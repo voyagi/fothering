@@ -1,0 +1,11 @@
+node_modules/
+dist/
+coverage/
+.astro/
+.wrangler/
+.env
+.env.*
+!.env.example
+.dev.vars
+cdk.out/
+*.log
