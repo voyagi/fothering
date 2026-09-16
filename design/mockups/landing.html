@@ -88,7 +88,7 @@ table.real { width: 100%; border-collapse: collapse; }
         <div class="drawing">
           <svg class="dwg dwg-wide" viewBox="0 0 760 350" role="img" aria-labelledby="dwg-title dwg-desc">
             <title id="dwg-title">Flow drawing of one SES account with four sending lanes</title>
-            <desc id="dwg-desc">Mail flows from the SES account through the receipts, password-resets and newsletter configuration sets. The partner-import configuration set is stopped at a closed valve that carries a lockout tag.</desc>
+            <desc id="dwg-desc">Mail flows from the SES account through the receipts, password-resets and newsletter configuration sets. The partner-import configuration set is stopped at a closed valve that carries a lockout tag, with a read-back instrument confirming the valve at 14:03:12.</desc>
             <rect x="8" y="22" width="112" height="296" fill="none" stroke="var(--ink)" stroke-width="2"/>
             <line x1="120" y1="50" x2="120" y2="290" stroke="var(--ink)" stroke-width="3.5"/>
             <text x="64" y="166" text-anchor="middle" font-family="Red Hat Display" font-weight="800" font-size="18" fill="var(--ink)">SES</text>
@@ -119,6 +119,11 @@ table.real { width: 100%; border-collapse: collapse; }
             </g>
             <path d="M252 278 l24 12 -24 12 z M300 278 l-24 12 24 12 z" fill="var(--ink)" stroke="var(--ink)" stroke-width="2"/>
             <line x1="276" y1="302" x2="276" y2="350" stroke="var(--ink)" stroke-width="2"/>
+            <path d="M512 43 l14 7 -14 7 z M512 123 l14 7 -14 7 z M512 203 l14 7 -14 7 z M190 283 l14 7 -14 7 z" fill="var(--ink)"/>
+            <line x1="292" y1="281" x2="341" y2="258" stroke="var(--ink)" stroke-width="1.5" stroke-dasharray="4 3"/>
+            <circle cx="356" cy="250" r="17" fill="var(--sheet)" stroke="var(--ink)" stroke-width="2"/>
+            <text x="356" y="254.5" text-anchor="middle" font-family="Red Hat Mono" font-weight="600" font-size="12" fill="var(--ink)">RB</text>
+            <text x="381" y="254" font-family="Red Hat Mono" font-size="12" fill="var(--label)">read-back 14:03:12</text>
             <g fill="none" stroke="var(--ink)" stroke-width="2">
               <rect x="706" y="36" width="40" height="28" rx="2"/><path d="M706 38 l20 14 20 -14"/>
               <rect x="706" y="116" width="40" height="28" rx="2"/><path d="M706 118 l20 14 20 -14"/>
@@ -159,6 +164,7 @@ table.real { width: 100%; border-collapse: collapse; }
               <line x1="58" y1="232" x2="174" y2="232"/>
             </g>
             <path d="M174 222 l20 10 -20 10 z M214 222 l-20 10 20 10 z" fill="var(--ink)" stroke="var(--ink)" stroke-width="2"/>
+            <path d="M254 34 l12 6 -12 6 z M254 98 l12 6 -12 6 z M254 162 l12 6 -12 6 z M112 226 l12 6 -12 6 z" fill="var(--ink)"/>
             <line x1="194" y1="242" x2="194" y2="300" stroke="var(--ink)" stroke-width="2"/>
             <g fill="none" stroke="var(--ink)" stroke-width="2">
               <rect x="316" y="30" width="36" height="22" rx="2"/><path d="M316 32 l18 11 18 -11"/>
@@ -313,7 +319,7 @@ table.real { width: 100%; border-collapse: collapse; }
           <thead><tr><th scope="col">Part</th><th scope="col">State</th><th scope="col" class="hide-s">Note</th></tr></thead>
           <tbody>
             <tr><td>Incident replay</td><td><span class="state">Fixture</span></td><td class="hide-s">Recorded demonstration events. Replaced by a live capture once runs exist.</td></tr>
-            <tr><td>Attribution and refusal logic</td><td><span class="state">Fixture</span></td><td class="hide-s">Tested against recorded event sets, including ones that must end unknown.</td></tr>
+            <tr><td>Attribution and refusal logic</td><td><span class="state later">Not yet</span></td><td class="hide-s">Will be tested against recorded event sets, including ones that must end unknown, before any live run.</td></tr>
             <tr><td>Deploy into your account</td><td><span class="state later">Not yet</span></td><td class="hide-s">Template and IAM policy land before the live runs.</td></tr>
             <tr><td>Time to closure</td><td><span class="state later">Not yet</span></td><td class="hide-s">Measured on three live runs against the mailbox simulator, then shown here with its cost.</td></tr>
           </tbody>

@@ -37,11 +37,16 @@
       '<fieldset class="theme"><legend>Colour theme</legend>' + modes + "</fieldset></div></header>";
   }
 
+  // Sheet order follows the site: landing first, then the three working sheets, then the two reading sheets.
+  var order = ["landing.html", "replay.html", "console.html", "deploy.html", "privacy.html", "ai.html"];
+
   function index(current) {
+    var n = Math.max(0, order.indexOf(current)) + 1;
     return '<div><b>Project</b>Fothering. Stops one leak without stopping the ship.<br><span class="mono">eu-central-1, fixture build</span></div>' +
       '<nav aria-label="Sheets"><b>Sheets</b><ul>' + links(sheets, current) + "</ul></nav>" +
       "<div><b>Read</b><ul>" + links(reads, current) + "</ul></div>" +
-      "<div><b>Source</b>Private until submission</div>";
+      '<div><b>Drawing</b><span class="mono">FTH-00' + n + ", sheet " + n + " of " + order.length + '</span><br>' +
+      '<span class="mono">Rev A, 2026-09-16</span><br><span class="mono">Status: fixture</span><br>Source private until submission</div>';
   }
 
   function wireTheme() {

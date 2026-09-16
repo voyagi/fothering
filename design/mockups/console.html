@@ -37,12 +37,21 @@
 
 .specimens { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px; }
 .specimen { border: 1.5px solid var(--ink); padding: 20px 22px 22px; }
-.specimen .state { display: block; margin-bottom: 14px; }
+.specimen h3 .state { font-size: inherit; font-family: inherit; font-weight: inherit; letter-spacing: inherit; text-transform: none; white-space: normal; }
 .specimen p { margin: 0 0 14px; color: var(--ink-2); max-width: 52ch; }
-.specimen.fault { border-width: 2px; border-color: var(--tag-red); }
+.specimen.fault { border-width: 2.5px; }
+.forget { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: 20px 40px; align-items: start; }
+.forget form { display: flex; flex-wrap: wrap; gap: 12px; align-items: end; }
+.forget label { display: grid; gap: 6px; flex: 1 1 280px; font: 600 0.75rem/1.2 var(--mono); letter-spacing: 0.05em; text-transform: uppercase; color: var(--label); }
+.forget input { font: 400 1rem/1.4 var(--text); color: var(--ink); background: var(--sheet); border: 1.5px solid var(--ink); border-radius: 2px; padding: 12px 14px; min-height: 48px; text-transform: none; letter-spacing: 0; }
+.forget input:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+.forget .note { margin: 12px 0 0; color: var(--ink-2); max-width: 60ch; }
+/* Red belongs to the closed lane only. An unconfirmed closure leaves the lane open, so its mark is a heavy
+   empty ink outline, not the lock colour. */
+.state.unproven::before { background: none; border-width: 2.5px; }
 
 @media (max-width: 960px) {
-  .closure, .specimens { grid-template-columns: 1fr; }
+  .closure, .specimens, .forget { grid-template-columns: 1fr; }
 }
 @media (max-width: 620px) {
   .register td:last-child { white-space: normal; }
@@ -135,6 +144,23 @@
 
     <div class="row">
       <div class="rail" aria-hidden="true">4</div>
+      <section class="sheet forget" aria-labelledby="forget-title">
+        <h2 id="forget-title">Forget one recipient</h2>
+        <div>
+          <form id="forget-form" novalidate>
+            <label for="forget-address">Recipient address
+              <input id="forget-address" name="address" type="email" autocomplete="off" spellcheck="false" required aria-describedby="forget-note forget-result">
+            </label>
+            <button class="button quiet" type="submit">Delete matching records</button>
+          </form>
+          <p class="note" id="forget-note">The address goes to your deployment, is hashed there with your key, and is never stored. Every event and reply record carrying that hash is deleted from the table.</p>
+          <p class="note" id="forget-result" role="status"></p>
+        </div>
+      </section>
+    </div>
+
+    <div class="row">
+      <div class="rail" aria-hidden="true">5</div>
       <section class="sheet" aria-labelledby="states-title">
         <div class="sheet-head">
           <h2 id="states-title">Other states of this sheet</h2>
@@ -142,26 +168,22 @@
         </div>
         <div class="specimens">
           <article class="specimen" aria-labelledby="watched-title">
-            <span class="state watch">Watched</span>
-            <h3 id="watched-title">newsletter: complaints rising, cause unknown</h3>
+            <h3 id="watched-title"><span class="state watch">Watched:</span> complaints rising on newsletter, cause unknown</h3>
             <p>No message tag, template or receiving provider accounts for the complaints, so nothing was closed. The question went to you at 13:20.</p>
             <div class="buttons"><button class="button quiet" type="button">Close newsletter anyway</button></div>
           </article>
           <article class="specimen fault" aria-labelledby="fault-title">
-            <span class="state shut">Not confirmed</span>
-            <h3 id="fault-title">Read-back did not confirm the closure</h3>
+            <h3 id="fault-title"><span class="state unproven">Not confirmed:</span> the read-back still says sending</h3>
             <p><code>GetConfigurationSet</code> still returned <code>SendingEnabled</code> true after the change. Fothering does not report a closure it cannot prove: this lane counts as open, and you were emailed the failed call.</p>
             <div class="buttons"><button class="button" type="button">Read back again</button></div>
           </article>
           <article class="specimen" aria-labelledby="empty-title">
-            <span class="state later">No lanes</span>
-            <h3 id="empty-title">No configuration sets are sending events yet</h3>
+            <h3 id="empty-title"><span class="state later">No lanes yet:</span> no configuration set is sending events</h3>
             <p>Fothering sees a lane once its configuration set publishes to the default EventBridge bus. The deploy sheet shows the event destination to add.</p>
             <a class="textlink" href="deploy.html">Open the deploy sheet</a>
           </article>
           <article class="specimen" aria-labelledby="gone-title">
-            <span class="state later">Unreachable</span>
-            <h3 id="gone-title">The console cannot reach your account</h3>
+            <h3 id="gone-title"><span class="state later">Unreachable:</span> the console cannot reach your account</h3>
             <p>The last successful read was at 14:03. Lane states below that time are shown, and nothing is changed until the connection returns.</p>
             <div class="buttons"><button class="button quiet" type="button">Try again</button></div>
           </article>
@@ -187,6 +209,18 @@
   document.getElementById("confirm").addEventListener("click", function () {
     openPanel(false);
     done.textContent = "Dry run: would call PutConfigurationSetSendingOptions with SendingEnabled true, then read it back. Recorded.";
+  });
+  document.getElementById("forget-form").addEventListener("submit", function (event) {
+    event.preventDefault();
+    var input = document.getElementById("forget-address");
+    var result = document.getElementById("forget-result");
+    if (!input.checkValidity()) {
+      result.textContent = "Enter the full address, for example the one in the complaint you received. Nothing was deleted.";
+      input.focus();
+      return;
+    }
+    result.textContent = "Dry run: would delete every record matching this recipient's hash and report the count. Recorded.";
+    input.value = "";
   });
   document.getElementById("keep").addEventListener("click", function () {
     openPanel(false);

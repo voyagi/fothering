@@ -16,7 +16,7 @@
 .procedure { --steps: 5; }
 .procedure pre { margin: 12px 0 0; padding: 10px 12px; background: var(--ground); border: 1px solid var(--rule); font: 500 0.8125rem/1.5 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; }
 .perms td:first-child code { font-weight: 600; }
-.never { margin-top: 28px; padding: 16px 18px; border: 2px solid var(--tag-red); max-width: 72ch; }
+.never { margin-top: 28px; padding: 16px 18px; border: 2px solid var(--ink); max-width: 72ch; }
 .never p { margin: 0; }
 .removal { counter-reset: r; list-style: none; margin: 0; padding: 0; border-top: 1.5px solid var(--ink); max-width: 80ch; }
 .removal li { counter-increment: r; display: grid; grid-template-columns: 44px minmax(0, 1fr); gap: 12px; padding: 16px 0; border-bottom: 1px solid var(--rule); }
@@ -99,6 +99,7 @@
             <tr><td data-col="Action"><code>bedrock-agentcore:InvokeAgentRuntime</code></td><td data-col="On">This stack's runtime</td><td data-col="Why">The ingest function hands a suspect window to the agent</td></tr>
             <tr><td data-col="Action"><code>bedrock-agentcore:CreateEvent</code>, <code>ListEvents</code></td><td data-col="On">This stack's memory</td><td data-col="Why">Recording and reading the closure conversation</td></tr>
             <tr><td data-col="Action"><code>dynamodb:PutItem</code>, <code>Query</code></td><td data-col="On">This stack's table</td><td data-col="Why">Writing events and closures, reading the window</td></tr>
+            <tr><td data-col="Action"><code>dynamodb:DeleteItem</code></td><td data-col="On">This stack's table</td><td data-col="Why">Forgetting one recipient on your request, from the console</td></tr>
             <tr><td data-col="Action"><code>s3:GetObject</code></td><td data-col="On">This stack's reply bucket</td><td data-col="Why">Reading your reply</td></tr>
           </tbody>
         </table>

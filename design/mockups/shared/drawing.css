@@ -13,6 +13,9 @@
   --label: light-dark(#566067, #9DA7AE);
   --rule: light-dark(#C9D0D4, #2A3238);
   --tag-red: #C8102E;
+  /* #C8102E measures 2.95:1 on the dark sheet, under the 3:1 a state mark needs, so marks drawn on the
+     sheet use their own dark value. The tag band stays #C8102E: it sits on the white card in both themes. */
+  --lock: light-dark(#C8102E, #E0304A);
   --flow: light-dark(#0E1113, #E8ECEE);
   --display: "Red Hat Display", sans-serif;
   --text: "Red Hat Text", sans-serif;
@@ -97,7 +100,7 @@ table.schedule { width: 100%; border-collapse: collapse; font-size: 1rem; border
 .state { font: 600 0.75rem/1 var(--mono); letter-spacing: 0.06em; text-transform: uppercase; white-space: nowrap; }
 .state::before { content: ""; display: inline-block; width: 9px; height: 9px; margin-right: 8px; border: 1.5px solid var(--ink); }
 .state.later::before { border-style: dashed; }
-.state.shut::before { background: var(--tag-red); border-color: var(--tag-red); }
+.state.shut::before { background: var(--lock); border-color: var(--lock); }
 .state.open::before { background: var(--ink); }
 .state.watch::before { border-radius: 50%; }
 

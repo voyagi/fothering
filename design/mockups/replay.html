@@ -17,7 +17,6 @@
 .board .tag { margin: -8px auto 0; transform: rotate(-2deg); transform-origin: 50% 20px; }
 .board .caption { margin: 20px 0 0; font: 500 0.75rem/1.4 var(--mono); color: var(--label); text-align: center; }
 .narrative { padding: clamp(20px, 3vw, 44px) var(--gutter) 40px; display: flex; flex-direction: column; gap: 20px; }
-.narrative .clock { font: 600 0.875rem/1 var(--mono); color: var(--label); margin: 0; }
 .narrative h2 { font-size: clamp(1.625rem, 1.2rem + 1vw, 2.25rem); }
 .narrative p { margin: 0; color: var(--ink-2); max-width: 52ch; }
 .controls { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
@@ -112,7 +111,6 @@
           </div>
 
           <div class="narrative" aria-live="polite">
-            <p class="clock" id="step-clock">Step 1 of 7, 14:00 UTC</p>
             <div data-steps="0"><h2 id="step-title">Normal sending on four lanes</h2><p>Receipts, password resets, the newsletter and a partner list import each send through their own configuration set. Bounce and complaint events arrive through EventBridge and nothing stands out.</p></div>
             <div data-steps="1"><h2>Hard bounces start on one lane</h2><p>Permanent bounces arrive on partner-import only, each with a <code>550 5.1.1 user unknown</code> diagnostic from a different receiving provider. The other three lanes keep delivering.</p></div>
             <div data-steps="2"><h2>The cause is named, with the rows that show it</h2><p>Every hard bounce on the lane carries the message tag <code>import_batch=2026-09-14-b</code>. The same template sends cleanly on other lanes, no provider is blocking across lanes, and no authentication recommendation is open. Cause: one import batch.</p></div>
@@ -134,6 +132,7 @@
             <div class="controls">
               <button class="button quiet" type="button" data-move="-1">Previous step</button>
               <button class="button" type="button" data-move="1">Next step</button>
+              <span class="count" id="step-clock">Step 1 of 7, 14:00 UTC</span>
             </div>
           </div>
         </section>
