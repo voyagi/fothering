@@ -17,7 +17,7 @@
 .board .tag { margin: -8px auto 0; transform: rotate(-2deg); transform-origin: 50% 20px; }
 .board .caption { margin: 20px 0 0; font: 500 0.75rem/1.4 var(--mono); color: var(--label); text-align: center; }
 .narrative { padding: clamp(20px, 3vw, 44px) var(--gutter) 40px; display: flex; flex-direction: column; gap: 20px; }
-.narrative h2 { font-size: clamp(1.625rem, 1.2rem + 1vw, 2.25rem); }
+.narrative h2 { font-size: clamp(1.625rem, 1.2rem + 1vw, 2.25rem); margin: 0 0 14px; }
 .narrative p { margin: 0; color: var(--ink-2); max-width: 52ch; }
 .controls { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
 .controls .count { font: 600 0.8125rem/1 var(--mono); color: var(--label); margin-left: auto; }
@@ -42,7 +42,8 @@
   .steps { grid-template-columns: repeat(4, minmax(0, 1fr)); row-gap: 4px; }
 }
 @media (max-width: 620px) {
-  .steps { display: flex; overflow-x: auto; scroll-snap-type: x mandatory; }
+  /* Snap inside the gutter, so the active dot's ring is never clipped by the scroll edge. */
+  .steps { display: flex; overflow-x: auto; scroll-snap-type: x mandatory; scroll-padding-inline: var(--gutter); }
   .steps li { flex: 0 0 38%; scroll-snap-align: start; }
   .controls .count { margin-left: 0; width: 100%; }
   .controls .button { flex: 1 1 40%; justify-content: center; }
