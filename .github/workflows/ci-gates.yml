@@ -1,0 +1,76 @@
+name: gates
+on:
+  pull_request:
+  push:
+    branches: [main]
+# npm ci runs third-party install scripts, so the token carries no write scope.
+permissions:
+  contents: read
+concurrency:
+  group: gates-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    steps:
+      # Actions are pinned to commit SHAs because tags can be moved; the comment names the tag.
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run verify:ship
+      # The site package does not exist yet. Until it does, say so in the log instead of passing
+      # silently; once apps/web builds, this step fails on a missing bundle like it should.
+      - name: client bundle secret scan
+        run: |
+          if [ -d apps/web ]; then
+            node scripts/check-client-secrets.mjs apps/web/dist
+          else
+            echo "client bundle secret scan: SKIPPED, no apps/web package in this revision"
+          fi
+      # Security floor on pushes to main only, so an unmerged pull request never prints open CVEs.
+      - if: github.event_name == 'push'
+        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # v0.35.0
+        env:
+          TRIVY_DB_REPOSITORY: mirror.gcr.io/aquasec/trivy-db:2,ghcr.io/aquasecurity/trivy-db:2
+        with:
+          scan-type: fs
+          scan-ref: .
+          scanners: vuln
+          format: json
+          output: trivy-vulns.json
+          exit-code: '0'
+          cache: 'true'
+      - if: github.event_name == 'push'
+        name: fail on HIGH/CRITICAL vulnerabilities
+        run: |
+          test -s trivy-vulns.json || { echo 'trivy produced no report - refusing to read that as clean'; exit 1; }
+          jq -e . trivy-vulns.json > /dev/null || { echo 'trivy report did not parse - refusing to read that as clean'; exit 1; }
+          count=$(jq '[.Results[]?.Vulnerabilities[]? | select(.Severity=="HIGH" or .Severity=="CRITICAL")] | length' trivy-vulns.json)
+          echo "HIGH/CRITICAL vulnerabilities: $count"
+          if [ "$count" -gt 0 ]; then
+            jq -r '.Results[]? | .Target as $t | (.Vulnerabilities[]? | select(.Severity=="HIGH" or .Severity=="CRITICAL") | "\($t): \(.PkgName) \(.InstalledVersion) \(.VulnerabilityID) (\(.Severity))")' trivy-vulns.json
+            exit 1
+          fi
+      - if: github.event_name == 'push'
+        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # v0.35.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          scanners: license
+          format: json
+          output: trivy-licenses.json
+          exit-code: '0'
+          cache: 'true'
+      - if: github.event_name == 'push'
+        name: assert the license census ran
+        run: |
+          test -s trivy-licenses.json || { echo 'license census produced no report'; exit 1; }
+          jq -e . trivy-licenses.json > /dev/null || { echo 'license census report did not parse'; exit 1; }
+      - if: github.event_name == 'push'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: license-census
+          path: trivy-licenses.json
