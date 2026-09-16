@@ -15,46 +15,26 @@ try {
 } catch (e) {}
 </script>
 <style>
+/* Device is the default: color-scheme follows the OS, and light-dark() resolves every token from it.
+   The two explicit choices only pin color-scheme, so the palette is written once. */
 :root {
-  --ground: #F5F7F8;
-  --sheet: #FFFFFF;
-  --ink: #0E1113;
-  --ink-2: #3B444A;
-  --line: #8A949B;
-  --label: #566067;
-  --rule: #C9D0D4;
+  color-scheme: light dark;
+  --ground: light-dark(#F5F7F8, #0F1316);
+  --sheet: light-dark(#FFFFFF, #161B1F);
+  --ink: light-dark(#0E1113, #E8ECEE);
+  --ink-2: light-dark(#3B444A, #AEB7BD);
+  --line: light-dark(#8A949B, #6F7A82);
+  --label: light-dark(#566067, #9DA7AE);
+  --rule: light-dark(#C9D0D4, #2A3238);
   --tag-red: #C8102E;
-  --flow: #0E1113;
+  --flow: light-dark(#0E1113, #E8ECEE);
   --display: "Red Hat Display", sans-serif;
   --text: "Red Hat Text", sans-serif;
   --mono: "Red Hat Mono", monospace;
   --gutter: clamp(16px, 3vw, 40px);
-  color-scheme: light;
 }
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) {
-    --ground: #0F1316;
-    --sheet: #161B1F;
-    --ink: #E8ECEE;
-    --ink-2: #AEB7BD;
-    --line: #6F7A82;
-    --label: #9DA7AE;
-    --rule: #2A3238;
-    --flow: #E8ECEE;
-    color-scheme: dark;
-  }
-}
-:root[data-theme="dark"] {
-  --ground: #0F1316;
-  --sheet: #161B1F;
-  --ink: #E8ECEE;
-  --ink-2: #AEB7BD;
-  --line: #6F7A82;
-  --label: #9DA7AE;
-  --rule: #2A3238;
-  --flow: #E8ECEE;
-  color-scheme: dark;
-}
+:root[data-theme="light"] { color-scheme: light; }
+:root[data-theme="dark"] { color-scheme: dark; }
 * { box-sizing: border-box; }
 html { -webkit-text-size-adjust: 100%; }
 body {
