@@ -19,13 +19,14 @@
 // README section.
 //
 // Verdicts: CLEAN (exit 0), FINDINGS (exit 1, counts + first entries printed),
-//           SKIPPED (exit 0, loud: knip or package.json absent), UNKNOWN (exit 2).
+//           SKIPPED (exit 0, loud: package.json absent, or knip neither declared nor installed),
+//           UNKNOWN (exit 2: knip declared but not installed, or no parsable report).
 //
 // Usage: node scripts/check-dead.mjs [--selftest]
 import { execFileSync } from 'node:child_process';
 import { readFileSync, writeFileSync, existsSync, mkdtempSync, mkdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, dirname } from 'node:path';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 // Resolved from the CWD the gate runs in, which is the product root when invoked as an npm
@@ -45,6 +46,15 @@ function resolveKnip(cwd) {
   return existsSync(abs) ? abs : null;
 }
 
+function declaresKnip(cwd) {
+  try {
+    const pkg = JSON.parse(readFileSync(join(cwd, 'package.json'), 'utf8'));
+    return Boolean((pkg.devDependencies && pkg.devDependencies.knip) || (pkg.dependencies && pkg.dependencies.knip));
+  } catch {
+    return false;
+  }
+}
+
 function run(cwd) {
   if (!existsSync(join(cwd, 'package.json'))) {
     console.log('[dead-code] SKIPPED: no package.json here, so there is no dependency graph for knip to read. Not applicable, not clean.');
@@ -52,6 +62,12 @@ function run(cwd) {
   }
   const knipBin = resolveKnip(cwd);
   if (!knipBin) {
+    // A product that declares knip has opted into the scan, so a missing install is a broken
+    // environment, not an opt-out, and must not let the ship gate pass unscanned.
+    if (declaresKnip(cwd)) {
+      console.error('[dead-code] UNKNOWN: package.json declares knip but it is not installed (run npm ci). The dead-code surface was NOT checked.');
+      return 2;
+    }
     console.log('[dead-code] SKIPPED: knip is not installed (npm i -D knip). The dead-code surface was NOT checked.');
     return 0;
   }
@@ -119,10 +135,10 @@ function selftest() {
   const self = fileURLToPath(import.meta.url);
   let failures = 0;
   const roots = [];
-  const caseDir = (name, { pkg = true, stub = null } = {}) => {
+  const caseDir = (name, { pkg = true, stub = null, pkgBody = '{"name":"fx","private":true}\n' } = {}) => {
     const root = mkdtempSync(join(tmpdir(), 'check-dead-st-'));
     roots.push(root);
-    if (pkg) writeFileSync(join(root, 'package.json'), '{"name":"fx","private":true}\n');
+    if (pkg) writeFileSync(join(root, 'package.json'), pkgBody);
     if (stub !== null) {
       const dir = join(root, 'node_modules', 'knip', 'bin');
       mkdirSync(dir, { recursive: true });
@@ -152,6 +168,8 @@ function selftest() {
       runCli(caseDir('findings', { stub: 'console.log(JSON.stringify({files:["src/dead.ts"],issues:[{file:"src/a.ts",exports:[{name:"unusedFn"}]}]}));process.exit(1);' })), 1, /FINDINGS: 1 unused file/);
     check('no knip installed is a loud SKIPPED, exit 0',
       runCli(caseDir('noknip')), 0, /SKIPPED: knip is not installed/);
+    check('knip declared in devDependencies but not installed is UNKNOWN, exit 2',
+      runCli(caseDir('declared', { pkgBody: '{"name":"fx","private":true,"devDependencies":{"knip":"6.35.1"}}\n' })), 2, /UNKNOWN: package\.json declares knip but it is not installed/);
     check('no package.json is a loud SKIPPED, exit 0',
       runCli(caseDir('nopkg', { pkg: false })), 0, /SKIPPED: no package\.json/);
     check('an empty report is UNKNOWN, exit 2',

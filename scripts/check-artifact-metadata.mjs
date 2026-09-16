@@ -212,20 +212,24 @@ function scan(cwd) {
     }
     for (const r of regions) judge(r.text, `${f} [${r.where}]`, findings, markers);
   }
-  if (unreadable.length) {
-    console.error(`[artifact-metadata] UNKNOWN: could not inspect ${unreadable.length} tracked artifact(s): ${unreadable.slice(0, 5).join(', ')}`);
-    console.error('[artifact-metadata] Refusing to report clean on files it could not parse.');
-    for (const f of findings) console.error(`  ${f.source}  <- ${f.why}`);
-    return 2;
-  }
+  // A real finding outranks an incomplete scan: the fix it names is actionable now, while the
+  // unreadable files only mean the scan could not see everything.
   if (findings.length) {
     console.error(`[artifact-metadata] ${findings.length} metadata finding(s) in tracked artifacts:`);
     for (const f of findings) console.error(`  ${f.source}  <- ${f.why}`);
+    if (unreadable.length) {
+      console.error(`[artifact-metadata] AND the scan was incomplete: could not inspect ${unreadable.length} tracked artifact(s): ${unreadable.slice(0, 5).join(', ')}`);
+    }
     console.error('');
     console.error('Strip metadata rather than untracking the file (re-export, or exiftool -all=), then');
     console.error('recommit. An AI generator name is also a disclosure decision: record it in the AI Act');
     console.error('determination file, do not just delete the evidence.');
     return 1;
+  }
+  if (unreadable.length) {
+    console.error(`[artifact-metadata] UNKNOWN: could not inspect ${unreadable.length} tracked artifact(s): ${unreadable.slice(0, 5).join(', ')}`);
+    console.error('[artifact-metadata] Refusing to report clean on files it could not parse.');
+    return 2;
   }
   console.log(`[artifact-metadata] clean (${covered.length} tracked artifact(s), listed regions inspected).`);
   return 0;
@@ -378,6 +382,11 @@ function selftest() {
       runCli(fixtureTracked({ 'img/x.png': pngWith([['tEXt', t('Author\0made by secretname here')]]) })), 0, /clean/);
     check('a malformed covered file is UNKNOWN, exit 2',
       runCli(fixtureTracked({ 'img/broken.png': t('this is not a png at all') })), 2, /UNKNOWN: could not inspect/);
+    check('a finding beside a malformed file is a finding, exit 1, with the scan gap named',
+      runCli(fixtureTracked({
+        'img/broken.png': t('this is not a png at all'),
+        'img/hero.jpg': jpegWith('Generator: Midjourney v6'),
+      })), 1, /metadata finding\(s\)[\s\S]*Midjourney[\s\S]*AND the scan was incomplete[\s\S]*Strip metadata/);
     const notRepo = mkdtempSync(join(tmpdir(), 'artifact-meta-st-nr-'));
     roots.push(notRepo);
     check('a non-repo is UNKNOWN, exit 2', runCli(notRepo), 2, /UNKNOWN: could not enumerate/);

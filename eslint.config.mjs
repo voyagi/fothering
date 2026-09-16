@@ -10,15 +10,35 @@ const tsParser = { parser: tseslint.parser, parserOptions: { ecmaVersion: 'lates
 const TEST_FILES = ['**/*.{test,spec}.{ts,tsx,js,jsx,mjs,cjs}'];
 
 export default [
-  { ignores: ['**/*.config.{ts,js,mjs,cjs}', '**/{dist,build,coverage,cdk.out,.astro,.wrangler}/**', 'scripts/**'] },
+  { ignores: ['**/*.config.{ts,js,mjs,cjs}', '**/{dist,build,coverage,cdk.out,.astro,.wrangler}/**'] },
   {
     files: ['**/*.{ts,tsx,js,jsx,mjs,cjs}'],
-    ignores: TEST_FILES,
+    ignores: [...TEST_FILES, 'scripts/**'],
     languageOptions: { ...tsParser },
     plugins: { sonarjs },
     rules: {
       complexity: ['error', 25],
       'sonarjs/cognitive-complexity': ['error', 25],
+    },
+  },
+  // The check scripts are copied gate tools whose behaviour is pinned by their --selftest controls, so
+  // they get correctness rules without the complexity budget: splitting them to fit it would change
+  // proven code for no user-facing gain.
+  {
+    files: ['scripts/**/*.{js,mjs,cjs}'],
+    languageOptions: {
+      ecmaVersion: 'latest',
+      sourceType: 'module',
+      globals: { process: 'readonly', console: 'readonly', Buffer: 'readonly', URL: 'readonly' },
+    },
+    rules: {
+      'no-undef': 'error',
+      'no-unused-vars': ['error', { caughtErrors: 'none' }],
+      'no-unreachable': 'error',
+      'no-dupe-keys': 'error',
+      'no-self-compare': 'error',
+      'use-isnan': 'error',
+      'valid-typeof': 'error',
     },
   },
   // A test with no assertion passes forever, and two tests with one title hide each other in reports.

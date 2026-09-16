@@ -15,7 +15,7 @@
 //
 // Usage: node scripts/check-hookspath.mjs [--selftest]
 import { execFileSync } from 'node:child_process';
-import { writeFileSync, mkdtempSync, mkdirSync, rmSync } from 'node:fs';
+import { writeFileSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -32,9 +32,14 @@ function gitConfig(args, cwd) {
 
 // Path equality, not string equality: the same directory can be written C:/x, C:\x, or with a
 // trailing slash, and a false SEVERED on spelling would teach people to delete the gate.
-function normalize(p) {
+// Case folds only where the default filesystem ignores case: on Linux /repo/Hooks and
+// /repo/hooks are different directories, and folding them would read a real severing as intact.
+const CASE_INSENSITIVE_FS = process.platform === 'win32' || process.platform === 'darwin';
+
+function normalize(p, caseInsensitive = CASE_INSENSITIVE_FS) {
   if (p == null) return null;
-  return p.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
+  const slashed = p.replace(/\\/g, '/').replace(/\/+$/, '');
+  return caseInsensitive ? slashed.toLowerCase() : slashed;
 }
 
 function run(cwd) {
@@ -122,6 +127,18 @@ function selftest() {
       execFileSync('git', ['config', 'core.hooksPath', chain.replace(/\//g, '\\') + '\\'], { cwd: r, windowsHide: true, stdio: 'pipe' });
       check('the same path in a different spelling is intact',
         runCli(r, globalFile(chain)), 0, /intact/);
+    }
+    {
+      // Called directly with both settings so the case rule is proven on every host, not only
+      // on the one the selftest happens to run on.
+      const caseRule = (name, ok) => {
+        if (ok) console.log(`selftest ok: ${name}`);
+        else { failures++; console.error(`SELFTEST FAIL: ${name}`); }
+      };
+      caseRule('a case-sensitive filesystem keeps /repo/Hooks and /repo/hooks apart',
+        normalize('/repo/Hooks', false) !== normalize('/repo/hooks', false));
+      caseRule('a case-insensitive filesystem reads C:/Repo/Hooks and c:/repo/hooks as one directory',
+        normalize('C:/Repo/Hooks', true) === normalize('c:/repo/hooks', true));
     }
     {
       const notRepo = mkdtempSync(join(tmpdir(), 'check-hookspath-st-nr-'));

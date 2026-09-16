@@ -32,8 +32,12 @@ import { fileURLToPath } from 'node:url';
 const PARAGRAPHS = ['1', '2', '3', '4'];
 const TEST_PATH_RE = /\.(test|spec)\.[\w.]+$|(^|\/)tests?\//i;
 
-function run(cwd, explicitPath) {
+function run(cwd, explicitPath, requireFile) {
   const file = explicitPath || join(cwd, 'docs', 'ai-act.md');
+  if (!existsSync(file) && requireFile) {
+    console.error(`[ai-act] FAIL: no ${explicitPath || 'docs/ai-act.md'}, and --require says this product is AI-facing. Write the Article 50 determination (shape: scaffold-gates/legal/ai-act.template.md).`);
+    return 1;
+  }
   if (!existsSync(file)) {
     console.log(`[ai-act] SKIPPED: no ${explicitPath || 'docs/ai-act.md'}. An AI-facing product without a written Article 50 determination is refused at sign-off, not here.`);
     return 0;
@@ -56,7 +60,7 @@ function run(cwd, explicitPath) {
     const rest = body.slice(head.index);
     const end = rest.slice(head[0].length).search(/^##\s/m);
     const section = end === -1 ? rest : rest.slice(0, head[0].length + end);
-    const applies = /\bAPPLIES\b/i.test(section.split('\n', 1)[0]) || /^\*\*?Verdict\*\*?:?\s*APPLIES/im.test(section);
+    const applies = /\bAPPLIES\b/i.test(section.split('\n', 1)[0]) || /^\*{0,2}Verdict\*{0,2}:?\s*APPLIES/im.test(section);
     const notApply = /\b(DOES NOT APPLY|NOT APPLICABLE)\b/i.test(section) || /falls on\b/i.test(section.split('\n', 1)[0]) || /:\s*falls on/i.test(section);
     if (!applies && !notApply) {
       problems.push(`Article 50(${p}): no verdict found - the heading or a Verdict line must say APPLIES, DOES NOT APPLY, or falls on <the third party>`);
@@ -104,9 +108,9 @@ function selftest() {
     }
     return root;
   };
-  const runCli = (cwd) => {
+  const runCli = (cwd, args = []) => {
     try {
-      const out = execFileSync(process.execPath, [self], { cwd, encoding: 'utf8', windowsHide: true, stdio: 'pipe' });
+      const out = execFileSync(process.execPath, [self, ...args], { cwd, encoding: 'utf8', windowsHide: true, stdio: 'pipe' });
       return { code: 0, out };
     } catch (e) {
       return { code: e.status == null ? -1 : e.status, out: String((e && e.stdout) || '') + String((e && e.stderr) || '') };
@@ -125,6 +129,12 @@ function selftest() {
   const MECH = { 'src/domain/brief.ts': 'export const D = "x";\n', 'src/domain/brief.test.ts': 'test\n' };
   try {
     check('an absent file is a loud SKIPPED, exit 0', runCli(fixture(null)), 0, /SKIPPED/);
+    check('an absent file under --require fails, exit 1', runCli(fixture(null), ['--require']), 1, /FAIL: no docs\/ai-act\.md, and --require/);
+    check('a present, determined file passes under --require', runCli(fixture(
+      '# AI Act\n\n## Article 50(1), interaction: DOES NOT APPLY\n\ntext\n\n' + OTHERS), ['--require']), 0, /determined/);
+    check('an unbolded Verdict: APPLIES line counts as a verdict', runCli(fixture(
+      '# AI Act\n\n## Article 50(1), interaction\n\nVerdict: APPLIES\n\nThe disclosure is `src/domain/brief.ts`, pinned by `src/domain/brief.test.ts`.\n\n' + OTHERS,
+      MECH)), 0, /determined: all four/);
     check('a full determination with mechanism and test passes', runCli(fixture(
       '# AI Act\n\n## Article 50(1), interaction: APPLIES\n\nThe disclosure is `src/domain/brief.ts` and `src/domain/brief.test.ts` asserts it.\n\n' + OTHERS,
       MECH)), 0, /determined: all four/);
@@ -154,4 +164,4 @@ function selftest() {
 
 if (process.argv.includes('--selftest')) process.exit(selftest());
 const pathArg = process.argv.slice(2).find((a) => !a.startsWith('-'));
-process.exit(run(process.cwd(), pathArg));
+process.exit(run(process.cwd(), pathArg, process.argv.includes('--require')));

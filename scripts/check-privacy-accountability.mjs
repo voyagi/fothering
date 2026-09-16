@@ -22,10 +22,11 @@
 import { execFileSync } from 'node:child_process';
 import { readFileSync, writeFileSync, existsSync, mkdtempSync, mkdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, dirname } from 'node:path';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const VERDICT_RE = /^(OPEN\b|APPLIES\s*-\s*\S|N-A\s*-\s*\S)/i;
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 function run(cwd, explicitPath) {
   const file = explicitPath || join(cwd, 'docs', 'privacy-accountability.md');
@@ -55,12 +56,14 @@ function run(cwd, explicitPath) {
   }
   const problems = [];
   for (const cells of rows) {
-    const [name, verdict] = cells;
+    const [name, verdict, date, evidence] = cells;
     if (!name) continue;
     if (!verdict || !VERDICT_RE.test(verdict)) {
       problems.push(`"${name}": verdict "${verdict || ''}" is not OPEN, "APPLIES - <what ships>", or "N-A - <reason>"`);
     } else if (/^OPEN\b/i.test(verdict)) {
       problems.push(`"${name}" is still OPEN - decide it, date it, and point at the evidence`);
+    } else if (!DATE_RE.test(date || '') || !evidence) {
+      problems.push(`"${name}" is decided but not signed off - it needs a YYYY-MM-DD date and an evidence pointer`);
     }
   }
   if (problems.length) {
@@ -110,6 +113,12 @@ function selftest() {
       '| AI Act Article 50 | OPEN | | |\n')), 1, /"AI Act Article 50" is still OPEN/);
     check('a verdict outside the three states fails', runCli(fixture(HEAD +
       '| DPIA required (Art. 35) | probably fine | | |\n')), 1, /is not OPEN, "APPLIES - <what ships>", or "N-A - <reason>"/);
+    check('an APPLIES row with no date or evidence fails', runCli(fixture(HEAD +
+      '| DPIA | APPLIES - do x | | |\n')), 1, /"DPIA" is decided but not signed off/);
+    check('an N-A row with a date but no evidence fails', runCli(fixture(HEAD +
+      '| DPIA | N-A - no personal data | 2026-08-29 | |\n')), 1, /"DPIA" is decided but not signed off/);
+    check('an N-A row with evidence but a non-date fails', runCli(fixture(HEAD +
+      '| DPIA | N-A - no personal data | soon | register |\n')), 1, /"DPIA" is decided but not signed off/);
     check('a bare APPLIES with no what-ships fails', runCli(fixture(HEAD +
       '| AI Act Article 50 | APPLIES - | | |\n')), 1, /is not OPEN/);
     check('a file without the section fails with the paste remedy', runCli(fixture('# Privacy Accountability\n\nold shape only\n')), 1, /no "## Determinations" section/);
