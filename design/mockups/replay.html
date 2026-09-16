@@ -184,6 +184,11 @@
       if (on) el.removeAttribute("hidden"); else el.setAttribute("hidden", "");
       if (el.tagName === "g" || el.tagName === "path" || el.tagName === "line" || el.tagName === "rect") el.style.display = on ? "" : "none";
     });
+    // The stage is labelled by #step-title, so the id follows the visible step's heading.
+    var heading = document.querySelector(".narrative > [data-steps]:not([hidden]) h2");
+    var labelled = document.getElementById("step-title");
+    if (labelled && labelled !== heading) labelled.removeAttribute("id");
+    if (heading) heading.id = "step-title";
     document.querySelectorAll("tr[data-from]").forEach(function (row) {
       var from = Number(row.getAttribute("data-from"));
       row.hidden = from > step;
