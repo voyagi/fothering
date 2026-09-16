@@ -1,0 +1,13 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  "ignore": [".git/**"],
+  "workspaces": {
+    ".": {
+      "entry": ["verify-ship.mjs", "scripts/*.mjs", "vitest.config.ts", "eslint.config.mjs"],
+      "ignoreDependencies": ["@types/node", "fast-check", "schema-dts", "size-limit", "@size-limit/file", "@stryker-mutator/core", "@stryker-mutator/vitest-runner"]
+    },
+    "packages/core": {
+      "entry": ["src/mode.ts"]
+    }
+  }
+}

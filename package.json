@@ -1,0 +1,51 @@
+{
+  "name": "fothering",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Closes the one Amazon SES sending lane that is going wrong, with evidence, and asks the operator by email before reopening it.",
+  "author": "voyagi",
+  "license": "UNLICENSED",
+  "type": "module",
+  "engines": {
+    "node": ">=22.18"
+  },
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "test": "vitest run",
+    "lint": "eslint .",
+    "gate:types": "tsc --noEmit",
+    "gate:complexity": "eslint .",
+    "gate:dup": "jscpd .",
+    "gate:deps": "depcruise packages --config .dependency-cruiser.cjs",
+    "gate:dead": "node scripts/check-dead.mjs",
+    "gate:env": "node scripts/check-env-example.mjs",
+    "gate:tsconfig": "node scripts/check-tsconfig-coverage.mjs",
+    "gate:repo": "node scripts/check-hookspath.mjs && node scripts/check-license.mjs && node scripts/check-git-identity.mjs && node scripts/check-artifact-metadata.mjs && node scripts/check-privacy-accountability.mjs && node scripts/check-ai-act.mjs",
+    "gate:precommit": "eslint . && jscpd . && npm run gate:env && npm run gate:tsconfig",
+    "gate": "npm run gate:tsconfig && npm run gate:types && npm run gate:complexity && npm run gate:dup && npm run gate:deps && npm run gate:env && npm run gate:dead && npm run gate:repo",
+    "verify:ship": "node verify-ship.mjs",
+    "mutate": "stryker run"
+  },
+  "devDependencies": {
+    "@fast-check/vitest": "0.5.0",
+    "@size-limit/file": "13.1.1",
+    "@stryker-mutator/core": "10.0.0",
+    "@stryker-mutator/vitest-runner": "10.0.0",
+    "@types/node": "22.20.2",
+    "@vitest/eslint-plugin": "1.6.27",
+    "dependency-cruiser": "18.2.0",
+    "eslint": "10.10.0",
+    "eslint-plugin-compat": "7.0.2",
+    "eslint-plugin-sonarjs": "4.2.0",
+    "fast-check": "4.10.0",
+    "jscpd": "5.2.0",
+    "knip": "6.35.1",
+    "schema-dts": "2.0.0",
+    "size-limit": "13.1.1",
+    "typescript": "6.0.3",
+    "typescript-eslint": "8.70.0",
+    "vitest": "4.1.11"
+  }
+}
