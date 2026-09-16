@@ -7,7 +7,7 @@
   "license": "UNLICENSED",
   "type": "module",
   "engines": {
-    "node": ">=22.12"
+    "node": ">=22.18"
   },
   "workspaces": [
     "packages/*"
@@ -24,7 +24,7 @@
     "gate:tsconfig": "node scripts/check-tsconfig-coverage.mjs",
     "gate:repo": "node scripts/check-hookspath.mjs && node scripts/check-license.mjs && node scripts/check-git-identity.mjs && node scripts/check-artifact-metadata.mjs && node scripts/check-privacy-accountability.mjs && node scripts/check-ai-act.mjs",
     "gate:precommit": "eslint . && jscpd . && npm run gate:env && npm run gate:tsconfig",
-    "gate": "npm run gate:tsconfig && npm run gate:types && npm run gate:complexity && npm run gate:dup && npm run gate:deps && npm run gate:env && npm run gate:dead",
+    "gate": "npm run gate:tsconfig && npm run gate:types && npm run gate:complexity && npm run gate:dup && npm run gate:deps && npm run gate:env && npm run gate:dead && npm run gate:repo",
     "verify:ship": "node verify-ship.mjs",
     "mutate": "stryker run"
   },

@@ -7,7 +7,7 @@ Status: early build, not yet runnable end to end.
 
 ## Requirements
 
-- Node.js 22.12 or later on the 22 line (Amazon Bedrock AgentCore Runtime runs Node.js 22)
+- Node.js 22.18 or later on the 22 line (Amazon Bedrock AgentCore Runtime runs Node.js 22)
 - npm 10 or later
 
 ## Setup
