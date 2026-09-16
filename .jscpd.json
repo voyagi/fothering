@@ -18,6 +18,7 @@
     "**/*.md",
     "**/docs/**",
     "scripts/**",
+    "design/mockups/**",
     "package-lock.json"
   ]
 }

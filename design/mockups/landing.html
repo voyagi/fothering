@@ -8,177 +8,30 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Red+Hat+Display:wght@500..900&family=Red+Hat+Mono:wght@400..600&family=Red+Hat+Text:wght@400..700&display=swap" rel="stylesheet">
-<script>
-try {
-  var stored = localStorage.getItem("fothering-theme");
-  if (stored === "light" || stored === "dark") document.documentElement.dataset.theme = stored;
-} catch (e) {}
-</script>
+<link rel="stylesheet" href="shared/drawing.css">
+<script src="shared/chrome.js"></script>
 <style>
-/* Device is the default: color-scheme follows the OS, and light-dark() resolves every token from it.
-   The two explicit choices only pin color-scheme, so the palette is written once. */
-:root {
-  color-scheme: light dark;
-  --ground: light-dark(#F5F7F8, #0F1316);
-  --sheet: light-dark(#FFFFFF, #161B1F);
-  --ink: light-dark(#0E1113, #E8ECEE);
-  --ink-2: light-dark(#3B444A, #AEB7BD);
-  --line: light-dark(#8A949B, #6F7A82);
-  --label: light-dark(#566067, #9DA7AE);
-  --rule: light-dark(#C9D0D4, #2A3238);
-  --tag-red: #C8102E;
-  --flow: light-dark(#0E1113, #E8ECEE);
-  --display: "Red Hat Display", sans-serif;
-  --text: "Red Hat Text", sans-serif;
-  --mono: "Red Hat Mono", monospace;
-  --gutter: clamp(16px, 3vw, 40px);
-  --rail: 34px;
-}
-:root[data-theme="light"] { color-scheme: light; }
-:root[data-theme="dark"] { color-scheme: dark; }
-* { box-sizing: border-box; }
-html { -webkit-text-size-adjust: 100%; }
-body {
-  margin: 0;
-  background: var(--ground);
-  color: var(--ink);
-  font: 400 1.0625rem/1.55 var(--text);
-}
-::selection { background: var(--ink); color: var(--ground); }
-a { color: inherit; text-underline-offset: 0.22em; text-decoration-thickness: 1px; }
-a:hover { text-decoration-thickness: 2px; }
-:focus-visible { outline: 2px solid var(--ink); outline-offset: 3px; }
-.mono { font-family: var(--mono); font-feature-settings: "tnum" 1; }
-.visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
-.skip { position: absolute; left: 12px; top: -60px; z-index: 5; background: var(--ink); color: var(--sheet); padding: 12px 16px; font-weight: 600; text-decoration: none; }
-.skip:focus { top: 12px; }
-
-/* Drawing frame. Columns A to F and the numbered rows are real coordinates: the copy cites them
-   ("the tag at D1"), so the border works as an index rather than as ornament. */
-.frame { margin: var(--gutter); border: 1.5px solid var(--ink); background: var(--sheet); }
-.zones { display: grid; grid-template-columns: var(--rail) repeat(6, minmax(0, 1fr)); border-bottom: 1px solid var(--rule); }
-.zones span { font: 500 0.6875rem/1 var(--mono); color: var(--label); text-align: center; padding: 6px 0; border-left: 1px solid var(--rule); }
-.zones span:first-child { border-left: 0; }
-.row { display: grid; grid-template-columns: var(--rail) minmax(0, 1fr); border-bottom: 1px solid var(--ink); }
-.rail { border-right: 1px solid var(--rule); font: 500 0.6875rem/1 var(--mono); color: var(--label); text-align: center; padding-top: 14px; }
-
-.bar {
-  display: flex; align-items: center; justify-content: space-between; gap: 16px 24px; flex-wrap: wrap;
-  padding: 16px var(--gutter);
-}
-.wordmark { font: 850 1.375rem/1 var(--display); letter-spacing: 0.08em; text-decoration: none; }
-.bar-end { display: flex; align-items: center; gap: clamp(16px, 2.4vw, 32px); }
-.bar-end > a { font: 600 0.9375rem/1 var(--text); padding: 12px 0; }
-.theme { display: inline-flex; border: 1.5px solid var(--ink); border-radius: 2px; margin: 0; padding: 0; min-inline-size: 0; }
-.theme legend { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
-.theme label { position: relative; cursor: pointer; }
-.theme input { position: absolute; inset: 0; opacity: 0; margin: 0; cursor: pointer; }
-.theme span { display: block; font: 600 0.75rem/1 var(--mono); letter-spacing: 0.04em; padding: 11px 10px; min-height: 36px; min-width: 44px; text-align: center; border-left: 1px solid var(--rule); }
-.theme label:first-of-type span { border-left: 0; }
-.theme input:checked + span { background: var(--ink); color: var(--sheet); }
-.theme input:focus-visible + span { outline: none; box-shadow: 0 0 0 3px var(--sheet), 0 0 0 5px var(--ink); position: relative; z-index: 1; }
-
-/* First viewport */
 .moment { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); }
-.claim {
-  padding: clamp(28px, 4vw, 60px) var(--gutter);
-  display: flex; flex-direction: column; justify-content: center; gap: 24px;
-  border-right: 1px solid var(--rule);
-}
-h1 {
-  font: 700 clamp(2.125rem, 1.3rem + 2vw, 3.4rem)/1.05 var(--display);
-  letter-spacing: -0.028em;
-  margin: 0;
-  text-wrap: balance;
-}
+.claim { padding: clamp(28px, 4vw, 60px) var(--gutter); display: flex; flex-direction: column; justify-content: center; gap: 24px; border-right: 1px solid var(--rule); }
+h1 { font: 700 clamp(2.125rem, 1.3rem + 2vw, 3.4rem)/1.05 var(--display); letter-spacing: -0.028em; margin: 0; text-wrap: balance; }
 .lede { font-size: 1.1875rem; max-width: 40ch; margin: 0; color: var(--ink-2); }
 .actions { display: flex; flex-wrap: wrap; align-items: center; gap: 14px 26px; }
-.button {
-  display: inline-flex; align-items: center; gap: 12px;
-  background: var(--ink); color: var(--sheet);
-  font: 600 1rem/1 var(--text);
-  padding: 16px 24px; border-radius: 2px; text-decoration: none;
-  min-height: 48px;
-}
-.button:hover { background: var(--ink-2); }
-.button svg { width: 16px; height: 16px; }
-.textlink { font-weight: 600; padding: 12px 0; }
 
 .drawing { position: relative; overflow: hidden; padding: clamp(20px, 3vw, 40px) 0 52px clamp(20px, 2.5vw, 36px); display: flex; flex-direction: column; justify-content: center; }
 .dwg { width: 100%; height: auto; display: block; }
 .dwg-narrow { display: none; }
 .drawing .caption { position: absolute; left: clamp(20px, 2.5vw, 36px); bottom: 18px; margin: 0; font: 500 0.75rem/1.3 var(--mono); color: var(--label); }
 
-.flow-dash { stroke-dasharray: 3 11; animation: flow 1.6s linear infinite; }
-@keyframes flow { to { stroke-dashoffset: -28; } }
-@media (prefers-reduced-motion: reduce) { .flow-dash { animation: none; } }
-
 /* The tag hangs from the closed valve's stem: its hole sits on the stem's end, so its left edge is the
    valve's x position (36.3% of the wide drawing) minus half the tag width. */
-.tag {
-  --tw: min(320px, 100%);
-  position: relative;
-  width: var(--tw);
-  margin: -24px 0 0 max(0px, calc(100% * 0.363 - var(--tw) / 2));
-  transform: rotate(-2.5deg);
-  transform-origin: 50% 20px;
-  background: #FFFFFF; color: #0E1113;
-  border: 1.5px solid #0E1113;
-  border-radius: 10px 10px 4px 4px;
-}
-.tag::before {
-  content: ""; position: absolute; top: 12px; left: 50%; width: 16px; height: 16px; margin-left: -8px;
-  border: 1.5px solid #0E1113; border-radius: 50%; background: var(--sheet);
-}
-.tag header { background: var(--tag-red); color: #FFFFFF; padding: 36px 16px 12px; border-radius: 8px 8px 0 0; display: grid; grid-template-columns: 1fr auto; align-items: end; gap: 4px 12px; }
-.tag header b { display: block; font: 900 1.75rem/0.95 var(--display); letter-spacing: 0.02em; }
-.tag header span { font: 600 0.8125rem/1.3 var(--mono); }
-.stamp { border: 1.5px solid currentColor; padding: 4px 6px; border-radius: 2px; font: 700 0.6875rem/1 var(--mono); letter-spacing: 0.08em; grid-row: 1 / span 2; grid-column: 2; align-self: start; }
-.tag dl { margin: 0; padding: 4px 16px 12px; display: grid; grid-template-columns: auto 1fr; gap: 8px 12px; }
-.tag dt { font: 600 0.6875rem/1.5 var(--mono); letter-spacing: 0.06em; text-transform: uppercase; color: #5A646B; }
-.tag dd { margin: 0; font: 500 0.875rem/1.35 var(--text); }
-.tag dd.mono { font-size: 0.8125rem; }
-.tag footer { border-top: 1.5px dashed #0E1113; padding: 8px 16px 10px; display: flex; justify-content: space-between; font: 600 0.6875rem/1.2 var(--mono); }
+.drawing .tag { --tw: min(320px, 100%); width: var(--tw); margin: -24px 0 0 max(0px, calc(100% * 0.363 - var(--tw) / 2)); transform: rotate(-2.5deg); transform-origin: 50% 20px; }
 
-/* Sheets below the fold */
-.sheet { padding: clamp(44px, 6vw, 92px) var(--gutter); }
-.sheet-head { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: 20px 40px; margin-bottom: clamp(28px, 4vw, 52px); }
-h2 { font: 700 clamp(1.75rem, 1.2rem + 1.6vw, 2.75rem)/1.08 var(--display); letter-spacing: -0.02em; margin: 0; text-wrap: balance; }
-.sheet-head p { margin: 0; max-width: 60ch; color: var(--ink-2); align-self: end; }
-
-/* The procedure is one process line with a valve per step; the third valve is drawn shut. */
-ol.procedure { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); }
-.procedure li { position: relative; padding: 0 24px 0 0; }
-.procedure li::before { content: ""; position: absolute; left: 0; right: 0; top: 17px; border-top: 2.5px solid var(--line); }
-.procedure li:last-child::before { right: 24px; }
-.procedure .valve { position: relative; display: flex; align-items: center; gap: 10px; margin-bottom: 20px; }
-.procedure .valve svg { width: 64px; height: 36px; background: var(--sheet); padding-right: 6px; }
-.procedure .n { font: 800 1.75rem/1 var(--display); background: var(--sheet); padding-right: 8px; }
-.procedure h3 { font: 700 1.375rem/1.25 var(--display); margin: 0 0 8px; max-width: 18ch; }
-.procedure p { margin: 0; color: var(--ink-2); font-size: 0.975rem; max-width: 34ch; }
-
-/* The email is the product's real surface, so it is shown as a message, not described. */
 .mail { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: 28px 40px; }
 .mail-head p { margin: 20px 0 0; color: var(--ink-2); max-width: 44ch; }
-.message { border: 1.5px solid var(--ink); background: var(--sheet); max-width: 68ch; }
-.message dl { margin: 0; padding: 12px 20px; display: grid; grid-template-columns: auto 1fr; gap: 6px 16px; border-bottom: 1px solid var(--rule); font: 500 0.8125rem/1.45 var(--mono); }
-.message dt { color: var(--label); }
-.message dd { margin: 0; overflow-wrap: anywhere; }
-.message .body { padding: 18px 20px 20px; }
-.message .body p { margin: 0 0 12px; font-size: 1rem; }
-.message .body p:last-child { margin-bottom: 0; }
-.message .body b { font-weight: 650; }
-.message.reply { margin: -1.5px 0 0 clamp(20px, 5vw, 64px); }
-.message.reply .body p { font-size: 1.0625rem; font-weight: 600; }
 
-table.schedule { width: 100%; border-collapse: collapse; font-size: 1rem; border: 1.5px solid var(--ink); }
-.schedule caption { caption-side: bottom; text-align: left; padding-top: 10px; font: 500 0.75rem/1.4 var(--mono); color: var(--label); }
-.schedule th, .schedule td { text-align: left; vertical-align: top; padding: 14px 16px; border-top: 1px solid var(--rule); border-left: 1px solid var(--rule); }
-.schedule thead th { font: 700 1rem/1.3 var(--display); border-top: 0; border-bottom: 1.5px solid var(--ink); }
-.schedule thead th small { display: block; font: 500 0.8125rem/1.4 var(--text); color: var(--ink-2); margin-top: 4px; }
-.schedule tbody th { font: 600 0.9375rem/1.4 var(--text); width: 20%; border-left: 0; }
-.schedule .us { font-weight: 600; background: var(--ground); }
-.schedule .no { color: var(--ink-2); }
+.compare thead th { font: 700 1rem/1.3 var(--display); letter-spacing: 0; text-transform: none; color: var(--ink); }
+.compare thead th small { display: block; font: 500 0.8125rem/1.4 var(--text); color: var(--ink-2); margin-top: 4px; }
+.compare tbody th { width: 20%; }
 
 .refusals { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: 40px; }
 ul.refuse { list-style: none; margin: 0; padding: 0; border-top: 1.5px solid var(--ink); }
@@ -189,91 +42,36 @@ table.real { width: 100%; border-collapse: collapse; }
 .real th, .real td { text-align: left; padding: 14px 16px 14px 0; border-top: 1px solid var(--rule); vertical-align: top; }
 .real thead th { border-top: 1.5px solid var(--ink); font: 600 0.75rem/1 var(--mono); letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-2); }
 .real th:last-child { width: 50%; }
-.state { font: 600 0.75rem/1 var(--mono); letter-spacing: 0.06em; text-transform: uppercase; white-space: nowrap; }
-.state::before { content: ""; display: inline-block; width: 9px; height: 9px; margin-right: 8px; border: 1.5px solid var(--ink); }
-.state.later::before { border-style: dashed; }
-
-.close { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 20px 40px; padding: clamp(32px, 4vw, 52px) var(--gutter); }
-.close p { margin: 8px 0 0; color: var(--ink-2); }
-
-/* The title block is the site's navigation, the way a drawing's title block indexes its sheet set. */
-.titleblock { display: grid; grid-template-columns: minmax(0, 2fr) repeat(3, minmax(0, 1fr)); font-size: 0.9375rem; }
-.titleblock > * { padding: 16px var(--gutter) 18px; border-left: 1px solid var(--rule); }
-.titleblock > :first-child { border-left: 0; }
-.titleblock b { display: block; font: 600 0.6875rem/1 var(--mono); letter-spacing: 0.06em; text-transform: uppercase; color: var(--label); margin-bottom: 6px; }
-.titleblock ul { list-style: none; margin: 0; padding: 0; }
-.titleblock li a { display: inline-block; padding: 6px 0; font-weight: 600; }
 
 @media (max-width: 960px) {
   .moment { grid-template-columns: 1fr; }
   .claim { border-right: 0; }
   .drawing { padding: 24px var(--gutter) 56px; }
-  .tag { margin-left: max(0px, calc((100% - var(--tw)) / 2)); }
-  .sheet-head, .refusals, .mail { grid-template-columns: 1fr; }
-  ol.procedure { grid-template-columns: 1fr 1fr; row-gap: 36px; }
-  .titleblock { grid-template-columns: 1fr 1fr; }
-  .titleblock > :first-child { grid-column: 1 / -1; border-bottom: 1px solid var(--rule); }
-  .titleblock > :nth-child(2) { border-left: 0; }
+  .drawing .tag { margin-left: max(0px, calc((100% - var(--tw)) / 2)); }
+  .refusals, .mail { grid-template-columns: 1fr; }
 }
 @media (max-width: 620px) {
-  :root { --rail: 22px; }
-  .frame { margin: 0; border-left: 0; border-right: 0; }
-  .bar-end > a { display: none; }
   .moment { display: flex; flex-direction: column; }
   .claim { display: contents; }
   .claim > * { margin-inline: var(--gutter); }
   .moment h1 { order: 1; margin-top: 28px; }
   .drawing { order: 2; padding: 16px var(--gutter) 52px; }
-  .lede { order: 3; }
+  .lede { order: 3; margin-top: 4px; }
   .actions { order: 4; margin-top: 16px; margin-bottom: 36px; }
-  .lede { margin-top: 4px; }
   .dwg-wide { display: none; }
   .dwg-narrow { display: block; }
   /* Narrow drawing: the closed valve sits at 53.9% of its width, and the tag never passes the edge. */
-  .tag { margin-left: max(0px, min(calc(100% * 0.539 - var(--tw) / 2), calc(100% - var(--tw)))); transform: rotate(-2deg); }
-  ol.procedure { grid-template-columns: 1fr; row-gap: 0; }
-  .procedure li { display: grid; grid-template-columns: 64px 1fr; column-gap: 14px; padding: 0 0 28px; }
-  .procedure li::before { left: 32px; right: auto; top: 0; bottom: 0; border-top: 0; border-left: 2.5px solid var(--line); }
-  .procedure li:last-child::before { bottom: 28px; right: auto; }
-  .procedure .valve { grid-row: 1 / span 2; flex-direction: column; align-items: center; margin: 0; }
-  .procedure .valve svg { transform: rotate(90deg); width: 36px; height: 64px; padding: 0; }
-  .procedure .n { padding: 4px 0; }
-  .message.reply { margin-left: 16px; }
-  table.schedule, .schedule thead, .schedule tbody, .schedule tr, .schedule th, .schedule td { display: block; width: auto; }
-  .schedule thead { display: none; }
-  .schedule tbody tr { border-top: 1.5px solid var(--ink); padding: 4px 0 8px; }
-  .schedule tbody tr:first-child { border-top: 0; }
-  .schedule tbody th, .schedule td { border: 0; padding: 6px 14px; width: auto; }
-  .schedule tbody th { padding-top: 10px; }
-  .schedule td::before { content: attr(data-col); display: block; font: 600 0.6875rem/1.4 var(--mono); letter-spacing: 0.06em; text-transform: uppercase; color: var(--label); }
+  .drawing .tag { margin-left: max(0px, min(calc(100% * 0.539 - var(--tw) / 2), calc(100% - var(--tw)))); transform: rotate(-2deg); }
   .real .hide-s { display: none; }
-  .close .button { width: 100%; justify-content: center; }
-  .titleblock { grid-template-columns: 1fr; }
-  .titleblock > * { border-left: 0; border-top: 1px solid var(--rule); }
-  .titleblock > :first-child { border-top: 0; border-bottom: 0; }
 }
 </style>
 </head>
 <body>
-<a class="skip" href="#main">Skip to the drawing</a>
 <div class="frame">
-  <div class="zones" aria-hidden="true"><span></span><span>A</span><span>B</span><span>C</span><span>D</span><span>E</span><span>F</span></div>
-
-  <header class="bar">
-    <a class="wordmark" href="landing.html">FOTHERING</a>
-    <div class="bar-end">
-      <a href="#index">Sheet index</a>
-      <fieldset class="theme">
-        <legend>Colour theme</legend>
-        <label><input type="radio" name="theme" value="device" checked><span>Device</span></label>
-        <label><input type="radio" name="theme" value="light"><span>Light</span></label>
-        <label><input type="radio" name="theme" value="dark"><span>Dark</span></label>
-      </fieldset>
-    </div>
-  </header>
+  <div data-chrome="top"></div>
 
   <main id="main">
-    <div class="row" style="border-top: 1px solid var(--ink)">
+    <div class="row">
       <div class="rail" aria-hidden="true">1</div>
       <section class="moment" aria-labelledby="moment-title">
         <div class="claim">
@@ -428,6 +226,7 @@ table.real { width: 100%; border-collapse: collapse; }
               <p><b>What I did.</b> Turned sending off for partner-import only at 14:03 UTC and read it back: <span class="mono">SendingEnabled</span> is false. SES now refuses sends that use this configuration set, so your importer will see errors on this lane until it reopens.</p>
               <p><b>What stays open.</b> Receipts, password-resets, newsletter.</p>
               <p>Reply <b>reopen</b> to resume sending, or <b>keep closed</b> to leave it paused.</p>
+              <p class="disclosure">Written by Fothering's AI agent. The closure itself passed fixed threshold checks before any SES call.</p>
             </div>
           </article>
           <article class="message reply" aria-label="Your reply">
@@ -448,7 +247,7 @@ table.real { width: 100%; border-collapse: collapse; }
           <h2 id="compare-title">The same bounce spike, three responses</h2>
           <p>AWS already gives you two tools for this moment, and both are good at their job. One advises and never acts. The other acts on a threshold without saying why.</p>
         </div>
-        <table class="schedule">
+        <table class="schedule stack compare">
           <caption>Schedule of responses. Fothering column: this project, fixture build.</caption>
           <thead>
             <tr>
@@ -536,30 +335,7 @@ table.real { width: 100%; border-collapse: collapse; }
     </div>
   </main>
 
-  <footer class="titleblock" id="index">
-    <div><b>Project</b>Fothering. Stops one leak without stopping the ship.<br><span class="mono" style="font-size: 0.8125rem; color: var(--label)">eu-central-1, fixture build</span></div>
-    <nav aria-label="Sheets"><b>Sheets</b><ul><li><a href="replay.html">Incident replay</a></li><li><a href="console.html">Console</a></li><li><a href="deploy.html">Deploy</a></li></ul></nav>
-    <div><b>Read</b><ul><li><a href="privacy.html">Privacy</a></li><li><a href="ai.html">AI disclosure</a></li></ul></div>
-    <div><b>Source</b>Private until submission</div>
-  </footer>
+  <footer data-chrome="index"></footer>
 </div>
-<script>
-(function () {
-  var root = document.documentElement;
-  var current = root.dataset.theme || "device";
-  var inputs = document.querySelectorAll('.theme input[name="theme"]');
-  inputs.forEach(function (input) {
-    input.checked = input.value === current;
-    input.addEventListener("change", function () {
-      if (input.value === "device") delete root.dataset.theme;
-      else root.dataset.theme = input.value;
-      try {
-        if (input.value === "device") localStorage.removeItem("fothering-theme");
-        else localStorage.setItem("fothering-theme", input.value);
-      } catch (e) {}
-    });
-  });
-})();
-</script>
 </body>
 </html>

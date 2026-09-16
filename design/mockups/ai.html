@@ -1,0 +1,162 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AI disclosure: what the model decides, and what it cannot</title>
+<meta name="description" content="Which AI model Fothering uses and where, what it is allowed to do, the fixed checks between it and your SES account, what data it sees, and where it can be wrong.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Red+Hat+Display:wght@500..900&family=Red+Hat+Mono:wght@400..600&family=Red+Hat+Text:wght@400..700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="shared/drawing.css">
+<script src="shared/chrome.js"></script>
+<style>
+.interlock { display: block; width: 100%; max-width: 1000px; height: auto; margin: 0 auto; }
+.interlock-narrow { display: none; }
+.split { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 32px 48px; }
+.split ul { list-style: none; margin: 0; padding: 0; border-top: 1.5px solid var(--ink); }
+.split li { padding: 14px 0; border-bottom: 1px solid var(--rule); max-width: 58ch; }
+.split h3 { margin-bottom: 12px; }
+.limits { max-width: 72ch; }
+.limits p { margin: 0 0 14px; }
+@media (max-width: 960px) { .split { grid-template-columns: 1fr; } }
+@media (max-width: 620px) {
+  .interlock-wide { display: none; }
+  .interlock-narrow { display: block; max-width: 360px; }
+}
+</style>
+</head>
+<body>
+<div class="frame">
+  <div data-chrome="top"></div>
+
+  <main id="main">
+    <div class="row">
+      <div class="rail" aria-hidden="true">1</div>
+      <section class="intro" aria-labelledby="page-title">
+        <h1 class="page-title" id="page-title">What the model decides, and what it cannot</h1>
+        <p>Fothering uses an AI model to name the cause of a spike and to write the email you read. It never touches your SES account directly: every closure it proposes passes fixed checks first, and only your reply reopens a lane.</p>
+      </section>
+    </div>
+
+    <div class="row">
+      <div class="rail" aria-hidden="true">2</div>
+      <section class="sheet" aria-labelledby="lock-title">
+        <div class="sheet-head">
+          <h2 id="lock-title">The interlock between the model and SES</h2>
+          <p>The model can ask for one tool, close a lane, and that tool requires an evidence record. Its handler recomputes the thresholds from the stored events and refuses if they do not hold, whatever the model wrote.</p>
+        </div>
+        <svg class="interlock interlock-wide" viewBox="0 0 1000 200" role="img" aria-labelledby="lock-svg-title lock-svg-desc">
+          <title id="lock-svg-title">Interlock drawing</title>
+          <desc id="lock-svg-desc">Minimized events flow to the model, which proposes a closure with evidence. The proposal passes through a fixed threshold check. Only a proposal that passes reaches SES. A failed check goes back to the operator as a question.</desc>
+          <rect x="4" y="60" width="150" height="70" fill="none" stroke="var(--ink)" stroke-width="2"/>
+          <text x="79" y="92" text-anchor="middle" font-family="Red Hat Display" font-weight="800" font-size="15" fill="var(--ink)">Stored events</text>
+          <text x="79" y="112" text-anchor="middle" font-family="Red Hat Mono" font-size="11" fill="var(--label)">no addresses</text>
+          <line x1="154" y1="95" x2="260" y2="95" stroke="var(--line)" stroke-width="2.5"/>
+          <rect x="260" y="50" width="190" height="90" fill="none" stroke="var(--ink)" stroke-width="2" stroke-dasharray="6 4"/>
+          <text x="355" y="90" text-anchor="middle" font-family="Red Hat Display" font-weight="800" font-size="15" fill="var(--ink)">Model</text>
+          <text x="355" y="110" text-anchor="middle" font-family="Red Hat Mono" font-size="11" fill="var(--label)">proposes, with evidence</text>
+          <line x1="450" y1="95" x2="560" y2="95" stroke="var(--line)" stroke-width="2.5"/>
+          <rect x="560" y="50" width="190" height="90" fill="var(--sheet)" stroke="var(--ink)" stroke-width="3"/>
+          <text x="655" y="90" text-anchor="middle" font-family="Red Hat Display" font-weight="800" font-size="15" fill="var(--ink)">Fixed check</text>
+          <text x="655" y="110" text-anchor="middle" font-family="Red Hat Mono" font-size="11" fill="var(--label)">thresholds recomputed</text>
+          <line x1="750" y1="95" x2="826" y2="95" stroke="var(--line)" stroke-width="2.5"/>
+          <path d="M826 83 l14 12 -14 12 z M854 83 l-14 12 14 12 z" fill="var(--sheet)" stroke="var(--ink)" stroke-width="2"/>
+          <line x1="854" y1="95" x2="890" y2="95" stroke="var(--line)" stroke-width="2.5"/>
+          <rect x="890" y="60" width="104" height="70" fill="none" stroke="var(--ink)" stroke-width="2"/>
+          <text x="942" y="100" text-anchor="middle" font-family="Red Hat Display" font-weight="800" font-size="15" fill="var(--ink)">SES</text>
+          <line x1="655" y1="140" x2="655" y2="172" stroke="var(--ink)" stroke-width="2"/>
+          <path d="M647 166 l8 10 8 -10" fill="none" stroke="var(--ink)" stroke-width="2"/>
+          <text x="655" y="194" text-anchor="middle" font-family="Red Hat Mono" font-size="12" font-weight="600" fill="var(--ink)">refused: nothing closes, you are asked</text>
+        </svg>
+        <svg class="interlock interlock-narrow" viewBox="0 0 300 380" role="img" aria-labelledby="lock-n-title">
+          <title id="lock-n-title">Stored events, then the model proposes, then a fixed check, then SES. A refused check asks you instead.</title>
+          <rect x="70" y="4" width="160" height="50" fill="none" stroke="var(--ink)" stroke-width="2"/>
+          <text x="150" y="34" text-anchor="middle" font-family="Red Hat Display" font-weight="800" font-size="14" fill="var(--ink)">Stored events</text>
+          <line x1="150" y1="54" x2="150" y2="90" stroke="var(--line)" stroke-width="2.5"/>
+          <rect x="70" y="90" width="160" height="60" fill="none" stroke="var(--ink)" stroke-width="2" stroke-dasharray="6 4"/>
+          <text x="150" y="126" text-anchor="middle" font-family="Red Hat Display" font-weight="800" font-size="14" fill="var(--ink)">Model proposes</text>
+          <line x1="150" y1="150" x2="150" y2="186" stroke="var(--line)" stroke-width="2.5"/>
+          <rect x="70" y="186" width="160" height="60" fill="var(--sheet)" stroke="var(--ink)" stroke-width="3"/>
+          <text x="150" y="222" text-anchor="middle" font-family="Red Hat Display" font-weight="800" font-size="14" fill="var(--ink)">Fixed check</text>
+          <line x1="150" y1="246" x2="150" y2="320" stroke="var(--line)" stroke-width="2.5"/>
+          <path d="M138 270 l12 14 12 -14 z M138 298 l12 -14 12 14 z" fill="var(--sheet)" stroke="var(--ink)" stroke-width="2"/>
+          <rect x="100" y="320" width="100" height="50" fill="none" stroke="var(--ink)" stroke-width="2"/>
+          <text x="150" y="350" text-anchor="middle" font-family="Red Hat Display" font-weight="800" font-size="14" fill="var(--ink)">SES</text>
+          <line x1="230" y1="216" x2="270" y2="216" stroke="var(--ink)" stroke-width="2"/>
+          <text x="296" y="262" text-anchor="end" font-family="Red Hat Mono" font-size="11" font-weight="600" fill="var(--ink)">refused: you</text>
+          <text x="296" y="278" text-anchor="end" font-family="Red Hat Mono" font-size="11" font-weight="600" fill="var(--ink)">are asked</text>
+        </svg>
+      </section>
+    </div>
+
+    <div class="row">
+      <div class="rail" aria-hidden="true">3</div>
+      <section class="sheet" aria-labelledby="does-title">
+        <div class="sheet-head">
+          <h2 id="does-title">What the model does, and what it never does</h2>
+          <p>The split is enforced by permissions and code, not by instructions in a prompt.</p>
+        </div>
+        <div class="split">
+          <div>
+            <h3>It does</h3>
+            <ul>
+              <li>Read the minimized event window for one lane and the lanes beside it.</li>
+              <li>Name a cause with the events that support it, or say the cause is unknown.</li>
+              <li>Propose closing one configuration set, with that evidence attached.</li>
+              <li>Write the email you receive, and read your reply to tell reopen from keep closed.</li>
+            </ul>
+          </div>
+          <div>
+            <h3>It never</h3>
+            <ul>
+              <li>Calls SES itself. Only the checked tool handler does, and only for sets you listed at deploy.</li>
+              <li>Pauses the whole account. That permission is not in the template.</li>
+              <li>Reopens a lane. Only your reply or your choice in the console does.</li>
+              <li>Sees a recipient address, a subject line or a message header.</li>
+            </ul>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <div class="row">
+      <div class="rail" aria-hidden="true">4</div>
+      <section class="sheet" aria-labelledby="model-title">
+        <div class="sheet-head">
+          <h2 id="model-title">Which model, and where it runs</h2>
+          <p>One model, called in your own AWS account, in the EU.</p>
+        </div>
+        <table class="schedule stack">
+          <caption>Model record for this build.</caption>
+          <tbody>
+            <tr><th scope="row" data-col="Item">Model</th><td data-col="Value">Claude Sonnet 5 by Anthropic, through Amazon Bedrock, inference profile <code>eu.anthropic.claude-sonnet-5</code></td></tr>
+            <tr><th scope="row" data-col="Item">Region</th><td data-col="Value">Called from eu-central-1; the EU profile keeps requests within EU regions</td></tr>
+            <tr><th scope="row" data-col="Item">Who sees prompts</th><td data-col="Value">Per AWS, model providers have no access to Amazon Bedrock logs or to customer prompts and completions</td></tr>
+            <tr><th scope="row" data-col="Item">Default</th><td data-col="Value">Dry run. Until the operator turns the go-live switch on, no model call and no SES change is made; recorded fixtures stand in</td></tr>
+            <tr><th scope="row" data-col="Item">Labelled output</th><td data-col="Value">Every email the agent writes says it was written by Fothering's AI agent</td></tr>
+          </tbody>
+        </table>
+      </section>
+    </div>
+
+    <div class="row">
+      <div class="rail" aria-hidden="true">5</div>
+      <section class="sheet" aria-labelledby="wrong-title">
+        <div class="sheet-head">
+          <h2 id="wrong-title">Where it can be wrong</h2>
+          <p>Naming a cause is a judgment, and a model can make a bad one.</p>
+        </div>
+        <div class="limits prose">
+          <p>It can pick the wrong tag when two causes overlap, such as an import batch sent with a new template. The fixed check limits the damage to one configuration set, and the email lists what was ruled out so you can see the reasoning.</p>
+          <p>It can say unknown when a person would have guessed right. That is the intended trade: a missed closure costs you a question, a wrong closure costs you a lane of mail.</p>
+          <p>It cannot see anything SES does not publish. A cause that only shows in your own application logs stays invisible to it.</p>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <footer data-chrome="index"></footer>
+</div>
+</body>
+</html>
