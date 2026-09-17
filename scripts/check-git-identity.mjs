@@ -61,7 +61,9 @@ function run(cwd) {
     // it that run walked nothing and reported "no commits yet". Deliberately not --all: that
     // would also read refs/stash (never pushed, so a long-dead stash would redden the gate
     // forever) and remote-tracking refs (the server's already-public state).
-    const out = execFileSync('git', ['log', '--branches', '--tags', 'HEAD', '--format=%ae%n%ce'], {
+    // --ignore-missing: on an orphan branch before its first commit HEAD does not resolve, and
+    // without it the whole log fails and the other branches are never read.
+    const out = execFileSync('git', ['log', '--ignore-missing', '--branches', '--tags', 'HEAD', '--format=%ae%n%ce'], {
       cwd, encoding: 'utf8', windowsHide: true, maxBuffer: 64 * 1024 * 1024,
     });
     emails = [...new Set(out.split('\n').map((l) => l.trim()).filter(Boolean))];
@@ -215,6 +217,14 @@ function selftest() {
       git(['update-ref', '-d', `refs/heads/${branch}`], r5);
       git(['config', 'user.email', '12345+someone@users.noreply.github.com'], r5);
       check('a leak on a detached HEAD with no branch still fails', runCli(r5), 1, /in HISTORY outside the allowlist/);
+    }
+    {
+      // An orphan branch before its first commit: HEAD is unborn, the leak sits on another branch.
+      const r6 = repo('person@gmail.example');
+      roots.push(r6);
+      git(['checkout', '-q', '--orphan', 'fresh'], r6);
+      git(['config', 'user.email', '12345+someone@users.noreply.github.com'], r6);
+      check('a leak on another branch still fails while HEAD is unborn', runCli(r6), 1, /in HISTORY outside the allowlist/);
     }
     {
       // A shallow clone hides older commits, so it must not read as clean.
