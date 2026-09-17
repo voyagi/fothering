@@ -1,0 +1,232 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Console: lanes in eu-central-1</title>
+<meta name="description" content="Every SES configuration set Fothering watches, which are open, closed or being watched, and the evidence and decision behind each closure.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Red+Hat+Display:wght@500..900&family=Red+Hat+Mono:wght@400..600&family=Red+Hat+Text:wght@400..700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="shared/drawing.css">
+<script src="shared/chrome.js"></script>
+<style>
+.dryrun { display: flex; flex-wrap: wrap; gap: 8px 20px; align-items: baseline; margin: 0 var(--gutter) clamp(24px, 3vw, 36px); padding: 12px 16px; border: 1.5px dashed var(--ink); }
+.dryrun b { font: 700 0.8125rem/1.2 var(--mono); letter-spacing: 0.06em; }
+.dryrun span { color: var(--ink-2); }
+
+.register tbody tr { cursor: default; }
+.register tr[aria-selected="true"] th, .register tr[aria-selected="true"] td { background: var(--ground); }
+.register tbody th a { font-weight: 700; }
+.register td:last-child { white-space: nowrap; }
+
+.closure { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: 32px 48px; align-items: start; }
+.closure .tag { transform: rotate(-1.5deg); margin: 8px auto 0; }
+.evidence { margin: 0; display: grid; grid-template-columns: max-content minmax(0, 1fr); border-top: 1.5px solid var(--ink); }
+.evidence dt, .evidence dd { margin: 0; padding: 12px 0; border-bottom: 1px solid var(--rule); }
+.evidence dt { font: 600 0.75rem/1.5 var(--mono); letter-spacing: 0.05em; text-transform: uppercase; color: var(--label); padding-right: 20px; }
+.evidence dd { max-width: 60ch; }
+.decision { margin-top: 28px; }
+.decision h3 { margin-bottom: 6px; }
+.decision > p { margin: 0 0 16px; color: var(--ink-2); max-width: 56ch; }
+.buttons { display: flex; flex-wrap: wrap; gap: 12px; }
+.confirm { margin-top: 16px; padding: 16px 18px; border: 1.5px solid var(--ink); background: var(--ground); max-width: 60ch; }
+.confirm p { margin: 0 0 12px; }
+.confirm[hidden] { display: none; }
+.done { margin: 16px 0 0; font-weight: 600; }
+
+.specimens { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px; }
+.specimen { border: 1.5px solid var(--ink); padding: 20px 22px 22px; }
+.specimen h3 .state { font-size: inherit; font-family: inherit; font-weight: inherit; letter-spacing: inherit; text-transform: none; white-space: normal; }
+.specimen p { margin: 0 0 14px; color: var(--ink-2); max-width: 52ch; }
+.specimen.fault { border-width: 2.5px; }
+.forget { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: 20px 40px; align-items: start; }
+.forget form { display: flex; flex-wrap: wrap; gap: 12px; align-items: end; }
+.forget label { display: grid; gap: 6px; flex: 1 1 280px; font: 600 0.75rem/1.2 var(--mono); letter-spacing: 0.05em; text-transform: uppercase; color: var(--label); }
+.forget input { font: 400 1rem/1.4 var(--text); color: var(--ink); background: var(--sheet); border: 1.5px solid var(--ink); border-radius: 2px; padding: 12px 14px; min-height: 48px; text-transform: none; letter-spacing: 0; }
+.forget input:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+.forget .note { margin: 12px 0 0; color: var(--ink-2); max-width: 60ch; }
+/* Red belongs to the closed lane only. An unconfirmed closure leaves the lane open, so its mark is a heavy
+   empty ink outline, not the lock colour. */
+.state.unproven::before { background: none; border-width: 2.5px; }
+
+@media (max-width: 960px) {
+  .closure, .specimens, .forget { grid-template-columns: 1fr; }
+}
+@media (max-width: 620px) {
+  .register td:last-child { white-space: normal; }
+  .buttons .button { flex: 1 1 100%; justify-content: center; }
+}
+</style>
+</head>
+<body>
+<div class="frame">
+  <div data-chrome="top"></div>
+
+  <main id="main">
+    <div class="row">
+      <div class="rail" aria-hidden="true">1</div>
+      <div>
+        <section class="intro" aria-labelledby="page-title">
+          <h1 class="page-title" id="page-title">Lanes in eu-central-1</h1>
+          <p>Every configuration set that publishes events to Fothering. A lane is open, closed, or watched: something looks wrong but the cause is not settled, so nothing was closed and you were asked.</p>
+        </section>
+        <p class="dryrun" role="note"><b>DRY RUN</b><span>The go-live switch is off. Decisions are recorded, and every SES call is logged as what it would do instead of being made.</span></p>
+      </div>
+    </div>
+
+    <div class="row">
+      <div class="rail" aria-hidden="true">2</div>
+      <section class="sheet" aria-labelledby="register-title">
+        <div class="sheet-head">
+          <h2 id="register-title">Lane register</h2>
+          <p>Sorted with anything that needs you first. Select a closed or watched lane to see its evidence and decide.</p>
+        </div>
+        <table class="schedule stack register">
+          <caption>Fixture build: lanes from recorded demonstration events.</caption>
+          <thead><tr><th scope="col">Lane</th><th scope="col">State</th><th scope="col">Since UTC</th><th scope="col">Reason</th><th scope="col">Waiting on</th></tr></thead>
+          <tbody>
+            <tr aria-selected="true"><th scope="row" data-col="Lane"><a href="#closure-title">partner-import</a></th><td data-col="State"><span class="state shut">Closed</span></td><td data-col="Since">14:03</td><td data-col="Reason">Hard bounces all tagged import_batch=2026-09-14-b</td><td data-col="Waiting on">Your reply: reopen or keep closed</td></tr>
+            <tr><th scope="row" data-col="Lane"><a href="#watched-title">newsletter</a></th><td data-col="State"><span class="state watch">Watched</span></td><td data-col="Since">13:20</td><td data-col="Reason">Complaints rising, cause unknown: no tag, template or provider stands out</td><td data-col="Waiting on">Your answer to the question sent 13:20</td></tr>
+            <tr><th scope="row" data-col="Lane">receipts</th><td data-col="State"><span class="state open">Open</span></td><td data-col="Since">09:00</td><td data-col="Reason">Normal</td><td data-col="Waiting on">Nothing</td></tr>
+            <tr><th scope="row" data-col="Lane">password-resets</th><td data-col="State"><span class="state open">Open</span></td><td data-col="Since">09:00</td><td data-col="Reason">Normal</td><td data-col="Waiting on">Nothing</td></tr>
+          </tbody>
+        </table>
+      </section>
+    </div>
+
+    <div class="row">
+      <div class="rail" aria-hidden="true">3</div>
+      <section class="sheet" aria-labelledby="closure-title">
+        <div class="sheet-head">
+          <h2 id="closure-title">partner-import, closed at 14:03</h2>
+          <p>The same tag the email described, with every row behind it. Your decision here does exactly what a reply to that email would do.</p>
+        </div>
+        <div class="closure">
+          <article class="tag" aria-label="Lockout tag on partner-import, fixture run">
+            <header><b>LANE CLOSED</b><span>partner-import</span><span class="stamp">FIXTURE RUN</span></header>
+            <dl>
+              <dt>Cause</dt><dd class="mono">import_batch=2026-09-14-b</dd>
+              <dt>Read back</dt><dd class="mono">SendingEnabled: false, 14:03:12 UTC</dd>
+              <dt>Reopens</dt><dd>On your reply or your choice below.</dd>
+            </dl>
+            <footer><span>TAG 001</span><span>ZONE B3</span></footer>
+          </article>
+          <div>
+            <dl class="evidence">
+              <dt>Cause</dt><dd>Every hard bounce on this lane in the window carries the message tag <code>import_batch=2026-09-14-b</code>.</dd>
+              <dt>Diagnostic</dt><dd><code>550 5.1.1 user unknown</code> from several receiving providers, not one.</dd>
+              <dt>Ruled out</dt><dd>Template: sends cleanly on other lanes. Provider: no cross-lane block. Authentication: no open recommendation.</dd>
+              <dt>Closure</dt><dd><code>PutConfigurationSetSendingOptions</code>, sending off for this configuration set only.</dd>
+              <dt>Read back</dt><dd><code>GetConfigurationSet</code> returned <code>SendingOptions.SendingEnabled</code> false at 14:03:12.</dd>
+              <dt>Effect</dt><dd>SES refuses sends that use partner-import. Your importer sees errors on this lane until it reopens.</dd>
+            </dl>
+            <div class="decision">
+              <h3>Decide</h3>
+              <p>Reopen once the batch is removed from your import. Keeping it closed changes nothing and is recorded.</p>
+              <div class="buttons">
+                <button class="button" type="button" id="ask-reopen" aria-controls="confirm-reopen" aria-expanded="false">Reopen partner-import</button>
+                <button class="button quiet" type="button" id="keep">Keep closed</button>
+              </div>
+              <div class="confirm" id="confirm-reopen" hidden>
+                <p>SES will accept sends on partner-import again, including anything your importer retries. Fothering reads the setting back and emails you the result.</p>
+                <div class="buttons">
+                  <button class="button" type="button" id="confirm">Confirm reopen</button>
+                  <button class="button quiet" type="button" id="cancel">Cancel</button>
+                </div>
+              </div>
+              <p class="done" id="done" role="status"></p>
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <div class="row">
+      <div class="rail" aria-hidden="true">4</div>
+      <section class="sheet forget" aria-labelledby="forget-title">
+        <h2 id="forget-title">Forget one recipient</h2>
+        <div>
+          <form id="forget-form" novalidate>
+            <label for="forget-address">Recipient address
+              <input id="forget-address" name="address" type="email" autocomplete="off" spellcheck="false" required aria-describedby="forget-note forget-result">
+            </label>
+            <button class="button quiet" type="submit">Delete matching records</button>
+          </form>
+          <p class="note" id="forget-note">The address goes to your deployment, is hashed there with your key, and is never stored. Every event and reply record carrying that hash is deleted from the table.</p>
+          <p class="note" id="forget-result" role="status"></p>
+        </div>
+      </section>
+    </div>
+
+    <div class="row">
+      <div class="rail" aria-hidden="true">5</div>
+      <section class="sheet" aria-labelledby="states-title">
+        <div class="sheet-head">
+          <h2 id="states-title">Other states of this sheet</h2>
+          <p>What the console shows when the evidence does not settle, when a closure cannot be proven, and before any lane exists.</p>
+        </div>
+        <div class="specimens">
+          <article class="specimen" aria-labelledby="watched-title">
+            <h3 id="watched-title"><span class="state watch">Watched:</span> complaints rising on newsletter, cause unknown</h3>
+            <p>No message tag, template or receiving provider accounts for the complaints, so nothing was closed. The question went to you at 13:20.</p>
+            <div class="buttons"><button class="button quiet" type="button">Close newsletter anyway</button></div>
+          </article>
+          <article class="specimen fault" aria-labelledby="fault-title">
+            <h3 id="fault-title"><span class="state unproven">Not confirmed:</span> the read-back still says sending</h3>
+            <p><code>GetConfigurationSet</code> still returned <code>SendingEnabled</code> true after the change. Fothering does not report a closure it cannot prove: this lane counts as open, and you were emailed the failed call.</p>
+            <div class="buttons"><button class="button" type="button">Read back again</button></div>
+          </article>
+          <article class="specimen" aria-labelledby="empty-title">
+            <h3 id="empty-title"><span class="state later">No lanes yet:</span> no configuration set is sending events</h3>
+            <p>Fothering sees a lane once its configuration set publishes to the default EventBridge bus. The deploy sheet shows the event destination to add.</p>
+            <a class="textlink" href="deploy.html">Open the deploy sheet</a>
+          </article>
+          <article class="specimen" aria-labelledby="gone-title">
+            <h3 id="gone-title"><span class="state later">Unreachable:</span> the console cannot reach your account</h3>
+            <p>The last successful read was at 14:03. Lane states below that time are shown, and nothing is changed until the connection returns.</p>
+            <div class="buttons"><button class="button quiet" type="button">Try again</button></div>
+          </article>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <footer data-chrome="index"></footer>
+</div>
+<script>
+(function () {
+  var ask = document.getElementById("ask-reopen");
+  var panel = document.getElementById("confirm-reopen");
+  var done = document.getElementById("done");
+  function openPanel(open) {
+    panel.hidden = !open;
+    ask.setAttribute("aria-expanded", String(open));
+    if (open) document.getElementById("confirm").focus();
+  }
+  ask.addEventListener("click", function () { openPanel(true); });
+  document.getElementById("cancel").addEventListener("click", function () { openPanel(false); ask.focus(); });
+  document.getElementById("confirm").addEventListener("click", function () {
+    openPanel(false);
+    done.textContent = "Dry run: would call PutConfigurationSetSendingOptions with SendingEnabled true, then read it back. Recorded.";
+  });
+  document.getElementById("forget-form").addEventListener("submit", function (event) {
+    event.preventDefault();
+    var input = document.getElementById("forget-address");
+    var result = document.getElementById("forget-result");
+    if (!input.checkValidity()) {
+      result.textContent = "Enter the full address, for example the one in the complaint you received. Nothing was deleted.";
+      input.focus();
+      return;
+    }
+    result.textContent = "Dry run: would delete every record matching this recipient's hash and report the count. Recorded.";
+    input.value = "";
+  });
+  document.getElementById("keep").addEventListener("click", function () {
+    openPanel(false);
+    done.textContent = "Kept closed. Recorded at the time of your choice; nothing changed on the lane.";
+  });
+})();
+</script>
+</body>
+</html>

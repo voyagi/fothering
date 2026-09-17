@@ -1,0 +1,347 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fothering: close the one SES lane that is going wrong</title>
+<meta name="description" content="Fothering watches the mail you send through Amazon SES, closes only the configuration set that is damaging your reputation, proves the closure, and asks you by email before reopening it.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Red+Hat+Display:wght@500..900&family=Red+Hat+Mono:wght@400..600&family=Red+Hat+Text:wght@400..700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="shared/drawing.css">
+<script src="shared/chrome.js"></script>
+<style>
+.moment { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); }
+.claim { padding: clamp(28px, 4vw, 60px) var(--gutter); display: flex; flex-direction: column; justify-content: center; gap: 24px; border-right: 1px solid var(--rule); }
+h1 { font: 700 clamp(2.125rem, 1.3rem + 2vw, 3.4rem)/1.05 var(--display); letter-spacing: -0.028em; margin: 0; text-wrap: balance; }
+.lede { font-size: 1.1875rem; max-width: 40ch; margin: 0; color: var(--ink-2); }
+.actions { display: flex; flex-wrap: wrap; align-items: center; gap: 14px 26px; }
+
+.drawing { position: relative; overflow: hidden; padding: clamp(20px, 3vw, 40px) 0 52px clamp(20px, 2.5vw, 36px); display: flex; flex-direction: column; justify-content: center; }
+.dwg { width: 100%; height: auto; display: block; }
+.dwg-narrow { display: none; }
+.drawing .caption { position: absolute; left: clamp(20px, 2.5vw, 36px); bottom: 18px; margin: 0; font: 500 0.75rem/1.3 var(--mono); color: var(--label); }
+
+/* The tag hangs from the closed valve's stem: its hole sits on the stem's end, so its left edge is the
+   valve's x position (36.3% of the wide drawing) minus half the tag width. */
+.drawing .tag { --tw: min(320px, 100%); width: var(--tw); margin: -24px 0 0 max(0px, calc(100% * 0.363 - var(--tw) / 2)); transform: rotate(-2.5deg); transform-origin: 50% 20px; }
+
+.mail { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: 28px 40px; }
+.mail-head p { margin: 20px 0 0; color: var(--ink-2); max-width: 44ch; }
+
+.compare thead th { font: 700 1rem/1.3 var(--display); letter-spacing: 0; text-transform: none; color: var(--ink); }
+.compare thead th small { display: block; font: 500 0.8125rem/1.4 var(--text); color: var(--ink-2); margin-top: 4px; }
+.compare tbody th { width: 20%; }
+
+.refusals { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: 40px; }
+ul.refuse { list-style: none; margin: 0; padding: 0; border-top: 1.5px solid var(--ink); }
+.refuse li { display: grid; grid-template-columns: 34px minmax(0, 62ch); gap: 14px; padding: 16px 0; border-bottom: 1px solid var(--rule); font-size: 1.0625rem; }
+.refuse svg { width: 22px; height: 22px; margin-top: 2px; }
+
+table.real { width: 100%; border-collapse: collapse; }
+.real th, .real td { text-align: left; padding: 14px 16px 14px 0; border-top: 1px solid var(--rule); vertical-align: top; }
+.real thead th { border-top: 1.5px solid var(--ink); font: 600 0.75rem/1 var(--mono); letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-2); }
+.real th:last-child { width: 50%; }
+
+@media (max-width: 960px) {
+  .moment { grid-template-columns: 1fr; }
+  .claim { border-right: 0; }
+  .drawing { padding: 24px var(--gutter) 56px; }
+  .drawing .tag { margin-left: max(0px, calc((100% - var(--tw)) / 2)); }
+  .refusals, .mail { grid-template-columns: 1fr; }
+}
+@media (max-width: 620px) {
+  .moment { display: flex; flex-direction: column; }
+  .claim { display: contents; }
+  .claim > * { margin-inline: var(--gutter); }
+  .moment h1 { order: 1; margin-top: 28px; }
+  .drawing { order: 2; padding: 16px var(--gutter) 52px; }
+  .lede { order: 3; margin-top: 4px; }
+  .actions { order: 4; margin-top: 16px; margin-bottom: 36px; }
+  .dwg-wide { display: none; }
+  .dwg-narrow { display: block; }
+  /* Narrow drawing: the closed valve sits at 53.9% of its width, and the tag never passes the edge. */
+  .drawing .tag { margin-left: max(0px, min(calc(100% * 0.539 - var(--tw) / 2), calc(100% - var(--tw)))); transform: rotate(-2deg); }
+  .real .hide-s { display: none; }
+}
+</style>
+</head>
+<body>
+<div class="frame">
+  <div data-chrome="top"></div>
+
+  <main id="main">
+    <div class="row">
+      <div class="rail" aria-hidden="true">1</div>
+      <section class="moment" aria-labelledby="moment-title">
+        <div class="claim">
+          <h1 id="moment-title">When one import starts bouncing, Fothering closes that lane and nothing else.</h1>
+          <p class="lede">Receipts, password resets and every list you send share one SES reputation. Each configuration set is a lane. When one goes wrong, Fothering names the cause, pauses that lane, reads the setting back, and asks you by email before it reopens.</p>
+          <div class="actions">
+            <a class="button" href="replay.html">Replay the incident
+              <svg viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M3 8h9M8.5 4l4 4-4 4" stroke="currentColor" stroke-width="1.8"/></svg>
+            </a>
+            <a class="textlink" href="deploy.html">Deploy into your AWS account</a>
+          </div>
+        </div>
+
+        <div class="drawing">
+          <svg class="dwg dwg-wide" viewBox="0 0 760 350" role="img" aria-labelledby="dwg-title dwg-desc">
+            <title id="dwg-title">Flow drawing of one SES account with four sending lanes</title>
+            <desc id="dwg-desc">Mail flows from the SES account through the receipts, password-resets and newsletter configuration sets. The partner-import configuration set is stopped at a closed valve that carries a lockout tag, with a read-back instrument confirming the valve at 14:03:12.</desc>
+            <rect x="8" y="22" width="112" height="296" fill="none" stroke="var(--ink)" stroke-width="2"/>
+            <line x1="120" y1="50" x2="120" y2="290" stroke="var(--ink)" stroke-width="3.5"/>
+            <text x="64" y="166" text-anchor="middle" font-family="Red Hat Display" font-weight="800" font-size="18" fill="var(--ink)">SES</text>
+            <text x="64" y="186" text-anchor="middle" font-family="Red Hat Mono" font-size="12" fill="var(--label)">eu-central-1</text>
+            <g font-family="Red Hat Mono" font-size="13" fill="var(--ink)">
+              <text x="130" y="40">receipts</text>
+              <text x="130" y="120">password-resets</text>
+              <text x="130" y="200">newsletter</text>
+              <text x="130" y="280">partner-import</text>
+            </g>
+            <g stroke="var(--line)" stroke-width="2.5" fill="none">
+              <line x1="120" y1="50" x2="700" y2="50"/>
+              <line x1="120" y1="130" x2="700" y2="130"/>
+              <line x1="120" y1="210" x2="700" y2="210"/>
+              <line x1="120" y1="290" x2="252" y2="290"/>
+            </g>
+            <line x1="300" y1="290" x2="700" y2="290" stroke="var(--rule)" stroke-width="2.5" stroke-dasharray="1 9"/>
+            <g class="flow-dash" stroke="var(--flow)" stroke-width="2.5" fill="none">
+              <line x1="124" y1="50" x2="700" y2="50"/>
+              <line x1="124" y1="130" x2="700" y2="130"/>
+              <line x1="124" y1="210" x2="700" y2="210"/>
+              <line x1="124" y1="290" x2="252" y2="290"/>
+            </g>
+            <g fill="var(--sheet)" stroke="var(--ink)" stroke-width="2">
+              <path d="M272 40 l24 10 -24 10 z M320 40 l-24 10 24 10 z"/>
+              <path d="M272 120 l24 10 -24 10 z M320 120 l-24 10 24 10 z"/>
+              <path d="M272 200 l24 10 -24 10 z M320 200 l-24 10 24 10 z"/>
+            </g>
+            <path d="M252 278 l24 12 -24 12 z M300 278 l-24 12 24 12 z" fill="var(--ink)" stroke="var(--ink)" stroke-width="2"/>
+            <line x1="276" y1="302" x2="276" y2="350" stroke="var(--ink)" stroke-width="2"/>
+            <path d="M512 43 l14 7 -14 7 z M512 123 l14 7 -14 7 z M512 203 l14 7 -14 7 z M190 283 l14 7 -14 7 z" fill="var(--ink)"/>
+            <line x1="292" y1="281" x2="341" y2="258" stroke="var(--ink)" stroke-width="1.5" stroke-dasharray="4 3"/>
+            <circle cx="356" cy="250" r="17" fill="var(--sheet)" stroke="var(--ink)" stroke-width="2"/>
+            <text x="356" y="254.5" text-anchor="middle" font-family="Red Hat Mono" font-weight="600" font-size="12" fill="var(--ink)">RB</text>
+            <text x="381" y="254" font-family="Red Hat Mono" font-size="12" fill="var(--label)">read-back 14:03:12</text>
+            <g fill="none" stroke="var(--ink)" stroke-width="2">
+              <rect x="706" y="36" width="40" height="28" rx="2"/><path d="M706 38 l20 14 20 -14"/>
+              <rect x="706" y="116" width="40" height="28" rx="2"/><path d="M706 118 l20 14 20 -14"/>
+              <rect x="706" y="196" width="40" height="28" rx="2"/><path d="M706 198 l20 14 20 -14"/>
+            </g>
+            <rect x="706" y="276" width="40" height="28" rx="2" fill="none" stroke="var(--line)" stroke-width="2" stroke-dasharray="3 3"/>
+            <g font-family="Red Hat Mono" font-size="12" text-anchor="end">
+              <text x="696" y="84" fill="var(--label)">sending</text>
+              <text x="696" y="164" fill="var(--label)">sending</text>
+              <text x="696" y="244" fill="var(--label)">sending</text>
+              <text x="696" y="324" fill="var(--ink)" font-weight="600">SendingEnabled: false</text>
+            </g>
+          </svg>
+
+          <svg class="dwg dwg-narrow" viewBox="0 0 360 300" role="img" aria-labelledby="dwgn-title dwgn-desc">
+            <title id="dwgn-title">Four SES sending lanes, one closed</title>
+            <desc id="dwgn-desc">Receipts, password-resets and newsletter keep sending. The partner-import configuration set is stopped at a closed valve with a lockout tag, SendingEnabled false.</desc>
+            <rect x="4" y="16" width="50" height="232" fill="none" stroke="var(--ink)" stroke-width="2"/>
+            <text x="29" y="137" text-anchor="middle" font-family="Red Hat Display" font-weight="800" font-size="15" fill="var(--ink)">SES</text>
+            <line x1="54" y1="40" x2="54" y2="232" stroke="var(--ink)" stroke-width="3"/>
+            <g font-family="Red Hat Mono" font-size="13" fill="var(--ink)">
+              <text x="66" y="30">receipts</text>
+              <text x="66" y="94">password-resets</text>
+              <text x="66" y="158">newsletter</text>
+              <text x="66" y="222">partner-import</text>
+            </g>
+            <g stroke="var(--line)" stroke-width="2.5" fill="none">
+              <line x1="54" y1="40" x2="310" y2="40"/>
+              <line x1="54" y1="104" x2="310" y2="104"/>
+              <line x1="54" y1="168" x2="310" y2="168"/>
+              <line x1="54" y1="232" x2="174" y2="232"/>
+            </g>
+            <line x1="214" y1="232" x2="310" y2="232" stroke="var(--rule)" stroke-width="2.5" stroke-dasharray="1 9"/>
+            <g class="flow-dash" stroke="var(--flow)" stroke-width="2.5" fill="none">
+              <line x1="58" y1="40" x2="310" y2="40"/>
+              <line x1="58" y1="104" x2="310" y2="104"/>
+              <line x1="58" y1="168" x2="310" y2="168"/>
+              <line x1="58" y1="232" x2="174" y2="232"/>
+            </g>
+            <path d="M174 222 l20 10 -20 10 z M214 222 l-20 10 20 10 z" fill="var(--ink)" stroke="var(--ink)" stroke-width="2"/>
+            <path d="M254 34 l12 6 -12 6 z M254 98 l12 6 -12 6 z M254 162 l12 6 -12 6 z M112 226 l12 6 -12 6 z" fill="var(--ink)"/>
+            <line x1="194" y1="242" x2="194" y2="300" stroke="var(--ink)" stroke-width="2"/>
+            <g fill="none" stroke="var(--ink)" stroke-width="2">
+              <rect x="316" y="30" width="36" height="22" rx="2"/><path d="M316 32 l18 11 18 -11"/>
+              <rect x="316" y="94" width="36" height="22" rx="2"/><path d="M316 96 l18 11 18 -11"/>
+              <rect x="316" y="158" width="36" height="22" rx="2"/><path d="M316 160 l18 11 18 -11"/>
+            </g>
+            <rect x="316" y="222" width="36" height="22" rx="2" fill="none" stroke="var(--line)" stroke-width="2" stroke-dasharray="3 3"/>
+            <text x="352" y="268" text-anchor="end" font-family="Red Hat Mono" font-size="12" font-weight="600" fill="var(--ink)">SendingEnabled: false</text>
+          </svg>
+
+          <article class="tag" aria-label="Lockout tag on the partner-import lane, fixture run">
+            <header>
+              <b>LANE CLOSED</b>
+              <span>partner-import</span>
+              <span class="stamp">FIXTURE RUN</span>
+            </header>
+            <dl>
+              <dt>Cause</dt>
+              <dd class="mono">import_batch=2026-09-14-b</dd>
+              <dt>Evidence</dt>
+              <dd>Every hard bounce in the window carries that tag: <span class="mono">550 5.1.1</span>, several providers.</dd>
+              <dt>Read back</dt>
+              <dd class="mono">SendingOptions.SendingEnabled: false, 14:03:12 UTC</dd>
+              <dt>Reopens</dt>
+              <dd>When you reply "reopen".</dd>
+            </dl>
+            <footer><span>TAG 001</span><span>ZONE D1</span></footer>
+          </article>
+          <p class="caption">Fixture run: recorded demonstration events, not a live account.</p>
+        </div>
+      </section>
+    </div>
+
+    <div class="row">
+      <div class="rail" aria-hidden="true">2</div>
+      <section class="sheet" aria-labelledby="steps-title">
+        <div class="sheet-head">
+          <h2 id="steps-title">How one lane gets closed</h2>
+          <p>The order is fixed, the way an isolation procedure is. A step that cannot finish stops the sequence and asks you instead.</p>
+        </div>
+        <ol class="procedure">
+          <li><div class="valve"><span class="n">1</span><svg viewBox="0 0 64 36" aria-hidden="true"><path d="M8 8 l24 10 -24 10 z M56 8 l-24 10 24 10 z" fill="var(--sheet)" stroke="var(--ink)" stroke-width="2"/></svg></div><div><h3>Watch every event</h3><p>Sends, deliveries, bounces, complaints, rejects and delays arrive through EventBridge, grouped by configuration set and by your message tags.</p></div></li>
+          <li><div class="valve"><span class="n">2</span><svg viewBox="0 0 64 36" aria-hidden="true"><path d="M8 8 l24 10 -24 10 z M56 8 l-24 10 24 10 z" fill="var(--sheet)" stroke="var(--ink)" stroke-width="2"/></svg></div><div><h3>Name the cause, or say unknown</h3><p>A spike is traced to one import batch, template, receiving provider or missing authentication record, with the events that show it.</p></div></li>
+          <li><div class="valve"><span class="n">3</span><svg viewBox="0 0 64 36" aria-hidden="true"><path d="M8 8 l24 10 -24 10 z M56 8 l-24 10 24 10 z" fill="var(--ink)" stroke="var(--ink)" stroke-width="2"/></svg></div><div><h3>Close one lane, then read it back</h3><p>Sending is switched off for that configuration set only, then confirmed through a second call, like the valve at D1 above.</p></div></li>
+          <li><div class="valve"><span class="n">4</span><svg viewBox="0 0 64 36" aria-hidden="true"><path d="M8 8 l24 10 -24 10 z M56 8 l-24 10 24 10 z" fill="var(--sheet)" stroke="var(--ink)" stroke-width="2"/></svg></div><div><h3>Ask you by email</h3><p>You get what it saw, what it closed and what stays open. Your reply reopens the lane or keeps it closed.</p></div></li>
+        </ol>
+      </section>
+    </div>
+
+    <div class="row">
+      <div class="rail" aria-hidden="true">3</div>
+      <section class="sheet mail" aria-labelledby="mail-title">
+        <div class="mail-head">
+          <h2 id="mail-title">The email you get, and the reply that decides</h2>
+          <p>Your inbox is the console you already watch. The message says what the tag at D1 says, in full sentences, and waits for one word back.</p>
+        </div>
+        <div>
+          <article class="message" aria-label="Closure email from Fothering, fixture run">
+            <dl>
+              <dt>From</dt><dd>Fothering, sent through your own verified SES identity</dd>
+              <dt>Subject</dt><dd>Closed: partner-import, one lane in eu-central-1</dd>
+            </dl>
+            <div class="body">
+              <p><b>What I saw.</b> Hard bounces on the partner-import configuration set, every one tagged <span class="mono">import_batch=2026-09-14-b</span>, with <span class="mono">550 5.1.1 user unknown</span> from several receiving providers. Receipts, password-resets and newsletter look normal.</p>
+              <p><b>What I did.</b> Turned sending off for partner-import only at 14:03 UTC and read it back: <span class="mono">SendingEnabled</span> is false. SES now refuses sends that use this configuration set, so your importer will see errors on this lane until it reopens.</p>
+              <p><b>What stays open.</b> Receipts, password-resets, newsletter.</p>
+              <p>Reply <b>reopen</b> to resume sending, or <b>keep closed</b> to leave it paused.</p>
+              <p class="disclosure">Written by Fothering's AI agent. The closure itself passed fixed threshold checks before any SES call.</p>
+            </div>
+          </article>
+          <article class="message reply" aria-label="Your reply">
+            <dl>
+              <dt>From</dt><dd>the operator on call</dd>
+              <dt>Subject</dt><dd>Re: Closed: partner-import, one lane in eu-central-1</dd>
+            </dl>
+            <div class="body"><p>keep closed</p></div>
+          </article>
+        </div>
+      </section>
+    </div>
+
+    <div class="row">
+      <div class="rail" aria-hidden="true">4</div>
+      <section class="sheet" aria-labelledby="compare-title">
+        <div class="sheet-head">
+          <h2 id="compare-title">The same bounce spike, three responses</h2>
+          <p>AWS already gives you two tools for this moment, and both are good at their job. One advises and never acts. The other acts on a threshold without saying why.</p>
+        </div>
+        <table class="schedule stack compare">
+          <caption>Schedule of responses. Fothering column: this project, fixture build.</caption>
+          <thead>
+            <tr>
+              <th scope="col"><span class="visually-hidden">Question</span></th>
+              <th scope="col">Virtual Deliverability Manager advisor<small>Amazon SES</small></th>
+              <th scope="col">CloudWatch alarm plus Lambda pause<small>AWS documented recipe</small></th>
+              <th scope="col" class="us">Fothering<small>this project</small></th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <th scope="row">Does it act?</th>
+              <td class="no" data-col="VDM advisor">Recommends. You act.</td>
+              <td data-col="Alarm plus Lambda">Pauses when the rate crosses your threshold.</td>
+              <td class="us" data-col="Fothering">Pauses one configuration set once the evidence names a cause.</td>
+            </tr>
+            <tr>
+              <th scope="row">Does it say why?</th>
+              <td data-col="VDM advisor">Flags issues per sending identity: DKIM, SPF, DMARC, bounces, complaints, IP listings.</td>
+              <td class="no" data-col="Alarm plus Lambda">No. The alarm knows a rate, not a cause.</td>
+              <td class="us" data-col="Fothering">Cites the batch, template, provider or record, or says unknown.</td>
+            </tr>
+            <tr>
+              <th scope="row">Is the pause proven?</th>
+              <td class="no" data-col="VDM advisor">Nothing is paused.</td>
+              <td class="no" data-col="Alarm plus Lambda">Only if you build the check.</td>
+              <td class="us" data-col="Fothering">Reads the setting back and records the answer.</td>
+            </tr>
+            <tr>
+              <th scope="row">How does it reopen?</th>
+              <td class="no" data-col="VDM advisor">Not applicable.</td>
+              <td class="no" data-col="Alarm plus Lambda">By hand, in the console or CLI.</td>
+              <td class="us" data-col="Fothering">You reply to its email. SES receives the reply.</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+    </div>
+
+    <div class="row">
+      <div class="rail" aria-hidden="true">5</div>
+      <section class="sheet" aria-labelledby="refuse-title">
+        <div class="refusals">
+          <h2 id="refuse-title">What it will not do</h2>
+          <ul class="refuse">
+            <li><svg viewBox="0 0 22 22" fill="none" aria-hidden="true"><circle cx="11" cy="11" r="9.5" stroke="currentColor" stroke-width="1.8"/><path d="M4.5 17.5l13-13" stroke="currentColor" stroke-width="1.8"/></svg><span>Close a lane on a guess. When the evidence does not settle the cause, nothing closes and you are asked.</span></li>
+            <li><svg viewBox="0 0 22 22" fill="none" aria-hidden="true"><circle cx="11" cy="11" r="9.5" stroke="currentColor" stroke-width="1.8"/><path d="M4.5 17.5l13-13" stroke="currentColor" stroke-width="1.8"/></svg><span>Pause your whole account. The smallest closure that stops the damage is one configuration set.</span></li>
+            <li><svg viewBox="0 0 22 22" fill="none" aria-hidden="true"><circle cx="11" cy="11" r="9.5" stroke="currentColor" stroke-width="1.8"/><path d="M4.5 17.5l13-13" stroke="currentColor" stroke-width="1.8"/></svg><span>Reopen on its own, or report a closure the read-back did not confirm. Only your reply reopens a lane.</span></li>
+            <li><svg viewBox="0 0 22 22" fill="none" aria-hidden="true"><circle cx="11" cy="11" r="9.5" stroke="currentColor" stroke-width="1.8"/><path d="M4.5 17.5l13-13" stroke="currentColor" stroke-width="1.8"/></svg><span>Keep recipient addresses. It stores the receiving domain and a keyed hash in Frankfurt, deleted within a few days after 30 days.</span></li>
+          </ul>
+        </div>
+      </section>
+    </div>
+
+    <div class="row">
+      <div class="rail" aria-hidden="true">6</div>
+      <section class="sheet" aria-labelledby="real-title">
+        <div class="sheet-head">
+          <h2 id="real-title">Limits, and what is real today</h2>
+          <p>This is a hackathon build. Everything on this site is labelled by where it came from, and no measured number appears until three live runs are recorded.</p>
+        </div>
+        <table class="real">
+          <thead><tr><th scope="col">Part</th><th scope="col">State</th><th scope="col" class="hide-s">Note</th></tr></thead>
+          <tbody>
+            <tr><td>Incident replay</td><td><span class="state">Fixture</span></td><td class="hide-s">Recorded demonstration events. Replaced by a live capture once runs exist.</td></tr>
+            <tr><td>Attribution and refusal logic</td><td><span class="state later">Not yet</span></td><td class="hide-s">Will be tested against recorded event sets, including ones that must end unknown, before any live run.</td></tr>
+            <tr><td>Deploy into your account</td><td><span class="state later">Not yet</span></td><td class="hide-s">Template and IAM policy land before the live runs.</td></tr>
+            <tr><td>Time to closure</td><td><span class="state later">Not yet</span></td><td class="hide-s">Measured on three live runs against the mailbox simulator, then shown here with its cost.</td></tr>
+          </tbody>
+        </table>
+      </section>
+    </div>
+
+    <div class="row">
+      <div class="rail" aria-hidden="true">7</div>
+      <section class="close" aria-labelledby="close-title">
+        <div>
+          <h2 id="close-title">Watch it close one lane</h2>
+          <p>The replay plays in this browser. Nothing to install, no AWS account needed.</p>
+        </div>
+        <a class="button" href="replay.html">Replay the incident
+          <svg viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M3 8h9M8.5 4l4 4-4 4" stroke="currentColor" stroke-width="1.8"/></svg>
+        </a>
+      </section>
+    </div>
+  </main>
+
+  <footer data-chrome="index"></footer>
+</div>
+</body>
+</html>

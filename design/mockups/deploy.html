@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Deploy Fothering into your own AWS account</title>
+<meta name="description" content="What the Fothering template creates in your AWS account, every IAM permission it asks for and why, where your data lives, and how to remove all of it.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Red+Hat+Display:wght@500..900&family=Red+Hat+Mono:wght@400..600&family=Red+Hat+Text:wght@400..700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="shared/drawing.css">
+<script src="shared/chrome.js"></script>
+<style>
+.notyet { margin: 0 var(--gutter) clamp(24px, 3vw, 36px); padding: 12px 16px; border: 1.5px dashed var(--ink); max-width: 80ch; }
+.notyet b { font: 700 0.8125rem/1.2 var(--mono); letter-spacing: 0.06em; margin-right: 12px; }
+.procedure { --steps: 5; }
+.procedure pre { margin: 12px 0 0; padding: 10px 12px; background: var(--ground); border: 1px solid var(--rule); font: 500 0.8125rem/1.5 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+.perms td:first-child code { font-weight: 600; }
+.never { margin-top: 28px; padding: 16px 18px; border: 2px solid var(--ink); max-width: 72ch; }
+.never p { margin: 0; }
+.removal { counter-reset: r; list-style: none; margin: 0; padding: 0; border-top: 1.5px solid var(--ink); max-width: 80ch; }
+.removal li { counter-increment: r; display: grid; grid-template-columns: 44px minmax(0, 1fr); gap: 12px; padding: 16px 0; border-bottom: 1px solid var(--rule); }
+.removal li::before { content: counter(r); font: 800 1.5rem/1 var(--display); }
+.removal p { margin: 0; }
+.removal pre { margin: 8px 0 0; font: 500 0.8125rem/1.5 var(--mono); }
+@media (max-width: 960px) { .procedure { --steps: 2; } }
+</style>
+</head>
+<body>
+<div class="frame">
+  <div data-chrome="top"></div>
+
+  <main id="main">
+    <div class="row">
+      <div class="rail" aria-hidden="true">1</div>
+      <div>
+        <section class="intro" aria-labelledby="page-title">
+          <h1 class="page-title" id="page-title">Deploy into your own AWS account</h1>
+          <p>Fothering runs in your account, in eu-central-1, and nowhere else. Read the template before you deploy it: this sheet lists everything it creates, every permission it asks for, and how to take all of it out again.</p>
+        </section>
+        <p class="notyet" role="note"><b>NOT YET</b>The template lands before the live runs. Until then this sheet describes what it will do, and the commands below do not exist.</p>
+      </div>
+    </div>
+
+    <div class="row">
+      <div class="rail" aria-hidden="true">2</div>
+      <section class="sheet" aria-labelledby="steps-title">
+        <div class="sheet-head">
+          <h2 id="steps-title">Five steps, one template</h2>
+          <p>The deploy is one CDK app. Synthesizing it is free and offline, so you can read the CloudFormation it produces before anything is created.</p>
+        </div>
+        <ol class="procedure">
+          <li><div class="valve"><span class="n">1</span><svg viewBox="0 0 64 36" aria-hidden="true"><path d="M8 8 l24 10 -24 10 z M56 8 l-24 10 24 10 z" fill="var(--sheet)" stroke="var(--ink)" stroke-width="2"/></svg></div><div><h3>Check what you have</h3><p>An AWS account with SES in eu-central-1, one verified identity to send the operator email from, Node.js 22, and AWS credentials for that account.</p></div></li>
+          <li><div class="valve"><span class="n">2</span><svg viewBox="0 0 64 36" aria-hidden="true"><path d="M8 8 l24 10 -24 10 z M56 8 l-24 10 24 10 z" fill="var(--sheet)" stroke="var(--ink)" stroke-width="2"/></svg></div><div><h3>Read the template</h3><p>Produce the CloudFormation template and read its IAM statements against the table below.</p><pre>npm run synth</pre></div></li>
+          <li><div class="valve"><span class="n">3</span><svg viewBox="0 0 64 36" aria-hidden="true"><path d="M8 8 l24 10 -24 10 z M56 8 l-24 10 24 10 z" fill="var(--sheet)" stroke="var(--ink)" stroke-width="2"/></svg></div><div><h3>Deploy with the switch off</h3><p>The stack starts in dry run: it reads events and records what it would do, and makes no SES change.</p><pre>npm run deploy</pre></div></li>
+          <li><div class="valve"><span class="n">4</span><svg viewBox="0 0 64 36" aria-hidden="true"><path d="M8 8 l24 10 -24 10 z M56 8 l-24 10 24 10 z" fill="var(--sheet)" stroke="var(--ink)" stroke-width="2"/></svg></div><div><h3>Name the lanes to watch</h3><p>Give each configuration set an EventBridge event destination. Fothering only ever acts on the sets you list.</p></div></li>
+          <li><div class="valve"><span class="n">5</span><svg viewBox="0 0 64 36" aria-hidden="true"><path d="M8 8 l24 10 -24 10 z M56 8 l-24 10 24 10 z" fill="var(--ink)" stroke="var(--ink)" stroke-width="2"/></svg></div><div><h3>Turn the switch on</h3><p>Only after a dry-run week you are happy with. From then on, a closure is a real SES call.</p></div></li>
+        </ol>
+      </section>
+    </div>
+
+    <div class="row">
+      <div class="rail" aria-hidden="true">3</div>
+      <section class="sheet" aria-labelledby="bom-title">
+        <div class="sheet-head">
+          <h2 id="bom-title">What the template creates</h2>
+          <p>Nothing outside this list. Every resource holding data is set to be deleted with the stack, and logs are kept for 30 days, because a guard's records should not outlive the guard.</p>
+        </div>
+        <table class="schedule stack">
+          <caption>Resource schedule, eu-central-1. Draft until the template lands.</caption>
+          <thead><tr><th scope="col">Resource</th><th scope="col">Why it exists</th><th scope="col">Holds</th><th scope="col">On removal</th></tr></thead>
+          <tbody>
+            <tr><th scope="row" data-col="Resource">EventBridge rule on the default bus</th><td data-col="Why">SES publishes configuration-set events to the default bus only</td><td data-col="Holds">Nothing</td><td data-col="On removal">Deleted</td></tr>
+            <tr><th scope="row" data-col="Resource">Ingest function (Lambda)</th><td data-col="Why">Drops subjects, headers and addresses before anything is stored</td><td data-col="Holds">Nothing</td><td data-col="On removal">Deleted</td></tr>
+            <tr><th scope="row" data-col="Resource">DynamoDB table</th><td data-col="Why">The event window, lane states, closures and your decisions</td><td data-col="Holds">Receiving domain and keyed hash per recipient, 30-day expiry</td><td data-col="On removal">Deleted</td></tr>
+            <tr><th scope="row" data-col="Resource">AgentCore Runtime</th><td data-col="Why">Hosts the agent that names the cause and writes the email</td><td data-col="Holds">Nothing between runs</td><td data-col="On removal">Deleted</td></tr>
+            <tr><th scope="row" data-col="Resource">AgentCore Memory</th><td data-col="Why">The conversation about each closure, so a reply is read in context</td><td data-col="Holds">Your replies, 30-day expiry</td><td data-col="On removal">Deleted</td></tr>
+            <tr><th scope="row" data-col="Resource">S3 bucket and SES receipt rule</th><td data-col="Why">Receives your reply to the closure email</td><td data-col="Holds">Raw reply messages, 30-day lifecycle</td><td data-col="On removal">Emptied and deleted</td></tr>
+          </tbody>
+        </table>
+      </section>
+    </div>
+
+    <div class="row">
+      <div class="rail" aria-hidden="true">4</div>
+      <section class="sheet" aria-labelledby="perms-title">
+        <div class="sheet-head">
+          <h2 id="perms-title">Every permission, and why</h2>
+          <p>Scoped to the resources in the template and the configuration sets you name. If the synthesized template asks for anything not on this list, do not deploy it.</p>
+        </div>
+        <table class="schedule stack perms">
+          <caption>IAM actions, names checked against the AWS policy reference on 2026-09-16.</caption>
+          <thead><tr><th scope="col">Action</th><th scope="col">On</th><th scope="col">Why</th></tr></thead>
+          <tbody>
+            <tr><td data-col="Action"><code>ses:PutConfigurationSetSendingOptions</code></td><td data-col="On">The configuration sets you name</td><td data-col="Why">Close one lane, and reopen it on your word</td></tr>
+            <tr><td data-col="Action"><code>ses:GetConfigurationSet</code></td><td data-col="On">The configuration sets you name</td><td data-col="Why">Read the setting back before reporting anything</td></tr>
+            <tr><td data-col="Action"><code>ses:SendEmail</code></td><td data-col="On">Your one verified identity</td><td data-col="Why">The closure email and its confirmations</td></tr>
+            <tr><td data-col="Action"><code>bedrock:InvokeModel</code></td><td data-col="On">The EU Claude Sonnet 5 inference profile</td><td data-col="Why">Naming the cause and writing the email</td></tr>
+            <tr><td data-col="Action"><code>bedrock-agentcore:InvokeAgentRuntime</code></td><td data-col="On">This stack's runtime</td><td data-col="Why">The ingest function hands a suspect window to the agent</td></tr>
+            <tr><td data-col="Action"><code>bedrock-agentcore:CreateEvent</code>, <code>ListEvents</code></td><td data-col="On">This stack's memory</td><td data-col="Why">Recording and reading the closure conversation</td></tr>
+            <tr><td data-col="Action"><code>dynamodb:PutItem</code>, <code>Query</code></td><td data-col="On">This stack's table</td><td data-col="Why">Writing events and closures, reading the window</td></tr>
+            <tr><td data-col="Action"><code>dynamodb:DeleteItem</code></td><td data-col="On">This stack's table</td><td data-col="Why">Forgetting one recipient on your request, from the console</td></tr>
+            <tr><td data-col="Action"><code>s3:GetObject</code></td><td data-col="On">This stack's reply bucket</td><td data-col="Why">Reading your reply</td></tr>
+          </tbody>
+        </table>
+        <div class="never">
+          <h3>Never granted</h3>
+          <p><code>ses:PutAccountSendingAttributes</code>, the call that pauses a whole account. Fothering cannot stop your receipts even if its own logic is wrong.</p>
+        </div>
+      </section>
+    </div>
+
+    <div class="row">
+      <div class="rail" aria-hidden="true">5</div>
+      <section class="sheet" aria-labelledby="remove-title">
+        <div class="sheet-head">
+          <h2 id="remove-title">Taking it out</h2>
+          <p>Removal leaves your SES configuration sets exactly as Fothering last left them, so reopen any closed lane first.</p>
+        </div>
+        <ol class="removal">
+          <li><p>Reopen every closed lane from the console, and wait for each read-back to say true.</p></li>
+          <li><div><p>Delete the stack. The table, memory, bucket and logs go with it.</p><pre>npm run destroy</pre></div></li>
+          <li><p>Remove the EventBridge event destinations you added to your configuration sets.</p></li>
+        </ol>
+      </section>
+    </div>
+  </main>
+
+  <footer data-chrome="index"></footer>
+</div>
+</body>
+</html>

@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Privacy: what Fothering keeps, and for how long</title>
+<meta name="description" content="What this website collects (nothing), which SES event fields a Fothering deployment keeps, changes or drops, where they live, how long, and how to delete them.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Red+Hat+Display:wght@500..900&family=Red+Hat+Mono:wght@400..600&family=Red+Hat+Text:wght@400..700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="shared/drawing.css">
+<script src="shared/chrome.js"></script>
+<style>
+.filter { display: block; width: 100%; max-width: 920px; height: auto; margin: 0 auto clamp(28px, 4vw, 48px); }
+.filter-narrow { display: none; }
+.fields td:nth-child(2) { white-space: nowrap; }
+.verdict { font: 600 0.75rem/1 var(--mono); letter-spacing: 0.06em; text-transform: uppercase; }
+.verdict.drop { text-decoration: line-through; text-decoration-thickness: 1.5px; }
+.facts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border-top: 1.5px solid var(--ink); }
+.facts > div { padding: 18px 24px 20px 0; border-bottom: 1px solid var(--rule); }
+.facts > div + div { padding-left: 24px; border-left: 1px solid var(--rule); }
+.facts p { margin: 0; color: var(--ink-2); }
+.site { max-width: 72ch; }
+.site li { margin-bottom: 10px; }
+@media (max-width: 960px) {
+  .facts { grid-template-columns: 1fr; }
+  .facts > div + div { padding-left: 0; border-left: 0; }
+}
+@media (max-width: 620px) {
+  .filter-wide { display: none; }
+  .filter-narrow { display: block; }
+  .fields td:nth-child(2) { white-space: normal; }
+}
+</style>
+</head>
+<body>
+<div class="frame">
+  <div data-chrome="top"></div>
+
+  <main id="main">
+    <div class="row">
+      <div class="rail" aria-hidden="true">1</div>
+      <section class="intro" aria-labelledby="page-title">
+        <h1 class="page-title" id="page-title">What Fothering keeps, and for how long</h1>
+        <p>Two different things are covered here. This website collects nothing about you. A Fothering deployment reads SES events in its operator's own AWS account, and it strips recipient addresses before anything is stored.</p>
+      </section>
+    </div>
+
+    <div class="row">
+      <div class="rail" aria-hidden="true">2</div>
+      <section class="sheet" aria-labelledby="filter-title">
+        <div class="sheet-head">
+          <h2 id="filter-title">Every event passes one filter before it is stored</h2>
+          <p>The ingest function sits between SES and the table. Fields that identify a person are dropped or turned into a domain and a keyed hash there, so the agent and the table never hold an address.</p>
+        </div>
+        <svg class="filter filter-wide" viewBox="0 0 920 170" role="img" aria-labelledby="filter-svg-title filter-svg-desc">
+          <title id="filter-svg-title">Event filter drawing</title>
+          <desc id="filter-svg-desc">An SES event enters the ingest filter. Subject, headers and addresses leave through a drain line and are not stored. The receiving domain, a keyed hash, tags and bounce details continue to the table.</desc>
+          <rect x="4" y="50" width="120" height="60" fill="none" stroke="var(--ink)" stroke-width="2"/>
+          <text x="64" y="86" text-anchor="middle" font-family="Red Hat Display" font-weight="800" font-size="16" fill="var(--ink)">SES event</text>
+          <line x1="124" y1="80" x2="360" y2="80" stroke="var(--line)" stroke-width="2.5"/>
+          <line class="flow-dash" x1="128" y1="80" x2="360" y2="80" stroke="var(--flow)" stroke-width="2.5"/>
+          <rect x="360" y="40" width="200" height="80" fill="var(--sheet)" stroke="var(--ink)" stroke-width="2"/>
+          <path d="M380 56 h160 l-50 48 h-60 z" fill="none" stroke="var(--ink)" stroke-width="1.5"/>
+          <text x="460" y="138" text-anchor="middle" font-family="Red Hat Mono" font-size="12" fill="var(--label)">ingest filter</text>
+          <line x1="560" y1="80" x2="796" y2="80" stroke="var(--line)" stroke-width="2.5"/>
+          <line class="flow-dash" x1="564" y1="80" x2="796" y2="80" stroke="var(--flow)" stroke-width="2.5"/>
+          <text x="580" y="68" font-family="Red Hat Mono" font-size="12" fill="var(--ink)">domain, keyed hash</text>
+          <text x="580" y="100" font-family="Red Hat Mono" font-size="12" fill="var(--ink)">tags, bounce type</text>
+          <path d="M796 56 a40 12 0 0 1 120 0 v48 a40 12 0 0 1 -120 0 z" fill="var(--sheet)" stroke="var(--ink)" stroke-width="2"/>
+          <text x="856" y="90" text-anchor="middle" font-family="Red Hat Display" font-weight="800" font-size="15" fill="var(--ink)">Table</text>
+          <line x1="460" y1="120" x2="460" y2="126" stroke="var(--ink)" stroke-width="2"/>
+          <line x1="460" y1="146" x2="460" y2="166" stroke="var(--rule)" stroke-width="2.5" stroke-dasharray="1 7"/>
+          <text x="476" y="164" font-family="Red Hat Mono" font-size="12" fill="var(--ink)" font-weight="600">not stored: subject, headers, addresses</text>
+        </svg>
+        <svg class="filter filter-narrow" viewBox="0 0 360 250" role="img" aria-labelledby="filter-n-title">
+          <title id="filter-n-title">SES event, then the ingest filter, then the table. Subject, headers and addresses are not stored.</title>
+          <rect x="110" y="4" width="140" height="44" fill="none" stroke="var(--ink)" stroke-width="2"/>
+          <text x="180" y="31" text-anchor="middle" font-family="Red Hat Display" font-weight="800" font-size="15" fill="var(--ink)">SES event</text>
+          <line x1="180" y1="48" x2="180" y2="84" stroke="var(--line)" stroke-width="2.5"/>
+          <rect x="100" y="84" width="160" height="56" fill="var(--sheet)" stroke="var(--ink)" stroke-width="2"/>
+          <path d="M116 96 h128 l-40 32 h-48 z" fill="none" stroke="var(--ink)" stroke-width="1.5"/>
+          <line x1="260" y1="112" x2="300" y2="112" stroke="var(--rule)" stroke-width="2.5" stroke-dasharray="1 7"/>
+          <text x="300" y="104" text-anchor="end" font-family="Red Hat Mono" font-size="11" fill="var(--ink)" font-weight="600">dropped</text>
+          <line x1="180" y1="140" x2="180" y2="190" stroke="var(--line)" stroke-width="2.5"/>
+          <path d="M120 196 a60 10 0 0 1 120 0 v36 a60 10 0 0 1 -120 0 z" fill="var(--sheet)" stroke="var(--ink)" stroke-width="2"/>
+          <text x="180" y="222" text-anchor="middle" font-family="Red Hat Display" font-weight="800" font-size="14" fill="var(--ink)">Table</text>
+        </svg>
+
+        <table class="schedule stack fields">
+          <caption>Field schedule for SES event records, as the ingest function will handle them.</caption>
+          <thead><tr><th scope="col">SES field</th><th scope="col">Kept</th><th scope="col">Stored</th></tr></thead>
+          <tbody>
+            <tr><td data-col="Field"><code>bounce.bouncedRecipients[].emailAddress</code>, <code>complaint.complainedRecipients[]</code></td><td data-col="Kept?"><span class="verdict">Changed</span></td><td data-col="Stored">The receiving domain, plus an HMAC-SHA-256 of the lowercased address under a key kept in your account. A plain hash of an address can be reversed by guessing; a keyed one cannot without the key.</td></tr>
+            <tr><td data-col="Field"><code>mail.destination</code>, <code>mail.headers</code>, <code>mail.commonHeaders</code></td><td data-col="Kept?"><span class="verdict drop">Dropped</span></td><td data-col="Stored">Nothing. Subjects and headers are not needed to name a cause.</td></tr>
+            <tr><td data-col="Field"><code>bouncedRecipients[].diagnosticCode</code></td><td data-col="Kept?"><span class="verdict">Changed</span></td><td data-col="Stored">The code with any address inside it removed, for example <code>550 5.1.1 user unknown</code>. Receiving servers sometimes quote the address.</td></tr>
+            <tr><td data-col="Field"><code>mail.tags</code></td><td data-col="Kept?"><span class="verdict">Kept</span></td><td data-col="Stored">Configuration set and your own tags, which is how a cause is named. Do not put personal data in message tags.</td></tr>
+            <tr><td data-col="Field"><code>bounceType</code>, <code>bounceSubType</code>, <code>complaintFeedbackType</code>, <code>timestamp</code>, <code>messageId</code></td><td data-col="Kept?"><span class="verdict">Kept</span></td><td data-col="Stored">As sent by SES. None identifies a person.</td></tr>
+          </tbody>
+        </table>
+      </section>
+    </div>
+
+    <div class="row">
+      <div class="rail" aria-hidden="true">3</div>
+      <section class="sheet" aria-labelledby="facts-title">
+        <div class="sheet-head">
+          <h2 id="facts-title">Where, how long, and who decides</h2>
+          <p>A deployment belongs to the business that deploys it. That business is the controller of its recipients' data; AWS processes it under that business's own AWS agreement.</p>
+        </div>
+        <div class="facts">
+          <div><h3>Where</h3><p>Everything stays in your AWS account in eu-central-1, Frankfurt. The model is called through Amazon Bedrock's EU inference profile, which keeps requests within EU regions.</p></div>
+          <div><h3>How long</h3><p>Event records and replies expire after 30 days. Expired records are removed within a few days after that, and are filtered out of every read in between.</p></div>
+          <div><h3>Deleting</h3><p>Forget one recipient from the console by entering their address: it is hashed with your key and every matching record is deleted. Deleting the stack removes everything.</p></div>
+        </div>
+      </section>
+    </div>
+
+    <div class="row">
+      <div class="rail" aria-hidden="true">4</div>
+      <section class="sheet" aria-labelledby="site-title">
+        <div class="sheet-head">
+          <h2 id="site-title">This website</h2>
+          <p>The pages you are reading are static files. They set no cookies and run no analytics.</p>
+        </div>
+        <ul class="site prose">
+          <li>Your theme choice, if you pick Light or Dark, is saved in your own browser and never sent anywhere.</li>
+          <li>Fonts are served from this site, not from a font service.</li>
+          <li>Cloudflare delivers the pages, and receives your IP address in order to do so, as any web host does.</li>
+          <li>The incident replay plays recorded data that ships with the page. It contains no real recipient.</li>
+        </ul>
+      </section>
+    </div>
+  </main>
+
+  <footer data-chrome="index"></footer>
+</div>
+</body>
+</html>

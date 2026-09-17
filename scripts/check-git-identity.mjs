@@ -23,7 +23,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const DEFAULT_ALLOW = ['@users.noreply.github.com'];
+// noreply@github.com is GitHub's own committer on every pull request merged in the web UI, so
+// without it the first merged PR reddens this gate for every branch after it. Exact match only.
+const DEFAULT_ALLOW = ['@users.noreply.github.com', 'noreply@github.com'];
 
 function allowlist() {
   const extra = String(process.env.GIT_IDENTITY_ALLOW || '')
@@ -151,6 +153,20 @@ function selftest() {
       git(['config', 'user.email', '12345+someone@users.noreply.github.com'], r2);
       git(['checkout', '-q', '-'], r2);
       check('a leaked identity on a SIDE branch fails', runCli(r2), 1, /in HISTORY outside the allowlist/);
+    }
+    {
+      // A web-UI merge: the author is the owner's no-reply address, the committer is GitHub itself.
+      const r3 = repo('12345+someone@users.noreply.github.com');
+      roots.push(r3);
+      writeFileSync(join(r3, 'c.txt'), 'z\n');
+      git(['add', '-A'], r3);
+      execFileSync('git', ['commit', '-q', '-m', 'merge'], {
+        cwd: r3, windowsHide: true, env: { ...process.env, GIT_COMMITTER_NAME: 'GitHub', GIT_COMMITTER_EMAIL: 'noreply@github.com' },
+      });
+      check('a GitHub web-merge committer is clean', runCli(r3), 0, /clean: 2 distinct identities/);
+      const r4 = repo('prefix.noreply@github.com');
+      roots.push(r4);
+      check('a lookalike of the GitHub committer still fails', runCli(r4), 1, /in HISTORY outside the allowlist/);
     }
     r = repo('12345+someone@users.noreply.github.com');
     roots.push(r);
