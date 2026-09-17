@@ -11,14 +11,17 @@
 <link rel="stylesheet" href="shared/drawing.css">
 <script src="shared/chrome.js"></script>
 <style>
-.notyet { margin: 0 var(--gutter) clamp(24px, 3vw, 36px); padding: 12px 16px; border: 1.5px dashed var(--ink); max-width: 80ch; }
+.notyet { margin: 0 var(--gutter) clamp(24px, 3vw, 36px); padding: 12px 16px; border: var(--w-outline) dashed var(--ink); max-width: 80ch; }
 .notyet b { font: 700 0.8125rem/1.2 var(--mono); letter-spacing: 0.06em; margin-right: 12px; }
 .procedure { --steps: 5; }
 .procedure pre { margin: 12px 0 0; padding: 10px 12px; background: var(--ground); border: 1px solid var(--rule); font: 500 0.8125rem/1.5 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; }
-.perms td:first-child code { font-weight: 600; }
-.never { margin-top: 28px; padding: 16px 18px; border: 2px solid var(--ink); max-width: 72ch; }
+.perms td[data-col="Action"] code { font-weight: 600; }
+.perms tbody th { white-space: nowrap; }
+.perms + .note { margin: 12px 0 0; color: var(--ink-2); }
+.never { margin-top: 28px; padding: 16px 18px; border: var(--w-emph) solid var(--ink); max-width: 72ch; }
 .never p { margin: 0; }
-.removal { counter-reset: r; list-style: none; margin: 0; padding: 0; border-top: 1.5px solid var(--ink); max-width: 80ch; }
+.never p + p { margin-top: 12px; }
+.removal { counter-reset: r; list-style: none; margin: 0; padding: 0; border-top: var(--w-outline) solid var(--ink); max-width: 80ch; }
 .removal li { counter-increment: r; display: grid; grid-template-columns: 44px minmax(0, 1fr); gap: 12px; padding: 16px 0; border-bottom: 1px solid var(--rule); }
 .removal li::before { content: counter(r); font: 800 1.5rem/1 var(--display); }
 .removal p { margin: 0; }
@@ -51,9 +54,9 @@
         </div>
         <ol class="procedure">
           <li><div class="valve"><span class="n">1</span><svg viewBox="0 0 64 36" aria-hidden="true"><path d="M8 8 l24 10 -24 10 z M56 8 l-24 10 24 10 z" fill="var(--sheet)" stroke="var(--ink)" stroke-width="2"/></svg></div><div><h3>Check what you have</h3><p>An AWS account with SES in eu-central-1, one verified identity to send the operator email from, Node.js 22, and AWS credentials for that account.</p></div></li>
-          <li><div class="valve"><span class="n">2</span><svg viewBox="0 0 64 36" aria-hidden="true"><path d="M8 8 l24 10 -24 10 z M56 8 l-24 10 24 10 z" fill="var(--sheet)" stroke="var(--ink)" stroke-width="2"/></svg></div><div><h3>Read the template</h3><p>Produce the CloudFormation template and read its IAM statements against the table below.</p><pre>npm run synth</pre></div></li>
-          <li><div class="valve"><span class="n">3</span><svg viewBox="0 0 64 36" aria-hidden="true"><path d="M8 8 l24 10 -24 10 z M56 8 l-24 10 24 10 z" fill="var(--sheet)" stroke="var(--ink)" stroke-width="2"/></svg></div><div><h3>Deploy with the switch off</h3><p>The stack starts in dry run: it reads events and records what it would do, and makes no SES change.</p><pre>npm run deploy</pre></div></li>
-          <li><div class="valve"><span class="n">4</span><svg viewBox="0 0 64 36" aria-hidden="true"><path d="M8 8 l24 10 -24 10 z M56 8 l-24 10 24 10 z" fill="var(--sheet)" stroke="var(--ink)" stroke-width="2"/></svg></div><div><h3>Name the lanes to watch</h3><p>Give each configuration set an EventBridge event destination. Fothering only ever acts on the sets you list.</p></div></li>
+          <li><div class="valve"><span class="n">2</span><svg viewBox="0 0 64 36" aria-hidden="true"><path d="M8 8 l24 10 -24 10 z M56 8 l-24 10 24 10 z" fill="var(--sheet)" stroke="var(--ink)" stroke-width="2"/></svg></div><div><h3>Name the lanes to watch</h3><p>List each configuration set in the lane map with its stream and whether it carries transactional mail, and give it an EventBridge event destination for send, delivery, bounce, complaint, reject and delivery-delay events. The template reads the map, so this comes first.</p></div></li>
+          <li><div class="valve"><span class="n">3</span><svg viewBox="0 0 64 36" aria-hidden="true"><path d="M8 8 l24 10 -24 10 z M56 8 l-24 10 24 10 z" fill="var(--sheet)" stroke="var(--ink)" stroke-width="2"/></svg></div><div><h3>Read the template</h3><p>Produce the CloudFormation template and read its IAM statements against the table below.</p><pre>npm run synth</pre></div></li>
+          <li><div class="valve"><span class="n">4</span><svg viewBox="0 0 64 36" aria-hidden="true"><path d="M8 8 l24 10 -24 10 z M56 8 l-24 10 24 10 z" fill="var(--sheet)" stroke="var(--ink)" stroke-width="2"/></svg></div><div><h3>Deploy with the switch off</h3><p>The stack starts in dry run: it reads and stores events, and records what it would do instead of changing SES, calling the model or sending email.</p><pre>npm run deploy</pre></div></li>
           <li><div class="valve"><span class="n">5</span><svg viewBox="0 0 64 36" aria-hidden="true"><path d="M8 8 l24 10 -24 10 z M56 8 l-24 10 24 10 z" fill="var(--ink)" stroke="var(--ink)" stroke-width="2"/></svg></div><div><h3>Turn the switch on</h3><p>Only after a dry-run week you are happy with. From then on, a closure is a real SES call.</p></div></li>
         </ol>
       </section>
@@ -64,18 +67,21 @@
       <section class="sheet" aria-labelledby="bom-title">
         <div class="sheet-head">
           <h2 id="bom-title">What the template creates</h2>
-          <p>Nothing outside this list. Every resource holding data is set to be deleted with the stack, and logs are kept for 30 days, because a guard's records should not outlive the guard.</p>
+          <p>Nothing outside this list. Every resource holding data is set to be deleted with the stack, and the stack creates its own log groups with 30-day retention, because a guard's records should not outlive the guard.</p>
         </div>
         <table class="schedule stack">
           <caption>Resource schedule, eu-central-1. Draft until the template lands.</caption>
           <thead><tr><th scope="col">Resource</th><th scope="col">Why it exists</th><th scope="col">Holds</th><th scope="col">On removal</th></tr></thead>
           <tbody>
-            <tr><th scope="row" data-col="Resource">EventBridge rule on the default bus</th><td data-col="Why">SES publishes configuration-set events to the default bus only</td><td data-col="Holds">Nothing</td><td data-col="On removal">Deleted</td></tr>
+            <tr><th scope="row" data-col="Resource">EventBridge rule on the default bus</th><td data-col="Why">SES publishes configuration-set events to the default bus only; the rule never matches opens or clicks</td><td data-col="Holds">Nothing</td><td data-col="On removal">Deleted</td></tr>
             <tr><th scope="row" data-col="Resource">Ingest function (Lambda)</th><td data-col="Why">Drops subjects, headers and addresses before anything is stored</td><td data-col="Holds">Nothing</td><td data-col="On removal">Deleted</td></tr>
-            <tr><th scope="row" data-col="Resource">DynamoDB table</th><td data-col="Why">The event window, lane states, closures and your decisions</td><td data-col="Holds">Receiving domain and keyed hash per recipient, 30-day expiry</td><td data-col="On removal">Deleted</td></tr>
-            <tr><th scope="row" data-col="Resource">AgentCore Runtime</th><td data-col="Why">Hosts the agent that names the cause and writes the email</td><td data-col="Holds">Nothing between runs</td><td data-col="On removal">Deleted</td></tr>
-            <tr><th scope="row" data-col="Resource">AgentCore Memory</th><td data-col="Why">The conversation about each closure, so a reply is read in context</td><td data-col="Holds">Your replies, 30-day expiry</td><td data-col="On removal">Deleted</td></tr>
+            <tr><th scope="row" data-col="Resource">Dead-letter queue (SQS)</th><td data-col="Why">Keeps an event the ingest function could not process, so it can be retried</td><td data-col="Holds">Raw events, encrypted, short retention</td><td data-col="On removal">Deleted</td></tr>
+            <tr><th scope="row" data-col="Resource">Secret for the address key</th><td data-col="Why">The key for the keyed hash of each recipient address</td><td data-col="Holds">The key and its previous versions</td><td data-col="On removal">Scheduled for deletion</td></tr>
+            <tr><th scope="row" data-col="Resource">DynamoDB table</th><td data-col="Why">The event window, evidence records, lane states, closures and your decisions</td><td data-col="Holds">Receiving domain and keyed hash per recipient, 30-day expiry</td><td data-col="On removal">Deleted</td></tr>
+            <tr><th scope="row" data-col="Resource">Detection, action and reply functions (Lambda)</th><td data-col="Why">Build the evidence, act on SES, and read your reply</td><td data-col="Holds">Nothing</td><td data-col="On removal">Deleted</td></tr>
+            <tr><th scope="row" data-col="Resource">AgentCore Runtime</th><td data-col="Why">Hosts the agent that explains the evidence and confirms the lane code approved, or says unknown</td><td data-col="Holds">Nothing between runs</td><td data-col="On removal">Deleted</td></tr>
             <tr><th scope="row" data-col="Resource">S3 bucket and SES receipt rule</th><td data-col="Why">Receives your reply to the closure email</td><td data-col="Holds">Raw reply messages, 30-day lifecycle</td><td data-col="On removal">Emptied and deleted</td></tr>
+            <tr><th scope="row" data-col="Resource">Log groups</th><td data-col="Why">One per function and one for the runtime, created by the stack rather than on first write</td><td data-col="Holds">Message ids and errors, never an address or a prompt, 30-day retention</td><td data-col="On removal">Deleted</td></tr>
           </tbody>
         </table>
       </section>
@@ -86,26 +92,35 @@
       <section class="sheet" aria-labelledby="perms-title">
         <div class="sheet-head">
           <h2 id="perms-title">Every permission, and why</h2>
-          <p>Scoped to the resources in the template and the configuration sets you name. If the synthesized template asks for anything not on this list, do not deploy it.</p>
+          <p>Listed per role, scoped to the resources in the template and to the configuration sets the lane map marks closeable. If the synthesized template asks for anything not on this list, do not deploy it.</p>
         </div>
-        <table class="schedule stack perms">
-          <caption>IAM actions, names checked against the AWS policy reference on 2026-09-16.</caption>
-          <thead><tr><th scope="col">Action</th><th scope="col">On</th><th scope="col">Why</th></tr></thead>
+        <table class="schedule stack stack-md perms">
+          <caption>IAM actions per role, names checked against the AWS service authorization reference on 2026-09-17. Draft until the template lands.</caption>
+          <thead><tr><th scope="col">Role</th><th scope="col">Action</th><th scope="col">On</th><th scope="col">Why</th></tr></thead>
           <tbody>
-            <tr><td data-col="Action"><code>ses:PutConfigurationSetSendingOptions</code></td><td data-col="On">The configuration sets you name</td><td data-col="Why">Close one lane, and reopen it on your word</td></tr>
-            <tr><td data-col="Action"><code>ses:GetConfigurationSet</code></td><td data-col="On">The configuration sets you name</td><td data-col="Why">Read the setting back before reporting anything</td></tr>
-            <tr><td data-col="Action"><code>ses:SendEmail</code></td><td data-col="On">Your one verified identity</td><td data-col="Why">The closure email and its confirmations</td></tr>
-            <tr><td data-col="Action"><code>bedrock:InvokeModel</code></td><td data-col="On">The EU Claude Sonnet 5 inference profile</td><td data-col="Why">Naming the cause and writing the email</td></tr>
-            <tr><td data-col="Action"><code>bedrock-agentcore:InvokeAgentRuntime</code></td><td data-col="On">This stack's runtime</td><td data-col="Why">The ingest function hands a suspect window to the agent</td></tr>
-            <tr><td data-col="Action"><code>bedrock-agentcore:CreateEvent</code>, <code>ListEvents</code></td><td data-col="On">This stack's memory</td><td data-col="Why">Recording and reading the closure conversation</td></tr>
-            <tr><td data-col="Action"><code>dynamodb:PutItem</code>, <code>Query</code></td><td data-col="On">This stack's table</td><td data-col="Why">Writing events and closures, reading the window</td></tr>
-            <tr><td data-col="Action"><code>dynamodb:DeleteItem</code></td><td data-col="On">This stack's table</td><td data-col="Why">Forgetting one recipient on your request, from the console</td></tr>
-            <tr><td data-col="Action"><code>s3:GetObject</code></td><td data-col="On">This stack's reply bucket</td><td data-col="Why">Reading your reply</td></tr>
+            <tr><th scope="row" data-col="Role">Ingest</th><td data-col="Action"><code>dynamodb:PutItem</code></td><td data-col="On">This stack's table</td><td data-col="Why">Writing each minimized event once</td></tr>
+            <tr><th scope="row" data-col="Role">Ingest</th><td data-col="Action"><code>secretsmanager:GetSecretValue</code></td><td data-col="On">This stack's address key</td><td data-col="Why">Keying the hash of each recipient address</td></tr>
+            <tr><th scope="row" data-col="Role">Ingest</th><td data-col="Action"><code>sqs:SendMessage</code></td><td data-col="On">This stack's dead-letter queue</td><td data-col="Why">Keeping an event that failed, for a retry</td></tr>
+            <tr><th scope="row" data-col="Role">Detection</th><td data-col="Action"><code>dynamodb:Query</code>, <code>PutItem</code></td><td data-col="On">This stack's table</td><td data-col="Why">Reading the window, writing the evidence record</td></tr>
+            <tr><th scope="row" data-col="Role">Detection</th><td data-col="Action"><code>ses:GetEmailIdentity</code></td><td data-col="On">Your sending identities</td><td data-col="Why">Checking DKIM and MAIL FROM status, and which configuration set an identity uses by default</td></tr>
+            <tr><th scope="row" data-col="Role">Detection</th><td data-col="Action"><code>bedrock-agentcore:InvokeAgentRuntime</code></td><td data-col="On">This stack's runtime, and no other role may call it</td><td data-col="Why">Handing the evidence record to the agent</td></tr>
+            <tr><th scope="row" data-col="Role">Agent runtime</th><td data-col="Action"><code>bedrock:InvokeModel</code>, <code>InvokeModelWithResponseStream</code></td><td data-col="On">The EU Claude Sonnet 5 inference profile</td><td data-col="Why">Explaining the evidence and confirming the approved lane, or saying unknown</td></tr>
+            <tr><th scope="row" data-col="Role">Agent runtime</th><td data-col="Action"><code>bedrock:InvokeModel</code>, <code>InvokeModelWithResponseStream</code></td><td data-col="On">The Claude Sonnet 5 foundation model in each EU Region the profile routes to, only when called through that profile (<code>bedrock:InferenceProfileArn</code>)</td><td data-col="Why">Cross-Region inference needs both grants; the condition stops a direct call</td></tr>
+            <tr><th scope="row" data-col="Role">Action</th><td data-col="Action"><code>dynamodb:GetItem</code>, <code>UpdateItem</code></td><td data-col="On">This stack's table</td><td data-col="Why">Reloading the evidence record, writing the closure once</td></tr>
+            <tr><th scope="row" data-col="Role">Action, Reply</th><td data-col="Action"><code>ses:PutConfigurationSetSendingOptions</code></td><td data-col="On">Only the configuration sets marked closeable</td><td data-col="Why">Close one lane, and reopen it on your word</td></tr>
+            <tr><th scope="row" data-col="Role">Action, Reply</th><td data-col="Action"><code>ses:GetConfigurationSet</code></td><td data-col="On">The same sets</td><td data-col="Why">Read the setting back before reporting anything</td></tr>
+            <tr><th scope="row" data-col="Role">Action, Reply</th><td data-col="Action"><code>ses:SendEmail</code></td><td data-col="On">Your one verified identity, through Fothering's own configuration set</td><td data-col="Why">The closure email and its confirmations</td></tr>
+            <tr><th scope="row" data-col="Role">Reply</th><td data-col="Action"><code>s3:GetObject</code></td><td data-col="On">This stack's reply bucket</td><td data-col="Why">Reading your reply</td></tr>
+            <tr><th scope="row" data-col="Role">Reply</th><td data-col="Action"><code>dynamodb:GetItem</code>, <code>UpdateItem</code></td><td data-col="On">This stack's table</td><td data-col="Why">Finding the closure your reply answers, and using its token once</td></tr>
+            <tr><th scope="row" data-col="Role">Delete command</th><td data-col="Action"><code>dynamodb:Query</code>, <code>DeleteItem</code>, <code>s3:DeleteObject</code>, <code>secretsmanager:GetSecretValue</code></td><td data-col="On">This stack's table and its address-hash index, the reply bucket, the address key</td><td data-col="Why">Forgetting one recipient on your request</td></tr>
+            <tr><th scope="row" data-col="Role">Every function and the runtime</th><td data-col="Action"><code>logs:CreateLogStream</code>, <code>PutLogEvents</code></td><td data-col="On">Its own log group</td><td data-col="Why">Writing its log</td></tr>
           </tbody>
         </table>
+        <p class="note">The agent runtime holds no SES, DynamoDB or S3 action.</p>
         <div class="never">
-          <h3>Never granted</h3>
-          <p><code>ses:PutAccountSendingAttributes</code>, the call that pauses a whole account. Fothering cannot stop your receipts even if its own logic is wrong.</p>
+          <h3>Denied on every role</h3>
+          <p><code>ses:PutAccountSendingAttributes</code> and <code>ses:UpdateAccountSendingEnabled</code>, which pause a whole account, and <code>ses:UpdateConfigurationSetSendingEnabled</code>, which pauses a configuration set and cannot be limited to one set in IAM. An explicit deny holds even if a broader SES policy is attached to a Fothering role later.</p>
+          <p>What IAM cannot know is which of your sets carries receipts. So a set is not closeable when it carries Fothering's own email, when it carries more than one stream, or when an identity uses it as its default configuration set while transactional mail through that identity names no set, because pausing it would stop that mail too. A transactional lane is never closed on Fothering's own decision: the email proposes it, and only your reply closes it.</p>
         </div>
       </section>
     </div>
@@ -118,8 +133,8 @@
           <p>Removal leaves your SES configuration sets exactly as Fothering last left them, so reopen any closed lane first.</p>
         </div>
         <ol class="removal">
-          <li><p>Reopen every closed lane from the console, and wait for each read-back to say true.</p></li>
-          <li><div><p>Delete the stack. The table, memory, bucket and logs go with it.</p><pre>npm run destroy</pre></div></li>
+          <li><p>Reopen every closed lane by replying <code>reopen</code> to its email, and wait for each confirmation to report the read-back as true.</p></li>
+          <li><div><p>Delete the stack. The table, the reply bucket and the log groups go with it.</p><pre>npm run destroy</pre></div></li>
           <li><p>Remove the EventBridge event destinations you added to your configuration sets.</p></li>
         </ol>
       </section>

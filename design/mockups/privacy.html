@@ -11,12 +11,13 @@
 <link rel="stylesheet" href="shared/drawing.css">
 <script src="shared/chrome.js"></script>
 <style>
-.filter { display: block; width: 100%; max-width: 920px; height: auto; margin: 0 auto clamp(28px, 4vw, 48px); }
+.filter { display: block; width: 100%; max-width: 920px; height: auto; margin: 0 auto 12px; }
+.flow-row { display: flex; justify-content: center; margin: 0 0 clamp(28px, 4vw, 48px); }
 .filter-narrow { display: none; }
 .fields td:nth-child(2) { white-space: nowrap; }
 .verdict { font: 600 0.75rem/1 var(--mono); letter-spacing: 0.06em; text-transform: uppercase; }
 .verdict.drop { text-decoration: line-through; text-decoration-thickness: 1.5px; }
-.facts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border-top: 1.5px solid var(--ink); }
+.facts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border-top: var(--w-outline) solid var(--ink); }
 .facts > div { padding: 18px 24px 20px 0; border-bottom: 1px solid var(--rule); }
 .facts > div + div { padding-left: 24px; border-left: 1px solid var(--rule); }
 .facts p { margin: 0; color: var(--ink-2); }
@@ -29,6 +30,8 @@
 @media (max-width: 620px) {
   .filter-wide { display: none; }
   .filter-narrow { display: block; }
+  /* The narrow drawing has no moving flow, so there is nothing for the button to stop. */
+  .flow-row { display: none; }
   .fields td:nth-child(2) { white-space: normal; }
 }
 </style>
@@ -70,7 +73,7 @@
           <path d="M796 56 a40 12 0 0 1 120 0 v48 a40 12 0 0 1 -120 0 z" fill="var(--sheet)" stroke="var(--ink)" stroke-width="2"/>
           <text x="856" y="90" text-anchor="middle" font-family="Red Hat Display" font-weight="800" font-size="15" fill="var(--ink)">Table</text>
           <line x1="460" y1="120" x2="460" y2="126" stroke="var(--ink)" stroke-width="2"/>
-          <line x1="460" y1="146" x2="460" y2="166" stroke="var(--rule)" stroke-width="2.5" stroke-dasharray="1 7"/>
+          <line x1="460" y1="146" x2="460" y2="166" stroke="var(--line)" stroke-width="2.5" stroke-dasharray="1 7"/>
           <text x="476" y="164" font-family="Red Hat Mono" font-size="12" fill="var(--ink)" font-weight="600">not stored: subject, headers, addresses</text>
         </svg>
         <svg class="filter filter-narrow" viewBox="0 0 360 250" role="img" aria-labelledby="filter-n-title">
@@ -80,12 +83,14 @@
           <line x1="180" y1="48" x2="180" y2="84" stroke="var(--line)" stroke-width="2.5"/>
           <rect x="100" y="84" width="160" height="56" fill="var(--sheet)" stroke="var(--ink)" stroke-width="2"/>
           <path d="M116 96 h128 l-40 32 h-48 z" fill="none" stroke="var(--ink)" stroke-width="1.5"/>
-          <line x1="260" y1="112" x2="300" y2="112" stroke="var(--rule)" stroke-width="2.5" stroke-dasharray="1 7"/>
+          <line x1="260" y1="112" x2="300" y2="112" stroke="var(--line)" stroke-width="2.5" stroke-dasharray="1 7"/>
           <text x="300" y="104" text-anchor="end" font-family="Red Hat Mono" font-size="11" fill="var(--ink)" font-weight="600">dropped</text>
           <line x1="180" y1="140" x2="180" y2="190" stroke="var(--line)" stroke-width="2.5"/>
           <path d="M120 196 a60 10 0 0 1 120 0 v36 a60 10 0 0 1 -120 0 z" fill="var(--sheet)" stroke="var(--ink)" stroke-width="2"/>
           <text x="180" y="222" text-anchor="middle" font-family="Red Hat Display" font-weight="800" font-size="14" fill="var(--ink)">Table</text>
         </svg>
+
+        <div class="flow-row"><button class="flow-toggle" type="button">Stop flow</button></div>
 
         <table class="schedule stack fields">
           <caption>Field schedule for SES event records, as the ingest function will handle them.</caption>
@@ -93,7 +98,7 @@
           <tbody>
             <tr><td data-col="Field"><code>bounce.bouncedRecipients[].emailAddress</code>, <code>complaint.complainedRecipients[]</code></td><td data-col="Kept?"><span class="verdict">Changed</span></td><td data-col="Stored">The receiving domain, plus an HMAC-SHA-256 of the lowercased address under a key kept in your account. A plain hash of an address can be reversed by guessing; a keyed one cannot without the key.</td></tr>
             <tr><td data-col="Field"><code>mail.destination</code>, <code>mail.headers</code>, <code>mail.commonHeaders</code></td><td data-col="Kept?"><span class="verdict drop">Dropped</span></td><td data-col="Stored">Nothing. Subjects and headers are not needed to name a cause.</td></tr>
-            <tr><td data-col="Field"><code>bouncedRecipients[].diagnosticCode</code></td><td data-col="Kept?"><span class="verdict">Changed</span></td><td data-col="Stored">The code with any address inside it removed, for example <code>550 5.1.1 user unknown</code>. Receiving servers sometimes quote the address.</td></tr>
+            <tr><td data-col="Field"><code>bouncedRecipients[].diagnosticCode</code></td><td data-col="Kept?"><span class="verdict">Changed</span></td><td data-col="Stored">Only the reply code and the enhanced status code, for example <code>550</code> and <code>5.1.1</code>. The free text is dropped, because receiving servers sometimes quote the address in it.</td></tr>
             <tr><td data-col="Field"><code>mail.tags</code></td><td data-col="Kept?"><span class="verdict">Kept</span></td><td data-col="Stored">Configuration set and your own tags, which is how a cause is named. Do not put personal data in message tags.</td></tr>
             <tr><td data-col="Field"><code>bounceType</code>, <code>bounceSubType</code>, <code>complaintFeedbackType</code>, <code>timestamp</code>, <code>messageId</code></td><td data-col="Kept?"><span class="verdict">Kept</span></td><td data-col="Stored">As sent by SES. None identifies a person.</td></tr>
           </tbody>
@@ -124,10 +129,10 @@
           <p>The pages you are reading are static files. They set no cookies and run no analytics.</p>
         </div>
         <ul class="site prose">
-          <li>Your theme choice, if you pick Light or Dark, is saved in your own browser and never sent anywhere.</li>
+          <li>Your theme choice, if you pick Light or Dark, and whether you stopped the flow animation are saved in your own browser and never sent anywhere.</li>
           <li>Fonts are served from this site, not from a font service.</li>
           <li>Cloudflare delivers the pages, and receives your IP address in order to do so, as any web host does.</li>
-          <li>The incident replay plays recorded data that ships with the page. It contains no real recipient.</li>
+          <li>The incident replay plays fixture data that ships with the page, built from AWS's documented event examples. It contains no real recipient.</li>
         </ul>
       </section>
     </div>

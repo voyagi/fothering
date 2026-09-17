@@ -17,10 +17,11 @@ h1 { font: 700 clamp(2.125rem, 1.3rem + 2vw, 3.4rem)/1.05 var(--display); letter
 .lede { font-size: 1.1875rem; max-width: 40ch; margin: 0; color: var(--ink-2); }
 .actions { display: flex; flex-wrap: wrap; align-items: center; gap: 14px 26px; }
 
-.drawing { position: relative; overflow: hidden; padding: clamp(20px, 3vw, 40px) 0 52px clamp(20px, 2.5vw, 36px); display: flex; flex-direction: column; justify-content: center; }
+.drawing { position: relative; overflow: hidden; padding: clamp(20px, 3vw, 40px) 0 clamp(20px, 3vw, 40px) clamp(20px, 2.5vw, 36px); display: flex; flex-direction: column; justify-content: center; }
 .dwg { width: 100%; height: auto; display: block; }
 .dwg-narrow { display: none; }
-.drawing .caption { position: absolute; left: clamp(20px, 2.5vw, 36px); bottom: 18px; margin: 0; font: 500 0.75rem/1.3 var(--mono); color: var(--label); }
+.drawing .caption-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px; margin-top: 20px; padding-right: var(--gutter); }
+.drawing .caption { margin: 0; font: 500 0.75rem/1.3 var(--mono); color: var(--label); }
 
 /* The tag hangs from the closed valve's stem: its hole sits on the stem's end, so its left edge is the
    valve's x position (36.3% of the wide drawing) minus half the tag width. */
@@ -34,19 +35,20 @@ h1 { font: 700 clamp(2.125rem, 1.3rem + 2vw, 3.4rem)/1.05 var(--display); letter
 .compare tbody th { width: 20%; }
 
 .refusals { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: 40px; }
-ul.refuse { list-style: none; margin: 0; padding: 0; border-top: 1.5px solid var(--ink); }
+ul.refuse { list-style: none; margin: 0; padding: 0; border-top: var(--w-outline) solid var(--ink); }
 .refuse li { display: grid; grid-template-columns: 34px minmax(0, 62ch); gap: 14px; padding: 16px 0; border-bottom: 1px solid var(--rule); font-size: 1.0625rem; }
 .refuse svg { width: 22px; height: 22px; margin-top: 2px; }
 
 table.real { width: 100%; border-collapse: collapse; }
 .real th, .real td { text-align: left; padding: 14px 16px 14px 0; border-top: 1px solid var(--rule); vertical-align: top; }
-.real thead th { border-top: 1.5px solid var(--ink); font: 600 0.75rem/1 var(--mono); letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-2); }
+.real thead th { border-top: var(--w-outline) solid var(--ink); font: 600 0.75rem/1 var(--mono); letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-2); }
 .real th:last-child { width: 50%; }
 
 @media (max-width: 960px) {
   .moment { grid-template-columns: 1fr; }
   .claim { border-right: 0; }
-  .drawing { padding: 24px var(--gutter) 56px; }
+  .drawing { padding: 24px var(--gutter) 28px; }
+  .drawing .caption-row { padding-right: 0; }
   .drawing .tag { margin-left: max(0px, calc((100% - var(--tw)) / 2)); }
   .refusals, .mail { grid-template-columns: 1fr; }
 }
@@ -55,7 +57,7 @@ table.real { width: 100%; border-collapse: collapse; }
   .claim { display: contents; }
   .claim > * { margin-inline: var(--gutter); }
   .moment h1 { order: 1; margin-top: 28px; }
-  .drawing { order: 2; padding: 16px var(--gutter) 52px; }
+  .drawing { order: 2; padding: 16px var(--gutter) 24px; }
   .lede { order: 3; margin-top: 4px; }
   .actions { order: 4; margin-top: 16px; margin-bottom: 36px; }
   .dwg-wide { display: none; }
@@ -105,7 +107,7 @@ table.real { width: 100%; border-collapse: collapse; }
               <line x1="120" y1="210" x2="700" y2="210"/>
               <line x1="120" y1="290" x2="252" y2="290"/>
             </g>
-            <line x1="300" y1="290" x2="700" y2="290" stroke="var(--rule)" stroke-width="2.5" stroke-dasharray="1 9"/>
+            <line x1="300" y1="290" x2="700" y2="290" stroke="var(--line)" stroke-width="2.5" stroke-dasharray="1 9"/>
             <g class="flow-dash" stroke="var(--flow)" stroke-width="2.5" fill="none">
               <line x1="124" y1="50" x2="700" y2="50"/>
               <line x1="124" y1="130" x2="700" y2="130"/>
@@ -156,7 +158,7 @@ table.real { width: 100%; border-collapse: collapse; }
               <line x1="54" y1="168" x2="310" y2="168"/>
               <line x1="54" y1="232" x2="174" y2="232"/>
             </g>
-            <line x1="214" y1="232" x2="310" y2="232" stroke="var(--rule)" stroke-width="2.5" stroke-dasharray="1 9"/>
+            <line x1="214" y1="232" x2="310" y2="232" stroke="var(--line)" stroke-width="2.5" stroke-dasharray="1 9"/>
             <g class="flow-dash" stroke="var(--flow)" stroke-width="2.5" fill="none">
               <line x1="58" y1="40" x2="310" y2="40"/>
               <line x1="58" y1="104" x2="310" y2="104"/>
@@ -191,9 +193,9 @@ table.real { width: 100%; border-collapse: collapse; }
               <dt>Reopens</dt>
               <dd>When you reply "reopen".</dd>
             </dl>
-            <footer><span>TAG 001</span><span>ZONE D1</span></footer>
+            <footer><span>TAG 001</span><span>ROW 1</span></footer>
           </article>
-          <p class="caption">Fixture run: recorded demonstration events, not a live account.</p>
+          <div class="caption-row"><p class="caption">Fixture run: built from AWS's documented event examples, not a live account.</p><button class="flow-toggle" type="button">Stop flow</button></div>
         </div>
       </section>
     </div>
@@ -208,7 +210,7 @@ table.real { width: 100%; border-collapse: collapse; }
         <ol class="procedure">
           <li><div class="valve"><span class="n">1</span><svg viewBox="0 0 64 36" aria-hidden="true"><path d="M8 8 l24 10 -24 10 z M56 8 l-24 10 24 10 z" fill="var(--sheet)" stroke="var(--ink)" stroke-width="2"/></svg></div><div><h3>Watch every event</h3><p>Sends, deliveries, bounces, complaints, rejects and delays arrive through EventBridge, grouped by configuration set and by your message tags.</p></div></li>
           <li><div class="valve"><span class="n">2</span><svg viewBox="0 0 64 36" aria-hidden="true"><path d="M8 8 l24 10 -24 10 z M56 8 l-24 10 24 10 z" fill="var(--sheet)" stroke="var(--ink)" stroke-width="2"/></svg></div><div><h3>Name the cause, or say unknown</h3><p>A spike is traced to one import batch, template, receiving provider or missing authentication record, with the events that show it.</p></div></li>
-          <li><div class="valve"><span class="n">3</span><svg viewBox="0 0 64 36" aria-hidden="true"><path d="M8 8 l24 10 -24 10 z M56 8 l-24 10 24 10 z" fill="var(--ink)" stroke="var(--ink)" stroke-width="2"/></svg></div><div><h3>Close one lane, then read it back</h3><p>Sending is switched off for that configuration set only, then confirmed through a second call, like the valve at D1 above.</p></div></li>
+          <li><div class="valve"><span class="n">3</span><svg viewBox="0 0 64 36" aria-hidden="true"><path d="M8 8 l24 10 -24 10 z M56 8 l-24 10 24 10 z" fill="var(--ink)" stroke="var(--ink)" stroke-width="2"/></svg></div><div><h3>Close one lane, then read it back</h3><p>Sending is switched off for that configuration set only, then confirmed through a second call, like the filled valve on partner-import in row 1.</p></div></li>
           <li><div class="valve"><span class="n">4</span><svg viewBox="0 0 64 36" aria-hidden="true"><path d="M8 8 l24 10 -24 10 z M56 8 l-24 10 24 10 z" fill="var(--sheet)" stroke="var(--ink)" stroke-width="2"/></svg></div><div><h3>Ask you by email</h3><p>You get what it saw, what it closed and what stays open. Your reply reopens the lane or keeps it closed.</p></div></li>
         </ol>
       </section>
@@ -219,7 +221,7 @@ table.real { width: 100%; border-collapse: collapse; }
       <section class="sheet mail" aria-labelledby="mail-title">
         <div class="mail-head">
           <h2 id="mail-title">The email you get, and the reply that decides</h2>
-          <p>Your inbox is the console you already watch. The message says what the tag at D1 says, in full sentences, and waits for one word back.</p>
+          <p>Your inbox is the console you already watch. The message says what the tag in row 1 says, in full sentences, and waits for one word back.</p>
         </div>
         <div>
           <article class="message" aria-label="Closure email from Fothering, fixture run">
@@ -228,11 +230,12 @@ table.real { width: 100%; border-collapse: collapse; }
               <dt>Subject</dt><dd>Closed: partner-import, one lane in eu-central-1</dd>
             </dl>
             <div class="body">
-              <p><b>What I saw.</b> Hard bounces on the partner-import configuration set, every one tagged <span class="mono">import_batch=2026-09-14-b</span>, with <span class="mono">550 5.1.1 user unknown</span> from several receiving providers. Receipts, password-resets and newsletter look normal.</p>
-              <p><b>What I did.</b> Turned sending off for partner-import only at 14:03 UTC and read it back: <span class="mono">SendingEnabled</span> is false. SES now refuses sends that use this configuration set, so your importer will see errors on this lane until it reopens.</p>
+              <p class="disclosure">Fothering's AI agent wrote the paragraph headed "Why". Code decided the closure and wrote the rest from the closure record.</p>
+              <p><b>What Fothering saw.</b> Hard bounces on the partner-import configuration set, every one tagged <span class="mono">import_batch=2026-09-14-b</span>, with <span class="mono">550 5.1.1</span> (no such mailbox) from several receiving providers. Receipts, password-resets and newsletter look normal.</p>
+              <p><b>What it did.</b> Turned sending off for partner-import only at 14:03 UTC and read it back: <span class="mono">SendingEnabled</span> is false. SES now refuses sends that use this configuration set, so your importer will see errors on this lane until it reopens.</p>
               <p><b>What stays open.</b> Receipts, password-resets, newsletter.</p>
+              <p><b>Why.</b> The bounces follow one import batch, not a template or a provider: the same template delivers on the other lanes, and the bounces come from several providers at once.</p>
               <p>Reply <b>reopen</b> to resume sending, or <b>keep closed</b> to leave it paused.</p>
-              <p class="disclosure">Written by Fothering's AI agent. The closure itself passed fixed threshold checks before any SES call.</p>
             </div>
           </article>
           <article class="message reply" aria-label="Your reply">
@@ -318,8 +321,8 @@ table.real { width: 100%; border-collapse: collapse; }
         <table class="real">
           <thead><tr><th scope="col">Part</th><th scope="col">State</th><th scope="col" class="hide-s">Note</th></tr></thead>
           <tbody>
-            <tr><td>Incident replay</td><td><span class="state">Fixture</span></td><td class="hide-s">Recorded demonstration events. Replaced by a live capture once runs exist.</td></tr>
-            <tr><td>Attribution and refusal logic</td><td><span class="state later">Not yet</span></td><td class="hide-s">Will be tested against recorded event sets, including ones that must end unknown, before any live run.</td></tr>
+            <tr><td>Incident replay</td><td><span class="state later">Fixture</span></td><td class="hide-s">Built from AWS's documented event examples. Replaced by a live capture once runs exist.</td></tr>
+            <tr><td>Attribution and refusal logic</td><td><span class="state later">Not yet</span></td><td class="hide-s">Will be tested against fixture event sets, including ones that must end unknown, before any live run.</td></tr>
             <tr><td>Deploy into your account</td><td><span class="state later">Not yet</span></td><td class="hide-s">Template and IAM policy land before the live runs.</td></tr>
             <tr><td>Time to closure</td><td><span class="state later">Not yet</span></td><td class="hide-s">Measured on three live runs against the mailbox simulator, then shown here with its cost.</td></tr>
           </tbody>
