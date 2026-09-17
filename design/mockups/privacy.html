@@ -98,9 +98,9 @@
           <tbody>
             <tr><td data-col="Field"><code>bounce.bouncedRecipients[].emailAddress</code>, <code>complaint.complainedRecipients[]</code></td><td data-col="Kept?"><span class="verdict">Changed</span></td><td data-col="Stored">The receiving domain, plus an HMAC-SHA-256 of the lowercased address under a key kept in your account. A plain hash of an address can be reversed by guessing; a keyed one cannot without the key.</td></tr>
             <tr><td data-col="Field"><code>mail.destination</code>, <code>mail.headers</code>, <code>mail.commonHeaders</code></td><td data-col="Kept?"><span class="verdict drop">Dropped</span></td><td data-col="Stored">Nothing. Subjects and headers are not needed to name a cause.</td></tr>
-            <tr><td data-col="Field"><code>bouncedRecipients[].diagnosticCode</code></td><td data-col="Kept?"><span class="verdict">Changed</span></td><td data-col="Stored">Only the reply code and the enhanced status code, for example <code>550</code> and <code>5.1.1</code>. The free text is dropped, because receiving servers sometimes quote the address in it.</td></tr>
+            <tr><td data-col="Field"><code>bounce.bouncedRecipients[].diagnosticCode</code></td><td data-col="Kept?"><span class="verdict">Changed</span></td><td data-col="Stored">Only the reply code and the enhanced status code, for example <code>550</code> and <code>5.1.1</code>. The free text is dropped, because receiving servers sometimes quote the address in it.</td></tr>
             <tr><td data-col="Field"><code>mail.tags</code></td><td data-col="Kept?"><span class="verdict">Kept</span></td><td data-col="Stored">Configuration set and your own tags, which is how a cause is named. Do not put personal data in message tags.</td></tr>
-            <tr><td data-col="Field"><code>bounceType</code>, <code>bounceSubType</code>, <code>complaintFeedbackType</code>, <code>timestamp</code>, <code>messageId</code></td><td data-col="Kept?"><span class="verdict">Kept</span></td><td data-col="Stored">As sent by SES. None identifies a person.</td></tr>
+            <tr><td data-col="Field"><code>bounce.bounceType</code>, <code>bounce.bounceSubType</code>, <code>complaint.complaintFeedbackType</code>, <code>mail.timestamp</code>, <code>mail.messageId</code></td><td data-col="Kept?"><span class="verdict">Kept</span></td><td data-col="Stored">As sent by SES. None identifies a person.</td></tr>
           </tbody>
         </table>
       </section>
@@ -116,7 +116,7 @@
         <div class="facts">
           <div><h3>Where</h3><p>Everything stays in your AWS account in eu-central-1, Frankfurt. The model is called through Amazon Bedrock's EU inference profile, which keeps requests within EU regions.</p></div>
           <div><h3>How long</h3><p>Event records and replies expire after 30 days. Expired records are removed within a few days after that, and are filtered out of every read in between.</p></div>
-          <div><h3>Deleting</h3><p>Forget one recipient from the console by entering their address: it is hashed with your key and every matching record is deleted. Deleting the stack removes everything.</p></div>
+          <div><h3>Deleting</h3><p>Forget one recipient from the console by entering their address: it is hashed with your key and every matching record in the table is deleted. A matching event still waiting in the retry queue expires within 4 days. Deleting the stack removes everything.</p></div>
         </div>
       </section>
     </div>

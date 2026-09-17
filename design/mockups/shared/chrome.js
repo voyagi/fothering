@@ -89,6 +89,8 @@
         label();
       });
     });
+    // With no stored choice the CSS follows the preference live, so the label must too.
+    reduce.addEventListener("change", label);
     label();
   }
 

@@ -75,7 +75,7 @@
           <tbody>
             <tr><th scope="row" data-col="Resource">EventBridge rule on the default bus</th><td data-col="Why">SES publishes configuration-set events to the default bus only; the rule never matches opens or clicks</td><td data-col="Holds">Nothing</td><td data-col="On removal">Deleted</td></tr>
             <tr><th scope="row" data-col="Resource">Ingest function (Lambda)</th><td data-col="Why">Drops subjects, headers and addresses before anything is stored</td><td data-col="Holds">Nothing</td><td data-col="On removal">Deleted</td></tr>
-            <tr><th scope="row" data-col="Resource">Dead-letter queue (SQS)</th><td data-col="Why">Keeps an event the ingest function could not process, so it can be retried</td><td data-col="Holds">Raw events, encrypted, short retention</td><td data-col="On removal">Deleted</td></tr>
+            <tr><th scope="row" data-col="Resource">Dead-letter queue (SQS)</th><td data-col="Why">Keeps an event the ingest function minimized but could not write, so it can be retried. An event that cannot be minimized is dropped and logged by message id.</td><td data-col="Holds">Minimized events only, never an address, subject or header, encrypted, 4-day retention</td><td data-col="On removal">Deleted</td></tr>
             <tr><th scope="row" data-col="Resource">Secret for the address key</th><td data-col="Why">The key for the keyed hash of each recipient address</td><td data-col="Holds">The key and its previous versions</td><td data-col="On removal">Scheduled for deletion</td></tr>
             <tr><th scope="row" data-col="Resource">DynamoDB table</th><td data-col="Why">The event window, evidence records, lane states, closures and your decisions</td><td data-col="Holds">Receiving domain and keyed hash per recipient, 30-day expiry</td><td data-col="On removal">Deleted</td></tr>
             <tr><th scope="row" data-col="Resource">Detection, action and reply functions (Lambda)</th><td data-col="Why">Build the evidence, act on SES, and read your reply</td><td data-col="Holds">Nothing</td><td data-col="On removal">Deleted</td></tr>
@@ -92,7 +92,7 @@
       <section class="sheet" aria-labelledby="perms-title">
         <div class="sheet-head">
           <h2 id="perms-title">Every permission, and why</h2>
-          <p>Listed per role, scoped to the resources in the template and to the configuration sets the lane map marks closeable. If the synthesized template asks for anything not on this list, do not deploy it.</p>
+          <p>Listed per role, scoped to the resources in the template and to the configuration sets the lane map marks closeable. If the synthesized template gives a role anything not on this list, do not deploy it. The list covers role permissions only: the grants that let AWS services deliver to the stack, such as EventBridge invoking the ingest function or SES writing a reply to the bucket, are resource policies, and each should name only this stack's own rule or bucket.</p>
         </div>
         <table class="schedule stack stack-md perms">
           <caption>IAM actions per role, names checked against the AWS service authorization reference on 2026-09-17. Draft until the template lands.</caption>
@@ -100,7 +100,7 @@
           <tbody>
             <tr><th scope="row" data-col="Role">Ingest</th><td data-col="Action"><code>dynamodb:PutItem</code></td><td data-col="On">This stack's table</td><td data-col="Why">Writing each minimized event once</td></tr>
             <tr><th scope="row" data-col="Role">Ingest</th><td data-col="Action"><code>secretsmanager:GetSecretValue</code></td><td data-col="On">This stack's address key</td><td data-col="Why">Keying the hash of each recipient address</td></tr>
-            <tr><th scope="row" data-col="Role">Ingest</th><td data-col="Action"><code>sqs:SendMessage</code></td><td data-col="On">This stack's dead-letter queue</td><td data-col="Why">Keeping an event that failed, for a retry</td></tr>
+            <tr><th scope="row" data-col="Role">Ingest</th><td data-col="Action"><code>sqs:SendMessage</code></td><td data-col="On">This stack's dead-letter queue</td><td data-col="Why">Keeping a minimized event that failed to write, for a retry</td></tr>
             <tr><th scope="row" data-col="Role">Detection</th><td data-col="Action"><code>dynamodb:Query</code>, <code>PutItem</code></td><td data-col="On">This stack's table</td><td data-col="Why">Reading the window, writing the evidence record</td></tr>
             <tr><th scope="row" data-col="Role">Detection</th><td data-col="Action"><code>ses:GetEmailIdentity</code></td><td data-col="On">Your sending identities</td><td data-col="Why">Checking DKIM and MAIL FROM status, and which configuration set an identity uses by default</td></tr>
             <tr><th scope="row" data-col="Role">Detection</th><td data-col="Action"><code>bedrock-agentcore:InvokeAgentRuntime</code></td><td data-col="On">This stack's runtime, and no other role may call it</td><td data-col="Why">Handing the evidence record to the agent</td></tr>
