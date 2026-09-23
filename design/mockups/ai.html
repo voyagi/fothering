@@ -14,7 +14,7 @@
 .interlock { display: block; width: 100%; max-width: 1000px; height: auto; margin: 0 auto; }
 .interlock-narrow { display: none; }
 .split { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 32px 48px; }
-.split ul { list-style: none; margin: 0; padding: 0; border-top: 1.5px solid var(--ink); }
+.split ul { list-style: none; margin: 0; padding: 0; border-top: var(--w-outline) solid var(--ink); }
 .split li { padding: 14px 0; border-bottom: 1px solid var(--rule); max-width: 58ch; }
 .split h3 { margin-bottom: 12px; }
 .limits { max-width: 72ch; }
@@ -35,7 +35,7 @@
       <div class="rail" aria-hidden="true">1</div>
       <section class="intro" aria-labelledby="page-title">
         <h1 class="page-title" id="page-title">What the model decides, and what it cannot</h1>
-        <p>Fothering uses an AI model to name the cause of a spike and to write the email you read. It never touches your SES account directly: every closure it proposes passes fixed checks first, and only your reply reopens a lane.</p>
+        <p>Fothering's code works out the cause of a spike and which lane, if any, may close. An AI model then explains that evidence in the email you read, and confirms the one closure code approved or says unknown. The model never touches your SES account, and only your reply reopens a lane.</p>
       </section>
     </div>
 
@@ -44,48 +44,60 @@
       <section class="sheet" aria-labelledby="lock-title">
         <div class="sheet-head">
           <h2 id="lock-title">The interlock between the model and SES</h2>
-          <p>The model can ask for one tool, close a lane, and that tool requires an evidence record. Its handler recomputes the thresholds from the stored events and refuses if they do not hold, whatever the model wrote.</p>
+          <p>The model gets one evidence record and no tool that changes anything. Code has already decided which lane, if any, may close. Before any SES call, the action function reloads that record, recomputes the verdict and checks the lane map, whatever the model wrote.</p>
         </div>
-        <svg class="interlock interlock-wide" viewBox="0 0 1000 200" role="img" aria-labelledby="lock-svg-title lock-svg-desc">
+        <svg class="interlock interlock-wide" viewBox="0 0 1000 210" role="img" aria-labelledby="lock-svg-title lock-svg-desc">
           <title id="lock-svg-title">Interlock drawing</title>
-          <desc id="lock-svg-desc">Minimized events flow to the model, which proposes a closure with evidence. The proposal passes through a fixed threshold check. Only a proposal that passes reaches SES. A failed check goes back to the operator as a question.</desc>
-          <rect x="4" y="60" width="150" height="70" fill="none" stroke="var(--ink)" stroke-width="2"/>
-          <text x="79" y="92" text-anchor="middle" font-family="Red Hat Display" font-weight="800" font-size="15" fill="var(--ink)">Stored events</text>
-          <text x="79" y="112" text-anchor="middle" font-family="Red Hat Mono" font-size="11" fill="var(--label)">no addresses</text>
-          <line x1="154" y1="95" x2="260" y2="95" stroke="var(--line)" stroke-width="2.5"/>
-          <rect x="260" y="50" width="190" height="90" fill="none" stroke="var(--ink)" stroke-width="2" stroke-dasharray="6 4"/>
-          <text x="355" y="90" text-anchor="middle" font-family="Red Hat Display" font-weight="800" font-size="15" fill="var(--ink)">Model</text>
-          <text x="355" y="110" text-anchor="middle" font-family="Red Hat Mono" font-size="11" fill="var(--label)">proposes, with evidence</text>
-          <line x1="450" y1="95" x2="560" y2="95" stroke="var(--line)" stroke-width="2.5"/>
-          <rect x="560" y="50" width="190" height="90" fill="var(--sheet)" stroke="var(--ink)" stroke-width="3"/>
-          <text x="655" y="90" text-anchor="middle" font-family="Red Hat Display" font-weight="800" font-size="15" fill="var(--ink)">Fixed check</text>
-          <text x="655" y="110" text-anchor="middle" font-family="Red Hat Mono" font-size="11" fill="var(--label)">thresholds recomputed</text>
-          <line x1="750" y1="95" x2="826" y2="95" stroke="var(--line)" stroke-width="2.5"/>
+          <desc id="lock-svg-desc">Stored events, with no addresses, go to detection code, which writes an evidence record and approves at most one lane. The model reads that record, explains it, and confirms the approved lane or says unknown. The action function, also code, reloads the record and recomputes the verdict. Only a closure that passes reaches SES. Unknown or refused, nothing closes and the operator is asked.</desc>
+          <rect x="4" y="55" width="140" height="80" fill="none" stroke="var(--ink)" stroke-width="2"/>
+          <text x="74" y="91" text-anchor="middle" font-family="Red Hat Display" font-weight="800" font-size="15" fill="var(--ink)">Stored events</text>
+          <text x="74" y="111" text-anchor="middle" font-family="Red Hat Mono" font-size="11" fill="var(--label)">no addresses</text>
+          <line x1="144" y1="95" x2="184" y2="95" stroke="var(--line)" stroke-width="2.5"/>
+          <rect x="184" y="50" width="170" height="90" fill="none" stroke="var(--ink)" stroke-width="2"/>
+          <text x="269" y="84" text-anchor="middle" font-family="Red Hat Display" font-weight="800" font-size="15" fill="var(--ink)">Detection code</text>
+          <text x="269" y="104" text-anchor="middle" font-family="Red Hat Mono" font-size="11" fill="var(--label)">evidence record,</text>
+          <text x="269" y="120" text-anchor="middle" font-family="Red Hat Mono" font-size="11" fill="var(--label)">at most one lane</text>
+          <line x1="354" y1="95" x2="394" y2="95" stroke="var(--line)" stroke-width="2.5"/>
+          <rect x="394" y="50" width="170" height="90" fill="none" stroke="var(--ink)" stroke-width="2" stroke-dasharray="6 4"/>
+          <text x="479" y="84" text-anchor="middle" font-family="Red Hat Display" font-weight="800" font-size="15" fill="var(--ink)">Model</text>
+          <text x="479" y="104" text-anchor="middle" font-family="Red Hat Mono" font-size="11" fill="var(--label)">explains, confirms</text>
+          <text x="479" y="120" text-anchor="middle" font-family="Red Hat Mono" font-size="11" fill="var(--label)">that lane or unknown</text>
+          <line x1="564" y1="95" x2="604" y2="95" stroke="var(--line)" stroke-width="2.5"/>
+          <rect x="604" y="50" width="170" height="90" fill="var(--sheet)" stroke="var(--ink)" stroke-width="3"/>
+          <text x="689" y="84" text-anchor="middle" font-family="Red Hat Display" font-weight="800" font-size="15" fill="var(--ink)">Action check</text>
+          <text x="689" y="104" text-anchor="middle" font-family="Red Hat Mono" font-size="11" fill="var(--label)">code: reloads,</text>
+          <text x="689" y="120" text-anchor="middle" font-family="Red Hat Mono" font-size="11" fill="var(--label)">recomputes</text>
+          <line x1="774" y1="95" x2="826" y2="95" stroke="var(--line)" stroke-width="2.5"/>
           <path d="M826 83 l14 12 -14 12 z M854 83 l-14 12 14 12 z" fill="var(--sheet)" stroke="var(--ink)" stroke-width="2"/>
           <line x1="854" y1="95" x2="890" y2="95" stroke="var(--line)" stroke-width="2.5"/>
           <rect x="890" y="60" width="104" height="70" fill="none" stroke="var(--ink)" stroke-width="2"/>
           <text x="942" y="100" text-anchor="middle" font-family="Red Hat Display" font-weight="800" font-size="15" fill="var(--ink)">SES</text>
-          <line x1="655" y1="140" x2="655" y2="172" stroke="var(--ink)" stroke-width="2"/>
-          <path d="M647 166 l8 10 8 -10" fill="none" stroke="var(--ink)" stroke-width="2"/>
-          <text x="655" y="194" text-anchor="middle" font-family="Red Hat Mono" font-size="12" font-weight="600" fill="var(--ink)">refused: nothing closes, you are asked</text>
+          <line x1="689" y1="140" x2="689" y2="176" stroke="var(--ink)" stroke-width="2"/>
+          <path d="M681 170 l8 10 8 -10" fill="none" stroke="var(--ink)" stroke-width="2"/>
+          <text x="689" y="202" text-anchor="middle" font-family="Red Hat Mono" font-size="12" font-weight="600" fill="var(--ink)">unknown or refused: nothing closes, you are asked</text>
         </svg>
-        <svg class="interlock interlock-narrow" viewBox="0 0 300 380" role="img" aria-labelledby="lock-n-title">
-          <title id="lock-n-title">Stored events, then the model proposes, then a fixed check, then SES. A refused check asks you instead.</title>
-          <rect x="70" y="4" width="160" height="50" fill="none" stroke="var(--ink)" stroke-width="2"/>
-          <text x="150" y="34" text-anchor="middle" font-family="Red Hat Display" font-weight="800" font-size="14" fill="var(--ink)">Stored events</text>
-          <line x1="150" y1="54" x2="150" y2="90" stroke="var(--line)" stroke-width="2.5"/>
-          <rect x="70" y="90" width="160" height="60" fill="none" stroke="var(--ink)" stroke-width="2" stroke-dasharray="6 4"/>
-          <text x="150" y="126" text-anchor="middle" font-family="Red Hat Display" font-weight="800" font-size="14" fill="var(--ink)">Model proposes</text>
-          <line x1="150" y1="150" x2="150" y2="186" stroke="var(--line)" stroke-width="2.5"/>
-          <rect x="70" y="186" width="160" height="60" fill="var(--sheet)" stroke="var(--ink)" stroke-width="3"/>
-          <text x="150" y="222" text-anchor="middle" font-family="Red Hat Display" font-weight="800" font-size="14" fill="var(--ink)">Fixed check</text>
-          <line x1="150" y1="246" x2="150" y2="320" stroke="var(--line)" stroke-width="2.5"/>
-          <path d="M138 270 l12 14 12 -14 z M138 298 l12 -14 12 14 z" fill="var(--sheet)" stroke="var(--ink)" stroke-width="2"/>
-          <rect x="100" y="320" width="100" height="50" fill="none" stroke="var(--ink)" stroke-width="2"/>
-          <text x="150" y="350" text-anchor="middle" font-family="Red Hat Display" font-weight="800" font-size="14" fill="var(--ink)">SES</text>
-          <line x1="230" y1="216" x2="270" y2="216" stroke="var(--ink)" stroke-width="2"/>
-          <text x="296" y="262" text-anchor="end" font-family="Red Hat Mono" font-size="11" font-weight="600" fill="var(--ink)">refused: you</text>
-          <text x="296" y="278" text-anchor="end" font-family="Red Hat Mono" font-size="11" font-weight="600" fill="var(--ink)">are asked</text>
+        <svg class="interlock interlock-narrow" viewBox="0 0 300 410" role="img" aria-labelledby="lock-n-title">
+          <title id="lock-n-title">Stored events, then detection code approves at most one lane, then the model explains and confirms it or says unknown, then the action check, then SES. Unknown or refused, you are asked instead.</title>
+          <rect x="70" y="4" width="160" height="44" fill="none" stroke="var(--ink)" stroke-width="2"/>
+          <text x="150" y="31" text-anchor="middle" font-family="Red Hat Display" font-weight="800" font-size="14" fill="var(--ink)">Stored events</text>
+          <line x1="150" y1="48" x2="150" y2="74" stroke="var(--line)" stroke-width="2.5"/>
+          <rect x="70" y="74" width="160" height="50" fill="none" stroke="var(--ink)" stroke-width="2"/>
+          <text x="150" y="104" text-anchor="middle" font-family="Red Hat Display" font-weight="800" font-size="14" fill="var(--ink)">Detection code</text>
+          <line x1="150" y1="124" x2="150" y2="150" stroke="var(--line)" stroke-width="2.5"/>
+          <rect x="70" y="150" width="160" height="50" fill="none" stroke="var(--ink)" stroke-width="2" stroke-dasharray="6 4"/>
+          <text x="150" y="180" text-anchor="middle" font-family="Red Hat Display" font-weight="800" font-size="14" fill="var(--ink)">Model explains</text>
+          <line x1="150" y1="200" x2="150" y2="226" stroke="var(--line)" stroke-width="2.5"/>
+          <rect x="70" y="226" width="160" height="50" fill="var(--sheet)" stroke="var(--ink)" stroke-width="3"/>
+          <text x="150" y="256" text-anchor="middle" font-family="Red Hat Display" font-weight="800" font-size="14" fill="var(--ink)">Action check</text>
+          <line x1="150" y1="276" x2="150" y2="352" stroke="var(--line)" stroke-width="2.5"/>
+          <path d="M138 300 l12 14 12 -14 z M138 328 l12 -14 12 14 z" fill="var(--sheet)" stroke="var(--ink)" stroke-width="2"/>
+          <rect x="100" y="352" width="100" height="50" fill="none" stroke="var(--ink)" stroke-width="2"/>
+          <text x="150" y="382" text-anchor="middle" font-family="Red Hat Display" font-weight="800" font-size="14" fill="var(--ink)">SES</text>
+          <path d="M230 251 h28 v28" fill="none" stroke="var(--ink)" stroke-width="2"/>
+          <path d="M251 273 l7 9 7 -9" fill="none" stroke="var(--ink)" stroke-width="2"/>
+          <text x="258" y="300" text-anchor="middle" font-family="Red Hat Mono" font-size="11" font-weight="600" fill="var(--ink)">unknown or</text>
+          <text x="258" y="316" text-anchor="middle" font-family="Red Hat Mono" font-size="11" font-weight="600" fill="var(--ink)">refused: you</text>
+          <text x="258" y="332" text-anchor="middle" font-family="Red Hat Mono" font-size="11" font-weight="600" fill="var(--ink)">are asked</text>
         </svg>
       </section>
     </div>
@@ -101,19 +113,19 @@
           <div>
             <h3>It does</h3>
             <ul>
-              <li>Read the minimized event window for one lane and the lanes beside it.</li>
-              <li>Name a cause with the events that support it, or say the cause is unknown.</li>
-              <li>Propose closing one configuration set, with that evidence attached.</li>
-              <li>Write the email you receive, and read your reply to tell reopen from keep closed.</li>
+              <li>Read one evidence record that detection code built: counts, rates, a verdict per cause, and at most one lane code approved for closure.</li>
+              <li>Write one paragraph in the email you receive, explaining that evidence.</li>
+              <li>Confirm the approved lane by its option id, or say unknown when the evidence does not hold up.</li>
             </ul>
           </div>
           <div>
             <h3>It never</h3>
             <ul>
-              <li>Calls SES itself. Only the checked tool handler does, and only for sets you listed at deploy.</li>
-              <li>Pauses the whole account. That permission is not in the template.</li>
-              <li>Reopens a lane. Only your reply or your choice in the console does.</li>
-              <li>Sees a recipient address, a subject line or a message header.</li>
+              <li>Calls SES or holds a tool that changes anything. The action function does, after reloading the record and checking it, and only for sets you listed at deploy.</li>
+              <li>Picks a lane code did not approve. Any other answer counts as unknown.</li>
+              <li>Pauses the whole account. Every Fothering role carries an explicit deny for it.</li>
+              <li>Reads your reply. Code matches its first line against the exact words <code>reopen</code> and <code>keep closed</code>, or <code>close &lt;lane&gt;</code> after an unknown.</li>
+              <li>Sees a recipient address, a subject line, a message header or any other text that came from outside Fothering.</li>
             </ul>
           </div>
         </div>
@@ -131,10 +143,10 @@
           <caption>Model record for this build.</caption>
           <tbody>
             <tr><th scope="row" data-col="Item">Model</th><td data-col="Value">Claude Sonnet 5 by Anthropic, through Amazon Bedrock, inference profile <code>eu.anthropic.claude-sonnet-5</code></td></tr>
-            <tr><th scope="row" data-col="Item">Region</th><td data-col="Value">Called from eu-central-1; the EU profile keeps requests within EU regions</td></tr>
+            <tr><th scope="row" data-col="Item">Region</th><td data-col="Value">Called from eu-central-1 through the EU inference profile: requests are processed in EU Regions, and may be stored in the Region that served them for abuse detection</td></tr>
             <tr><th scope="row" data-col="Item">Who sees prompts</th><td data-col="Value">Per AWS, model providers have no access to Amazon Bedrock logs or to customer prompts and completions</td></tr>
-            <tr><th scope="row" data-col="Item">Default</th><td data-col="Value">Dry run. Until the operator turns the go-live switch on, no model call and no SES change is made; recorded fixtures stand in</td></tr>
-            <tr><th scope="row" data-col="Item">Labelled output</th><td data-col="Value">Every email the agent writes says it was written by Fothering's AI agent</td></tr>
+            <tr><th scope="row" data-col="Item">Default</th><td data-col="Value">Dry run. With the go-live switch unset, events are read and stored, while model calls, SES changes and emails are skipped and each is recorded as what it would have done</td></tr>
+            <tr><th scope="row" data-col="Item">Labelled output</th><td data-col="Value">Every email says, at the top, which paragraph Fothering's AI agent wrote</td></tr>
           </tbody>
         </table>
       </section>
@@ -145,12 +157,12 @@
       <section class="sheet" aria-labelledby="wrong-title">
         <div class="sheet-head">
           <h2 id="wrong-title">Where it can be wrong</h2>
-          <p>Naming a cause is a judgment, and a model can make a bad one.</p>
+          <p>The model's part is small on purpose. It can still get that part wrong, and so can the code around it.</p>
         </div>
         <div class="limits prose">
-          <p>It can pick the wrong tag when two causes overlap, such as an import batch sent with a new template. The fixed check limits the damage to one configuration set, and the email lists what was ruled out so you can see the reasoning.</p>
-          <p>It can say unknown when a person would have guessed right. That is the intended trade: a missed closure costs you a question, a wrong closure costs you a lane of mail.</p>
-          <p>It cannot see anything SES does not publish. A cause that only shows in your own application logs stays invisible to it.</p>
+          <p>Its explanation can be badly worded, or claim more than the evidence shows. What closed, what stays open, the read-back and the words to reply with come from a template over the closure record, so a poor paragraph cannot change them, and the email names the paragraph the agent wrote.</p>
+          <p>It can say unknown when code approved a lane and a person would have closed it. That is the intended trade: a missed closure costs you a question, a wrong closure costs you a lane of mail.</p>
+          <p>Detection only sees what SES publishes. A cause that shows only in your own application logs stays invisible, and the result is unknown.</p>
         </div>
       </section>
     </div>

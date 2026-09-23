@@ -53,7 +53,17 @@ typography:
     fontWeight: 600
     lineHeight: 1.3
     letterSpacing: "0.05em"
-    fontFeature: "\"tnum\" 1"
+  button:
+    fontFamily: "Red Hat Text, sans-serif"
+    fontSize: "1rem"
+    fontWeight: 600
+    lineHeight: 1
+  switch:
+    fontFamily: "Red Hat Mono, monospace"
+    fontSize: "0.75rem"
+    fontWeight: 600
+    lineHeight: 1
+    letterSpacing: "0.04em"
   wordmark:
     fontFamily: "Red Hat Display, sans-serif"
     fontSize: "1.375rem"
@@ -81,7 +91,7 @@ components:
   button-primary:
     backgroundColor: "{colors.ink}"
     textColor: "{colors.sheet}"
-    typography: "{typography.body}"
+    typography: "{typography.button}"
     rounded: "{rounded.control}"
     padding: "16px 24px"
     height: "48px"
@@ -89,6 +99,7 @@ components:
     backgroundColor: "{colors.ink-2}"
   button-quiet:
     textColor: "{colors.ink}"
+    typography: "{typography.button}"
     rounded: "{rounded.control}"
     padding: "16px 24px"
     height: "48px"
@@ -106,7 +117,7 @@ components:
   theme-switch-selected:
     backgroundColor: "{colors.ink}"
     textColor: "{colors.sheet}"
-    typography: "{typography.label}"
+    typography: "{typography.switch}"
     padding: "11px 10px"
     height: "36px"
     width: "44px"
@@ -123,17 +134,17 @@ components:
 
 **Creative North Star: "The Tagged Isolation"**
 
-Every page is one sheet of a process flow drawing. The SES account is the source, each configuration set is a line leaving it, and a closed lane is an isolation valve drawn shut with a lockout tag hung on its stem. The tag states the cause, the evidence, the read-back and what reopens it, while flow keeps moving on every other line. The drawing is a working grammar, not a costume: zone letters and row numbers are real coordinates that copy cites ("the valve at D1"), the footer is the sheet's title block and doubles as site navigation, comparisons are schedules, and a procedure is one process line with a valve per step.
+Every page is one sheet of a process flow drawing. The SES account is the source, each configuration set is a line leaving it, and a closed lane is an isolation valve drawn shut with a lockout tag hung on its stem. The tag states the cause, the evidence, the read-back and what reopens it, while flow keeps moving on every other line. The drawing is a working grammar, not a costume: row numbers are real coordinates that copy and tags cite ("the filled valve in row 1"), true at every width, while zone letters index the columns of the widest layout and are never cited, the footer is the sheet's title block and doubles as site navigation, comparisons are schedules, and a procedure is one process line with a valve per step.
 
 The system is flat, cool and dense in the way infrastructure documentation is dense. A cool white sheet lies on a cool grey ground, drawn in one cool near-black ink at a few line weights, with grey pipework and a single safety red confined to the closed lane. Identifiers an SES operator would copy are always set in mono. There are no shadows, gradients, glass, hero illustrations or charts beside a headline.
 
 Two token sets are designed, not inverted. Device is the default theme and follows the operating system; Light and Dark are explicit choices that only pin `color-scheme`, so every token is written once through `light-dark()`.
 
 **Key Characteristics:**
-- A 1.5px ink frame around every page, a zone strip A to F along the top, numbered rows with a left rail.
+- An outline-weight ink frame around every page, a zone strip A to F along the top, numbered rows with a left rail.
 - Flat surfaces, square 2px corners on controls; the tag is the only rounded, hung object.
 - One hue besides the neutrals: red, and only on the closed lane.
-- Motion is flow and only flow: dashes moving on live lines.
+- Motion is flow and only flow: dashes moving on live lines, with a Stop flow button beside every moving drawing.
 - Red Hat Display, Text and Mono as one working trio.
 
 ## Colors
@@ -149,18 +160,18 @@ A cool white sheet on a cool grey table, one near-black ink, grey pipework, and 
 - **Drawing Sheet** (`sheet`, `sheet-dark`): the frame's fill and every reading surface; also the knock-out fill behind valve symbols and step numerals so they break the process line.
 - **Drawing Ink** (`ink`, `ink-dark`): text, the frame, row rules, valves, the SES source box, primary buttons, focus outlines, selection background.
 - **Secondary Ink** (`ink-2`, `ink-2-dark`): lede and supporting paragraphs, table header text, primary button hover.
-- **Pipework** (`line`, `line-dark`): process lines in drawings, procedures and the replay timeline.
+- **Pipework** (`line`, `line-dark`): process lines in drawings, procedures and the replay timeline, and the dotted outlet of a closed line and the privacy drain line, which carry state and so need the 3:1 Pipework holds (Cell Rule does not).
 - **Field Label** (`label`, `label-dark`): zone letters, rail numbers, captions, title block field names, form labels, disabled button text.
-- **Cell Rule** (`rule`, `rule-dark`): table cell rules, zone dividers, internal grid lines, the dotted outlet of a closed line, disabled button fill.
+- **Cell Rule** (`rule`, `rule-dark`): table cell rules, zone dividers, internal grid lines, disabled button fill. Never a line that carries state.
 - **Flow** (`flow`, `flow-dark`): the moving dashes on a live line; equal to ink in both themes.
 - **Tag Card** (`tag-card`), **Tag Ink** (`tag-ink`), **Tag Field** (`tag-field`): the tag's paper stock, its outline and text, and its field names. These are literal values, identical in both themes, because the tag is a physical card.
 
 ### Named Rules
 **The Red Rule.** Red belongs to the closed lane and appears in exactly two places: the band of the tag hung on that lane, and the Lock Mark beside that lane's name. It is never a region fill, a frame, a button, a link, a heading, a logo or decoration, and on any screen it covers less than one tag's area.
 
-**The Unproven Stays Ink Rule.** A closure the read-back did not confirm leaves the lane open, so its state mark is a heavy empty ink outline (2.5px), never red. The permission the product is never granted is likewise framed in heavy ink (2px), not red.
+**The Unproven Stays Ink Rule.** A closure the read-back did not confirm leaves the lane open, so its state mark is an empty ink outline at emphasis weight, never red. The permission the product is never granted is likewise framed in ink at emphasis weight, not red.
 
-**The Paper Tag Rule.** The tag keeps its white card, near-black ink and red band in both themes. Everything else follows the theme.
+**The Paper Tag Rule.** The tag keeps its white card, near-black ink and red band in both themes. Everything else follows the theme, with one exception on the card: its outline takes the dark theme's ink on the dark sheet, where a near-black outline would vanish and the red band's edge alone measures 2.95:1.
 
 **The Device Default Rule.** Every surface offers Device, Light and Dark. Device follows the OS and is the default; a stored choice lives in `localStorage` under `fothering-theme` (`light` or `dark`; Device removes the key) and is applied by a synchronous script in `<head>` before first paint.
 
@@ -168,7 +179,7 @@ A cool white sheet on a cool grey table, one near-black ink, grey pipework, and 
 
 **Display Font:** Red Hat Display (with sans-serif)
 **Body Font:** Red Hat Text (with sans-serif)
-**Label/Mono Font:** Red Hat Mono (with monospace), tabular numerals on
+**Label/Mono Font:** Red Hat Mono (with monospace), tabular numerals on identifiers (`.mono`, `code`)
 
 **Character:** A neutral, screen-first grotesque trio with a real display cut heavy enough for a tag legend and a mono built to sit beside it. The mono does work: lane names, API fields, message tags, SMTP codes, timestamps and coordinates.
 
@@ -183,7 +194,7 @@ A cool white sheet on a cool grey table, one near-black ink, grey pipework, and 
 - **Step Numeral**: Red Hat Display 800 at 1.75rem beside each procedure valve; removal steps use 800 at 1.5rem.
 
 ### Named Rules
-**The Copyable Identifier Rule.** Anything an SES operator would copy (configuration set names, `SendingOptions.SendingEnabled`, `import_batch=...`, `550 5.1.1`, UTC times) is set in Red Hat Mono, spelled exactly as the API spells it.
+**The Copyable Identifier Rule.** Anything an SES operator would copy (`SendingOptions.SendingEnabled`, `import_batch=...`, `550 5.1.1`, and configuration set names and UTC times wherever they sit in a tag, schedule, log, register, message header or drawing) is set in Red Hat Mono with tabular numerals, spelled exactly as the API spells it. Running prose may name a lane as a plain word in Red Hat Text; API names and tag values stay in mono even inside prose. On the tag, `.tag dd.mono` names the mono family itself, because `.tag dd` resets the family.
 
 **The Self-Hosted Faces Rule.** Production serves all three faces from its own origin. Loading them from a third-party font CDN is not allowed in production.
 
@@ -197,26 +208,32 @@ The first viewport's flow drawing runs to the sheet border and stops there; cont
 
 Breakpoints:
 - **960px and below:** 5:7 and 7:5 splits collapse to one column; procedures go to two columns (36px row gap); the title block goes to two columns with the project cell spanning.
-- **620px and below:** the rail narrows to 22px; the frame loses its margin and side borders and runs edge to edge; top-bar text links hide (the theme switch stays); procedures become a vertical process line with the valve rotated 90 degrees; schedules marked to stack become one block per row with each cell's column name printed above it; full-width close buttons; on the landing page the drawing follows the headline directly; the replay timeline becomes a horizontal snap-scrolling strip.
+- **620px and below:** the rail narrows to 22px; the frame loses its margin and side borders and runs edge to edge; top-bar text links hide (the theme switch stays); procedures become a vertical process line with the valve rotated 90 degrees; schedules marked to stack become one block per row with each cell's column name printed above it; full-width close buttons; on the landing page the drawing follows the headline directly; the replay's four steps become two rows of two and its controls stick to the top while the story scrolls (on wider screens the drawing sticks beside the story instead).
 
 ## Elevation & Depth
 
-The system is flat. There are no drop shadows, gradients, blur or glass anywhere. Depth is conveyed by line weight and fill: the 1.5px ink outline marks an object (frame, schedule, message, specimen), a 1px rule divides inside it, a 2px to 2.5px ink border marks the exceptional (the never-granted permission, a faulty specimen), a dashed 1.5px ink border marks a notice that something is simulated or not yet built, and the ground tint marks selection.
+The system is flat. There are no drop shadows, gradients, blur or glass anywhere. Depth is conveyed by line weight and fill, with three weights set as tokens on `:root`:
+
+- **Rule** (`--w-rule`, 1px): divides inside an object.
+- **Outline** (`--w-outline`, 1.5px): marks an object (frame, schedule, message, specimen, tag, input, theme switch, state mark).
+- **Emphasis** (`--w-emph`, 2.5px): marks the exceptional (the never-granted permission, a faulty specimen, the unproven state mark).
+
+Browsers round border widths down to whole device pixels, so on a screen under 1.5 device pixels per CSS pixel a 1.5px outline would draw as 1px, the same as a rule. There, a `max-resolution: 1.49dppx` query steps outline to 2px and emphasis to 3px, and the three weights stay distinct. A dashed outline-weight ink border marks a notice that something is simulated or not yet built, and selection is the ground tint plus an outline-weight ink frame, never the tint alone.
 
 ### Shadow Vocabulary
 `box-shadow` is used only to draw rings, never elevation:
 - **Focus ring on the theme switch** (`box-shadow: 0 0 0 3px var(--sheet), 0 0 0 5px var(--ink)`): keyboard focus on a segment whose native input is hidden.
 - **Current replay step** (`box-shadow: 0 0 0 4px var(--sheet), 0 0 0 6px var(--ink)`): the filled dot of the step on screen.
-- **Quiet button outline** (`box-shadow: inset 0 0 0 1.5px var(--ink)`): draws the quiet button's border without changing its box.
+- **Quiet button outline** (`box-shadow: inset 0 0 0 var(--w-outline) var(--ink)`): draws the quiet button's border without changing its box.
 
 ### Named Rules
-**The Line Weight Rule.** Hierarchy comes from stroke weight (1px rule, 1.5px outline, 2 to 2.5px emphasis) and fill, never from a cast shadow.
+**The Line Weight Rule.** Hierarchy comes from the three stroke weights (rule, outline, emphasis) and fill, never from a cast shadow. CSS borders on objects use the weight tokens, never a literal fractional width. Pipework is a line, not an object weight: its CSS borders stay 2.5px (drawn 2px on a 1x screen, the outline's width there, told apart by being Pipework grey where outlines are ink), and SVG strokes in drawings are not rounded by the browser and keep their own values.
 
 ## Shapes
 
-Corners are square. Controls (buttons, inputs, the theme switch, the stamp, outlet boxes in drawings) take a 2px radius. The only rounded object is the tag, a punched card: 10px top corners and 4px bottom corners, its red band 8px at the top, a 16px punched hole centred 12px from its top edge, and a dashed 1.5px rule above its footer. It always hangs at a slight fixed angle (between -1.5 and -2.5 degrees, origin 50% 20px), a pose rather than an animation.
+Corners are square. Controls (buttons, inputs, the theme switch, the stamp, outlet boxes in drawings) take a 2px radius. The only rounded object is the tag, a punched card: 10px top corners and 4px bottom corners, its red band 8px at the top, a 16px punched hole whose top sits 12px below the card's top edge (centre 20px down, the same point the tag rotates about), and a dashed outline-weight rule above its footer. It always hangs at a slight fixed angle (between -1.5 and -2.5 degrees, origin 50% 20px), a pose rather than an animation.
 
-Drawn symbols come from process drawings: the bow-tie valve (open is sheet-filled with an ink stroke, closed is ink-filled), direction arrowheads in ink, a round instrument bubble for the read-back, envelope outlets for live lines and a dashed grey outlet for a closed one. State marks are 9px squares with a 1.5px border: filled ink for open, Lock Mark for closed, dashed for not yet, round for watching, heavy empty outline for unproven.
+Drawn symbols come from process drawings: the bow-tie valve (open is sheet-filled with an ink stroke, closed is ink-filled), direction arrowheads in ink, a round instrument bubble for the read-back, envelope outlets for live lines and a dashed grey outlet for a closed one. State marks are 12px squares (border-box, border included) with an outline-weight border, and no two differ by colour alone: filled ink for open; Lock Mark with a knocked-out horizontal bar for closed (a shut sign, cut with an SVG mask so the sheet shows through in both themes); dashed for not yet, which the landing page's what-is-real table also uses for fixture data; round for watching; an empty outline at emphasis weight for unproven.
 
 ## Components
 
@@ -225,45 +242,46 @@ Plain and firm, one weight of ink.
 - **Shape:** square with a 2px radius, minimum 48px tall.
 - **Primary:** ink fill, sheet text, Red Hat Text 600 at 1rem, 16px 24px padding, an optional 16px trailing arrow drawn in `currentColor`.
 - **Hover / Focus:** hover shifts the fill to Secondary Ink; focus is the global 2px ink outline offset 3px.
-- **Quiet:** transparent with a 1.5px inset ink outline and ink text; hover fills with the ground tint.
+- **Quiet:** transparent with an outline-weight inset ink outline and ink text; hover fills with the ground tint.
 - **Disabled:** Cell Rule fill, Field Label text, no outline, not-allowed cursor.
 - **Text link action:** Red Hat Text 600 with 12px vertical padding for the tap target, underlined.
 
 ### Inputs / Fields
-- **Style:** sheet fill, ink text, 1.5px ink border, 2px radius, 12px 14px padding, minimum 48px tall, Red Hat Text 400 at 1rem.
+- **Style:** sheet fill, ink text, outline-weight ink border, 2px radius, 12px 14px padding, minimum 48px tall, Red Hat Text 400 at 1rem.
 - **Label:** the mono label style above the field, uppercase, Field Label colour.
 - **Focus:** 2px ink outline offset 2px.
 
 ### Navigation
 - **Top bar:** the zone strip, then the wordmark on the left and, on the right, a "Sheet index" link and the theme switch.
-- **Theme switch:** a fieldset of three segments (Device, Light, Dark) in a 1.5px ink border with a 2px radius; segments are mono 600 at 0.75rem, at least 44px wide and 36px tall, divided by Cell Rules; the selected segment is ink-filled with sheet text.
+- **Theme switch:** a fieldset of three segments (Device, Light, Dark) in an outline-weight ink border with a 2px radius; segments are mono 600 at 0.75rem, at least 44px wide and 36px tall, divided by Cell Rules; the selected segment is ink-filled with sheet text.
 - **Title block:** the footer, a four-cell grid (project, sheets, reading list, drawing number with sheet n of 6, revision, date and fixture status) divided by Cell Rules. Links are Red Hat Text 600; the current sheet's link carries a 3px underline. Collapses to two columns at 960px and one at 620px.
 - **Links:** inherit colour, 1px underline offset 0.22em, 2px on hover.
+- **Flow switch:** a mono 600 button at 0.75rem, at least 44px square, sheet fill with an outline-weight ink border and a 2px radius, reading "Stop flow" or "Run flow". It sits in the caption row of every drawing with moving flow (WCAG 2.2.2), stores `stopped` or `running` in `localStorage` under `fothering-flow`, applied in `<head>` like the theme; with nothing stored the flow follows reduced motion. Hidden without JavaScript, and wherever the drawing on screen has no moving flow. In forced colours the selected theme segment is underlined and focus draws an outline, since fills and rings are dropped.
 
 ### Schedules (tables)
-A drawing's table: full width, a 1.5px ink outline, 1px Cell Rules, 13px 16px cell padding, uppercase mono column headers over a 1.5px ink rule, row headers in Red Hat Text 600, and a mono caption below that names the source. The product's own column may carry the ground tint and 600 weight; columns that do not act are set in Secondary Ink.
+A drawing's table: full width, an outline-weight ink outline, rule-weight Cell Rules, 13px 16px cell padding, uppercase mono column headers over an outline-weight ink rule, row headers in Red Hat Text 600, and a mono caption below that names the source. The product's own column may carry the ground tint and 600 weight; columns that do not act are set in Secondary Ink. A schedule marked `stack` becomes one block per row at 620px; one whose cells hold long API names in several columns also carries `stack-md` and stacks from 960px, so an identifier is never broken mid-word to fit a narrow column.
 
 ### Lockout Tag
-The signature component, the one place colour lives. Up to 320px wide, white card, 1.5px near-black outline, punched hole, red band holding the "LANE CLOSED" legend, the lane name in mono and a boxed "FIXTURE RUN" stamp while data is recorded rather than live. Below the band, a two-column list of Cause, Evidence, Read back and Reopens, then a dashed footer with the tag number and its zone coordinate. It hangs from the closed valve's stem in drawings.
+The signature component, the one place colour lives. Up to 320px wide, white card, outline-weight near-black outline, punched hole, red band holding the "LANE CLOSED" legend, the lane name in mono and a boxed "FIXTURE RUN" stamp while the data is a fixture rather than live. Below the band, a two-column list of Cause, Read back and Reopens, with an Evidence line between Cause and Read back where no evidence schedule sits beside the tag (the landing tag carries it; the replay and console show the evidence next to the tag instead), then a dashed footer with the tag number and the row it hangs in. It hangs from the closed valve's stem in drawings.
 
 ### Message
-The operator email shown as a message, not described: a 1.5px ink box up to 68ch wide, a mono header list (From, Subject) over a Cell Rule, a body of Red Hat Text paragraphs with bold run-in heads, and a Field Label disclosure line. A reply is a second message overlapping the first by 1.5px and indented `clamp(20px, 5vw, 64px)` (16px on narrow screens), its text at 600.
+The operator email shown as a message, not described: an outline-weight ink box up to 68ch wide, a mono header list (From, Subject) over a Cell Rule, a body that opens with the AI disclosure line (Secondary Ink at 0.9375rem above a Cell Rule, naming the one paragraph the agent wrote), then Red Hat Text paragraphs with bold run-in heads. A reply is a second message overlapping the first by one outline weight and indented `clamp(20px, 5vw, 64px)` (16px on narrow screens), its text at 600.
 
 ### Procedure
 An ordered list drawn as one process line in Pipework (2.5px) with a valve and a Display numeral per step; the step that closes is drawn with the filled valve. Four columns by default (set per page), two at 960px, a vertical line at 620px.
 
 ### Notice Box
-A 1.5px dashed ink border with 12px 16px padding and a bold mono run-in label, used to say a surface is a dry run or not yet built.
+A dashed outline-weight ink border with 12px 16px padding and a bold mono run-in label, used to say a surface is a dry run or not yet built.
 
 ## Do's and Don'ts
 
 ### Do:
 - **Do** set every token through `light-dark()` on `:root` and let Device (no stored choice) follow the OS; explicit Light and Dark only pin `color-scheme`.
 - **Do** keep red to the closed lane's tag band and its Lock Mark, using `lock-dark` for any mark drawn on the dark sheet.
-- **Do** give every page the frame, the A to F zone strip, numbered rows and the title block, and cite real coordinates in copy when pointing at the drawing.
+- **Do** give every page the frame, the A to F zone strip, numbered rows and the title block, and cite row numbers in copy when pointing at the drawing, since a zone letter shifts with the width.
 - **Do** set identifiers in Red Hat Mono with tabular numerals, spelled as the API spells them.
-- **Do** label recorded data as fixture on the tag stamp, the caption and the title block status until live runs replace it.
-- **Do** stop every flow dash under `prefers-reduced-motion`, so closed and open lines differ by valve fill and the dotted outlet, never by motion alone.
+- **Do** label fixture data as fixture on the tag stamp, the caption and the title block status until live runs replace it, and never call data built from AWS's documented examples "recorded" or "captured".
+- **Do** give every moving drawing the Flow switch, and keep the flow still under `prefers-reduced-motion` until the visitor runs it, so closed and open lines differ by valve fill and the dotted outlet, never by motion alone.
 - **Do** keep controls at least 48px tall (theme switch segments at least 44 by 36px) with the 2px ink focus outline.
 - **Do** serve Red Hat Display, Text and Mono from the site's own origin in production.
 

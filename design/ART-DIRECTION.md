@@ -144,9 +144,9 @@ title 22px, body 17px at 1.55, labels 11 to 13px mono. The tag legend is the hea
 
 **The site is one drawing sheet.** Not a stack of marketing sections.
 
-- **Frame and zones.** Every page sits in a 1.5px ink border. A zone strip of columns A to F runs along the
-  top, and each band of content is a numbered row with its number in a left rail. The coordinates are real:
-  copy cites them ("like the valve at D1 above"), so the border is an index, not ornament.
+- **Frame and zones.** Every page sits in an ink border at outline weight (DESIGN.md, Elevation & Depth). A zone strip of columns A to F runs along the
+  top, and each band of content is a numbered row with its number in a left rail. The row numbers are real coordinates at every width:
+  copy cites them ("like the filled valve on partner-import in row 1"), and zone letters index the widest layout only, so the border is an index, not ornament.
 - **Title block as navigation.** The footer is the drawing's title block: project, sheet list (replay,
   console, deploy), reading list (privacy, AI disclosure) and source status. The current sheet carries a
   heavier underline.
@@ -178,8 +178,9 @@ Motion is flow, and only flow.
   line, then its dashes stop, the valve fills and the tag hangs on the stem. The visitor moves each step with
   a button or the arrow keys, never on a timer.
 - The tag hangs at a slight angle from its hole, a fixed pose, not an animation.
-- `prefers-reduced-motion` stops every dash. Closed and open lines then differ by the valve fill and the
-  dotted outlet, never by motion alone.
+- Every moving drawing has a Stop flow button (WCAG 2.2.2), and `prefers-reduced-motion` keeps the dashes
+  still until the visitor runs them. Closed and open lines then differ by the valve fill and the dotted
+  outlet, never by motion alone.
 - No scroll-triggered reveals, no parallax, no bounce.
 
 ## 7. Real media

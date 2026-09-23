@@ -22,10 +22,20 @@
   --mono: "Red Hat Mono", monospace;
   --gutter: clamp(16px, 3vw, 40px);
   --rail: 34px;
+  /* Three line weights carry the hierarchy: rule, outline, emphasis. Browsers round border widths down to
+     whole device pixels, so on a 1x or 1.25x screen 1.5px would draw as 1px, the same as a rule. Below
+     1.5 device pixels per CSS pixel the weights step to whole pixels and stay three distinct lines. */
+  --w-rule: 1px;
+  --w-outline: 1.5px;
+  --w-emph: 2.5px;
+}
+@media (max-resolution: 1.49dppx) {
+  :root { --w-outline: 2px; --w-emph: 3px; }
 }
 :root[data-theme="light"] { color-scheme: light; }
 :root[data-theme="dark"] { color-scheme: dark; }
-* { box-sizing: border-box; }
+/* Pseudo-elements are included, so the state marks and the tag's punched hole measure what they declare. */
+*, *::before, *::after { box-sizing: border-box; }
 html { -webkit-text-size-adjust: 100%; }
 body { margin: 0; background: var(--ground); color: var(--ink); font: 400 1.0625rem/1.55 var(--text); }
 ::selection { background: var(--ink); color: var(--ground); }
@@ -34,13 +44,13 @@ a:hover { text-decoration-thickness: 2px; }
 :focus-visible { outline: 2px solid var(--ink); outline-offset: 3px; }
 .mono, code { font-family: var(--mono); font-feature-settings: "tnum" 1; }
 code { font-size: 0.9em; overflow-wrap: anywhere; }
-.visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .skip { position: absolute; left: 12px; top: -60px; z-index: 5; background: var(--ink); color: var(--sheet); padding: 12px 16px; font-weight: 600; text-decoration: none; }
 .skip:focus { top: 12px; }
 
 /* Drawing frame. Columns A to F and the numbered rows are real coordinates: copy cites them
    ("the tag at D1"), so the border works as an index rather than as ornament. */
-.frame { margin: var(--gutter); border: 1.5px solid var(--ink); background: var(--sheet); }
+.frame { margin: var(--gutter); border: var(--w-outline) solid var(--ink); background: var(--sheet); }
 .zones { display: grid; grid-template-columns: var(--rail) repeat(6, minmax(0, 1fr)); border-bottom: 1px solid var(--rule); }
 .zones span { font: 500 0.6875rem/1 var(--mono); color: var(--label); text-align: center; padding: 6px 0; border-left: 1px solid var(--rule); }
 .zones span:first-child { border-left: 0; }
@@ -52,14 +62,19 @@ code { font-size: 0.9em; overflow-wrap: anywhere; }
 .wordmark { font: 850 1.375rem/1 var(--display); letter-spacing: 0.08em; text-decoration: none; }
 .bar-end { display: flex; align-items: center; gap: clamp(16px, 2.4vw, 32px); }
 .bar-end > a { font: 600 0.9375rem/1 var(--text); padding: 12px 0; }
-.theme { display: inline-flex; border: 1.5px solid var(--ink); border-radius: 2px; margin: 0; padding: 0; min-inline-size: 0; }
-.theme legend { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.theme { display: inline-flex; border: var(--w-outline) solid var(--ink); border-radius: 2px; margin: 0; padding: 0; min-inline-size: 0; }
+.theme legend { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .theme label { position: relative; cursor: pointer; }
 .theme input { position: absolute; inset: 0; opacity: 0; margin: 0; cursor: pointer; }
 .theme span { display: block; font: 600 0.75rem/1 var(--mono); letter-spacing: 0.04em; padding: 11px 10px; min-height: 36px; min-width: 44px; text-align: center; border-left: 1px solid var(--rule); }
 .theme label:first-of-type span { border-left: 0; }
 .theme input:checked + span { background: var(--ink); color: var(--sheet); }
 .theme input:focus-visible + span { outline: none; box-shadow: 0 0 0 3px var(--sheet), 0 0 0 5px var(--ink); position: relative; z-index: 1; }
+/* Forced colours drop fills and shadows, so the selected segment and keyboard focus fall back to lines. */
+@media (forced-colors: active) {
+  .theme input:checked + span { text-decoration: underline; text-decoration-thickness: 2px; text-underline-offset: 3px; }
+  .theme input:focus-visible + span { outline: 2px solid; }
+}
 
 h2 { font: 700 clamp(1.75rem, 1.2rem + 1.6vw, 2.75rem)/1.08 var(--display); letter-spacing: -0.02em; margin: 0; text-wrap: balance; }
 h3 { font: 700 1.375rem/1.25 var(--display); margin: 0 0 8px; }
@@ -79,46 +94,61 @@ h3 { font: 700 1.375rem/1.25 var(--display); margin: 0 0 8px; }
 }
 .button:hover { background: var(--ink-2); }
 .button svg { width: 16px; height: 16px; }
-.button.quiet { background: transparent; color: var(--ink); box-shadow: inset 0 0 0 1.5px var(--ink); }
+.button.quiet { background: transparent; color: var(--ink); box-shadow: inset 0 0 0 var(--w-outline) var(--ink); }
 .button.quiet:hover { background: var(--ground); }
 .button[disabled] { cursor: not-allowed; background: var(--rule); color: var(--label); box-shadow: none; }
 .textlink { font-weight: 600; padding: 12px 0; }
 
 .flow-dash { stroke-dasharray: 3 11; animation: flow 1.6s linear infinite; }
 @keyframes flow { to { stroke-dashoffset: -28; } }
-@media (prefers-reduced-motion: reduce) { .flow-dash { animation: none; } }
+/* Moving flow never plays past the visitor's say (WCAG 2.2.2): the Stop flow button pins data-flow, and with
+   no choice stored, reduced motion keeps it still. The dashes stay drawn either way. */
+:root[data-flow="stopped"] .flow-dash { animation: none; }
+@media (prefers-reduced-motion: reduce) { :root:not([data-flow="running"]) .flow-dash { animation: none; } }
+.flow-toggle { font: 600 0.75rem/1 var(--mono); letter-spacing: 0.04em; min-height: 44px; min-width: 44px; padding: 0 14px; background: var(--sheet); color: var(--ink); border: var(--w-outline) solid var(--ink); border-radius: 2px; cursor: pointer; }
+.flow-toggle:hover { background: var(--ground); }
+:root:not(.js) .flow-toggle { display: none; }
 
 /* A schedule is a drawing's table: ruled cells, an ink outline, a caption that names its source. */
-table.schedule { width: 100%; border-collapse: collapse; font-size: 1rem; border: 1.5px solid var(--ink); }
+table.schedule { width: 100%; border-collapse: collapse; font-size: 1rem; border: var(--w-outline) solid var(--ink); }
 .schedule caption { caption-side: bottom; text-align: left; padding-top: 10px; font: 500 0.75rem/1.4 var(--mono); color: var(--label); }
 .schedule th, .schedule td { text-align: left; vertical-align: top; padding: 13px 16px; border-top: 1px solid var(--rule); border-left: 1px solid var(--rule); }
-.schedule thead th { font: 600 0.75rem/1.3 var(--mono); letter-spacing: 0.05em; text-transform: uppercase; color: var(--ink-2); border-top: 0; border-bottom: 1.5px solid var(--ink); }
+.schedule thead th { font: 600 0.75rem/1.3 var(--mono); letter-spacing: 0.05em; text-transform: uppercase; color: var(--ink-2); border-top: 0; border-bottom: var(--w-outline) solid var(--ink); }
 .schedule tbody th { font: 600 0.9375rem/1.4 var(--text); border-left: 0; }
 .schedule .us { font-weight: 600; background: var(--ground); }
 .schedule .no { color: var(--ink-2); }
 
 .state { font: 600 0.75rem/1 var(--mono); letter-spacing: 0.06em; text-transform: uppercase; white-space: nowrap; }
-.state::before { content: ""; display: inline-block; width: 9px; height: 9px; margin-right: 8px; border: 1.5px solid var(--ink); }
+.state::before { content: ""; display: inline-block; width: 12px; height: 12px; margin-right: 8px; border: var(--w-outline) solid var(--ink); }
 .state.later::before { border-style: dashed; }
-.state.shut::before { background: var(--lock); border-color: var(--lock); }
+/* Closed differs from open by shape as well as colour: the lock square carries a knocked-out bar, a shut sign. */
+.state.shut::before {
+  background: var(--lock); border-color: var(--lock);
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath fill-rule='evenodd' d='M0 0h12v12H0zM2.5 5h7v2h-7z'/%3E%3C/svg%3E") center / 100% 100% no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath fill-rule='evenodd' d='M0 0h12v12H0zM2.5 5h7v2h-7z'/%3E%3C/svg%3E") center / 100% 100% no-repeat;
+}
 .state.open::before { background: var(--ink); }
 .state.watch::before { border-radius: 50%; }
 
 /* The lockout tag keeps its paper colours in both themes: it is a physical card hung on the drawing. */
-.tag { position: relative; width: min(320px, 100%); background: #FFFFFF; color: #0E1113; border: 1.5px solid #0E1113; border-radius: 10px 10px 4px 4px; }
-.tag::before { content: ""; position: absolute; top: 12px; left: 50%; width: 16px; height: 16px; margin-left: -8px; border: 1.5px solid #0E1113; border-radius: 50%; background: var(--sheet); }
+/* On the dark sheet the card's own near-black outline vanishes and the red band's edge measures 2.95:1, so the
+   outline takes the theme ink there and the card's edge holds 3:1 all round. */
+.tag { position: relative; width: min(320px, 100%); background: #FFFFFF; color: #0E1113; border: var(--w-outline) solid light-dark(#0E1113, #E8ECEE); border-radius: 10px 10px 4px 4px; }
+.tag::before { content: ""; position: absolute; top: 12px; left: 50%; width: 16px; height: 16px; margin-left: -8px; border: var(--w-outline) solid #0E1113; border-radius: 50%; background: var(--sheet); }
 .tag header { background: var(--tag-red); color: #FFFFFF; padding: 36px 16px 12px; border-radius: 8px 8px 0 0; display: grid; grid-template-columns: 1fr auto; align-items: end; gap: 4px 12px; }
 .tag header b { display: block; font: 900 1.75rem/0.95 var(--display); letter-spacing: 0.02em; }
 .tag header span { font: 600 0.8125rem/1.3 var(--mono); }
-.stamp { border: 1.5px solid currentColor; padding: 4px 6px; border-radius: 2px; font: 700 0.6875rem/1 var(--mono); letter-spacing: 0.08em; grid-row: 1 / span 2; grid-column: 2; align-self: start; }
+.stamp { border: var(--w-outline) solid currentColor; padding: 4px 6px; border-radius: 2px; font: 700 0.6875rem/1 var(--mono); letter-spacing: 0.08em; grid-row: 1 / span 2; grid-column: 2; align-self: start; }
 .tag dl { margin: 0; padding: 4px 16px 12px; display: grid; grid-template-columns: auto 1fr; gap: 8px 12px; }
 .tag dt { font: 600 0.6875rem/1.5 var(--mono); letter-spacing: 0.06em; text-transform: uppercase; color: #5A646B; }
-.tag dd { margin: 0; font: 500 0.875rem/1.35 var(--text); }
-.tag dd.mono { font-size: 0.8125rem; }
-.tag footer { border-top: 1.5px dashed #0E1113; padding: 8px 16px 10px; display: flex; justify-content: space-between; font: 600 0.6875rem/1.2 var(--mono); }
+.tag dd { margin: 0; font: 500 0.875rem/1.35 var(--text); overflow-wrap: anywhere; }
+/* `.tag dd` resets the family through the font shorthand and outranks `.mono`, so the mono family is
+   named again here: identifiers on the tag are copied, and the Copyable Identifier Rule covers them. */
+.tag dd.mono { font-family: var(--mono); font-size: 0.8125rem; }
+.tag footer { border-top: var(--w-outline) dashed #0E1113; padding: 8px 16px 10px; display: flex; justify-content: space-between; font: 600 0.6875rem/1.2 var(--mono); }
 
 /* The email is the product's real surface, so it is shown as a message, not described. */
-.message { border: 1.5px solid var(--ink); background: var(--sheet); max-width: 68ch; }
+.message { border: var(--w-outline) solid var(--ink); background: var(--sheet); max-width: 68ch; }
 .message dl { margin: 0; padding: 12px 20px; display: grid; grid-template-columns: auto 1fr; gap: 6px 16px; border-bottom: 1px solid var(--rule); font: 500 0.8125rem/1.45 var(--mono); }
 .message dt { color: var(--label); }
 .message dd { margin: 0; overflow-wrap: anywhere; }
@@ -126,8 +156,9 @@ table.schedule { width: 100%; border-collapse: collapse; font-size: 1rem; border
 .message .body p { margin: 0 0 12px; font-size: 1rem; }
 .message .body p:last-child { margin-bottom: 0; }
 .message .body b { font-weight: 650; }
-.message .disclosure { font: 500 0.8125rem/1.45 var(--text); color: var(--label); }
-.message.reply { margin: -1.5px 0 0 clamp(20px, 5vw, 64px); }
+/* The AI disclosure opens the body, above a rule, so it is read before the message rather than after it. */
+.message .disclosure { font: 500 0.9375rem/1.45 var(--text); color: var(--ink-2); padding-bottom: 12px; border-bottom: var(--w-rule) solid var(--rule); }
+.message.reply { margin: calc(-1 * var(--w-outline)) 0 0 clamp(20px, 5vw, 64px); }
 .message.reply .body p { font-size: 1.0625rem; font-weight: 600; }
 
 /* A procedure is one process line with a valve per step; a step drawn shut uses the filled valve. */
@@ -160,6 +191,16 @@ ol.procedure { list-style: none; margin: 0; padding: 0; display: grid; grid-temp
   .titleblock { grid-template-columns: 1fr 1fr; }
   .titleblock > :first-child { grid-column: 1 / -1; border-bottom: 1px solid var(--rule); }
   .titleblock > :nth-child(2) { border-left: 0; }
+  /* A schedule with long identifiers in several columns (.stack-md) stacks already here, so an API name is
+     never broken mid-word to fit a narrow column. Same shape as .stack below 620px. */
+  table.schedule.stack-md, .schedule.stack-md thead, .schedule.stack-md tbody, .schedule.stack-md tr, .schedule.stack-md th, .schedule.stack-md td { display: block; width: auto; }
+  .schedule.stack-md thead { display: none; }
+  .schedule.stack-md caption { display: block; padding: 10px 14px; }
+  .schedule.stack-md tbody tr { border-top: var(--w-outline) solid var(--ink); padding: 4px 0 8px; }
+  .schedule.stack-md tbody tr:first-child { border-top: 0; }
+  .schedule.stack-md tbody th, .schedule.stack-md td { border: 0; padding: 6px 14px; }
+  .schedule.stack-md tbody th { padding-top: 10px; }
+  .schedule.stack-md td::before { content: attr(data-col); display: block; font: 600 0.6875rem/1.4 var(--mono); letter-spacing: 0.06em; text-transform: uppercase; color: var(--label); }
 }
 @media (max-width: 620px) {
   :root { --rail: 22px; }
@@ -176,7 +217,7 @@ ol.procedure { list-style: none; margin: 0; padding: 0; display: grid; grid-temp
   table.schedule.stack, .schedule.stack thead, .schedule.stack tbody, .schedule.stack tr, .schedule.stack th, .schedule.stack td { display: block; width: auto; }
   .schedule.stack thead { display: none; }
   .schedule.stack caption { display: block; padding: 10px 14px; }
-  .schedule.stack tbody tr { border-top: 1.5px solid var(--ink); padding: 4px 0 8px; }
+  .schedule.stack tbody tr { border-top: var(--w-outline) solid var(--ink); padding: 4px 0 8px; }
   .schedule.stack tbody tr:first-child { border-top: 0; }
   .schedule.stack tbody th, .schedule.stack td { border: 0; padding: 6px 14px; }
   .schedule.stack tbody th { padding-top: 10px; }

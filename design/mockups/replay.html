@@ -4,26 +4,40 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Incident replay: partner-import, fixture run 001</title>
-<meta name="description" content="Step through a recorded SES incident: bounces arrive on one configuration set, Fothering names the cause, closes that lane, reads it back, emails the operator and reopens on their reply.">
+<meta name="description" content="One SES incident in four steps: bounces arrive on one configuration set, the cause is named with counts, that lane is closed and read back, and the operator's reply reopens it.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Red+Hat+Display:wght@500..900&family=Red+Hat+Mono:wght@400..600&family=Red+Hat+Text:wght@400..700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="shared/drawing.css">
 <script src="shared/chrome.js"></script>
 <style>
-.stage { display: grid; grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); }
-.board { padding: clamp(20px, 3vw, 44px) var(--gutter) 40px; border-right: 1px solid var(--rule); }
+.intro .summary { grid-column: 1 / -1; list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border-top: var(--w-outline) solid var(--ink); }
+.summary li { padding: 12px 16px 0 0; font-size: 1rem; }
+.summary li + li { padding-left: 16px; border-left: var(--w-rule) solid var(--rule); }
+.summary time { display: block; font: 600 0.8125rem/1.4 var(--mono); font-feature-settings: "tnum" 1; color: var(--label); }
+
+.stage { display: grid; grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); align-items: start; }
+.board { position: sticky; top: 0; padding: clamp(20px, 3vw, 44px) var(--gutter) 40px; border-right: 1px solid var(--rule); }
 .board svg { display: block; width: 100%; max-width: 420px; height: auto; margin-inline: auto; }
 .board .tag { margin: -8px auto 0; transform: rotate(-2deg); transform-origin: 50% 20px; }
-.board .caption { margin: 20px 0 0; font: 500 0.75rem/1.4 var(--mono); color: var(--label); text-align: center; }
+.board .caption-row { margin-top: 20px; display: flex; flex-direction: column; align-items: center; gap: 10px; }
+.board .caption { margin: 0; font: 500 0.75rem/1.4 var(--mono); color: var(--label); text-align: center; max-width: 44ch; }
 .narrative { padding: clamp(20px, 3vw, 44px) var(--gutter) 40px; display: flex; flex-direction: column; gap: 20px; }
 .narrative h2 { font-size: clamp(1.625rem, 1.2rem + 1vw, 2.25rem); margin: 0 0 14px; }
 .narrative p { margin: 0; color: var(--ink-2); max-width: 52ch; }
+/* A reply keeps its own negative margin, so it still overlaps the email it answers. */
+.narrative > [data-steps] > * + *:not(.reply) { margin-top: 16px; }
+/* The controls sit above the story, so they stay put whatever length the step has. */
 .controls { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
 .controls .count { font: 600 0.8125rem/1 var(--mono); color: var(--label); margin-left: auto; }
 
+.evidence-sched { font-size: 0.9375rem; }
+.evidence-sched th, .evidence-sched td { padding: 10px 12px; }
+.evidence-sched tbody th code { display: block; font-weight: 500; margin-top: 2px; }
+.evidence-sched .us { font-weight: 600; }
+
 /* The step strip is the replay's timeline, drawn as the same process line the procedure uses. */
-.steps { list-style: none; margin: 0; padding: 0 var(--gutter); display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); border-top: 1px solid var(--rule); }
+.steps { list-style: none; margin: 0; padding: 0 var(--gutter); display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border-top: 1px solid var(--rule); }
 .steps li { position: relative; }
 .steps li::before { content: ""; position: absolute; left: 0; right: 0; top: 29px; border-top: 2.5px solid var(--line); }
 .steps button { position: relative; display: flex; flex-direction: column; align-items: flex-start; gap: 8px; width: 100%; padding: 18px 10px 16px 0; background: none; border: 0; color: var(--ink); font: 500 0.8125rem/1.3 var(--text); text-align: left; cursor: pointer; }
@@ -33,20 +47,30 @@
 .steps .t { font: 600 0.75rem/1 var(--mono); color: var(--label); }
 
 .log td:first-child, .log th:first-child { white-space: nowrap; }
+/* Times and lane names are identifiers an operator copies, so the log sets them in mono. */
+.log td[data-col="Time"], .log td[data-col="Lane"] { font-family: var(--mono); font-feature-settings: "tnum" 1; }
 .log tr[hidden] { display: none; }
 .log .new td { background: var(--ground); }
 
+/* Without JavaScript the replay reads as one page: every step's text in order, the drawing held at the
+   closed lane (the parts marked data-still), and no step controls that would do nothing. */
+:root:not(.js) .steps, :root:not(.js) .controls, :root:not(.js) .needs-js { display: none; }
+:root:not(.js) .board [data-steps]:not([data-still]) { display: none; }
+
 @media (max-width: 960px) {
   .stage { grid-template-columns: 1fr; }
-  .board { border-right: 0; border-bottom: 1px solid var(--rule); }
-  .steps { grid-template-columns: repeat(4, minmax(0, 1fr)); row-gap: 4px; }
+  .board { position: static; border-right: 0; border-bottom: 1px solid var(--rule); }
+  .intro .summary { grid-template-columns: repeat(2, minmax(0, 1fr)); row-gap: 12px; }
+  .summary li:nth-child(3) { padding-left: 0; border-left: 0; }
 }
 @media (max-width: 620px) {
-  /* Snap inside the gutter, so the active dot's ring is never clipped by the scroll edge. */
-  .steps { display: flex; overflow-x: auto; scroll-snap-type: x mandatory; scroll-padding-inline: var(--gutter); }
-  .steps li { flex: 0 0 38%; scroll-snap-align: start; }
+  /* Four steps fit as two rows of two, so the timeline never scrolls sideways on a phone. */
+  .steps { grid-template-columns: repeat(2, minmax(0, 1fr)); row-gap: 4px; }
+  .controls { position: sticky; top: 0; z-index: 2; background: var(--sheet); padding: 12px 0; margin: -12px 0 0; border-bottom: var(--w-rule) solid var(--rule); }
   .controls .count { margin-left: 0; width: 100%; }
   .controls .button { flex: 1 1 40%; justify-content: center; }
+  .intro .summary { grid-template-columns: 1fr; }
+  .summary li + li { padding-left: 0; border-left: 0; }
 }
 </style>
 </head>
@@ -59,7 +83,13 @@
       <div class="rail" aria-hidden="true">1</div>
       <section class="intro" aria-labelledby="page-title">
         <h1 class="page-title" id="page-title">Replay: the partner-import incident</h1>
-        <p>Seven steps from a recorded run. Every event, call and email below is read from the run's committed artifact, not typed into this page. Use the buttons or the arrow keys.</p>
+        <p>One incident, four steps. The events come from a fixture built on AWS's documented event examples, so the times are illustrative. <span class="needs-js">Use the buttons or the arrow keys.</span></p>
+        <ol class="summary" aria-label="The incident in one line">
+          <li><time>14:01</time>Hard bounces on partner-import</li>
+          <li><time>14:02</time>Cause: <code>import_batch=2026-09-14-b</code></li>
+          <li><time>14:03</time>Closed, read back false</li>
+          <li><time>15:20</time>Reply "reopen", read back true</li>
+        </ol>
       </section>
     </div>
 
@@ -67,19 +97,17 @@
       <div class="rail" aria-hidden="true">2</div>
       <div>
         <ol class="steps" aria-label="Replay steps">
-          <li><button type="button" data-go="0"><span class="dot"></span><span class="t">14:00</span>Normal sending</button></li>
-          <li><button type="button" data-go="1"><span class="dot"></span><span class="t">14:01</span>Bounces arrive</button></li>
-          <li><button type="button" data-go="2"><span class="dot"></span><span class="t">14:02</span>Cause named</button></li>
-          <li><button type="button" data-go="3"><span class="dot"></span><span class="t">14:03</span>Closed, read back</button></li>
-          <li><button type="button" data-go="4"><span class="dot"></span><span class="t">14:03</span>Email sent</button></li>
-          <li><button type="button" data-go="5"><span class="dot"></span><span class="t">14:41</span>Reply: keep closed</button></li>
-          <li><button type="button" data-go="6"><span class="dot"></span><span class="t">15:20</span>Reply: reopen</button></li>
+          <li><button type="button" data-go="0"><span class="dot"></span><span class="t">14:01</span>Bounces arrive</button></li>
+          <li><button type="button" data-go="1"><span class="dot"></span><span class="t">14:02</span>Cause named</button></li>
+          <li><button type="button" data-go="2"><span class="dot"></span><span class="t">14:03</span>Closed, read back</button></li>
+          <li><button type="button" data-go="3"><span class="dot"></span><span class="t">15:20</span>Reply reopens it</button></li>
         </ol>
 
         <section class="stage" aria-labelledby="step-title">
           <div class="board">
-            <svg viewBox="0 0 400 260" role="img" aria-labelledby="board-title">
+            <svg viewBox="0 0 400 260" role="img" aria-labelledby="board-title board-desc">
               <title id="board-title">Flow drawing of the four lanes at the current step</title>
+              <desc id="board-desc">partner-import is stopped at a filled valve with a lockout tag, and its outlet is dotted. Receipts, password-resets and newsletter keep flowing.</desc>
               <rect x="4" y="20" width="50" height="220" fill="none" stroke="var(--ink)" stroke-width="2"/>
               <text x="29" y="136" text-anchor="middle" font-family="Red Hat Display" font-weight="800" font-size="15" fill="var(--ink)">SES</text>
               <g font-family="Red Hat Mono" font-size="12" fill="var(--ink)">
@@ -87,53 +115,59 @@
               </g>
               <g stroke="var(--line)" stroke-width="2.5"><line x1="54" y1="40" x2="352" y2="40"/><line x1="54" y1="100" x2="352" y2="100"/><line x1="54" y1="160" x2="352" y2="160"/><line x1="54" y1="220" x2="186" y2="220"/></g>
               <g class="flow-dash" stroke="var(--flow)" stroke-width="2.5"><line x1="58" y1="40" x2="352" y2="40"/><line x1="58" y1="100" x2="352" y2="100"/><line x1="58" y1="160" x2="352" y2="160"/><line x1="58" y1="220" x2="186" y2="220"/></g>
-              <g data-steps="0,1,2,6"><line x1="214" y1="220" x2="352" y2="220" stroke="var(--line)" stroke-width="2.5"/><line class="flow-dash" x1="214" y1="220" x2="352" y2="220" stroke="var(--flow)" stroke-width="2.5"/></g>
-              <line data-steps="3,4,5" x1="214" y1="220" x2="352" y2="220" stroke="var(--rule)" stroke-width="2.5" stroke-dasharray="1 9"/>
+              <g data-steps="0,1,3"><line x1="214" y1="220" x2="352" y2="220" stroke="var(--line)" stroke-width="2.5"/><line class="flow-dash" x1="214" y1="220" x2="352" y2="220" stroke="var(--flow)" stroke-width="2.5"/></g>
+              <line data-steps="2" data-still x1="214" y1="220" x2="352" y2="220" stroke="var(--line)" stroke-width="2.5" stroke-dasharray="1 9"/>
               <g fill="var(--sheet)" stroke="var(--ink)" stroke-width="2"><path d="M186 30 l14 10 -14 10 z M214 30 l-14 10 14 10 z"/><path d="M186 90 l14 10 -14 10 z M214 90 l-14 10 14 10 z"/><path d="M186 150 l14 10 -14 10 z M214 150 l-14 10 14 10 z"/></g>
-              <path data-steps="0,1,2,6" d="M186 210 l14 10 -14 10 z M214 210 l-14 10 14 10 z" fill="var(--sheet)" stroke="var(--ink)" stroke-width="2"/>
-              <path data-steps="3,4,5" d="M186 210 l14 10 -14 10 z M214 210 l-14 10 14 10 z" fill="var(--ink)" stroke="var(--ink)" stroke-width="2"/>
-              <line data-steps="3,4,5" x1="200" y1="230" x2="200" y2="260" stroke="var(--ink)" stroke-width="2"/>
-              <path data-steps="1,2" d="M250 212 l8 8 m0 -8 l-8 8 M280 212 l8 8 m0 -8 l-8 8 M310 212 l8 8 m0 -8 l-8 8 M335 212 l8 8 m0 -8 l-8 8" stroke="var(--ink)" stroke-width="2"/>
+              <path data-steps="0,1,3" d="M186 210 l14 10 -14 10 z M214 210 l-14 10 14 10 z" fill="var(--sheet)" stroke="var(--ink)" stroke-width="2"/>
+              <path data-steps="2" data-still d="M186 210 l14 10 -14 10 z M214 210 l-14 10 14 10 z" fill="var(--ink)" stroke="var(--ink)" stroke-width="2"/>
+              <line data-steps="2" data-still x1="200" y1="230" x2="200" y2="260" stroke="var(--ink)" stroke-width="2"/>
+              <path data-steps="0,1" d="M250 212 l8 8 m0 -8 l-8 8 M280 212 l8 8 m0 -8 l-8 8 M310 212 l8 8 m0 -8 l-8 8 M335 212 l8 8 m0 -8 l-8 8" stroke="var(--ink)" stroke-width="2"/>
               <g fill="none" stroke="var(--ink)" stroke-width="2"><rect x="358" y="30" width="34" height="20" rx="2"/><path d="M358 32 l17 10 17 -10"/><rect x="358" y="90" width="34" height="20" rx="2"/><path d="M358 92 l17 10 17 -10"/><rect x="358" y="150" width="34" height="20" rx="2"/><path d="M358 152 l17 10 17 -10"/></g>
-              <g data-steps="0,1,2,6" fill="none" stroke="var(--ink)" stroke-width="2"><rect x="358" y="210" width="34" height="20" rx="2"/><path d="M358 212 l17 10 17 -10"/></g>
-              <rect data-steps="3,4,5" x="358" y="210" width="34" height="20" rx="2" fill="none" stroke="var(--line)" stroke-width="2" stroke-dasharray="3 3"/>
+              <g data-steps="0,1,3" fill="none" stroke="var(--ink)" stroke-width="2"><rect x="358" y="210" width="34" height="20" rx="2"/><path d="M358 212 l17 10 17 -10"/></g>
+              <rect data-steps="2" data-still x="358" y="210" width="34" height="20" rx="2" fill="none" stroke="var(--line)" stroke-width="2" stroke-dasharray="3 3"/>
             </svg>
 
-            <article class="tag" data-steps="3,4,5" aria-label="Lockout tag on partner-import">
+            <article class="tag" data-steps="2" data-still aria-label="Lockout tag on partner-import">
               <header><b>LANE CLOSED</b><span>partner-import</span><span class="stamp">FIXTURE RUN</span></header>
               <dl>
                 <dt>Cause</dt><dd class="mono">import_batch=2026-09-14-b</dd>
                 <dt>Read back</dt><dd class="mono">SendingEnabled: false, 14:03:12 UTC</dd>
                 <dt>Reopens</dt><dd>When the operator replies "reopen".</dd>
               </dl>
-              <footer><span>TAG 001</span><span>ZONE B2</span></footer>
+              <footer><span>TAG 001</span><span>ROW 2</span></footer>
             </article>
-            <p class="caption">Fixture run 001, recorded demonstration events. Not a live account.</p>
+            <div class="caption-row"><p class="caption">Fixture run 001, built from AWS's documented event examples. Times are illustrative. Not a live account.</p><button class="flow-toggle" type="button">Stop flow</button></div>
           </div>
 
           <div class="narrative" aria-live="polite">
-            <div data-steps="0"><h2 id="step-title">Normal sending on four lanes</h2><p>Receipts, password resets, the newsletter and a partner list import each send through their own configuration set. Bounce and complaint events arrive through EventBridge and nothing stands out.</p></div>
-            <div data-steps="1"><h2>Hard bounces start on one lane</h2><p>Permanent bounces arrive on partner-import only, each with a <code>550 5.1.1 user unknown</code> diagnostic from a different receiving provider. The other three lanes keep delivering.</p></div>
-            <div data-steps="2"><h2>The cause is named, with the rows that show it</h2><p>Every hard bounce on the lane carries the message tag <code>import_batch=2026-09-14-b</code>. The same template sends cleanly on other lanes, no provider is blocking across lanes, and no authentication recommendation is open. Cause: one import batch.</p></div>
-            <div data-steps="3"><h2>One lane closed, then read back</h2><p><code>PutConfigurationSetSendingOptions</code> turns sending off for partner-import only. A second call, <code>GetConfigurationSet</code>, reads <code>SendingOptions.SendingEnabled</code> as false before anything is reported.</p></div>
-            <div data-steps="4"><h2>The operator gets the email</h2>
-              <article class="message" aria-label="Closure email">
-                <dl><dt>Subject</dt><dd>Closed: partner-import, one lane in eu-central-1</dd></dl>
-                <div class="body"><p>Hard bounces on partner-import all carry <span class="mono">import_batch=2026-09-14-b</span>. I turned sending off for that lane only and read it back as false. Receipts, password-resets and newsletter stay open.</p><p>Reply <b>reopen</b> or <b>keep closed</b>.</p><p class="disclosure">Written by Fothering's AI agent.</p></div>
-              </article>
-            </div>
-            <div data-steps="5"><h2>The operator keeps it closed</h2>
-              <article class="message reply" aria-label="Operator reply"><dl><dt>14:41</dt><dd>Re: Closed: partner-import</dd></dl><div class="body"><p>keep closed, removing that batch first</p></div></article>
-              <p>SES receives the reply, and Fothering records the decision against the closure. Nothing changes on the lane.</p>
-            </div>
-            <div data-steps="6"><h2>Reopened on the operator's word</h2>
-              <article class="message reply" aria-label="Operator reply"><dl><dt>15:20</dt><dd>Re: Closed: partner-import</dd></dl><div class="body"><p>reopen</p></div></article>
-              <p>Sending is switched back on, read back as true, and a confirmation goes to the operator. The tag comes off the valve.</p>
-            </div>
             <div class="controls">
               <button class="button quiet" type="button" data-move="-1">Previous step</button>
               <button class="button" type="button" data-move="1">Next step</button>
-              <span class="count" id="step-clock">Step 1 of 7, 14:00 UTC</span>
+              <span class="count" id="step-clock">Step 1 of 4, 14:01 UTC</span>
+            </div>
+            <div data-steps="0"><h2 id="step-title">Hard bounces start on one lane</h2><p>Permanent bounces arrive on partner-import only, each with the status <code>550 5.1.1</code> (no such mailbox), from nine different receiving providers. Receipts, password-resets and newsletter keep delivering.</p></div>
+            <div data-steps="1"><h2>The cause, with the counts behind it</h2>
+              <table class="schedule evidence-sched">
+                <caption>Window 13:32 to 14:02 UTC on partner-import: 31 hard bounces in 240 recipient-sends. The fixture's rule: close only when one dimension holds every hard bounce on a lane above 5%, over at least 100 sends.</caption>
+                <thead><tr><th scope="col">Dimension</th><th scope="col">Hard bounces</th><th scope="col">Verdict</th></tr></thead>
+                <tbody>
+                  <tr><th scope="row">Message tag <code>import_batch=2026-09-14-b</code></th><td class="us">31 of 180 sends, 17.2%</td><td class="us">Cause: all 31 of the lane's hard bounces</td></tr>
+                  <tr><th scope="row">Message tag <code>import_batch=2026-09-14-a</code></th><td>0 of 60 sends</td><td class="no">Clean</td></tr>
+                  <tr><th scope="row">Template <code>partner-welcome</code></th><td>0 of 412 sends on other lanes</td><td class="no">Ruled out</td></tr>
+                  <tr><th scope="row">Receiving provider, largest <code>web.de</code></th><td>6 of 38 sends, 15.8%</td><td class="no">Ruled out: spread over 9 providers</td></tr>
+                  <tr><th scope="row">Authentication</th><td>DKIM and MAIL FROM verified</td><td class="no">Ruled out</td></tr>
+                </tbody>
+              </table>
+              <p>Detection code approved one lane for closure, partner-import. The agent on AgentCore confirmed it and wrote the explanation for the email.</p>
+            </div>
+            <div data-steps="2"><h2>One lane closed, then read back</h2><p><code>PutConfigurationSetSendingOptions</code> turns sending off for partner-import only. A second call, <code>GetConfigurationSet</code>, reads <code>SendingOptions.SendingEnabled</code> as false before anything is reported.</p></div>
+            <div data-steps="3"><h2>The email, and the reply that reopens</h2>
+              <article class="message" aria-label="Closure email">
+                <dl><dt>Subject</dt><dd>Closed: partner-import, one lane in eu-central-1</dd></dl>
+                <div class="body"><p class="disclosure">Fothering's AI agent wrote the paragraph headed "Why". Code decided the closure and wrote the rest.</p><p>Hard bounces on partner-import all carry <span class="mono">import_batch=2026-09-14-b</span>. Sending is off for that lane only, read back as false. Receipts, password-resets and newsletter stay open.</p><p><b>Why.</b> The bounces follow one import batch: the same template delivers on the other lanes, and the bounces come from nine providers.</p><p>Reply <b>reopen</b> or <b>keep closed</b>.</p></div>
+              </article>
+              <article class="message reply" aria-label="Operator reply"><dl><dt>15:20</dt><dd>Re: Closed: partner-import</dd></dl><div class="body"><p>reopen</p></div></article>
+              <p>Code matched <code>reopen</code> on the reply's first line. Sending went back on, read back as true, and a confirmation went out. An earlier "keep closed" reply, while the batch was being removed, is in the log below.</p>
             </div>
           </div>
         </section>
@@ -148,20 +182,22 @@
           <p>Rows appear as the replay reaches them. Recipient addresses are never stored: a row keeps the receiving domain only.</p>
         </div>
         <table class="schedule stack log">
-          <caption>Source: runs/fixture-001.json, recorded demonstration events.</caption>
+          <caption>Source: runs/fixture-001.json, a fixture built from AWS's documented event examples. Showing the first two of 31 hard bounces, and every decision, call, email and reply.</caption>
           <thead><tr><th scope="col">Time UTC</th><th scope="col">Kind</th><th scope="col">Lane</th><th scope="col">Detail</th></tr></thead>
           <tbody>
-            <tr data-from="0"><td data-col="Time">14:00:04</td><td data-col="Kind">Delivery</td><td data-col="Lane">receipts</td><td data-col="Detail">Delivered, gmail.com</td></tr>
-            <tr data-from="1"><td data-col="Time">14:01:17</td><td data-col="Kind">Bounce, Permanent</td><td data-col="Lane">partner-import</td><td data-col="Detail"><code>550 5.1.1 user unknown</code>, web.de, tag import_batch=2026-09-14-b</td></tr>
-            <tr data-from="1"><td data-col="Time">14:01:29</td><td data-col="Kind">Bounce, Permanent</td><td data-col="Lane">partner-import</td><td data-col="Detail"><code>550 5.1.1 user unknown</code>, outlook.com, tag import_batch=2026-09-14-b</td></tr>
-            <tr data-from="1"><td data-col="Time">14:01:40</td><td data-col="Kind">Delivery</td><td data-col="Lane">password-resets</td><td data-col="Detail">Delivered, kpnmail.nl</td></tr>
-            <tr data-from="2"><td data-col="Time">14:02:05</td><td data-col="Kind">Attribution</td><td data-col="Lane">partner-import</td><td data-col="Detail">Cause: message tag import_batch=2026-09-14-b. Ruled out: template, provider, authentication.</td></tr>
-            <tr data-from="3"><td data-col="Time">14:03:11</td><td data-col="Kind">SES call</td><td data-col="Lane">partner-import</td><td data-col="Detail"><code>PutConfigurationSetSendingOptions</code> SendingEnabled false, HTTP 200</td></tr>
-            <tr data-from="3"><td data-col="Time">14:03:12</td><td data-col="Kind">Read-back</td><td data-col="Lane">partner-import</td><td data-col="Detail"><code>GetConfigurationSet</code> SendingOptions.SendingEnabled false</td></tr>
-            <tr data-from="4"><td data-col="Time">14:03:14</td><td data-col="Kind">Email sent</td><td data-col="Lane">operator</td><td data-col="Detail">Closure notice, asks reopen or keep closed</td></tr>
-            <tr data-from="5"><td data-col="Time">14:41:02</td><td data-col="Kind">Reply received</td><td data-col="Lane">operator</td><td data-col="Detail">keep closed, recorded</td></tr>
-            <tr data-from="6"><td data-col="Time">15:20:40</td><td data-col="Kind">Reply received</td><td data-col="Lane">operator</td><td data-col="Detail">reopen</td></tr>
-            <tr data-from="6"><td data-col="Time">15:20:43</td><td data-col="Kind">Read-back</td><td data-col="Lane">partner-import</td><td data-col="Detail"><code>GetConfigurationSet</code> SendingOptions.SendingEnabled true</td></tr>
+            <tr data-from="0"><td data-col="Time">14:01:17</td><td data-col="Kind">Bounce, Permanent</td><td data-col="Lane">partner-import</td><td data-col="Detail"><code>550 5.1.1</code>, web.de, tag <code>import_batch=2026-09-14-b</code></td></tr>
+            <tr data-from="0"><td data-col="Time">14:01:29</td><td data-col="Kind">Bounce, Permanent</td><td data-col="Lane">partner-import</td><td data-col="Detail"><code>550 5.1.1</code>, outlook.com, tag <code>import_batch=2026-09-14-b</code></td></tr>
+            <tr data-from="0"><td data-col="Time">14:01:40</td><td data-col="Kind">Delivery</td><td data-col="Lane">password-resets</td><td data-col="Detail">Delivered, kpnmail.nl</td></tr>
+            <tr data-from="1"><td data-col="Time">14:02:05</td><td data-col="Kind">Evidence record</td><td data-col="Lane">partner-import</td><td data-col="Detail">Cause: message tag <code>import_batch=2026-09-14-b</code>, 31 of 31 hard bounces. Ruled out: template, provider, authentication. One lane approved.</td></tr>
+            <tr data-from="1"><td data-col="Time">14:02:09</td><td data-col="Kind">Agent</td><td data-col="Lane">partner-import</td><td data-col="Detail">Confirmed the approved lane, wrote the explanation</td></tr>
+            <tr data-from="2"><td data-col="Time">14:03:11</td><td data-col="Kind">SES call</td><td data-col="Lane">partner-import</td><td data-col="Detail"><code>PutConfigurationSetSendingOptions</code> SendingEnabled false, HTTP 200</td></tr>
+            <tr data-from="2"><td data-col="Time">14:03:12</td><td data-col="Kind">Read-back</td><td data-col="Lane">partner-import</td><td data-col="Detail"><code>GetConfigurationSet</code> SendingOptions.SendingEnabled false</td></tr>
+            <tr data-from="3"><td data-col="Time">14:03:14</td><td data-col="Kind">Email sent</td><td data-col="Lane">operator</td><td data-col="Detail">Closure notice, asks reopen or keep closed</td></tr>
+            <tr data-from="3"><td data-col="Time">14:41:02</td><td data-col="Kind">Reply received</td><td data-col="Lane">operator</td><td data-col="Detail">First line <code>keep closed</code>, recorded, nothing changed</td></tr>
+            <tr data-from="3"><td data-col="Time">15:20:40</td><td data-col="Kind">Reply received</td><td data-col="Lane">operator</td><td data-col="Detail">First line <code>reopen</code></td></tr>
+            <tr data-from="3"><td data-col="Time">15:20:41</td><td data-col="Kind">SES call</td><td data-col="Lane">partner-import</td><td data-col="Detail"><code>PutConfigurationSetSendingOptions</code> SendingEnabled true, HTTP 200</td></tr>
+            <tr data-from="3"><td data-col="Time">15:20:42</td><td data-col="Kind">Read-back</td><td data-col="Lane">partner-import</td><td data-col="Detail"><code>GetConfigurationSet</code> SendingOptions.SendingEnabled true</td></tr>
+            <tr data-from="3"><td data-col="Time">15:20:44</td><td data-col="Kind">Email sent</td><td data-col="Lane">operator</td><td data-col="Detail">Confirmation: partner-import reopened, read back true</td></tr>
           </tbody>
         </table>
       </section>
@@ -172,10 +208,18 @@
 </div>
 <script>
 (function () {
-  var clocks = ["14:00", "14:01", "14:02", "14:03", "14:03", "14:41", "15:20"];
+  var clocks = ["14:01", "14:02", "14:03", "15:20"];
+  // The drawing's description follows the step, so a screen reader hears the lane states, not only the title.
+  var descriptions = [
+    "Mail flows on all four lanes. Bounce marks appear on partner-import.",
+    "Mail still flows on all four lanes, with bounce marks on partner-import. Detection code has approved closing partner-import.",
+    "partner-import is stopped at a filled valve with a lockout tag, and its outlet is dotted. Receipts, password-resets and newsletter keep flowing.",
+    "partner-import is open and flowing again, and the tag is off the valve. All four lanes flow."
+  ];
   var last = clocks.length - 1;
   var step = 0;
   var clock = document.getElementById("step-clock");
+  var desc = document.getElementById("board-desc");
   var stepButtons = document.querySelectorAll("[data-go]");
 
   function render() {
@@ -189,6 +233,7 @@
     var labelled = document.getElementById("step-title");
     if (labelled && labelled !== heading) labelled.removeAttribute("id");
     if (heading) heading.id = "step-title";
+    desc.textContent = descriptions[step];
     document.querySelectorAll("tr[data-from]").forEach(function (row) {
       var from = Number(row.getAttribute("data-from"));
       row.hidden = from > step;
@@ -203,9 +248,11 @@
     document.querySelector('[data-move="1"]').disabled = step === last;
   }
 
+  // Each step has its own address (#step-1 to #step-4), for the landing page and the video to link to.
   function go(next) {
     step = Math.max(0, Math.min(last, next));
     render();
+    if (history.replaceState) history.replaceState(null, "", "#step-" + (step + 1));
   }
 
   stepButtons.forEach(function (button) {
@@ -215,10 +262,25 @@
     button.addEventListener("click", function () { go(step + Number(button.getAttribute("data-move"))); });
   });
   document.addEventListener("keydown", function (event) {
-    if (event.target.closest("input, textarea")) return;
-    if (event.key === "ArrowRight") go(step + 1);
-    if (event.key === "ArrowLeft") go(step - 1);
+    if (event.key !== "ArrowRight" && event.key !== "ArrowLeft") return;
+    // Modified arrows belong to the browser (Alt+Left is Back), and a focused field or radio group
+    // (the theme switch) uses arrows itself.
+    if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+    if (event.target.closest("input, textarea, select, [contenteditable]")) return;
+    event.preventDefault();
+    go(step + (event.key === "ArrowRight" ? 1 : -1));
   });
+
+  function stepFromHash() {
+    var linked = /^#step-([1-4])$/.exec(location.hash);
+    return linked ? Number(linked[1]) - 1 : null;
+  }
+  // A step link followed while the replay is already open changes only the hash, and reloads nothing.
+  window.addEventListener("hashchange", function () {
+    var linked = stepFromHash();
+    if (linked !== null && linked !== step) { step = linked; render(); }
+  });
+  step = stepFromHash() || 0;
   render();
 })();
 </script>

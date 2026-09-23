@@ -2,9 +2,14 @@
 // visitor who chose Light never sees a dark flash, and Device (no stored value) follows the OS.
 (function () {
   var root = document.documentElement;
+  // Pages style their scripted parts under .js, so a visitor without JavaScript never sees controls that do nothing.
+  root.classList.add("js");
   try {
     var stored = localStorage.getItem("fothering-theme");
     if (stored === "light" || stored === "dark") root.dataset.theme = stored;
+    // The flow animation choice (WCAG 2.2.2) is applied here too, so a stopped drawing never starts moving on load.
+    var flow = localStorage.getItem("fothering-flow");
+    if (flow === "stopped" || flow === "running") root.dataset.flow = flow;
   } catch (e) {}
 
   var sheets = [
@@ -64,6 +69,31 @@
     });
   }
 
+  // Every drawing with moving flow carries a Stop flow button. With no stored choice the flow follows the
+  // operating system: stopped under reduced motion, running otherwise. A click stores the opposite state.
+  function wireFlow() {
+    var buttons = document.querySelectorAll(".flow-toggle");
+    if (!buttons.length) return;
+    var reduce = window.matchMedia("(prefers-reduced-motion: reduce)");
+    function isStopped() {
+      return root.dataset.flow === "stopped" || (root.dataset.flow !== "running" && reduce.matches);
+    }
+    function label() {
+      var stopped = isStopped();
+      buttons.forEach(function (button) { button.textContent = stopped ? "Run flow" : "Stop flow"; });
+    }
+    buttons.forEach(function (button) {
+      button.addEventListener("click", function () {
+        root.dataset.flow = isStopped() ? "running" : "stopped";
+        try { localStorage.setItem("fothering-flow", root.dataset.flow); } catch (e) {}
+        label();
+      });
+    });
+    // With no stored choice the CSS follows the preference live, so the label must too.
+    reduce.addEventListener("change", label);
+    label();
+  }
+
   document.addEventListener("DOMContentLoaded", function () {
     var current = location.pathname.split("/").pop() || "landing.html";
     var topSlot = document.querySelector('[data-chrome="top"]');
@@ -75,5 +105,6 @@
       indexSlot.innerHTML = index(current);
     }
     wireTheme();
+    wireFlow();
   });
 })();
