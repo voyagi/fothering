@@ -41,12 +41,29 @@ function allowed(email, allow) {
 function run(cwd) {
   let emails = [];
   let historyRead = true;
+  let shallow = false;
   try {
-    // --branches --tags, not bare HEAD: a push can publish ANY local branch or tag, and the
-    // one recreate was owed to identities that sat on branches beside main. Deliberately
-    // not --all: that would also read refs/stash (never pushed, so a long-dead stash would
-    // redden the gate forever) and remote-tracking refs (the server's already-public state).
-    const out = execFileSync('git', ['log', '--branches', '--tags', '--format=%ae%n%ce'], {
+    shallow = execFileSync('git', ['rev-parse', '--is-shallow-repository'], { cwd, encoding: 'utf8', windowsHide: true }).trim() === 'true';
+  } catch {
+    // Not a repo, or git missing: the git log below fails the same way and reports it as UNKNOWN.
+  }
+  if (shallow) {
+    // A shallow clone (CI's default fetch-depth: 1) holds only the newest commits, so a clean
+    // result would say nothing about the rest of the history.
+    console.error('[git-identity] UNKNOWN: shallow clone, older commits are missing and cannot be judged.');
+    console.error('[git-identity] In CI, check out with fetch-depth: 0.');
+    return 2;
+  }
+  try {
+    // --branches --tags plus HEAD: a push can publish ANY local branch or tag, and the one
+    // recreate was owed to identities that sat on branches beside main. HEAD covers a detached
+    // checkout with no local branch at all, which is how CI checks out a pull request; without
+    // it that run walked nothing and reported "no commits yet". Deliberately not --all: that
+    // would also read refs/stash (never pushed, so a long-dead stash would redden the gate
+    // forever) and remote-tracking refs (the server's already-public state).
+    // --ignore-missing: on an orphan branch before its first commit HEAD does not resolve, and
+    // without it the whole log fails and the other branches are never read.
+    const out = execFileSync('git', ['log', '--ignore-missing', '--branches', '--tags', 'HEAD', '--format=%ae%n%ce'], {
       cwd, encoding: 'utf8', windowsHide: true, maxBuffer: 64 * 1024 * 1024,
     });
     emails = [...new Set(out.split('\n').map((l) => l.trim()).filter(Boolean))];
@@ -191,6 +208,38 @@ function selftest() {
     const notRepo = mkdtempSync(join(tmpdir(), 'git-identity-st-nr-'));
     roots.push(notRepo);
     check('a non-repo is UNKNOWN, exit 2', runCli(notRepo), 2, /UNKNOWN/);
+    {
+      // The CI pull request shape: HEAD detached on a commit and no local branch left pointing at it.
+      const r5 = repo('person@gmail.example');
+      roots.push(r5);
+      const branch = git(['symbolic-ref', '--short', 'HEAD'], r5);
+      git(['checkout', '-q', '--detach'], r5);
+      git(['update-ref', '-d', `refs/heads/${branch}`], r5);
+      git(['config', 'user.email', '12345+someone@users.noreply.github.com'], r5);
+      check('a leak on a detached HEAD with no branch still fails', runCli(r5), 1, /in HISTORY outside the allowlist/);
+    }
+    {
+      // An orphan branch before its first commit: HEAD is unborn, the leak sits on another branch.
+      const r6 = repo('person@gmail.example');
+      roots.push(r6);
+      git(['checkout', '-q', '--orphan', 'fresh'], r6);
+      git(['config', 'user.email', '12345+someone@users.noreply.github.com'], r6);
+      check('a leak on another branch still fails while HEAD is unborn', runCli(r6), 1, /in HISTORY outside the allowlist/);
+    }
+    {
+      // A shallow clone hides older commits, so it must not read as clean.
+      const src = repo('12345+someone@users.noreply.github.com');
+      roots.push(src);
+      writeFileSync(join(src, 'd.txt'), 'w\n');
+      git(['add', '-A'], src);
+      git(['commit', '-q', '-m', 'second'], src);
+      const dest = mkdtempSync(join(tmpdir(), 'git-identity-st-shallow-'));
+      roots.push(dest);
+      // --no-local, not a file:// URL: Git for Windows misreads file:///C:/..., and a plain local
+      // path clone ignores --depth.
+      git(['-c', `core.hooksPath=${join(src, '.no-hooks')}`, 'clone', '-q', '--no-local', '--depth', '1', src, dest], src);
+      check('a shallow clone is UNKNOWN, exit 2', runCli(dest), 2, /UNKNOWN: shallow clone/);
+    }
   } finally {
     for (const r of roots) { try { rmSync(r, { recursive: true, force: true }); } catch {} }
   }
