@@ -2,5 +2,14 @@
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": [
     "local>voyagi/renovate-config"
+  ],
+  "packageRules": [
+    {
+      "description": "Turn automerge off for every update, including the patch and minor updates the shared preset automerges, so each update waits for a maintainer's review.",
+      "matchPackageNames": [
+        "*"
+      ],
+      "automerge": false
+    }
   ]
 }
