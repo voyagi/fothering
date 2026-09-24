@@ -19,6 +19,7 @@
     "**/docs/**",
     "scripts/**",
     "design/mockups/**",
-    "package-lock.json"
+    "package-lock.json",
+    "**/fixtures/**"
   ]
 }
