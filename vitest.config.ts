@@ -5,5 +5,6 @@ export default defineConfig({
     include: ['packages/*/src/**/*.test.ts'],
     exclude: [...configDefaults.exclude, '**/*.fault.test.ts'],
     setupFiles: ['packages/providers/src/test/guards.setup.ts'],
+    globalSetup: ['packages/providers/src/test/global-setup.ts'],
   },
 });
