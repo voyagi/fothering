@@ -8,12 +8,19 @@ import {
   TTL_ATTRIBUTE,
   expiresAtFor,
 } from '@fothering/core/records';
-import { bucketStartMs, countRecords } from '@fothering/core/buckets';
+import { BUCKET_MS, bucketStartMs, countRecords } from '@fothering/core/buckets';
 import { findLane } from '@fothering/core/lanes';
 import { minimizeEvent } from '@fothering/core/minimize';
 import { parseSesEvent } from '@fothering/core/ses-events';
+import { selectKeyVersion, type AddressKeySet } from '@fothering/core/address';
 import { DOC_EXAMPLE_LANE_MAP, loadSesEventFixture } from './ses-events/index.js';
-import { createFixtureAddressKey, createFixtureEventStore, TEST_ADDRESS_KEY_SET } from './ingest-ports.js';
+import {
+  FixtureWriteError,
+  createFixtureAddressKey,
+  createFixtureDeadLetter,
+  createFixtureEventStore,
+  TEST_ADDRESS_KEY_SET,
+} from './ingest-ports.js';
 
 const ONE_HOUR_MS = 60 * 60 * 1000;
 
@@ -102,5 +109,92 @@ describe('the doc-derived Bounce through core and the fixture event store', () =
     expect(RECIPIENT_INDEX_NAME).toBe('byRecipient');
     expect(TTL_ATTRIBUTE).toBe('expiresAt');
     expect(RETENTION_SECONDS).toBe(2_592_000);
+  });
+});
+
+describe('the fixture ports behave like the conditional-write store and queue they stand in for', () => {
+  it('gives exactly one written and one duplicate for two concurrent puts of the same key', async () => {
+    const { records } = await minimizeFixture();
+    const record = records[0];
+    if (record === undefined) throw new Error('expected at least one minimized record');
+    const store = createFixtureEventStore();
+
+    const outcomes = await Promise.all([store.putIfAbsent(record), store.putIfAbsent(record)]);
+    expect(outcomes.sort()).toEqual(['duplicate', 'written']);
+
+    const nowMs = record.mailTimestampMs + ONE_HOUR_MS;
+    const stored = await store.queryLane(record.configurationSet, record.bucketStartMs, record.bucketStartMs, nowMs);
+    expect(stored).toHaveLength(1);
+  });
+
+  it('excludes a record outside the requested bucket range and one expiring exactly at now', async () => {
+    const { records } = await minimizeFixture();
+    const record = records[0];
+    if (record === undefined) throw new Error('expected at least one minimized record');
+    const store = createFixtureEventStore();
+    await store.putIfAbsent(record);
+
+    const outsideRange = await store.queryLane(
+      record.configurationSet,
+      record.bucketStartMs + BUCKET_MS,
+      record.bucketStartMs + BUCKET_MS,
+      record.mailTimestampMs + ONE_HOUR_MS,
+    );
+    expect(outsideRange).toHaveLength(0);
+
+    const nowAtExpiryMs = record.expiresAt * 1000;
+    const atExpiry = await store.queryLane(record.configurationSet, record.bucketStartMs, record.bucketStartMs, nowAtExpiryMs);
+    expect(atExpiry).toHaveLength(0);
+
+    const beforeExpiry = await store.queryLane(
+      record.configurationSet,
+      record.bucketStartMs,
+      record.bucketStartMs,
+      nowAtExpiryMs - 1000,
+    );
+    expect(beforeExpiry).toHaveLength(1);
+  });
+
+  it('finds a record by its recipient hash, then a delete makes a re-read return undefined', async () => {
+    const { records } = await minimizeFixture();
+    const record = records[0];
+    if (record === undefined) throw new Error('expected at least one minimized record');
+    if (record.recipientHmac === undefined) throw new Error('expected the record to carry a recipient hash');
+    const store = createFixtureEventStore();
+    await store.putIfAbsent(record);
+
+    const keys = await store.queryByRecipient(record.recipientHmac);
+    expect(keys).toEqual([{ pk: record.pk, sk: record.sk }]);
+
+    await store.deleteRecord({ pk: record.pk, sk: record.sk });
+    expect(await store.getRecord({ pk: record.pk, sk: record.sk })).toBeUndefined();
+  });
+
+  it('rejects a put configured to fail, and the dead letter records batches and rejects when configured to fail', async () => {
+    const { records } = await minimizeFixture();
+
+    const failingStore = createFixtureEventStore({ eventStoreFailure: 'put' });
+    const record = records[0];
+    if (record === undefined) throw new Error('expected at least one minimized record');
+    await expect(failingStore.putIfAbsent(record)).rejects.toThrow(FixtureWriteError);
+
+    const deadLetter = createFixtureDeadLetter();
+    await deadLetter.send(records);
+    expect(deadLetter.sent).toEqual([records]);
+
+    const failingDeadLetter = createFixtureDeadLetter({ deadLetterFailure: 'send' });
+    await expect(failingDeadLetter.send(records)).rejects.toThrow(FixtureWriteError);
+  });
+
+  it('selects the key version active at or before the send time', () => {
+    const rotationMs = 1_700_000_000_000;
+    const keySet: AddressKeySet = {
+      versions: [
+        { id: 'k1', secret: 'k1-secret', activeFromMs: 0 },
+        { id: 'k2', secret: 'k2-secret', activeFromMs: rotationMs },
+      ],
+    };
+    expect(selectKeyVersion(keySet, rotationMs - 1).id).toBe('k1');
+    expect(selectKeyVersion(keySet, rotationMs).id).toBe('k2');
   });
 });
