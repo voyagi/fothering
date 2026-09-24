@@ -61,7 +61,90 @@ export interface NetworkGuardModules {
   dgram: { Socket: { prototype: { send: AnyFn; connect: AnyFn } } };
 }
 
-// GREEN phase implements the wrapping; RED phase proves the target assertions can fail for real.
+// Marks a wrapped function so a second install call recognizes it and skips re-wrapping. A plain
+// boolean flag on the target object would work too, but the marker travels with the FUNCTION
+// itself, so it survives even if callers move it between objects.
+const GUARD_MARKER = Symbol('networkGuardWrapped');
+
+function isGuarded(fn: unknown): boolean {
+  return typeof fn === 'function' && (fn as unknown as Record<PropertyKey, unknown>)[GUARD_MARKER] === true;
+}
+
+function wrapMethod(target: object, prop: string, checkArgs: (args: unknown[]) => void): void {
+  const bag = target as Record<string, unknown>;
+  const original = bag[prop];
+  if (typeof original !== 'function' || isGuarded(original)) return;
+  const wrapped = function (this: unknown, ...args: unknown[]): unknown {
+    checkArgs(args);
+    return (original as (...fnArgs: unknown[]) => unknown).apply(this, args);
+  };
+  (wrapped as unknown as Record<PropertyKey, unknown>)[GUARD_MARKER] = true;
+  bag[prop] = wrapped;
+}
+
+// net.connect() pre-normalizes its own arguments into [options, callback] before handing them to
+// Socket.prototype.connect, so a caller through the module function and a caller through the
+// prototype method directly hand this two different shapes (Pitfall 6).
+function firstConnectArg(args: unknown[]): unknown {
+  return Array.isArray(args[0]) ? args[0][0] : args[0];
+}
+
+function assertAllowedConnect(args: unknown[]): void {
+  const target = firstConnectArg(args);
+  let host: string | undefined;
+  let path: string | undefined;
+  if (typeof target === 'object' && target !== null) {
+    const opts = target as { host?: string; path?: string };
+    host = opts.host;
+    path = opts.path;
+  } else if (typeof target === 'string') {
+    path = target; // Socket.prototype.connect(path, ...) is the IPC form.
+  } else if (typeof target === 'number') {
+    const maybeHost = args[1];
+    host = typeof maybeHost === 'string' ? maybeHost : undefined;
+  }
+  if (path !== undefined) return; // a Unix socket or named pipe never reaches the network.
+  if (host !== undefined && !isLoopbackHost(host)) throw new NetworkGuardError(host);
+}
+
+function assertAllowedHostname(hostname: unknown): void {
+  if (typeof hostname === 'string' && !isLoopbackHost(hostname)) throw new NetworkGuardError(hostname);
+}
+
+// dns.resolve4, resolveMx, reverse and every sibling share this prefix; matching by name means a
+// Node release adding another resolve* method is covered without editing this list.
+const HOSTNAME_METHOD_RE = /^(resolve|reverse)/;
+
+function wrapHostnameMethods(target: object): void {
+  const bag = target as Record<string, unknown>;
+  for (const key of Object.getOwnPropertyNames(bag)) {
+    if (!HOSTNAME_METHOD_RE.test(key)) continue;
+    wrapMethod(bag, key, (args) => assertAllowedHostname(args[0]));
+  }
+}
+
+function lastNonCallbackArg(args: unknown[]): unknown {
+  const withoutCallback = typeof args[args.length - 1] === 'function' ? args.slice(0, -1) : args;
+  return withoutCallback[withoutCallback.length - 1];
+}
+
 export function installNetworkGuard(modules: NetworkGuardModules): void {
-  void modules;
+  const { net, dns, dgram } = modules;
+
+  wrapMethod(net.Socket.prototype, 'connect', assertAllowedConnect);
+
+  wrapMethod(dns, 'lookup', (args) => assertAllowedHostname(args[0]));
+  wrapMethod(dns.promises, 'lookup', (args) => assertAllowedHostname(args[0]));
+  wrapHostnameMethods(dns);
+  wrapHostnameMethods(dns.promises);
+  wrapHostnameMethods(dns.Resolver.prototype);
+  wrapHostnameMethods(dns.promises.Resolver.prototype);
+
+  wrapMethod(dgram.Socket.prototype, 'send', (args) => {
+    const target = lastNonCallbackArg(args);
+    if (typeof target === 'string') assertAllowedHostname(target);
+  });
+  wrapMethod(dgram.Socket.prototype, 'connect', (args) => {
+    if (typeof args[1] === 'string') assertAllowedHostname(args[1]);
+  });
 }
