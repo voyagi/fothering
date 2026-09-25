@@ -1,8 +1,71 @@
 import { z } from 'zod';
+import { UNCLASSIFIED } from './records.js';
 
-// D-12: zod objects strip unknown keys by default, so a new SES field an event carries but this
-// schema does not name is dropped silently rather than rejected. Plan 01-04 adds the other five
-// event types; this plan carries only the Bounce shape the tracer needs.
+// D-12: zod objects strip unknown keys by default, so a new SES field or subtype this schema does
+// not name is dropped or mapped to unclassified rather than dropping the whole event.
+
+const SES_ID_PATTERN = /^[A-Za-z0-9._-]{1,256}$/;
+// SES assigns messageId and feedbackId itself; a value outside this pattern cannot have come from
+// SES, so it fails the parse rather than carrying free text into a record key.
+const sesId = z.string().regex(SES_ID_PATTERN);
+
+function parsesToDate(value: string): boolean {
+  return !Number.isNaN(Date.parse(value));
+}
+
+// A value outside the AWS-documented list never fails the parse: it is a new SES subtype the
+// schema has not caught up with yet, so it is stored as unclassified instead of dropping the event.
+function unclassifiedEnum(values: readonly string[]) {
+  const allowed = new Set(values);
+  return z.string().transform((value) => (allowed.has(value) ? value : UNCLASSIFIED));
+}
+
+const BOUNCE_TYPES = ['Undetermined', 'Permanent', 'Transient'] as const;
+const BOUNCE_SUBTYPES = [
+  'Undetermined',
+  'General',
+  'NoEmail',
+  'Suppressed',
+  'OnAccountSuppressionList',
+  'EmailValidationSuppressed',
+  'OnTenantSuppressionList',
+  'MailboxFull',
+  'MessageTooLarge',
+  'CustomTimeoutExceeded',
+  'ContentRejected',
+  'AttachmentRejected',
+] as const;
+const COMPLAINT_FEEDBACK_TYPES = ['abuse', 'auth-failure', 'fraud', 'not-spam', 'other', 'virus'] as const;
+const DELAY_TYPES = [
+  'InternalFailure',
+  'General',
+  'MailboxFull',
+  'SpamDetected',
+  'RecipientServerError',
+  'IPFailure',
+  'TransientCommunicationFailure',
+  'BYOIPHostNameLookupUnavailable',
+  'Undetermined',
+  'SendingDeferral',
+] as const;
+
+// complaintSubType is the one enum field the docs say may be null: that means no subtype, never
+// unclassified. Two suppression values are kept as themselves; anything else maps to unclassified.
+const complaintSubTypeSchema = z
+  .string()
+  .nullish()
+  .transform((value) => {
+    if (value === null || value === undefined) return value;
+    return value === 'OnAccountSuppressionList' || value === 'OnTenantSuppressionList' ? value : UNCLASSIFIED;
+  });
+
+const mailSchema = z.object({
+  timestamp: z.string().refine(parsesToDate, 'mail.timestamp is not a date Date.parse can read'),
+  messageId: sesId,
+  source: z.string(),
+  destination: z.array(z.string()),
+  tags: z.record(z.string(), z.array(z.string())),
+});
 
 const bouncedRecipientSchema = z.object({
   emailAddress: z.string(),
@@ -11,45 +74,131 @@ const bouncedRecipientSchema = z.object({
   diagnosticCode: z.string().optional(),
 });
 
+const delayedRecipientSchema = z.object({
+  emailAddress: z.string(),
+  status: z.string().optional(),
+  diagnosticCode: z.string().optional(),
+});
+
+const sendDetailSchema = z.object({
+  eventType: z.literal('Send'),
+  mail: mailSchema,
+  send: z.object({}),
+});
+
+const deliveryDetailSchema = z.object({
+  eventType: z.literal('Delivery'),
+  mail: mailSchema,
+  delivery: z.object({
+    timestamp: z.string().refine(parsesToDate, 'delivery.timestamp is not a date Date.parse can read'),
+    processingTimeMillis: z.number(),
+    recipients: z.array(z.string()).min(1),
+    smtpResponse: z.string(),
+    reportingMTA: z.string().optional(),
+    remoteMtaIp: z.string(),
+  }),
+});
+
 const bounceDetailSchema = z.object({
   eventType: z.literal('Bounce'),
-  mail: z.object({
-    timestamp: z.string(),
-    messageId: z.string(),
-    destination: z.array(z.string()),
-    tags: z.record(z.string(), z.array(z.string())),
-  }),
+  mail: mailSchema,
   bounce: z.object({
-    bounceType: z.string(),
-    bounceSubType: z.string(),
-    bouncedRecipients: z.array(bouncedRecipientSchema),
-    timestamp: z.string(),
-    feedbackId: z.string(),
+    bounceType: unclassifiedEnum(BOUNCE_TYPES),
+    bounceSubType: unclassifiedEnum(BOUNCE_SUBTYPES),
+    bouncedRecipients: z.array(bouncedRecipientSchema).min(1),
+    timestamp: z.string().refine(parsesToDate, 'bounce.timestamp is not a date Date.parse can read'),
+    feedbackId: sesId,
     reportingMTA: z.string().optional(),
   }),
 });
 
-const eventBridgeEnvelopeSchema = z.object({
-  version: z.string(),
-  id: z.string(),
-  'detail-type': z.string(),
-  source: z.string(),
-  account: z.string(),
-  time: z.string(),
-  region: z.string(),
-  resources: z.array(z.string()),
-  detail: bounceDetailSchema,
+const complaintDetailSchema = z.object({
+  eventType: z.literal('Complaint'),
+  mail: mailSchema,
+  complaint: z.object({
+    complainedRecipients: z.array(z.object({ emailAddress: z.string() })),
+    timestamp: z.string().refine(parsesToDate, 'complaint.timestamp is not a date Date.parse can read'),
+    feedbackId: sesId,
+    complaintSubType: complaintSubTypeSchema,
+    complaintFeedbackType: unclassifiedEnum(COMPLAINT_FEEDBACK_TYPES).optional(),
+  }),
 });
+
+const rejectDetailSchema = z.object({
+  eventType: z.literal('Reject'),
+  mail: mailSchema,
+  reject: z.object({
+    reason: z.string(),
+  }),
+});
+
+const deliveryDelayDetailSchema = z.object({
+  eventType: z.literal('DeliveryDelay'),
+  mail: mailSchema,
+  deliveryDelay: z.object({
+    delayType: unclassifiedEnum(DELAY_TYPES),
+    delayedRecipients: z.array(delayedRecipientSchema).min(1),
+    expirationTime: z.string(),
+    reportingMTA: z.string().optional(),
+    timestamp: z.string().refine(parsesToDate, 'deliveryDelay.timestamp is not a date Date.parse can read'),
+  }),
+});
+
+const detailSchema = z.discriminatedUnion('eventType', [
+  sendDetailSchema,
+  deliveryDetailSchema,
+  bounceDetailSchema,
+  complaintDetailSchema,
+  rejectDetailSchema,
+  deliveryDelayDetailSchema,
+]);
+
+export type SesEvent = z.infer<typeof detailSchema>;
+
+// The EventBridge detail-type and the SES-assigned eventType describe the same event through two
+// independent fields; a mismatch is not a shape problem any single field schema can catch on its
+// own, so it is checked here, after the rest of the envelope has already parsed successfully.
+const DETAIL_TYPE_BY_EVENT_TYPE: Record<SesEvent['eventType'], string> = {
+  Send: 'Email Sent',
+  Delivery: 'Email Delivered',
+  Bounce: 'Email Bounced',
+  Complaint: 'Email Complaint Received',
+  Reject: 'Email Rejected',
+  DeliveryDelay: 'Email Delivery Delayed',
+};
+
+const eventBridgeEnvelopeSchema = z
+  .object({
+    version: z.string(),
+    id: z.string(),
+    'detail-type': z.string(),
+    source: z.literal('aws.ses'),
+    account: z.string(),
+    time: z.string().refine(parsesToDate, 'the envelope time is not a date Date.parse can read'),
+    region: z.string(),
+    resources: z.array(z.string()),
+    detail: detailSchema,
+  })
+  .refine((value) => value['detail-type'] === DETAIL_TYPE_BY_EVENT_TYPE[value.detail.eventType], {
+    message: 'detail-type does not match the parsed eventType',
+  });
 
 export type SesEnvelope = z.infer<typeof eventBridgeEnvelopeSchema>;
 
-export type ParseSesEventResult = { ok: true; event: SesEnvelope } | { ok: false; messageId?: string };
+export type ParseSesEventResult =
+  | { ok: true; event: SesEnvelope }
+  | { ok: false; messageId?: string; field?: string };
 
 export function parseSesEvent(raw: unknown): ParseSesEventResult {
   const result = eventBridgeEnvelopeSchema.safeParse(raw);
   if (result.success) return { ok: true, event: result.data };
   const messageId = extractMessageId(raw);
-  return messageId === undefined ? { ok: false } : { ok: false, messageId };
+  const field = fieldFromIssue(raw, result.error.issues[0]);
+  return {
+    ok: false,
+    ...(messageId !== undefined ? { messageId } : {}),
+    ...(field !== undefined ? { field } : {}),
+  };
 }
 
 // A parse failure still logs a message id where one is readable, so a dropped event leaves a
@@ -62,4 +211,27 @@ function extractMessageId(raw: unknown): string | undefined {
   if (typeof mail !== 'object' || mail === null) return undefined;
   const messageId = (mail as Record<string, unknown>).messageId;
   return typeof messageId === 'string' ? messageId : undefined;
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+// field is a closed vocabulary read from the FIRST zod issue's path, never from the input itself.
+// Two restrictions keep it that way: a garbage or near-empty input (raw is not a plain object, or
+// its first issue is a missing top-level envelope field such as "version") never gets one, because
+// that shape carries no reliable content to name; only a detail-rooted issue, or the eventType and
+// detail-type cross-check's empty-path issue, is specific enough to surface. A tag key is sender-
+// controlled, so the path is cut the instant it reaches "tags", before any key past it is joined in.
+function fieldFromIssue(raw: unknown, issue: { path: readonly PropertyKey[] } | undefined): string | undefined {
+  if (!isPlainObject(raw) || issue === undefined) return undefined;
+  if (issue.path.length === 0) return 'envelope';
+  if (issue.path[0] !== 'detail') return undefined;
+  const segments: string[] = [];
+  for (const segment of issue.path) {
+    if (typeof segment !== 'string') continue;
+    segments.push(segment);
+    if (segment === 'tags') break;
+  }
+  return segments.length === 0 ? 'envelope' : segments.join('.');
 }
