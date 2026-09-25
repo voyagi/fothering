@@ -9,9 +9,12 @@ const SES_ID_PATTERN = /^[A-Za-z0-9._-]{1,256}$/;
 // SES, so it fails the parse rather than carrying free text into a record key.
 const sesId = z.string().regex(SES_ID_PATTERN);
 
-function parsesToDate(value: string): boolean {
-  return !Number.isNaN(Date.parse(value));
-}
+// SES and EventBridge write every timestamp as ISO 8601 with an explicit offset (Z). Date.parse
+// alone would also accept a date-time with no offset, which it reads as LOCAL time, so one event
+// would land in send-time buckets hours apart on hosts in different timezones; it also reads a
+// bare "1" as a date in 2001 and rolls 31 February into March. The offset is therefore required,
+// and the calendar date must exist.
+const isoTimestamp = z.iso.datetime({ offset: true });
 
 // A value outside the AWS-documented list never fails the parse: it is a new SES subtype the
 // schema has not caught up with yet, so it is stored as unclassified instead of dropping the event.
@@ -60,7 +63,7 @@ const complaintSubTypeSchema = z
   });
 
 const mailSchema = z.object({
-  timestamp: z.string().refine(parsesToDate, 'mail.timestamp is not a date Date.parse can read'),
+  timestamp: isoTimestamp,
   messageId: sesId,
   source: z.string(),
   destination: z.array(z.string()),
@@ -90,7 +93,7 @@ const deliveryDetailSchema = z.object({
   eventType: z.literal('Delivery'),
   mail: mailSchema,
   delivery: z.object({
-    timestamp: z.string().refine(parsesToDate, 'delivery.timestamp is not a date Date.parse can read'),
+    timestamp: isoTimestamp,
     processingTimeMillis: z.number(),
     recipients: z.array(z.string()).min(1),
     smtpResponse: z.string(),
@@ -106,7 +109,7 @@ const bounceDetailSchema = z.object({
     bounceType: unclassifiedEnum(BOUNCE_TYPES),
     bounceSubType: unclassifiedEnum(BOUNCE_SUBTYPES),
     bouncedRecipients: z.array(bouncedRecipientSchema).min(1),
-    timestamp: z.string().refine(parsesToDate, 'bounce.timestamp is not a date Date.parse can read'),
+    timestamp: isoTimestamp,
     feedbackId: sesId,
     reportingMTA: z.string().optional(),
   }),
@@ -117,7 +120,7 @@ const complaintDetailSchema = z.object({
   mail: mailSchema,
   complaint: z.object({
     complainedRecipients: z.array(z.object({ emailAddress: z.string() })),
-    timestamp: z.string().refine(parsesToDate, 'complaint.timestamp is not a date Date.parse can read'),
+    timestamp: isoTimestamp,
     feedbackId: sesId,
     complaintSubType: complaintSubTypeSchema,
     complaintFeedbackType: unclassifiedEnum(COMPLAINT_FEEDBACK_TYPES).optional(),
@@ -140,7 +143,7 @@ const deliveryDelayDetailSchema = z.object({
     delayedRecipients: z.array(delayedRecipientSchema).min(1),
     expirationTime: z.string(),
     reportingMTA: z.string().optional(),
-    timestamp: z.string().refine(parsesToDate, 'deliveryDelay.timestamp is not a date Date.parse can read'),
+    timestamp: isoTimestamp,
   }),
 });
 
@@ -174,7 +177,7 @@ const eventBridgeEnvelopeSchema = z
     'detail-type': z.string(),
     source: z.literal('aws.ses'),
     account: z.string(),
-    time: z.string().refine(parsesToDate, 'the envelope time is not a date Date.parse can read'),
+    time: isoTimestamp,
     region: z.string(),
     resources: z.array(z.string()),
     detail: detailSchema,

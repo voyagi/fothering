@@ -175,6 +175,43 @@ describe('parseSesEvent: unparseable timestamps fail the parse', () => {
   });
 });
 
+// Date.parse reads a date-time with no offset as LOCAL time, so the same event would land in buckets
+// hours apart on hosts in different timezones; it also reads a bare "1" as a date in 2001, and rolls
+// 31 February over into March. SES and EventBridge always write an explicit offset (Z).
+describe('parseSesEvent: timestamps must be ISO 8601 with an explicit offset', () => {
+  it.each([
+    ['no offset', '2023-07-17T16:48:05'],
+    ['a space instead of T and no offset', '2023-07-17 16:48:05'],
+    ['a bare number', '1'],
+    ['a calendar date that does not exist', '2023-02-31T16:48:05Z'],
+  ])('fails when mail.timestamp has %s', (_label, bad) => {
+    const event = fixtureEvent('bounce');
+    (detailOf(event).mail as Record<string, unknown>).timestamp = bad;
+    expect(parseSesEvent(event)).toEqual({ ok: false, messageId: BOUNCE_MESSAGE_ID, field: 'detail.mail.timestamp' });
+  });
+
+  it('fails when the Bounce object timestamp has no offset', () => {
+    const event = fixtureEvent('bounce');
+    (detailOf(event).bounce as Record<string, unknown>).timestamp = '2023-07-17T16:48:05';
+    expect(parseSesEvent(event)).toEqual({ ok: false, messageId: BOUNCE_MESSAGE_ID, field: 'detail.bounce.timestamp' });
+  });
+
+  it('fails when the envelope time has no offset', () => {
+    const event = fixtureEvent('bounce');
+    event.time = '2023-07-17T16:48:05';
+    expect(parseSesEvent(event)).toEqual({ ok: false, messageId: BOUNCE_MESSAGE_ID });
+  });
+
+  it('accepts an explicit numeric offset and reads it as the same instant', () => {
+    const event = fixtureEvent('bounce');
+    (detailOf(event).mail as Record<string, unknown>).timestamp = '2023-07-17T18:48:05+02:00';
+    const result = parseSesEvent(event);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(Date.parse(result.event.detail.mail.timestamp)).toBe(Date.parse('2023-07-17T16:48:05Z'));
+  });
+});
+
 describe('parseSesEvent: empty recipient lists fail the parse', () => {
   it('fails when bounce.bouncedRecipients is empty', () => {
     const event = fixtureEvent('bounce');
