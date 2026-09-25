@@ -13,6 +13,17 @@ function keyOf(key: RecordKey): string {
   return `${key.pk}\u0000${key.sk}`;
 }
 
+// The DynamoDB document client refuses NaN and the infinities while marshalling a number, with
+// this message (util-dynamodb convertToAttr), so a value holding one never reaches the table.
+function rejectSpecialNumbers(value: unknown): void {
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value)) throw new Error(`Special numeric value ${String(value)} is not allowed`);
+    return;
+  }
+  if (typeof value !== 'object' || value === null) return;
+  for (const nested of Object.values(value)) rejectSpecialNumbers(nested);
+}
+
 // Models the table's conditional put (attribute_not_exists(pk), D-08): the check and the set
 // happen with no await between them, so two calls issued together under Promise.all resolve
 // exactly like DynamoDB's conditional write, one written and one duplicate. Records go in and
@@ -26,12 +37,14 @@ export function createFixtureEventStore(options: FixtureOptions = {}): EventStor
       if (options.eventStoreFailure === 'put') {
         throw new FixtureWriteError('fixture event store is configured to fail on put');
       }
+      rejectSpecialNumbers(record);
       const key = keyOf(record);
       if (records.has(key)) return 'duplicate';
       records.set(key, structuredClone(record));
       return 'written';
     },
     async queryLane(configurationSet, fromBucketMs, toBucketMs, nowMs) {
+      rejectSpecialNumbers([fromBucketMs, toBucketMs, nowMs]);
       const pk = `LANE#${configurationSet}`;
       const nowSeconds = Math.floor(nowMs / 1000);
       const result: EventRecord[] = [];

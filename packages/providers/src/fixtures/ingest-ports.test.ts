@@ -179,6 +179,41 @@ describe('the fixture ports behave like the conditional-write store and queue th
     expect(await store.getRecord(key)).toEqual(original);
   });
 
+  // The DynamoDB document client refuses NaN and the infinities when it marshals a number
+  // ("Special numeric value NaN is not allowed", util-dynamodb convertToAttr), so a record or a
+  // query value holding one fails live. The fixture must fail the same way, not store it or read
+  // a NaN bound as "every bucket".
+  it('rejects a record holding NaN or an infinity anywhere, and stores nothing', async () => {
+    const { records } = await minimizeFixture();
+    const original = records[0];
+    if (original === undefined) throw new Error('expected at least one minimized record');
+    const store = createFixtureEventStore();
+
+    const nanBucket = { ...structuredClone(original), bucketStartMs: Number.NaN };
+    await expect(store.putIfAbsent(nanBucket)).rejects.toThrow('Special numeric value NaN is not allowed');
+    expect(await store.getRecord({ pk: nanBucket.pk, sk: nanBucket.sk })).toBeUndefined();
+
+    const infiniteField = structuredClone(original);
+    infiniteField.fields.delayTimestampMs = Number.POSITIVE_INFINITY;
+    await expect(store.putIfAbsent(infiniteField)).rejects.toThrow('Special numeric value Infinity is not allowed');
+  });
+
+  it('rejects a lane query whose bucket bounds or clock are not finite numbers', async () => {
+    const { records } = await minimizeFixture();
+    const record = records[0];
+    if (record === undefined) throw new Error('expected at least one minimized record');
+    const store = createFixtureEventStore();
+    await store.putIfAbsent(record);
+    const nowMs = record.mailTimestampMs + ONE_HOUR_MS;
+
+    await expect(store.queryLane(record.configurationSet, Number.NaN, Number.NaN, nowMs)).rejects.toThrow(
+      'Special numeric value NaN is not allowed',
+    );
+    await expect(
+      store.queryLane(record.configurationSet, record.bucketStartMs, record.bucketStartMs, Number.NaN),
+    ).rejects.toThrow('Special numeric value NaN is not allowed');
+  });
+
   it('finds a record by its recipient hash, then a delete makes a re-read return undefined', async () => {
     const { records } = await minimizeFixture();
     const record = records[0];
