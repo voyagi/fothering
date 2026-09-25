@@ -45,7 +45,7 @@ function registerBucketProperties(): void {
   it('counts are invariant under duplication', () => {
     fc.assert(
       fc.property(fc.array(messageCaseArb, { minLength: 1, maxLength: 3 }), (cases) => {
-        const envelopes = cases.flatMap(envelopesFor);
+        const envelopes = cases.flatMap((mc) => envelopesFor(mc));
         const nowMs = maxTimestamp(cases) + BUCKET_MS + LATENESS_HORIZON_MS + 1;
         const range = bucketRangeFor(cases);
         const once = countLaneBuckets(ingestAll(envelopes, contextFor(nowMs)), { ...range, nowMs });
@@ -60,14 +60,14 @@ function registerBucketProperties(): void {
     fc.assert(
       fc.property(
         fc.array(messageCaseArb, { minLength: 1, maxLength: 3 }).chain((cases) => {
-          const envelopes = cases.flatMap(envelopesFor);
+          const envelopes = cases.flatMap((mc) => envelopesFor(mc));
           return fc.tuple(
             fc.constant(cases),
             fc.shuffledSubarray(envelopes, { minLength: envelopes.length, maxLength: envelopes.length }),
           );
         }),
         ([cases, shuffled]) => {
-          const envelopes = cases.flatMap(envelopesFor);
+          const envelopes = cases.flatMap((mc) => envelopesFor(mc));
           const nowMs = maxTimestamp(cases) + BUCKET_MS + LATENESS_HORIZON_MS + 1;
           const range = bucketRangeFor(cases);
           const baseline = countLaneBuckets(ingestAll(envelopes, contextFor(nowMs)), { ...range, nowMs });
@@ -85,7 +85,7 @@ function registerBucketProperties(): void {
         fc.array(messageCaseArb, { minLength: 1, maxLength: 3 }),
         fc.integer({ min: 0, max: 10_000_000 }),
         (cases, arrivalDelayMs) => {
-          const envelopes = cases.flatMap(envelopesFor);
+          const envelopes = cases.flatMap((mc) => envelopesFor(mc));
           const nowMs = maxTimestamp(cases) + BUCKET_MS + LATENESS_HORIZON_MS + 1;
           const range = bucketRangeFor(cases);
           const baseline = countLaneBuckets(ingestAll(envelopes, contextFor(nowMs)), { ...range, nowMs });
@@ -249,7 +249,7 @@ function registerBucketProperties(): void {
           expect(outOfOrder).toEqual(inOrder);
           const own = outOfOrder.find((bucket) => bucket.bucketStartMs === bucketStartMs(mc.sendTimestampMs));
           if (own === undefined) throw new Error('expected the message’s own bucket');
-          expect(own.delivery).toBe(1);
+          expect(own.delivery).toBe(mc.recipientCount);
         },
       ),
       { seed: SEED },
@@ -275,8 +275,10 @@ function registerBucketProperties(): void {
           }
         }
 
-        const runA: { envelope: SesEnvelope; context: MinimizeContext }[] = envelopesFor(mcA).map((envelope) => ({ envelope, context: contextA }));
-        const runB: { envelope: SesEnvelope; context: MinimizeContext }[] = envelopesFor(mcB).map((envelope) => ({ envelope, context: contextB }));
+        const envelopesA = envelopesFor(mcA, TEST_LANE.configurationSet);
+        const envelopesB = envelopesFor(mcB, laneB.configurationSet);
+        const runA: { envelope: SesEnvelope; context: MinimizeContext }[] = envelopesA.map((envelope) => ({ envelope, context: contextA }));
+        const runB: { envelope: SesEnvelope; context: MinimizeContext }[] = envelopesB.map((envelope) => ({ envelope, context: contextB }));
         const all = [...runA, ...runB];
         const reversed = [...all].reverse();
         for (const { envelope, context } of [...all, ...reversed]) {
@@ -286,8 +288,8 @@ function registerBucketProperties(): void {
         const range = bucketRangeFor([mcA, mcB]);
         const storedA = await store.queryLane(TEST_LANE.configurationSet, range.fromBucketMs, range.toBucketMs, nowMs);
         const storedB = await store.queryLane(laneB.configurationSet, range.fromBucketMs, range.toBucketMs, nowMs);
-        const expectedA = countLaneBuckets(ingestAll(envelopesFor(mcA), contextA), { ...range, nowMs });
-        const expectedB = countLaneBuckets(ingestAll(envelopesFor(mcB), contextB), { ...range, nowMs });
+        const expectedA = countLaneBuckets(ingestAll(envelopesA, contextA), { ...range, nowMs });
+        const expectedB = countLaneBuckets(ingestAll(envelopesB, contextB), { ...range, nowMs });
 
         expect(countLaneBuckets(storedA, { ...range, nowMs })).toEqual(expectedA);
         expect(countLaneBuckets(storedB, { ...range, nowMs })).toEqual(expectedB);

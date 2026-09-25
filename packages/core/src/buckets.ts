@@ -18,11 +18,24 @@ export function countRecords(records: readonly EventRecord[]): Partial<Record<Se
   return counts;
 }
 
-// RED stub: task 2 has not implemented these yet. Every call throws so buckets.test.ts and
-// buckets.property.test.ts fail on real assertions instead of a module-resolution crash.
-export const LATENESS_HORIZON_MS = -1;
-export const SUPPRESSION_BOUNCE_SUBTYPES: readonly string[] = [];
-export const SUPPRESSION_COMPLAINT_SUBTYPES: readonly string[] = [];
+// D-11: SES's own delivery retry window, not transport lag after SES emits an event (the evidence
+// phase in a later plan owns that case). Sourced from two AWS pages: the SES v2 API's
+// PutConfigurationSetDeliveryOptions MaxDeliverySeconds field ranges 300 to 50400
+// (https://docs.aws.amazon.com/ses/latest/APIReference-V2/API_DeliveryOptions.html), and creating
+// a configuration set documents 50400 seconds (14 hours) as the default
+// (https://docs.aws.amazon.com/ses/latest/dg/creating-configuration-sets.html). 50400 seconds is
+// 50,400,000 milliseconds, the top of that range and the shipped default alike.
+export const LATENESS_HORIZON_MS = 14 * 60 * 60 * 1000;
+
+// D-37/AWS SES bounce and complaint subtype lists: AWS excludes OnAccountSuppressionList and
+// OnTenantSuppressionList from bounce and complaint rates; EmailValidationSuppressed is a
+// Fothering choice to also keep out of the numerators (SPEC requirement 6).
+export const SUPPRESSION_BOUNCE_SUBTYPES: readonly string[] = [
+  'OnAccountSuppressionList',
+  'OnTenantSuppressionList',
+  'EmailValidationSuppressed',
+];
+export const SUPPRESSION_COMPLAINT_SUBTYPES: readonly string[] = ['OnAccountSuppressionList', 'OnTenantSuppressionList'];
 
 export interface BucketCount {
   bucketStartMs: number;
@@ -39,8 +52,10 @@ export interface BucketCount {
   suppressedComplaint: number;
 }
 
-export function isBucketComplete(_bucketStartMs: number, _nowMs: number): boolean {
-  throw new Error('isBucketComplete not implemented');
+/** AC-E18: half-open like bucketStartMs itself; a bucket is complete once the clock reaches its
+ * own end (bucketStartMs + BUCKET_MS) plus the lateness horizon, never a millisecond earlier. */
+export function isBucketComplete(bucketStartMsValue: number, nowMs: number): boolean {
+  return nowMs >= bucketStartMsValue + BUCKET_MS + LATENESS_HORIZON_MS;
 }
 
 export interface CountLaneBucketsOptions {
@@ -49,10 +64,89 @@ export interface CountLaneBucketsOptions {
   nowMs: number;
 }
 
-export function countLaneBuckets(_records: readonly EventRecord[], _options: CountLaneBucketsOptions): BucketCount[] {
-  throw new Error('countLaneBuckets not implemented');
+function emptyBucket(bucketStartMsValue: number, nowMs: number): BucketCount {
+  return {
+    bucketStartMs: bucketStartMsValue,
+    complete: isBucketComplete(bucketStartMsValue, nowMs),
+    send: 0,
+    delivery: 0,
+    permanentBounce: 0,
+    transientBounce: 0,
+    undeterminedBounce: 0,
+    complaint: 0,
+    reject: 0,
+    deliveryDelay: 0,
+    suppressedBounce: 0,
+    suppressedComplaint: 0,
+  };
 }
 
-export function hardBounceRatio(_counts: Pick<BucketCount, 'send' | 'permanentBounce'>): number | null {
-  throw new Error('hardBounceRatio not implemented');
+function applyBounce(bucket: BucketCount, record: EventRecord): void {
+  const subtype = record.fields.bounceSubType;
+  if (subtype !== undefined && SUPPRESSION_BOUNCE_SUBTYPES.includes(subtype)) {
+    bucket.suppressedBounce += 1;
+    return;
+  }
+  const bounceType = record.fields.bounceType;
+  if (bounceType === 'Permanent') bucket.permanentBounce += 1;
+  else if (bounceType === 'Transient') bucket.transientBounce += 1;
+  else bucket.undeterminedBounce += 1;
+}
+
+function applyComplaint(bucket: BucketCount, record: EventRecord): void {
+  const subtype = record.fields.complaintSubType;
+  if (subtype !== undefined && SUPPRESSION_COMPLAINT_SUBTYPES.includes(subtype)) {
+    bucket.suppressedComplaint += 1;
+  } else {
+    bucket.complaint += 1;
+  }
+}
+
+function applyRecord(bucket: BucketCount, record: EventRecord): void {
+  switch (record.eventType) {
+    case 'Send':
+      bucket.send += 1;
+      break;
+    case 'Delivery':
+      bucket.delivery += 1;
+      break;
+    case 'Reject':
+      bucket.reject += 1;
+      break;
+    case 'DeliveryDelay':
+      bucket.deliveryDelay += 1;
+      break;
+    case 'Bounce':
+      applyBounce(bucket, record);
+      break;
+    case 'Complaint':
+      applyComplaint(bucket, record);
+      break;
+  }
+}
+
+// SPEC requirement 6: counts are derived from the same countRecords-style per-type check
+// (kind send, outcome or complaint only; a complaintRecipient item is never counted), so the
+// counting rule stays written in one place regardless of which shape the caller reads it through.
+export function countLaneBuckets(records: readonly EventRecord[], options: CountLaneBucketsOptions): BucketCount[] {
+  const byBucket = new Map<number, BucketCount>();
+  for (let start = options.fromBucketMs; start <= options.toBucketMs; start += BUCKET_MS) {
+    byBucket.set(start, emptyBucket(start, options.nowMs));
+  }
+  for (const record of records) {
+    if (record.kind !== 'send' && record.kind !== 'outcome' && record.kind !== 'complaint') continue;
+    const bucket = byBucket.get(record.bucketStartMs);
+    if (bucket === undefined) continue;
+    applyRecord(bucket, record);
+  }
+  return [...byBucket.values()].sort((a, b) => a.bucketStartMs - b.bucketStartMs);
+}
+
+// SES counts only hard (permanent) bounces toward the account bounce rate: "Your bounce rate
+// includes only hard bounces to domains you haven't verified. Hard bounces are permanent delivery
+// failures such as 'address does not exist.' Temporary and intermittent failures such as 'mailbox
+// full,' or bounces due to blocked IP addresses, don't count toward your bounce rate."
+// (https://docs.aws.amazon.com/ses/latest/dg/faqs-enforcement.html, Bounce FAQ Q3).
+export function hardBounceRatio(counts: Pick<BucketCount, 'send' | 'permanentBounce'>): number | null {
+  return counts.send === 0 ? null : counts.permanentBounce / counts.send;
 }

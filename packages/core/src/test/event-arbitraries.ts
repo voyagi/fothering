@@ -111,14 +111,14 @@ function recipientAddress(messageSeed: number, index: number): string {
   return `r${messageSeed}-${index}@example.com`;
 }
 
-function mailBase(mc: MessageCase) {
+function mailBase(mc: MessageCase, configurationSet: string) {
   const destination = Array.from({ length: mc.recipientCount }, (_, i) => recipientAddress(mc.messageSeed, i));
   return {
     timestamp: new Date(mc.sendTimestampMs).toISOString(),
     messageId: `msg-${mc.messageSeed}`,
     source: 'sender@example.com',
     destination,
-    tags: { 'ses:configuration-set': [TEST_CONFIGURATION_SET] },
+    tags: { 'ses:configuration-set': [configurationSet] },
   };
 }
 
@@ -150,14 +150,14 @@ function envelopeFor(detail: SesEvent, timeMs: number): SesEnvelope {
   } as SesEnvelope;
 }
 
-function sendEnvelope(mc: MessageCase): SesEnvelope {
-  const mail = mailBase(mc);
+function sendEnvelope(mc: MessageCase, configurationSet: string): SesEnvelope {
+  const mail = mailBase(mc, configurationSet);
   const detail: SesEvent = { eventType: 'Send', mail, send: {} };
   return envelopeFor(detail, mc.sendTimestampMs);
 }
 
-function deliveryEnvelope(mc: MessageCase, timestampMs: number): SesEnvelope {
-  const mail = mailBase(mc);
+function deliveryEnvelope(mc: MessageCase, configurationSet: string, timestampMs: number): SesEnvelope {
+  const mail = mailBase(mc, configurationSet);
   const detail: SesEvent = {
     eventType: 'Delivery',
     mail,
@@ -172,15 +172,20 @@ function deliveryEnvelope(mc: MessageCase, timestampMs: number): SesEnvelope {
   return envelopeFor(detail, timestampMs);
 }
 
-function bounceEnvelope(mc: MessageCase, bounce: BounceCase): SesEnvelope {
-  const mail = mailBase(mc);
+// Bounces only the message's first recipient: this is what lets a three-recipient message with
+// "one bounce" mean exactly one bounced recipient out of three sends, the shape the 1/3 hard
+// bounce ratio property depends on.
+function bounceEnvelope(mc: MessageCase, configurationSet: string, bounce: BounceCase): SesEnvelope {
+  const mail = mailBase(mc, configurationSet);
+  const bouncedAddress = mail.destination[0];
+  if (bouncedAddress === undefined) throw new Error('expected at least one recipient to bounce');
   const detail: SesEvent = {
     eventType: 'Bounce',
     mail,
     bounce: {
       bounceType: bounce.bounceType,
       bounceSubType: bounce.bounceSubType,
-      bouncedRecipients: mail.destination.map((emailAddress) => ({ emailAddress })),
+      bouncedRecipients: [{ emailAddress: bouncedAddress }],
       timestamp: new Date(bounce.timestampMs).toISOString(),
       feedbackId: bounce.feedbackId,
     },
@@ -188,8 +193,8 @@ function bounceEnvelope(mc: MessageCase, bounce: BounceCase): SesEnvelope {
   return envelopeFor(detail, bounce.timestampMs);
 }
 
-function complaintEnvelope(mc: MessageCase, complaint: NonNullable<MessageCase['complaint']>): SesEnvelope {
-  const mail = mailBase(mc);
+function complaintEnvelope(mc: MessageCase, configurationSet: string, complaint: NonNullable<MessageCase['complaint']>): SesEnvelope {
+  const mail = mailBase(mc, configurationSet);
   const detail: SesEvent = {
     eventType: 'Complaint',
     mail,
@@ -203,8 +208,8 @@ function complaintEnvelope(mc: MessageCase, complaint: NonNullable<MessageCase['
   return envelopeFor(detail, complaint.timestampMs);
 }
 
-function delayEnvelope(mc: MessageCase, timestampMs: number): SesEnvelope {
-  const mail = mailBase(mc);
+function delayEnvelope(mc: MessageCase, configurationSet: string, timestampMs: number): SesEnvelope {
+  const mail = mailBase(mc, configurationSet);
   const detail: SesEvent = {
     eventType: 'DeliveryDelay',
     mail,
@@ -218,13 +223,15 @@ function delayEnvelope(mc: MessageCase, timestampMs: number): SesEnvelope {
   return envelopeFor(detail, timestampMs);
 }
 
-/** Every SES envelope one generated message produces: a Send, plus its planned outcome events. */
-export function envelopesFor(mc: MessageCase): SesEnvelope[] {
-  const events: SesEnvelope[] = [sendEnvelope(mc)];
-  if (mc.delivery !== undefined) events.push(deliveryEnvelope(mc, mc.delivery.timestampMs));
-  for (const bounce of mc.bounces) events.push(bounceEnvelope(mc, bounce));
-  if (mc.complaint !== undefined) events.push(complaintEnvelope(mc, mc.complaint));
-  for (const delay of mc.delays) events.push(delayEnvelope(mc, delay.timestampMs));
+/** Every SES envelope one generated message produces: a Send, plus its planned outcome events.
+ * configurationSet defaults to TEST_CONFIGURATION_SET so single-lane callers need not pass it;
+ * the two-lane fixture-store property passes each message's real lane instead. */
+export function envelopesFor(mc: MessageCase, configurationSet: string = TEST_CONFIGURATION_SET): SesEnvelope[] {
+  const events: SesEnvelope[] = [sendEnvelope(mc, configurationSet)];
+  if (mc.delivery !== undefined) events.push(deliveryEnvelope(mc, configurationSet, mc.delivery.timestampMs));
+  for (const bounce of mc.bounces) events.push(bounceEnvelope(mc, configurationSet, bounce));
+  if (mc.complaint !== undefined) events.push(complaintEnvelope(mc, configurationSet, mc.complaint));
+  for (const delay of mc.delays) events.push(delayEnvelope(mc, configurationSet, delay.timestampMs));
   return events;
 }
 
