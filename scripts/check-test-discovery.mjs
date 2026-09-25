@@ -10,13 +10,17 @@
 // own list.
 //
 // TWO RULES.
-//   1. TRACKED BUT UNLISTED. Every tracked `*.test.ts` file, except the exclusion suffix
+//   1. TRACKED BUT UNLISTED. Every tracked test file, except the exclusion suffix
 //      `*.fault.test.ts` (the same suffix vitest.config.ts excludes, so the two lists cannot drift
 //      silently; plan 01-13's repo-hardening test pins that they match), must appear in the
-//      runner's own file list. A tracked test the runner never lists is a finding, since nothing
-//      downstream ever exercises it. This reaches a test placed anywhere in the tracked tree, not
-//      only inside the runner's usual include path, which is exactly the case a narrower "is it
-//      inside packages/*/src" check would miss.
+//      runner's own file list. A test file is any `*.test.*` or `*.spec.*` with a script
+//      extension (ts, js, tsx, jsx, and the c and m variants), vitest's own default include shape
+//      and the shape eslint.config.mjs lints as a test: the runner's include here names only
+//      `*.test.ts`, so a tracked `*.spec.ts` or `*.test.mjs` would never run, and checking only
+//      `*.test.ts` would let it read as coverage. A tracked test the runner never lists is a
+//      finding, since nothing downstream ever exercises it. This reaches a test placed anywhere
+//      in the tracked tree, not only inside the runner's usual include path, which is exactly
+//      the case a narrower "is it inside packages/*/src" check would miss.
 //   2. LISTED BUT UNTRACKED is an advisory only. A generated or gitignored file the runner happens
 //      to pick up is not a coverage gap.
 //
@@ -53,7 +57,7 @@ function trackedFiles(root) {
 
 // --- what counts as a test ----------------------------------------------------------------------
 
-const TEST_FILE_RE = /\.test\.ts$/i;
+const TEST_FILE_RE = /\.(test|spec)\.(c|m)?[jt]sx?$/i;
 const FAULT_TEST_RE = /\.fault\.test\.ts$/i;
 
 // --- the real lister -----------------------------------------------------------------------------
@@ -212,6 +216,26 @@ function selftest() {
     files: { 'tools/example.test.ts': BODY, 'widgets/src/decoy.test.ts': BODY },
     lister: () => ['widgets/src/decoy.test.ts'],
     expect: 'fail', expectWhy: /tools\/example\.test\.ts <- tracked as a test file/,
+  });
+
+  // Rule 1 reaches every test-file shape, not only the one the runner's include names.
+  cases.push({
+    name: 'a tracked spec file the runner never lists is a finding',
+    files: { 'widgets/src/example.spec.ts': BODY, 'widgets/src/decoy.test.ts': BODY },
+    lister: () => ['widgets/src/decoy.test.ts'],
+    expect: 'fail', expectWhy: /widgets\/src\/example\.spec\.ts <- tracked as a test file/,
+  });
+  cases.push({
+    name: 'a tracked .test.mjs the runner never lists is a finding',
+    files: { 'scripts/example.test.mjs': BODY, 'widgets/src/decoy.test.ts': BODY },
+    lister: () => ['widgets/src/decoy.test.ts'],
+    expect: 'fail', expectWhy: /scripts\/example\.test\.mjs <- tracked as a test file/,
+  });
+  cases.push({
+    name: 'a plain source file whose name holds "test" is not a test file',
+    files: { 'widgets/src/test-helpers.ts': BODY, 'widgets/src/decoy.test.ts': BODY },
+    lister: () => ['widgets/src/decoy.test.ts'],
+    expect: 'clean',
   });
 
   // Rule 2.

@@ -47,6 +47,10 @@ const MUTATIONS = [
   // --- the fault-test exclusion, kept in step with vitest.config.ts's own exclude ---
   { name: 'the fault-test exclusion is honoured', expect: 'a fault-test file is exempt even when the runner never lists it', find: '&& !FAULT_TEST_RE.test(f)', repl: '&& true' },
 
+  // --- the test-file shape: every *.test.* and *.spec.* script, and nothing broader ---
+  { name: 'the test-file shape reaches spec files and every script extension', expect: 'a tracked spec file the runner never lists is a finding', find: 'const TEST_FILE_RE = /\\.(test|spec)\\.(c|m)?[jt]sx?$/i;', repl: 'const TEST_FILE_RE = /\\.test\\.ts$/i;' },
+  { name: 'the test-file shape does not swallow any name holding "test"', expect: 'a plain source file whose name holds "test" is not a test file', find: 'const TEST_FILE_RE = /\\.(test|spec)\\.(c|m)?[jt]sx?$/i;', repl: 'const TEST_FILE_RE = /test/i;' },
+
   // --- AC-E40: an empty listing is UNKNOWN, never clean ---
   { name: 'the empty-listing rule fires', expect: 'an empty listing is UNKNOWN, never clean', find: 'if (listed.length === 0) {', repl: 'if (false) {' },
 
