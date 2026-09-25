@@ -21,9 +21,9 @@ interface LivePortContext {
  *
  * Mutating and gated are two different facts (D-06 decides live vs dry-run per operation, not per
  * port). A gated operation resolves to the dry-run recorder in 'deployed' unless the switch is
- * exactly `live`: SPEC requirement 1 names those as SES pause, reopen and send, the model call and
- * InvokeAgentRuntime. A write to Fothering's own table or queue mutates but is never gated, so a
- * deploy with the switch unset still stores the events it ingests.
+ * exactly `live`: those are SES pause, reopen and send, the model call and InvokeAgentRuntime. A
+ * write to Fothering's own table or queue mutates but is never gated, so a deploy with the switch
+ * unset still stores the events it ingests.
  */
 export interface PortRow {
   readonly operations: readonly string[];

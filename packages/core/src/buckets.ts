@@ -11,8 +11,8 @@ export function bucketStartMs(ms: number): number {
   return Math.floor(ms / BUCKET_MS) * BUCKET_MS;
 }
 
-/** SPEC requirement 6's one counting rule: a send, an outcome or a Complaint's counting record
- * counts; a complaintRecipient item exists for the recipient index and deletion only. */
+/** The one counting rule: a send, an outcome or a Complaint's counting record counts; a
+ * complaintRecipient item exists for the recipient index and deletion only. */
 export function isCountedRecord(record: EventRecord): boolean {
   return record.kind === 'send' || record.kind === 'outcome' || record.kind === 'complaint';
 }
@@ -61,7 +61,10 @@ export interface BucketCount {
 }
 
 /** AC-E18: half-open like bucketStartMs itself; a bucket is complete once the clock reaches its
- * own end (bucketStartMs + BUCKET_MS) plus the lateness horizon, never a millisecond earlier. */
+ * own end (bucketStartMs + BUCKET_MS) plus the lateness horizon, never a millisecond earlier.
+ * Complete means SES's retry window for the bucket's sends has closed, not that its counts are
+ * final: a complaint or an asynchronous bounce can still arrive later and land in this send-time
+ * bucket, so a reader that treats complete as final must allow for that. */
 export function isBucketComplete(bucketStartMsValue: number, nowMs: number): boolean {
   return nowMs >= bucketStartMsValue + BUCKET_MS + LATENESS_HORIZON_MS;
 }

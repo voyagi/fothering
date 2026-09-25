@@ -48,8 +48,9 @@ interface PlantedAdapters {
   deadLetter: PlantedDeadLetter;
 }
 
-// The real table gates none of these operations (SPEC requirement 1), so this planted table gates
-// two of them itself: it is the only way to reach the dry-run branch until a gated row lands.
+// The real table gates none of these operations (the product's own table, key and queue stay live
+// without the switch), so this planted table gates two of them itself: it is the only way to reach
+// the dry-run branch until a gated row lands.
 function plantedLiveTable(adapters: PlantedAdapters): Record<PortName, PortRow> {
   return {
     eventStore: {
@@ -163,9 +164,9 @@ describe('resolvePortTable with live adapters written as classes', () => {
   });
 });
 
-// SPEC requirement 1 and plan 01-15's expected table: in 'deployed' the event store, the address key
-// and the dead-letter queue resolve live for EVERY switch value. Only SES pause, reopen and send, the
-// model call and InvokeAgentRuntime wait for the switch, and none of those rows exists yet.
+// In 'deployed' the event store, the address key and the dead-letter queue resolve live for EVERY
+// switch value. Only SES pause, reopen and send, the model call and InvokeAgentRuntime wait for the
+// switch, and none of those rows exists yet.
 describe('the real port table gates nothing the switch does not own', () => {
   it.each([undefined, '', '   ', 'true', 'LIVE', ' live', 'live'])(
     'resolves every event store, address key and dead-letter operation live in deployed for switch %j',
