@@ -23,6 +23,7 @@ export const RETENTION_SECONDS = 2_592_000;
 // D-08's sort key zero-pads the bucket start so a lexicographic range query on the sort key
 // is also a numeric range query; 13 digits covers epoch milliseconds through the year 2286.
 const BUCKET_DIGITS = 13;
+const BUCKET_LIMIT_MS = 10 ** BUCKET_DIGITS;
 
 /** The full phase 2 field schedule (SPEC requirement 5), carried as closed-vocabulary strings only. */
 export interface EventFields {
@@ -83,11 +84,23 @@ export interface RecordKeyInput {
   identity: string;
 }
 
+// The one place a bucket start becomes sort-key text: every written key and the live store's
+// range bounds are built here, so a write and a read cannot pad differently. A start that is
+// negative, fractional, NaN or longer than 13 digits would pad into text whose order is not time
+// order, so it is refused rather than written or queried.
+export function bucketSortKeyPrefix(bucketStartMs: number): string {
+  if (!Number.isInteger(bucketStartMs) || bucketStartMs < 0 || bucketStartMs >= BUCKET_LIMIT_MS) {
+    throw new RangeError(
+      `bucket start ${String(bucketStartMs)} is not a whole number of epoch milliseconds from 0 to ${String(BUCKET_LIMIT_MS - 1)}`,
+    );
+  }
+  return `B#${String(bucketStartMs).padStart(BUCKET_DIGITS, '0')}`;
+}
+
 export function recordKey(input: RecordKeyInput): RecordKey {
-  const bucket = String(input.bucketStartMs).padStart(BUCKET_DIGITS, '0');
   return {
     pk: `LANE#${input.configurationSet}`,
-    sk: `B#${bucket}#${input.eventType}#${input.identity}`,
+    sk: `${bucketSortKeyPrefix(input.bucketStartMs)}#${input.eventType}#${input.identity}`,
   };
 }
 

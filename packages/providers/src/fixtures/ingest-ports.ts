@@ -1,4 +1,4 @@
-import type { EventRecord, RecordKey } from '@fothering/core/records';
+import { bucketSortKeyPrefix, type EventRecord, type RecordKey } from '@fothering/core/records';
 import type { AddressKeySet } from '@fothering/core/address';
 import type { AddressKeyPort, DeadLetterPort, EventStorePort, FixtureOptions } from '../port-types.js';
 
@@ -56,9 +56,11 @@ export function createFixtureEventStore(options: FixtureOptions = {}): EventStor
     },
     async queryLane(configurationSet, fromBucketMs, toBucketMs, nowMs) {
       // The clock reaches the marshaller as :now. The bucket bounds do not: the live adapter pads
-      // them into sort-key strings, where a NaN bound would silently select no records, so plan
-      // 01-03 refuses a bound that is not a finite safe integer the same way this fixture does.
-      rejectUnmarshallable([fromBucketMs, toBucketMs, nowMs]);
+      // them into sort-key strings with bucketSortKeyPrefix, which refuses a bound no key could
+      // hold, so the fixture passes them through the same function before comparing numbers.
+      bucketSortKeyPrefix(fromBucketMs);
+      bucketSortKeyPrefix(toBucketMs);
+      rejectUnmarshallable(nowMs);
       // DynamoDB rejects an inverted BETWEEN key condition with a ValidationException instead of
       // returning an empty page, so a window computed backwards fails here as it would live.
       if (fromBucketMs > toBucketMs) {

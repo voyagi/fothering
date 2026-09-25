@@ -329,9 +329,9 @@ describe('the fixture ports behave like the conditional-write store and queue th
   // The DynamoDB document client refuses NaN and the infinities when it marshals a number
   // ("Special numeric value NaN is not allowed", util-dynamodb convertToAttr), so a record or a
   // query clock holding one fails live. A query's bucket bounds never reach the marshaller: the
-  // live adapter pads them into sort-key strings, where NaN would silently select nothing, so
-  // plan 01-03's adapter refuses them explicitly. The fixture refuses both, never storing the
-  // record or reading a NaN bound as "every bucket".
+  // live adapter pads them into sort-key strings with bucketSortKeyPrefix, which refuses a bound
+  // no key could hold. The fixture refuses both, never storing the record or reading a NaN bound
+  // as "every bucket".
   it('rejects a record holding NaN or an infinity anywhere, and stores nothing', async () => {
     const { records } = await minimizeFixture();
     const original = records[0];
@@ -374,7 +374,7 @@ describe('the fixture ports behave like the conditional-write store and queue th
     expect(await store.getRecord({ pk: original.pk, sk: original.sk })).toBeUndefined();
   });
 
-  it('rejects a lane query whose bucket bounds or clock are not finite numbers', async () => {
+  it('rejects a lane query whose bucket bounds cannot be sort keys or whose clock is not a finite number', async () => {
     const { records } = await minimizeFixture();
     const record = records[0];
     if (record === undefined) throw new Error('expected at least one minimized record');
@@ -382,9 +382,10 @@ describe('the fixture ports behave like the conditional-write store and queue th
     await store.putIfAbsent(record);
     const nowMs = record.mailTimestampMs + ONE_HOUR_MS;
 
-    await expect(store.queryLane(record.configurationSet, Number.NaN, Number.NaN, nowMs)).rejects.toThrow(
-      'Special numeric value NaN is not allowed',
-    );
+    for (const bound of [Number.NaN, -BUCKET_MS, record.bucketStartMs + 0.5]) {
+      await expect(store.queryLane(record.configurationSet, bound, record.bucketStartMs, nowMs)).rejects.toThrow(RangeError);
+      await expect(store.queryLane(record.configurationSet, record.bucketStartMs, bound, nowMs)).rejects.toThrow(RangeError);
+    }
     await expect(
       store.queryLane(record.configurationSet, record.bucketStartMs, record.bucketStartMs, Number.NaN),
     ).rejects.toThrow('Special numeric value NaN is not allowed');
