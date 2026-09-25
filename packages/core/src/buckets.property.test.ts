@@ -35,11 +35,18 @@ function maxTimestamp(cases: readonly MessageCase[]): number {
   return Math.max(...cases.map((mc) => mc.sendTimestampMs));
 }
 
-function registerBucketProperties(): void {
+// Shared by the real property and its planted failure below, so the planted one fails for the
+// reason the real one guards: a bucket one millisecond short of its end plus the horizon is open.
+function youngBucketReadsIncomplete(mc: MessageCase, isComplete: (bucketStart: number, nowMs: number) => boolean): boolean {
+  const bucketStart = bucketStartMs(mc.sendTimestampMs);
+  return !isComplete(bucketStart, bucketStart + BUCKET_MS + LATENESS_HORIZON_MS - 1);
+}
+
+function registerBucketProperties(expectedOffsetMinutes: number): void {
   it('positive control: the worker’s own timezone offset changed', () => {
-    // asserted by the caller before this function runs; kept here only so a future reordering
-    // cannot accidentally drop it silently.
-    expect(typeof new Date(0).getTimezoneOffset()).toBe('number');
+    // The caller's beforeAll switched TZ; this proves the switch still holds inside the tests,
+    // so a property passing below passed under the zone its describe names.
+    expect(new Date(0).getTimezoneOffset()).toBe(expectedOffsetMinutes);
   });
 
   it('counts are invariant under duplication', () => {
@@ -125,6 +132,7 @@ function registerBucketProperties(): void {
         const own = buckets.find((bucket) => bucket.bucketStartMs === bucketStart);
         if (own === undefined) throw new Error('expected the message’s own bucket in range');
         expect(own.complete).toBe(false);
+        expect(youngBucketReadsIncomplete(mc, isBucketComplete)).toBe(true);
       }),
       { seed: SEED },
     );
@@ -319,7 +327,7 @@ describe.skipIf(underMutationRunner)('AC-11 bucket and count properties, under U
     else process.env.TZ = originalTz;
   });
 
-  registerBucketProperties();
+  registerBucketProperties(0);
 });
 
 describe.skipIf(underMutationRunner)('AC-11 bucket and count properties, under Asia/Kolkata', () => {
@@ -338,7 +346,7 @@ describe.skipIf(underMutationRunner)('AC-11 bucket and count properties, under A
     else process.env.TZ = originalTz;
   });
 
-  registerBucketProperties();
+  registerBucketProperties(-330);
 });
 
 describe('AC-11 planted failures (design choices the properties above guard)', () => {
@@ -404,16 +412,19 @@ describe('AC-11 planted failures (design choices the properties above guard)', (
     expect(result.failed).toBe(true);
   });
 
-  it('treating every bucket as complete breaks the lateness-horizon invariant, so fc.check reports failed', () => {
-    const wrongComplete = (_bucketStartMs: number, _nowMs: number): boolean => true;
+  it('counting a bucket complete at its own end, without the lateness horizon, breaks the invariant, so fc.check reports failed', () => {
+    const noHorizon = (bucketStart: number, nowMs: number): boolean => nowMs >= bucketStart + BUCKET_MS;
     const result = fc.check(
-      fc.property(messageCaseArb, (mc) => {
-        const bucketStart = bucketStartMs(mc.sendTimestampMs);
-        const nowMs = bucketStart + BUCKET_MS + LATENESS_HORIZON_MS - 1;
-        return !wrongComplete(bucketStart, nowMs);
-      }),
+      fc.property(messageCaseArb, (mc) => youngBucketReadsIncomplete(mc, noHorizon)),
       { seed: SEED },
     );
     expect(result.failed).toBe(true);
+    // Control: the same predicate holds for the real completeness rule, so the failure above comes
+    // from the missing horizon and not from the predicate itself.
+    const real = fc.check(
+      fc.property(messageCaseArb, (mc) => youngBucketReadsIncomplete(mc, isBucketComplete)),
+      { seed: SEED },
+    );
+    expect(real.failed).toBe(false);
   });
 });
