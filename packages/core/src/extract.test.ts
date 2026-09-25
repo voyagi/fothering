@@ -44,6 +44,24 @@ describe('extractEnhancedStatusCode', () => {
   it('reads a code that ends a sentence', () => {
     expect(extractEnhancedStatusCode('smtp; 550 mailbox unavailable 5.1.1.')).toBe('5.1.1');
   });
+
+  // RFC 2034 section 4: every status code must agree with the reply code's class, so a code-shaped
+  // run of another class inside a 550 line is a version number or a URL fragment, and storing it
+  // would turn a permanent failure into a temporary one in the evidence.
+  it.each([
+    ['a mail server version', 'smtp; 550 rejected by mx.example.com (Exim 4.94.2)'],
+    ['a code inside a URL', 'smtp; 550 see https://help.example.com/550?code=4.2.0 for details'],
+  ])('reads unclassified for a run whose class contradicts the reply code: %s', (_label, text) => {
+    expect(extractEnhancedStatusCode(text)).toBe(UNCLASSIFIED);
+  });
+
+  it('skips a run of the wrong class and reads the later one that agrees with the reply code', () => {
+    expect(extractEnhancedStatusCode('smtp; 550 (Exim 4.94.2) said: 5.7.1 message blocked')).toBe('5.7.1');
+  });
+
+  it('reads the first run when the text carries no leading reply code to agree with', () => {
+    expect(extractEnhancedStatusCode('X-Postfix; host mx.example.com said: 550 5.1.1 user unknown')).toBe('5.1.1');
+  });
 });
 
 describe('extractBasicReplyCode', () => {
@@ -75,6 +93,12 @@ describe('validIp', () => {
 
   it('reads unclassified for an address with an out-of-range octet', () => {
     expect(validIp('123.456.789.012')).toBe(UNCLASSIFIED);
+  });
+
+  // node:net isIP accepts an IPv6 zone id, and a zone id may be any dotted text, so it would carry
+  // a name into a field that promises an address; no mail server is reached at a link-local scope.
+  it.each(['fe80::1%eth0', 'fe80::1%jane.doe.example.com'])('reads unclassified for an IPv6 address with a zone id: %s', (value) => {
+    expect(validIp(value)).toBe(UNCLASSIFIED);
   });
 
   it("reads the Delivery fixture's remoteMtaIp as unclassified, since the AWS example is not a valid IPv4 address", () => {

@@ -8,7 +8,8 @@ import { UNCLASSIFIED } from './records.js';
 // A code must stand alone: no word character or dot right before it, and no word character or
 // dot-then-digit right after it. A plain \b boundary treats the dot as a boundary, so it read
 // 5.1.7 out of the address 10.5.1.7; a sentence-ending dot after the code is still allowed.
-const ENHANCED_STATUS_CODE_RE = /(?<![\w.])[245]\.\d{1,3}\.\d{1,3}(?!\w|\.\d)/;
+// Global, because extractEnhancedStatusCode walks every code-shaped run in order.
+const ENHANCED_STATUS_CODE_RE = /(?<![\w.])[245]\.\d{1,3}\.\d{1,3}(?!\w|\.\d)/g;
 const ENHANCED_STATUS_CODE_ANCHORED_RE = /^[245]\.\d{1,3}\.\d{1,3}$/;
 // An optional "smtp;" prefix, then a three-digit code not followed by a fourth digit, so a longer
 // number at the start of the text is never mistaken for the code.
@@ -25,16 +26,27 @@ const CALLER_IDENTITY_RE = /^[A-Za-z0-9+=,._-]{1,128}$/;
 const TAG_VALUE_RE = /^[A-Za-z0-9_-]{1,256}$/;
 const RECIPIENT_ACTIONS = ['failed', 'delayed', 'delivered', 'relayed', 'expanded'] as const;
 
+// RFC 2034 section 4: every status code "must agree with the primary response code", so a 5xx
+// reply carries a 5.X.X code. When the text opens with a reply code, a code-shaped run of another
+// class (a server version such as Exim 4.94.2, a URL's ?code=4.2.0) is not the status and is
+// skipped; with no reply code to agree with, the first run is the code.
 export function extractEnhancedStatusCode(text: string): string {
-  return ENHANCED_STATUS_CODE_RE.exec(text)?.[0] ?? UNCLASSIFIED;
+  const replyClass = BASIC_REPLY_CODE_RE.exec(text)?.[1]?.charAt(0);
+  for (const match of text.matchAll(ENHANCED_STATUS_CODE_RE)) {
+    if (replyClass === undefined || match[0].startsWith(replyClass)) return match[0];
+  }
+  return UNCLASSIFIED;
 }
 
 export function extractBasicReplyCode(text: string): string {
   return BASIC_REPLY_CODE_RE.exec(text)?.[1] ?? UNCLASSIFIED;
 }
 
+// node:net isIP accepts an IPv6 zone id (fe80::1%eth0), and the text after the % can be any dotted
+// name, so it would carry that name into a field that promises an address. No mail server is
+// reached at a link-local scope, so a value with a zone id is refused rather than stored.
 export function validIp(value: string): string {
-  return isIP(value) !== 0 ? value : UNCLASSIFIED;
+  return !value.includes('%') && isIP(value) !== 0 ? value : UNCLASSIFIED;
 }
 
 export function validHostname(value: string): string {
