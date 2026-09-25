@@ -1,4 +1,5 @@
 import { resolveProviderMode } from '@fothering/core/mode';
+import { UNCLASSIFIED } from '@fothering/core/records';
 import type { AddressKeyPort, DeadLetterPort, EventStorePort, FixtureOptions } from './port-types.js';
 import type { DryRunSink, KindTable, LiveClients, LiveConfig, ResolvedKind, RuntimeContext } from './port-types.js';
 import { NotBuiltError } from './port-types.js';
@@ -84,13 +85,20 @@ function notBuiltPort(operations: readonly string[], phase: number): Record<stri
   return port;
 }
 
-// AC-P9: the target is a receiving domain or a lane name by the time this fires (later live
-// adapters own that shaping); this recorder only ever prints whatever its caller already reduced
-// the request to, never a whole command object that could carry a recipient address.
+// AC-P9: a live adapter reduces its request to a receiving domain or a lane name before this
+// fires. The recorder does not rely on that: a string first argument is printed only when it
+// matches a shape that cannot hold an address or a sentence, anything else prints as
+// unclassified, and a non-string argument (a whole command or record) prints the port name.
+const DRY_RUN_TARGET_PATTERN = /^[A-Za-z0-9._:-]{1,256}$/;
+
+function dryRunTarget(portName: string, first: unknown): string {
+  if (typeof first !== 'string') return portName;
+  return DRY_RUN_TARGET_PATTERN.test(first) ? first : UNCLASSIFIED;
+}
+
 function dryRunOperation(portName: string, operation: string, sink: DryRunSink): (...args: unknown[]) => Promise<void> {
   return async (...args: unknown[]) => {
-    const target = typeof args[0] === 'string' ? args[0] : portName;
-    sink(`(dry-run) WOULD ${portName}.${operation} ${target}`);
+    sink(`(dry-run) WOULD ${portName}.${operation} ${dryRunTarget(portName, args[0])}`);
   };
 }
 
@@ -126,14 +134,23 @@ export function resolvePortTable(options: ResolvePortTableOptions): { ports: Res
       continue;
     }
 
+    // Each operation is read off the instance and bound to it, never copied with a spread: a spread
+    // keeps own properties only, so an adapter written as a class would lose every method on its
+    // prototype and report 'live' for an operation that is not there. A missing operation fails
+    // here, when the composition root is built, not on the first call in a deployed function.
     const liveInstance = row.live({ liveConfig, liveClients, dryRunSink, now }) as Record<string, unknown>;
-    const wrapped: Record<string, unknown> = { ...liveInstance };
+    const wrapped: Record<string, unknown> = {};
     for (const operation of row.operations) {
+      const method = liveInstance[operation];
+      if (typeof method !== 'function') {
+        throw new Error(`the live ${name} adapter has no ${operation} operation`);
+      }
       if (row.mutatingOperations.includes(operation) && mode !== 'live') {
         rowKinds[operation] = 'dry-run';
         wrapped[operation] = dryRunOperation(name, operation, dryRunSink);
       } else {
         rowKinds[operation] = 'live';
+        wrapped[operation] = (method as (...args: unknown[]) => unknown).bind(liveInstance);
       }
     }
     ports[name] = wrapped;
