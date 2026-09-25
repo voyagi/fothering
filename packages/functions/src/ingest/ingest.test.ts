@@ -97,7 +97,7 @@ describe('the doc-derived Bounce through the ingest composition root', () => {
     const result = await ingestEvent(raw, loggedDeps, { provenance: 'doc-derived' });
 
     expect(result).toEqual({ outcome: 'dropped', stored: 0, duplicates: 0 });
-    expect(JSON.parse(lines[0] ?? '{}')).toMatchObject({ event: 'dropped-no-configuration-set' });
+    expect(JSON.parse(lines[0] ?? '{}')).toMatchObject({ event: 'dropped-no-configuration-set', level: 'info' });
   });
 
   it('drops an event whose configuration set is not in the lane map and logs its message id only', async () => {
@@ -112,7 +112,7 @@ describe('the doc-derived Bounce through the ingest composition root', () => {
     const result = await ingestEvent(raw, loggedDeps, { provenance: 'doc-derived' });
 
     expect(result).toEqual({ outcome: 'dropped', stored: 0, duplicates: 0 });
-    expect(JSON.parse(lines[0] ?? '{}')).toMatchObject({ event: 'dropped-unmapped' });
+    expect(JSON.parse(lines[0] ?? '{}')).toMatchObject({ event: 'dropped-unmapped', level: 'info' });
   });
 
   it('drops a Send with an empty destination list and logs its message id only (AC-E15)', async () => {
@@ -127,7 +127,7 @@ describe('the doc-derived Bounce through the ingest composition root', () => {
     const result = await ingestEvent(raw, loggedDeps, { provenance: 'doc-derived' });
 
     expect(result).toEqual({ outcome: 'dropped', stored: 0, duplicates: 0 });
-    expect(JSON.parse(lines[0] ?? '{}')).toEqual({ event: 'dropped-empty-destination', messageId: raw.detail.mail.messageId });
+    expect(JSON.parse(lines[0] ?? '{}')).toEqual({ event: 'dropped-empty-destination', level: 'info', messageId: raw.detail.mail.messageId });
   });
 
   it('does not match bulk-2 or Bulk against a bulk lane entry, and writes nothing (AC-E14)', async () => {
@@ -161,7 +161,7 @@ describe('the doc-derived Bounce through the ingest composition root', () => {
     const result = await ingestEvent(loadSesEventFixture('bounce').event, deps, { provenance: 'doc-derived' });
 
     expect(result).toEqual({ outcome: 'dropped', stored: 0, duplicates: 0 });
-    expect(JSON.parse(lines[0] ?? '{}')).toEqual({ event: 'dropped-unminimizable', messageId: BOUNCE_MESSAGE_ID, errorName: 'Error' });
+    expect(JSON.parse(lines[0] ?? '{}')).toEqual({ event: 'dropped-unminimizable', level: 'error', messageId: BOUNCE_MESSAGE_ID, errorName: 'Error' });
   });
 
   it('sends every minimized record to the dead-letter port, logs the write error by name, and resolves dead-lettered when a put fails', async () => {
@@ -181,7 +181,7 @@ describe('the doc-derived Bounce through the ingest composition root', () => {
     expect(deadLetter.sent).toHaveLength(1);
     expect(deadLetter.sent[0]).toHaveLength(1);
     expect(lines.map((line) => JSON.parse(line) as unknown)).toEqual([
-      { event: 'dead-lettered', messageId: BOUNCE_MESSAGE_ID, errorName: 'FixtureWriteError' },
+      { event: 'dead-lettered', level: 'error', messageId: BOUNCE_MESSAGE_ID, errorName: 'FixtureWriteError' },
     ]);
   });
 
@@ -197,7 +197,7 @@ describe('the doc-derived Bounce through the ingest composition root', () => {
 
     await expect(ingestEvent(loadSesEventFixture('bounce').event, deps, { provenance: 'doc-derived' })).rejects.toThrow();
     expect(lines.map((line) => JSON.parse(line) as unknown)).toEqual([
-      { event: 'dead-letter-failed', messageId: BOUNCE_MESSAGE_ID, errorName: 'FixtureWriteError' },
+      { event: 'dead-letter-failed', level: 'error', messageId: BOUNCE_MESSAGE_ID, errorName: 'FixtureWriteError' },
     ]);
   });
 
@@ -215,7 +215,7 @@ describe('the doc-derived Bounce through the ingest composition root', () => {
 
     await expect(ingestEvent(loadSesEventFixture('bounce').event, deps, { provenance: 'doc-derived' })).rejects.toThrow(KeyStoreError);
     expect(lines.map((line) => JSON.parse(line) as unknown)).toEqual([
-      { event: 'key-set-unavailable', messageId: BOUNCE_MESSAGE_ID, errorName: 'KeyStoreError' },
+      { event: 'key-set-unavailable', level: 'error', messageId: BOUNCE_MESSAGE_ID, errorName: 'KeyStoreError' },
     ]);
   });
 
@@ -347,7 +347,7 @@ describe('the doc-derived Bounce through the ingest composition root', () => {
     const result = await ingestEvent({ detail: { mail: { messageId: 'm-1' } } }, loggedDeps, { provenance: 'doc-derived' });
 
     expect(result).toEqual({ outcome: 'dropped', stored: 0, duplicates: 0 });
-    expect(JSON.parse(lines[0] ?? '{}')).toEqual({ event: 'dropped-unparseable', messageId: 'm-1' });
+    expect(JSON.parse(lines[0] ?? '{}')).toEqual({ event: 'dropped-unparseable', level: 'info', messageId: 'm-1' });
   });
 });
 
@@ -446,6 +446,7 @@ describe('createLogger keeps free text out of every line', () => {
     const logger = createLogger((line) => lines.push(line));
     const hostileEntry = {
       event: 'dropped-unparseable',
+      level: 'a caller-supplied sentence',
       messageId: 'jane@example.com',
       errorName: 'a full sentence is not a name',
       field: 'a field with spaces in it',
@@ -457,10 +458,27 @@ describe('createLogger keeps free text out of every line', () => {
 
     expect(JSON.parse(lines[0] ?? '{}')).toEqual({
       event: 'dropped-unparseable',
+      level: 'info',
       messageId: 'unclassified',
       errorName: 'unclassified',
       field: 'unclassified',
     });
+  });
+
+  // The level comes from the method called, never from the entry, so a reader can tell a failure
+  // from a routine drop without knowing every event name.
+  it('writes the same entry through info and error as two lines that differ only by level', () => {
+    const lines: string[] = [];
+    const logger = createLogger((line) => lines.push(line));
+    const entry: LogEntry = { event: 'dead-lettered', messageId: 'abc-123', errorName: 'TypeError' };
+
+    logger.info(entry);
+    logger.error(entry);
+
+    expect(lines.map((line) => JSON.parse(line) as unknown)).toEqual([
+      { ...entry, level: 'info' },
+      { ...entry, level: 'error' },
+    ]);
   });
 
   // The log line is the one trace a failed message leaves, so the logger keeps every id the event
@@ -470,7 +488,7 @@ describe('createLogger keeps free text out of every line', () => {
     (_label, messageId) => {
       const lines: string[] = [];
       createLogger((line) => lines.push(line)).error({ event: 'dead-letter-failed', messageId });
-      expect(JSON.parse(lines[0] ?? '{}')).toEqual({ event: 'dead-letter-failed', messageId });
+      expect(JSON.parse(lines[0] ?? '{}')).toEqual({ event: 'dead-letter-failed', level: 'error', messageId });
     },
   );
 
@@ -482,6 +500,7 @@ describe('createLogger keeps free text out of every line', () => {
 
     expect(JSON.parse(lines[0] ?? '{}')).toEqual({
       event: 'ingest-failure',
+      level: 'error',
       messageId: 'abc-123',
       errorName: 'TypeError',
       field: 'detail.mail.tags',

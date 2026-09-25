@@ -1,7 +1,7 @@
 import { SES_ID_PATTERN, UNCLASSIFIED } from './records.js';
 
-// A closed key set is the whole point (T-01-02): every line holds only what is listed below,
-// whatever an entry carries beyond it. Building the output object field by field, rather than
+// A closed key set is the whole point (T-01-02): every line holds only what is listed below, plus
+// the level of the method that wrote it, whatever an entry carries beyond that. Building the output object field by field, rather than
 // spreading the entry, is what makes an unlisted key impossible to leak, not merely undocumented.
 
 export type LogSink = (line: string) => void;
@@ -26,9 +26,15 @@ const ERROR_NAME_PATTERN = /^[A-Za-z][A-Za-z0-9]{0,63}$/;
 const FIELD_PATTERN = /^[A-Za-z][A-Za-z0-9-]*(\.[A-Za-z][A-Za-z0-9-]*)*$/;
 const FIELD_MAX_LENGTH = 128;
 
-function sanitizedLine(entry: LogEntry): Record<string, unknown> {
+// The level is the method the caller chose, written as a fixed word, never read from the entry:
+// without it an info line and an error line are identical, so no reader can tell a failed message
+// from a routine drop without knowing every event name.
+type LogLevel = 'info' | 'error';
+
+function sanitizedLine(entry: LogEntry, level: LogLevel): Record<string, unknown> {
   const line: Record<string, unknown> = {
     event: EVENT_PATTERN.test(entry.event) ? entry.event : UNCLASSIFIED,
+    level,
   };
   if (entry.messageId !== undefined) {
     line.messageId = MESSAGE_ID_PATTERN.test(entry.messageId) ? entry.messageId : UNCLASSIFIED;
@@ -48,10 +54,10 @@ function sanitizedLine(entry: LogEntry): Record<string, unknown> {
 export function createLogger(sink: LogSink): Logger {
   return {
     info(entry) {
-      sink(JSON.stringify(sanitizedLine(entry)));
+      sink(JSON.stringify(sanitizedLine(entry, 'info')));
     },
     error(entry) {
-      sink(JSON.stringify(sanitizedLine(entry)));
+      sink(JSON.stringify(sanitizedLine(entry, 'error')));
     },
   };
 }
