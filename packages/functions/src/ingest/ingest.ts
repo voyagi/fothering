@@ -14,8 +14,15 @@ export interface IngestOptions {
   provenance: Provenance;
 }
 
-// Ordering per D-16: parse, drop an unmapped set, minimize, conditional puts. Plan 01-12 adds the
-// dead-letter path behind this same signature; a write failure here is left to that plan.
+function errorName(error: unknown): string {
+  return error instanceof Error ? error.name : 'Error';
+}
+
+// Ordering per D-16: parse, drop without a configuration-set tag, drop an unmapped set, drop a
+// Send with no destination, minimize, conditional puts. A write failure sends the already-
+// minimized records to the dead-letter port and reports dead-lettered; a failed dead-letter send
+// is left to propagate so Lambda's asynchronous retry reruns the whole event, and the conditional
+// puts absorb whatever the first attempt already wrote.
 export async function ingestEvent(rawEvent: unknown, deps: IngestDeps, options: IngestOptions): Promise<IngestResult> {
   const parsed = parseSesEvent(rawEvent);
   if (!parsed.ok) {
@@ -27,29 +34,55 @@ export async function ingestEvent(rawEvent: unknown, deps: IngestDeps, options: 
     return { outcome: 'dropped', stored: 0, duplicates: 0 };
   }
 
-  const configurationSet = parsed.event.detail.mail.tags['ses:configuration-set']?.[0];
-  const lane = configurationSet === undefined ? undefined : findLane(deps.laneMap, configurationSet);
+  const { detail } = parsed.event;
+  const messageId = detail.mail.messageId;
+
+  const configurationSet = detail.mail.tags['ses:configuration-set']?.[0];
+  if (configurationSet === undefined) {
+    deps.log.info({ event: 'dropped-no-configuration-set', messageId });
+    return { outcome: 'dropped', stored: 0, duplicates: 0 };
+  }
+
+  const lane = findLane(deps.laneMap, configurationSet);
   if (lane === undefined) {
-    deps.log.info({ event: 'dropped-unmapped', messageId: parsed.event.detail.mail.messageId });
+    deps.log.info({ event: 'dropped-unmapped', messageId });
+    return { outcome: 'dropped', stored: 0, duplicates: 0 };
+  }
+
+  if (detail.eventType === 'Send' && detail.mail.destination.length === 0) {
+    deps.log.info({ event: 'dropped-empty-destination', messageId });
     return { outcome: 'dropped', stored: 0, duplicates: 0 };
   }
 
   const keySet = await deps.ports.addressKey.getKeySet();
-  const records = minimizeEvent(parsed.event, {
-    lane,
-    laneMap: deps.laneMap,
-    keySet,
-    provenance: options.provenance,
-    envelopeTimeMs: Date.parse(parsed.event.time),
-    arrivalTimeMs: deps.now(),
-  });
+
+  let records;
+  try {
+    records = minimizeEvent(parsed.event, {
+      lane,
+      laneMap: deps.laneMap,
+      keySet,
+      provenance: options.provenance,
+      envelopeTimeMs: Date.parse(parsed.event.time),
+      arrivalTimeMs: deps.now(),
+    });
+  } catch (error) {
+    deps.log.error({ event: 'dropped-unminimizable', errorName: errorName(error) });
+    return { outcome: 'dropped', stored: 0, duplicates: 0 };
+  }
 
   let stored = 0;
   let duplicates = 0;
-  for (const record of records) {
-    const outcome = await deps.ports.eventStore.putIfAbsent(record);
-    if (outcome === 'written') stored += 1;
-    else duplicates += 1;
+  try {
+    for (const record of records) {
+      const outcome = await deps.ports.eventStore.putIfAbsent(record);
+      if (outcome === 'written') stored += 1;
+      else duplicates += 1;
+    }
+  } catch {
+    await deps.ports.deadLetter.send(records);
+    deps.log.error({ event: 'dead-lettered', messageId });
+    return { outcome: 'dead-lettered', stored, duplicates };
   }
 
   return { outcome: 'stored', stored, duplicates };
