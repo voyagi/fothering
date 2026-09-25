@@ -463,6 +463,17 @@ describe('createLogger keeps free text out of every line', () => {
     });
   });
 
+  // The log line is the one trace a failed message leaves, so the logger keeps every id the event
+  // parser accepts and stores; a narrower copy of the pattern logged some as unclassified.
+  it.each([['a dot and an underscore', 'id.with_parts-1'], ['256 characters', 'a'.repeat(256)]])(
+    'keeps a messageId the event parser accepts, with %s',
+    (_label, messageId) => {
+      const lines: string[] = [];
+      createLogger((line) => lines.push(line)).error({ event: 'dead-letter-failed', messageId });
+      expect(JSON.parse(lines[0] ?? '{}')).toEqual({ event: 'dead-letter-failed', messageId });
+    },
+  );
+
   it('keeps a valid messageId, errorName, field and count as given', () => {
     const lines: string[] = [];
     const logger = createLogger((line) => lines.push(line));

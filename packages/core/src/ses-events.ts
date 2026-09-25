@@ -1,12 +1,10 @@
 import { z } from 'zod';
-import { UNCLASSIFIED } from './records.js';
+import { SES_ID_PATTERN, UNCLASSIFIED } from './records.js';
 
 // D-12: zod objects strip unknown keys by default, so a new SES field or subtype this schema does
 // not name is dropped or mapped to unclassified rather than dropping the whole event.
 
-const SES_ID_PATTERN = /^[A-Za-z0-9._-]{1,256}$/;
-// SES assigns messageId and feedbackId itself; a value outside this pattern cannot have come from
-// SES, so it fails the parse rather than carrying free text into a record key.
+// An id outside SES_ID_PATTERN fails the parse rather than carrying free text into a record key.
 const sesId = z.string().regex(SES_ID_PATTERN);
 
 // SES and EventBridge write every timestamp as ISO 8601 with an explicit offset (Z). Date.parse
@@ -230,11 +228,12 @@ function fieldFromIssue(raw: unknown, issue: { path: readonly PropertyKey[] } | 
   if (!isPlainObject(raw) || issue === undefined) return undefined;
   if (issue.path.length === 0) return 'envelope';
   if (issue.path[0] !== 'detail') return undefined;
+  // path[0] is 'detail' here, so segments always holds at least that one entry.
   const segments: string[] = [];
   for (const segment of issue.path) {
     if (typeof segment !== 'string') continue;
     segments.push(segment);
     if (segment === 'tags') break;
   }
-  return segments.length === 0 ? 'envelope' : segments.join('.');
+  return segments.join('.');
 }

@@ -255,6 +255,15 @@ describe('parseSesEvent: mail.messageId is a pattern-checked identifier, never f
     const result = parseSesEvent(event);
     expect(result.ok).toBe(false);
   });
+
+  it.each([['a dot and an underscore', 'id.with_parts-1'], ['256 characters', 'a'.repeat(256)]])(
+    'accepts a mail.messageId with %s',
+    (_label, good) => {
+      const event = fixtureEvent('bounce');
+      (detailOf(event).mail as Record<string, unknown>).messageId = good;
+      expect(parseSesEvent(event).ok).toBe(true);
+    },
+  );
 });
 
 describe('parseSesEvent: field is absent when the input is not an object', () => {

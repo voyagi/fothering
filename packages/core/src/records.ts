@@ -13,6 +13,11 @@ export type RecordKind = (typeof RECORD_KINDS)[number];
 
 export const UNCLASSIFIED = 'unclassified';
 
+// SES assigns messageId and feedbackId itself, so a value outside this pattern cannot have come
+// from SES. One pattern for the event parser and the logger alike, so every id the parser stores
+// is an id a log line can name.
+export const SES_ID_PATTERN = /^[A-Za-z0-9._-]{1,256}$/;
+
 export const PARTITION_KEY = 'pk';
 export const SORT_KEY = 'sk';
 export const RECIPIENT_KEY = 'recipientHmac';

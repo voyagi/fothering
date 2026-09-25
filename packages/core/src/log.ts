@@ -1,4 +1,4 @@
-import { UNCLASSIFIED } from './records.js';
+import { SES_ID_PATTERN, UNCLASSIFIED } from './records.js';
 
 // A closed key set is the whole point (T-01-02): every line holds only what is listed below,
 // whatever an entry carries beyond it. Building the output object field by field, rather than
@@ -20,7 +20,8 @@ export interface Logger {
 }
 
 const EVENT_PATTERN = /^[a-z][a-z0-9]*(-[a-z0-9]+)*$/;
-const MESSAGE_ID_PATTERN = /^[A-Za-z0-9-]{1,128}$/;
+// The parser's own id pattern, never a copy: an id the parser stores is one the log line can name.
+const MESSAGE_ID_PATTERN = SES_ID_PATTERN;
 const ERROR_NAME_PATTERN = /^[A-Za-z][A-Za-z0-9]{0,63}$/;
 const FIELD_PATTERN = /^[A-Za-z][A-Za-z0-9-]*(\.[A-Za-z][A-Za-z0-9-]*)*$/;
 const FIELD_MAX_LENGTH = 128;
