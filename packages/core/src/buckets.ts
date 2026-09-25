@@ -17,3 +17,42 @@ export function countRecords(records: readonly EventRecord[]): Partial<Record<Se
   }
   return counts;
 }
+
+// RED stub: task 2 has not implemented these yet. Every call throws so buckets.test.ts and
+// buckets.property.test.ts fail on real assertions instead of a module-resolution crash.
+export const LATENESS_HORIZON_MS = -1;
+export const SUPPRESSION_BOUNCE_SUBTYPES: readonly string[] = [];
+export const SUPPRESSION_COMPLAINT_SUBTYPES: readonly string[] = [];
+
+export interface BucketCount {
+  bucketStartMs: number;
+  complete: boolean;
+  send: number;
+  delivery: number;
+  permanentBounce: number;
+  transientBounce: number;
+  undeterminedBounce: number;
+  complaint: number;
+  reject: number;
+  deliveryDelay: number;
+  suppressedBounce: number;
+  suppressedComplaint: number;
+}
+
+export function isBucketComplete(_bucketStartMs: number, _nowMs: number): boolean {
+  throw new Error('isBucketComplete not implemented');
+}
+
+export interface CountLaneBucketsOptions {
+  fromBucketMs: number;
+  toBucketMs: number;
+  nowMs: number;
+}
+
+export function countLaneBuckets(_records: readonly EventRecord[], _options: CountLaneBucketsOptions): BucketCount[] {
+  throw new Error('countLaneBuckets not implemented');
+}
+
+export function hardBounceRatio(_counts: Pick<BucketCount, 'send' | 'permanentBounce'>): number | null {
+  throw new Error('hardBounceRatio not implemented');
+}
