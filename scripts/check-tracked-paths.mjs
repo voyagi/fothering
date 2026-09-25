@@ -67,10 +67,35 @@ function loadAllowlist(root) {
 // --- the scan ----------------------------------------------------------------------------------
 
 function scan(cwd, opts = {}) {
-  // RED PHASE PLACEHOLDER (TDD): the allowlist comparison is not implemented yet, so every case
-  // that needs it must fail here rather than pass by coincidence.
-  void cwd; void opts; void repoRoot; void trackedFiles; void loadAllowlist;
-  return { ok: true, findings: [] };
+  let root;
+  try {
+    root = repoRoot(cwd);
+  } catch {
+    return { unknown: true, reason: `not a git repository at ${cwd}`, findings: [] };
+  }
+  let tracked;
+  try {
+    tracked = trackedFiles(root);
+  } catch (e) {
+    return { unknown: true, reason: `git ls-files failed: ${(e.message || '').split('\n')[0]}`, findings: [] };
+  }
+  if (tracked.length === 0) {
+    return { unknown: true, reason: 'git ls-files returned no tracked files (empty index)', findings: [] };
+  }
+
+  const allow = opts.allowlist || loadAllowlist(root);
+  if (allow.error) {
+    return { unknown: true, reason: allow.error, findings: [] };
+  }
+
+  const findings = [];
+  for (const f of tracked) {
+    if (allow.exact.has(f)) continue;
+    if (allow.prefixes.some((p) => f.startsWith(p))) continue;
+    findings.push({ file: f, why: 'not on the tracked-path allowlist (no exact entry, no covering prefix)' });
+  }
+
+  return { ok: findings.length === 0, findings, tracked: tracked.length };
 }
 
 // --- reporting ---------------------------------------------------------------------------------
@@ -98,7 +123,7 @@ function report(res) {
 //
 // EVERY RULE GETS ITS OWN ISOLATED CONTROL, built on an isolated git fixture under os.tmpdir().
 
-function fixture(files) {
+function fixture(files, untracked = {}) {
   const root = mkdtempSync(join(tmpdir(), 'tracked-paths-st-'));
   git(['init', '-q'], root);
   const noExcludes = join(root, '.git', 'empty-excludes');
@@ -113,6 +138,13 @@ function fixture(files) {
   const staged = new Set(git(['ls-files', '-z'], root).split('\0').filter(Boolean));
   const gap = Object.keys(files).filter((f) => !staged.has(f.replace(/\\/g, '/')));
   if (gap.length) throw new Error(`fixture failed to stage ${gap.join(', ')} - this case would assert nothing`);
+  // Written to disk but never staged: distinguishes "zero tracked files" from "no tracked-paths.json
+  // to read", since loadAllowlist() reads the disk directly while trackedFiles() reads the index.
+  for (const [rel, body] of Object.entries(untracked)) {
+    const abs = join(root, rel);
+    mkdirSync(dirname(abs), { recursive: true });
+    writeFileSync(abs, body);
+  }
   return root;
 }
 
@@ -130,7 +162,10 @@ function muted(fn) {
 }
 
 const BODY = 'text\n';
-const BASE_ALLOW = { exact: ['README.md', 'package.json'], prefixes: ['widgets/', 'docs/adr/'] };
+// tracked-paths.json names itself, exactly like the real repo's allowlist does: the fixture
+// tracks the file it is written into, and it must cover itself or every case here would report a
+// spurious finding for its own presence.
+const BASE_ALLOW_JSON = JSON.stringify({ exact: ['README.md', 'package.json', 'tracked-paths.json'], prefixes: ['widgets/', 'docs/adr/'] });
 
 function selftest() {
   const SEP = '  ::  ';
@@ -142,64 +177,65 @@ function selftest() {
 
   const cases = [];
 
+  // Every case below writes a REAL tracked-paths.json into its fixture and lets scan() call the
+  // real loadAllowlist() (no injected allowlist object), so a bug in reading or parsing that file
+  // is exercised the same way it would be on the real repo.
+
   // NEGATIVE control: a tree that matches the allowlist exactly must pass.
   cases.push({
     name: 'a clean tree matching the allowlist passes',
-    files: { 'README.md': BODY, 'widgets/src/index.ts': BODY, 'docs/adr/0001.md': BODY },
-    allowlist: BASE_ALLOW,
+    files: { 'tracked-paths.json': BASE_ALLOW_JSON, 'README.md': BODY, 'widgets/src/index.ts': BODY, 'docs/adr/0001.md': BODY },
     expect: 'clean',
   });
 
   // AC-E39: a neutral path next to the allowlist.
   cases.push({
     name: 'a path next to the allowlist is a finding',
-    files: { 'README.md': BODY, '.cache-old/x.md': BODY },
-    allowlist: BASE_ALLOW,
+    files: { 'tracked-paths.json': BASE_ALLOW_JSON, 'README.md': BODY, '.cache-old/x.md': BODY },
     expect: 'fail', expectWhy: /\.cache-old\/x\.md <- not on the tracked-path allowlist/,
   });
   cases.push({
     name: 'a new top-level folder not on the allowlist is a finding',
-    files: { 'README.md': BODY, 'newdir/file.txt': BODY },
-    allowlist: BASE_ALLOW,
+    files: { 'tracked-paths.json': BASE_ALLOW_JSON, 'README.md': BODY, 'newdir/file.txt': BODY },
     expect: 'fail', expectWhy: /newdir\/file\.txt <- not on the tracked-path allowlist/,
   });
 
   // The prefix segment boundary.
   cases.push({
     name: 'a prefix matches only whole path segments (docs/adr/ does not match docs/adrx/)',
-    files: { 'README.md': BODY, 'docs/adrx/y.md': BODY },
-    allowlist: BASE_ALLOW,
+    files: { 'tracked-paths.json': BASE_ALLOW_JSON, 'README.md': BODY, 'docs/adrx/y.md': BODY },
     expect: 'fail', expectWhy: /docs\/adrx\/y\.md <- not on the tracked-path allowlist/,
   });
 
-  // A missing or unparsable allowlist.
+  // A missing or unparsable allowlist, both read from a REAL fixture so the disk-reading and
+  // JSON-parsing paths themselves are what gets exercised.
   cases.push({
     name: 'a missing allowlist is UNKNOWN, not clean',
     files: { 'README.md': BODY },
-    allowlist: { error: 'tracked-paths.json is missing or unreadable: ENOENT' },
     expect: 'unknown',
   });
   cases.push({
     name: 'an unparsable allowlist is UNKNOWN, not clean',
-    files: { 'README.md': BODY },
-    allowlist: { error: 'tracked-paths.json is not valid JSON: Unexpected token' },
+    files: { 'tracked-paths.json': '{ not json', 'README.md': BODY },
     expect: 'unknown',
   });
 
   // AC-E41: an exact entry with a space and a non-ASCII letter matches exactly.
   cases.push({
     name: 'an exact entry with a space and a non-ASCII letter matches exactly',
-    files: { 'my café notes.md': BODY },
-    allowlist: { exact: ['my café notes.md'], prefixes: [] },
+    files: { 'tracked-paths.json': JSON.stringify({ exact: ['my café notes.md', 'tracked-paths.json'], prefixes: [] }), 'my café notes.md': BODY },
     expect: 'clean',
   });
 
   // A non-repository, and an empty index.
   cases.push({ name: 'a non-repository is UNKNOWN, not clean', noRepo: true, expect: 'unknown' });
   cases.push({
+    // tracked-paths.json sits on DISK but is never staged, so loadAllowlist() (reads disk) would
+    // succeed while trackedFiles() (reads the index) reports zero - the one case where skipping the
+    // explicit empty-index check would reach "clean" instead of "UNKNOWN".
     name: 'zero tracked files is UNKNOWN, not clean',
     files: {},
-    allowlist: BASE_ALLOW,
+    untrackedFiles: { 'tracked-paths.json': BASE_ALLOW_JSON },
     expect: 'unknown',
   });
 
@@ -221,11 +257,11 @@ function selftest() {
     if (c.noRepo) {
       root = mkdtempSync(join(tmpdir(), 'tracked-paths-norepo-'));
       roots.push(root);
-      res = scan(root, { allowlist: BASE_ALLOW });
+      res = scan(root);
     } else {
-      root = fixture(c.files);
+      root = fixture(c.files, c.untrackedFiles || {});
       roots.push(root);
-      res = scan(root, { allowlist: c.allowlist });
+      res = scan(root);
     }
     const got = res.unknown ? 'unknown' : (res.ok ? 'clean' : 'fail');
     const whys = (res.findings || []).map((f) => `${f.file} <- ${f.why}`).join(' | ');

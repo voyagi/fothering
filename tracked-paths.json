@@ -1,0 +1,34 @@
+{
+  "exact": [
+    ".dependency-cruiser.cjs",
+    ".env.example",
+    ".gitignore",
+    ".jscpd.json",
+    "DESIGN.md",
+    "LICENSE",
+    "PRODUCT.md",
+    "README.md",
+    "cdk.json",
+    "eslint.complexity.config.mjs",
+    "eslint.config.mjs",
+    "knip.json",
+    "lanes.json",
+    "package-lock.json",
+    "package.json",
+    "renovate.json",
+    "stryker.config.json",
+    "tracked-paths.json",
+    "tsconfig.json",
+    "verify-ship.mjs",
+    "vitest.config.ts",
+    "vitest.stryker.config.ts",
+    "docs/forget-one-recipient.md"
+  ],
+  "prefixes": [
+    ".github/workflows/",
+    "design/",
+    "docs/adr/",
+    "packages/",
+    "scripts/"
+  ]
+}
