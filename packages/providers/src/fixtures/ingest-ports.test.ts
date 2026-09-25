@@ -167,6 +167,24 @@ describe('breaking cases on the parse and minimize path', () => {
     expect(record.eventTimestampMs).toBe(bounceMs);
   });
 
+  // A record's partition is its lane, and a lane's counts decide whether that lane is closed, so
+  // a lane that is not the event's own must stop the minimize rather than file records under it.
+  it('refuses to minimize an event under a lane other than its configuration set', () => {
+    const parsed = parseSesEvent(loadSesEventFixture('bounce').event);
+    if (!parsed.ok) throw new Error('fixture bounce event failed to parse');
+    const context = {
+      laneMap: DOC_EXAMPLE_LANE_MAP,
+      keySet: TEST_ADDRESS_KEY_SET,
+      provenance: 'doc-derived' as const,
+      envelopeTimeMs: 0,
+      arrivalTimeMs: 0,
+    };
+    expect(() => minimizeEvent(parsed.event, { ...context, lane: { ...docLane(), configurationSet: 'OtherSet' } })).toThrow(
+      'does not match the lane',
+    );
+    expect(minimizeEvent(parsed.event, { ...context, lane: docLane() })).toHaveLength(1);
+  });
+
   it('keeps the receiving server diagnostic text out of every record', () => {
     const serialized = JSON.stringify(minimizeRaw(editableBounce()));
     expect(JSON.stringify(loadSesEventFixture('bounce'))).toContain('user unknown');

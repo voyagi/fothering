@@ -81,6 +81,7 @@ function fakeModules() {
       lookup: recordingLookup,
       lookupService: recordingResolve,
       resolve4: recordingResolve,
+      reverse: recordingResolve,
       promises: {
         lookup: recordingLookup,
         lookupService: recordingResolve,
@@ -257,6 +258,20 @@ describe('installNetworkGuard', () => {
     expect(() => modules.dns.lookupService('192.0.2.1', 53, () => {})).toThrow(NetworkGuardError);
     expect(() => modules.dns.promises.lookupService('192.0.2.1', 53)).toThrow(NetworkGuardError);
     expect(() => modules.dns.lookupService('127.0.0.1', 53, () => {})).not.toThrow();
+  });
+
+  // Every dns function other than lookup sends its query to the configured DNS servers over the
+  // network and skips the hosts file (Node's dns docs), so even a loopback name leaves the machine.
+  it('refuses every resolve and reverse call, a loopback name included, and still allows a loopback lookup', () => {
+    const modules = fakeModules();
+    installNetworkGuard(modules);
+    expect(() => modules.dns.resolve4('localhost')).toThrow(NetworkGuardError);
+    expect(() => modules.dns.reverse('127.0.0.1', () => {})).toThrow(NetworkGuardError);
+    expect(() => modules.dns.promises.resolve4('localhost')).toThrow(NetworkGuardError);
+    expect(() => modules.dns.Resolver.prototype.resolve4('localhost')).toThrow(NetworkGuardError);
+    expect(() => modules.dns.promises.Resolver.prototype.resolve6('::1')).toThrow(NetworkGuardError);
+    expect(() => modules.dns.lookup('localhost', () => {})).not.toThrow();
+    expect(modules.calls.lookup).toHaveLength(1);
   });
 
   it('refuses the Resolver classes\' resolve methods for a non-loopback name', () => {

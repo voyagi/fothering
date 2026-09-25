@@ -17,6 +17,11 @@ export interface MinimizeContext {
 
 export function minimizeEvent(event: SesEnvelope, context: MinimizeContext): EventRecord[] {
   const { detail } = event;
+  // Every record is filed under the lane's partition, and a lane's counts decide whether that
+  // lane is closed, so a caller's lane that is not this event's own configuration set is refused.
+  if (detail.mail.tags['ses:configuration-set']?.[0] !== context.lane.configurationSet) {
+    throw new Error(`the event's configuration set does not match the lane ${context.lane.configurationSet}`);
+  }
   if (detail.eventType !== 'Bounce') return [];
 
   const mailTimestampMs = Date.parse(detail.mail.timestamp);

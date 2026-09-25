@@ -49,8 +49,8 @@ export function isLoopbackHost(host: string): boolean {
 }
 
 export class NetworkGuardError extends Error {
-  constructor(host: string) {
-    super(`refused a non-loopback connection to ${host}: tests run on fixtures only`);
+  constructor(target: string, refused = 'a non-loopback connection to') {
+    super(`refused ${refused} ${target}: tests run on fixtures only`);
     this.name = 'NetworkGuardError';
   }
 }
@@ -127,16 +127,20 @@ function assertAllowedHostname(hostname: unknown): void {
   if (typeof hostname === 'string' && !isLoopbackHost(hostname)) throw new NetworkGuardError(hostname);
 }
 
-// dns.resolve4, resolveMx, reverse and every sibling share this prefix; matching by name means a
-// Node release adding another resolve* method is covered without editing this list.
-// lookupService is the one other query: a reverse lookup whose first argument is the address.
-const HOSTNAME_METHOD_RE = /^(resolve|reverse|lookupService$)/;
+// dns.resolve4, resolveMx, reverse and every sibling share these prefixes; matching by name means
+// a Node release adding another resolve* method is covered without editing this list. They send
+// their query to the configured DNS servers over the network and skip the hosts file (Node's dns
+// docs), so the name they are given says nothing about where the query goes: every call is
+// refused, a loopback name included.
+const NETWORK_QUERY_METHOD_RE = /^(resolve|reverse)/;
 
-function wrapHostnameMethods(target: object): void {
+function wrapNetworkQueryMethods(target: object): void {
   const bag = target as Record<string, unknown>;
   for (const key of Object.getOwnPropertyNames(bag)) {
-    if (!HOSTNAME_METHOD_RE.test(key)) continue;
-    wrapMethod(bag, key, (args) => assertAllowedHostname(args[0]));
+    if (!NETWORK_QUERY_METHOD_RE.test(key)) continue;
+    wrapMethod(bag, key, (args) => {
+      throw new NetworkGuardError(String(args[0]), 'a network DNS query for');
+    });
   }
 }
 
@@ -154,12 +158,16 @@ export function installNetworkGuard(modules: NetworkGuardModules): void {
 
   wrapMethod(net.Socket.prototype, 'connect', assertAllowedConnect);
 
-  wrapMethod(dns, 'lookup', (args) => assertAllowedHostname(args[0]));
-  wrapMethod(dns.promises, 'lookup', (args) => assertAllowedHostname(args[0]));
-  wrapHostnameMethods(dns);
-  wrapHostnameMethods(dns.promises);
-  wrapHostnameMethods(dns.Resolver.prototype);
-  wrapHostnameMethods(dns.promises.Resolver.prototype);
+  // lookup and lookupService go through the operating system (getaddrinfo and getnameinfo), which
+  // answers a loopback name or address locally, so only those two are checked by name.
+  for (const bag of [dns, dns.promises]) {
+    wrapMethod(bag, 'lookup', (args) => assertAllowedHostname(args[0]));
+    wrapMethod(bag, 'lookupService', (args) => assertAllowedHostname(args[0]));
+  }
+  wrapNetworkQueryMethods(dns);
+  wrapNetworkQueryMethods(dns.promises);
+  wrapNetworkQueryMethods(dns.Resolver.prototype);
+  wrapNetworkQueryMethods(dns.promises.Resolver.prototype);
 
   wrapMethod(dgram.Socket.prototype, 'send', (args) => {
     const target = dgramSendAddress(args);
