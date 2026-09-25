@@ -2,11 +2,14 @@ import { describe, expect, it } from 'vitest';
 import { bucketStartMs, countRecords } from '@fothering/core/buckets';
 import { parseSesEvent } from '@fothering/core/ses-events';
 import { createLogger, type LogEntry, type LogSink } from '@fothering/core/log';
+import { parseLaneMap } from '@fothering/core/lanes';
+import type { AddressKeySet } from '@fothering/core/address';
 import { DOC_EXAMPLE_LANE_MAP, loadSesEventFixture } from '@fothering/providers/fixtures/ses-events/index';
 import {
   createFixtureAddressKey,
   createFixtureDeadLetter,
   createFixtureEventStore,
+  type FixtureDeadLetterPort,
 } from '@fothering/providers/fixtures/ingest-ports';
 import { PORT_TABLE, resolvePortTable, type PortName, type PortRow } from '@fothering/providers/ports';
 import {
@@ -89,7 +92,218 @@ describe('the doc-derived Bounce through the ingest composition root', () => {
     const result = await ingestEvent(raw, loggedDeps, { provenance: 'doc-derived' });
 
     expect(result).toEqual({ outcome: 'dropped', stored: 0, duplicates: 0 });
+    expect(JSON.parse(lines[0] ?? '{}')).toMatchObject({ event: 'dropped-no-configuration-set' });
+  });
+
+  it('drops an event whose configuration set is not in the lane map and logs its message id only', async () => {
+    const deps = buildIngestRoot({ runtimeContext: 'test', switchValue: undefined, laneMap: DOC_EXAMPLE_LANE_MAP });
+    const raw = structuredClone(loadSesEventFixture('bounce').event) as {
+      detail: { mail: { tags: Record<string, string[]> } };
+    };
+    raw.detail.mail.tags['ses:configuration-set'] = ['NotInTheLaneMap'];
+    const lines: string[] = [];
+    const loggedDeps: IngestDeps = { ...deps, log: createLogger((line) => lines.push(line)) };
+
+    const result = await ingestEvent(raw, loggedDeps, { provenance: 'doc-derived' });
+
+    expect(result).toEqual({ outcome: 'dropped', stored: 0, duplicates: 0 });
     expect(JSON.parse(lines[0] ?? '{}')).toMatchObject({ event: 'dropped-unmapped' });
+  });
+
+  it('drops a Send with an empty destination list and logs its message id only (AC-E15)', async () => {
+    const deps = buildIngestRoot({ runtimeContext: 'test', switchValue: undefined, laneMap: DOC_EXAMPLE_LANE_MAP });
+    const raw = structuredClone(loadSesEventFixture('send').event) as {
+      detail: { mail: { messageId: string; destination: string[] } };
+    };
+    raw.detail.mail.destination = [];
+    const lines: string[] = [];
+    const loggedDeps: IngestDeps = { ...deps, log: createLogger((line) => lines.push(line)) };
+
+    const result = await ingestEvent(raw, loggedDeps, { provenance: 'doc-derived' });
+
+    expect(result).toEqual({ outcome: 'dropped', stored: 0, duplicates: 0 });
+    expect(JSON.parse(lines[0] ?? '{}')).toEqual({ event: 'dropped-empty-destination', messageId: raw.detail.mail.messageId });
+  });
+
+  it('does not match bulk-2 or Bulk against a bulk lane entry, and writes nothing (AC-E14)', async () => {
+    const baseLane = DOC_EXAMPLE_LANE_MAP.lanes[0];
+    if (baseLane === undefined) throw new Error('expected at least one lane in DOC_EXAMPLE_LANE_MAP');
+    const laneMap = parseLaneMap({
+      runIdTagKey: DOC_EXAMPLE_LANE_MAP.runIdTagKey,
+      lanes: [{ ...baseLane, configurationSet: 'bulk', lane: 'bulk' }],
+    });
+    const deps = buildIngestRoot({ runtimeContext: 'test', switchValue: undefined, laneMap });
+    for (const configurationSet of ['bulk-2', 'Bulk']) {
+      const raw = structuredClone(loadSesEventFixture('bounce').event) as {
+        detail: { mail: { tags: Record<string, string[]> } };
+      };
+      raw.detail.mail.tags['ses:configuration-set'] = [configurationSet];
+      const result = await ingestEvent(raw, deps, { provenance: 'doc-derived' });
+      expect(result).toEqual({ outcome: 'dropped', stored: 0, duplicates: 0 });
+    }
+  });
+
+  it('drops an event whose address key set has no version active yet, logging dropped-unminimizable with the error name only', async () => {
+    const base = buildIngestRoot({ runtimeContext: 'test', switchValue: undefined, laneMap: DOC_EXAMPLE_LANE_MAP });
+    const futureKeySet: AddressKeySet = { versions: [{ id: 'k1', secret: 'x', activeFromMs: Number.MAX_SAFE_INTEGER }] };
+    const lines: string[] = [];
+    const deps: IngestDeps = {
+      ...base,
+      ports: { ...base.ports, addressKey: { getKeySet: async () => futureKeySet } },
+      log: createLogger((line) => lines.push(line)),
+    };
+
+    const result = await ingestEvent(loadSesEventFixture('bounce').event, deps, { provenance: 'doc-derived' });
+
+    expect(result).toEqual({ outcome: 'dropped', stored: 0, duplicates: 0 });
+    expect(JSON.parse(lines[0] ?? '{}')).toEqual({ event: 'dropped-unminimizable', errorName: 'Error' });
+  });
+
+  it('sends every minimized record to the dead-letter port and resolves dead-lettered when a put fails', async () => {
+    const deps = buildIngestRoot({
+      runtimeContext: 'test',
+      switchValue: undefined,
+      laneMap: DOC_EXAMPLE_LANE_MAP,
+      fixtures: { eventStoreFailure: 'put' },
+    });
+
+    const result = await ingestEvent(loadSesEventFixture('bounce').event, deps, { provenance: 'doc-derived' });
+
+    expect(result).toEqual({ outcome: 'dead-lettered', stored: 0, duplicates: 0 });
+    const deadLetter = deps.ports.deadLetter as FixtureDeadLetterPort;
+    expect(deadLetter.sent).toHaveLength(1);
+    expect(deadLetter.sent[0]).toHaveLength(1);
+  });
+
+  it('rethrows when the dead-letter send itself fails, so the caller’s retry can rerun the whole event', async () => {
+    const deps = buildIngestRoot({
+      runtimeContext: 'test',
+      switchValue: undefined,
+      laneMap: DOC_EXAMPLE_LANE_MAP,
+      fixtures: { eventStoreFailure: 'put', deadLetterFailure: 'send' },
+    });
+
+    await expect(ingestEvent(loadSesEventFixture('bounce').event, deps, { provenance: 'doc-derived' })).rejects.toThrow();
+  });
+
+  it('leaves one item and a count of one when two ingestEvent calls for the same event run under Promise.all (AC-E22)', async () => {
+    const nowMs = fixtureMailTimestampMs() + ONE_HOUR_MS;
+    const deps = buildIngestRoot({
+      runtimeContext: 'test',
+      switchValue: undefined,
+      laneMap: DOC_EXAMPLE_LANE_MAP,
+      now: () => nowMs,
+    });
+    const event = loadSesEventFixture('bounce').event;
+
+    const [first, second] = await Promise.all([
+      ingestEvent(event, deps, { provenance: 'doc-derived' }),
+      ingestEvent(event, deps, { provenance: 'doc-derived' }),
+    ]);
+
+    expect(first.stored + second.stored).toBe(1);
+    expect(first.duplicates + second.duplicates).toBe(1);
+    const configurationSet = fixtureConfigurationSet();
+    const bucket = bucketStartMs(fixtureMailTimestampMs());
+    const stored = await deps.ports.eventStore.queryLane(configurationSet, bucket, bucket, nowMs);
+    expect(stored).toHaveLength(1);
+  });
+
+  it('keeps the first write when a re-delivered Bounce carries the same feedbackId and recipient but a changed diagnosticCode (AC-E19)', async () => {
+    const nowMs = fixtureMailTimestampMs() + ONE_HOUR_MS;
+    const deps = buildIngestRoot({
+      runtimeContext: 'test',
+      switchValue: undefined,
+      laneMap: DOC_EXAMPLE_LANE_MAP,
+      now: () => nowMs,
+    });
+    const first = structuredClone(loadSesEventFixture('bounce').event) as {
+      detail: { bounce: { bouncedRecipients: { diagnosticCode?: string }[] } };
+    };
+    await ingestEvent(first, deps, { provenance: 'doc-derived' });
+
+    const redelivered = structuredClone(first);
+    const recipient = redelivered.detail.bounce.bouncedRecipients[0];
+    if (recipient === undefined) throw new Error('expected a recipient');
+    recipient.diagnosticCode = 'smtp; 421 4.4.1 different diagnostic text';
+    const second = await ingestEvent(redelivered, deps, { provenance: 'doc-derived' });
+    expect(second).toEqual({ outcome: 'stored', stored: 0, duplicates: 1 });
+
+    const configurationSet = fixtureConfigurationSet();
+    const bucket = bucketStartMs(fixtureMailTimestampMs());
+    const [stored] = await deps.ports.eventStore.queryLane(configurationSet, bucket, bucket, nowMs);
+    if (stored === undefined) throw new Error('expected the record to remain stored');
+    expect(stored.fields.basicReplyCode).toBe('550');
+  });
+
+  it('finds a planted address in the raw event and nowhere in stored items, dead-letter payloads or log lines (AC-12, AC-P3)', async () => {
+    const idnLabel = String.fromCodePoint(0x62, 0xfc, 0x63, 0x68, 0x65, 0x72); // b, U+00FC, cher
+    const address = `Jane+Tag@${idnLabel}.Example`;
+    const lowerAddress = address.toLowerCase();
+
+    function buildRaw() {
+      const raw = structuredClone(loadSesEventFixture('bounce').event) as {
+        detail: {
+          mail: {
+            source: string;
+            destination: string[];
+            headers: { name: string; value: string }[];
+            commonHeaders: { from: string[]; to: string[] };
+            tags: Record<string, string[]>;
+          };
+          bounce: { bouncedRecipients: { emailAddress: string; diagnosticCode?: string }[] };
+        };
+      };
+      raw.detail.mail.source = `Sender <${address}>`;
+      raw.detail.mail.destination = [address];
+      raw.detail.mail.commonHeaders.from = [address];
+      raw.detail.mail.commonHeaders.to = [address];
+      for (const header of raw.detail.mail.headers) header.value = address;
+      raw.detail.mail.tags.myCustomTag1 = [address];
+      const recipient = raw.detail.bounce.bouncedRecipients[0];
+      if (recipient === undefined) throw new Error('fixture bounce has no recipient');
+      recipient.emailAddress = address;
+      recipient.diagnosticCode = `smtp; 550 5.1.1 ${address} is unknown`;
+      return raw;
+    }
+
+    expect(JSON.stringify(buildRaw())).toContain(address);
+
+    const nowMs = fixtureMailTimestampMs() + ONE_HOUR_MS;
+
+    const cleanRoot = buildIngestRoot({ runtimeContext: 'test', switchValue: undefined, laneMap: DOC_EXAMPLE_LANE_MAP, now: () => nowMs });
+    const cleanLines: string[] = [];
+    const cleanDeps: IngestDeps = { ...cleanRoot, log: createLogger((line) => cleanLines.push(line)) };
+    const storedResult = await ingestEvent(buildRaw(), cleanDeps, { provenance: 'doc-derived' });
+    expect(storedResult.outcome).toBe('stored');
+    const configurationSet = fixtureConfigurationSet();
+    const bucket = bucketStartMs(fixtureMailTimestampMs());
+    const storedRecords = await cleanDeps.ports.eventStore.queryLane(configurationSet, bucket, bucket, nowMs);
+    const serializedStored = JSON.stringify(storedRecords);
+
+    const failingRoot = buildIngestRoot({
+      runtimeContext: 'test',
+      switchValue: undefined,
+      laneMap: DOC_EXAMPLE_LANE_MAP,
+      fixtures: { eventStoreFailure: 'put' },
+      now: () => nowMs,
+    });
+    const failingLines: string[] = [];
+    const failingDeps: IngestDeps = { ...failingRoot, log: createLogger((line) => failingLines.push(line)) };
+    const deadResult = await ingestEvent(buildRaw(), failingDeps, { provenance: 'doc-derived' });
+    expect(deadResult.outcome).toBe('dead-lettered');
+    const deadLetter = failingRoot.ports.deadLetter as FixtureDeadLetterPort;
+    const serializedDeadLetter = JSON.stringify(deadLetter.sent);
+
+    const serializedLogs = [...cleanLines, ...failingLines].join('\n');
+
+    for (const needle of [address, lowerAddress]) {
+      expect(serializedStored.toLowerCase()).not.toContain(needle.toLowerCase());
+      expect(serializedDeadLetter.toLowerCase()).not.toContain(needle.toLowerCase());
+      expect(serializedLogs.toLowerCase()).not.toContain(needle.toLowerCase());
+    }
+    expect(serializedStored).not.toContain('is unknown');
+    expect(serializedDeadLetter).not.toContain('is unknown');
   });
 
   it('drops an unparseable event and logs it dropped-unparseable, keeping only a readable message id', async () => {
