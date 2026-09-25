@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { fc, test } from '@fast-check/vitest';
+import fc from 'fast-check';
+import { propertySeed } from './test/property-seed.js';
 import { LIVE_SWITCH, resolveProviderMode } from './mode.js';
 
 describe('resolveProviderMode', () => {
@@ -22,10 +23,14 @@ describe('resolveProviderMode', () => {
     expect(resolveProviderMode('live')).toBe('live');
   });
 
-  test.prop([fc.string().filter((value) => value !== 'live')])(
-    'any other value stays on fixtures',
-    (value) => {
-      expect(resolveProviderMode(value)).toBe('fixture');
-    },
-  );
+  it('any other value stays on fixtures', () =>
+    fc.assert(
+      fc.property(
+        fc.string().filter((value) => value !== 'live'),
+        (value) => {
+          expect(resolveProviderMode(value)).toBe('fixture');
+        },
+      ),
+      { seed: propertySeed() },
+    ));
 });
