@@ -72,10 +72,52 @@ function realLister(root) {
 // --- the scan ----------------------------------------------------------------------------------
 
 function scan(cwd, opts = {}) {
-  // RED PHASE PLACEHOLDER (TDD): neither rule is implemented yet, so every case that needs real
-  // git/lister comparison must fail here rather than pass by coincidence.
-  void cwd; void opts; void repoRoot; void trackedFiles; void realLister; void TEST_FILE_RE; void FAULT_TEST_RE;
-  return { ok: true, findings: [], advisories: [] };
+  const lister = opts.lister || realLister;
+  let root;
+  try {
+    root = repoRoot(cwd);
+  } catch {
+    return { unknown: true, reason: `not a git repository at ${cwd}`, findings: [] };
+  }
+  let tracked;
+  try {
+    tracked = trackedFiles(root);
+  } catch (e) {
+    return { unknown: true, reason: `git ls-files failed: ${(e.message || '').split('\n')[0]}`, findings: [] };
+  }
+
+  let listed;
+  try {
+    listed = lister(root);
+  } catch (e) {
+    return { unknown: true, reason: `the test runner could not list its files: ${(e.message || '').split('\n')[0]}`, findings: [] };
+  }
+
+  // Zero listed files is the silent failure this gate exists to catch, turned all the way up:
+  // never read that as "nothing to check" (AC-E40).
+  if (listed.length === 0) {
+    return { unknown: true, reason: 'the test runner listed zero files, which is indistinguishable from a filter matching nothing', findings: [] };
+  }
+
+  const listedSet = new Set(listed);
+  const trackedSet = new Set(tracked);
+  const trackedTests = tracked.filter((f) => TEST_FILE_RE.test(f) && !FAULT_TEST_RE.test(f));
+
+  const findings = [];
+  for (const f of trackedTests) {
+    if (!listedSet.has(f)) {
+      findings.push({ file: f, kind: 'unlisted', why: 'tracked as a test file but the test runner never lists it, so it never fails on its own' });
+    }
+  }
+
+  const advisories = [];
+  for (const f of listed) {
+    if (!trackedSet.has(f)) {
+      advisories.push(`${f} is listed by the test runner but is not tracked (fine if generated or gitignored)`);
+    }
+  }
+
+  return { ok: findings.length === 0, findings, advisories, tracked: trackedTests.length, listed: listed.length };
 }
 
 // --- reporting ---------------------------------------------------------------------------------
@@ -204,12 +246,15 @@ function selftest() {
     expect: 'unknown',
   });
 
-  // AC-E41: exact comparison on an awkward path.
+  // AC-E41: exact comparison on an awkward path. Asserted directly against trackedFiles() rather
+  // than through scan(), because a quoted, octal-escaped path (what git prints without -z) no
+  // longer ends in ".test.ts" and would simply be filtered out of consideration - a silent hole
+  // that a clean/fail verdict on the whole scan cannot tell apart from correct behavior.
   cases.push({
     name: 'a path with a space and a non-ASCII letter compares exactly',
     files: { 'widgets/src/my dir/café.test.ts': BODY },
-    lister: () => ['widgets/src/my dir/café.test.ts'],
-    expect: 'clean',
+    directCall: (root) => trackedFiles(root),
+    expectDirect: ['widgets/src/my dir/café.test.ts'],
   });
 
   // A non-repository.
@@ -227,6 +272,14 @@ function selftest() {
     if (c.exitFor) {
       const code = muted(() => report(c.exitFor));
       emit(code === c.expectExit, c.name, `expected exit ${c.expectExit}, got ${code}`);
+      return;
+    }
+    if (c.directCall) {
+      const root = fixture(c.files);
+      roots.push(root);
+      const got = c.directCall(root);
+      const ok = JSON.stringify(got) === JSON.stringify(c.expectDirect);
+      emit(ok, c.name, `expected ${JSON.stringify(c.expectDirect)}, got ${JSON.stringify(got)}`);
       return;
     }
     let root;
