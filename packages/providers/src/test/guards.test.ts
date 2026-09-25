@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import * as net from 'node:net';
+import http from 'node:http';
+import tls from 'node:tls';
 import dgram from 'node:dgram';
 import dns from 'node:dns';
 import * as dnsNamespace from 'node:dns';
@@ -301,6 +303,54 @@ describe('installNetworkGuard', () => {
     installNetworkGuard(modules);
     modules.net.Socket.prototype.connect({ host: '127.0.0.1', port: 9 });
     expect(modules.calls.connect).toHaveLength(1);
+  });
+});
+
+// The AWS SDK's Node handler sends through http and https, and undici's fetch through its own
+// connector; both end in the patched socket connect. Each case gives up after two seconds with an
+// error that is not a NetworkGuardError, so a missing guard fails the test instead of hanging it.
+describe('the real request stacks a later SDK call would take', () => {
+  function firstError(start: (settle: (error: unknown) => void) => void): Promise<unknown> {
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => resolve(new Error('no refusal within 2s: the request reached the network')), 2000);
+      const settle = (error: unknown) => {
+        clearTimeout(timer);
+        resolve(error);
+      };
+      try {
+        start(settle);
+      } catch (error) {
+        settle(error);
+      }
+    });
+  }
+
+  it('refuses an http request to a non-loopback address', async () => {
+    const error = await firstError((settle) => {
+      const request = http.get({ host: '192.0.2.1', port: 9, path: '/' });
+      request.on('error', settle);
+    });
+    expect((error as Error).name).toBe('NetworkGuardError');
+  });
+
+  it('refuses a tls connection to a non-loopback address', async () => {
+    const error = await firstError((settle) => {
+      const socket = tls.connect({ host: '192.0.2.1', port: 9, servername: 'example.com' });
+      socket.on('error', settle);
+    });
+    expect((error as Error).name).toBe('NetworkGuardError');
+  });
+
+  // Port 8080, not 9: the fetch standard's bad-port list blocks 9 before any socket opens, which
+  // would pass this case without the guard ever running.
+  it('refuses a fetch to a non-loopback address, with the guard error as the cause', async () => {
+    const error = await firstError((settle) => {
+      fetch('http://192.0.2.1:8080/', { signal: AbortSignal.timeout(2000) }).then(
+        () => settle(new Error('fetch resolved: the request reached the network')),
+        settle,
+      );
+    });
+    expect((error as { cause?: Error }).cause?.name).toBe('NetworkGuardError');
   });
 });
 

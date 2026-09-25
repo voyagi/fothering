@@ -47,6 +47,134 @@ async function minimizeFixture() {
   return { fixture, parsed, lane, keySet, records };
 }
 
+// The fields the breaking cases below rewrite on a copy of the doc-derived Bounce.
+interface EditableBounce {
+  detail: {
+    mail: { timestamp: string };
+    bounce: { timestamp: string; bouncedRecipients: { emailAddress: string }[] };
+  };
+}
+
+function editableBounce(): EditableBounce {
+  return structuredClone(loadSesEventFixture('bounce').event) as EditableBounce;
+}
+
+function docLane() {
+  const lane = findLane(DOC_EXAMPLE_LANE_MAP, 'ConfigSet');
+  if (lane === undefined) throw new Error('fixture configuration set is not in DOC_EXAMPLE_LANE_MAP');
+  return lane;
+}
+
+function minimizeRaw(raw: unknown, keySet: AddressKeySet = TEST_ADDRESS_KEY_SET): EventRecord[] {
+  const parsed = parseSesEvent(raw);
+  if (!parsed.ok) throw new Error('expected the edited event to parse');
+  return minimizeEvent(parsed.event, {
+    lane: docLane(),
+    laneMap: DOC_EXAMPLE_LANE_MAP,
+    keySet,
+    provenance: 'doc-derived',
+    envelopeTimeMs: 0,
+    arrivalTimeMs: 0,
+  });
+}
+
+function onlyRecord(records: EventRecord[]): EventRecord {
+  const [record] = records;
+  if (record === undefined || records.length !== 1) throw new Error(`expected one record, got ${records.length}`);
+  return record;
+}
+
+describe('breaking cases on the parse and minimize path', () => {
+  it('reads hostile or partial input as a failed parse, keeping a readable message id and nothing else', () => {
+    for (const raw of [null, undefined, 'text', 42, [], {}, { detail: null }, { detail: { mail: null } }]) {
+      expect(parseSesEvent(raw)).toEqual({ ok: false });
+    }
+    expect(parseSesEvent({ detail: { mail: { messageId: 42 } } })).toEqual({ ok: false });
+    expect(parseSesEvent({ detail: { mail: { messageId: 'm-1' } } })).toEqual({ ok: false, messageId: 'm-1' });
+  });
+
+  // JSON.parse makes "__proto__" an own key, the shape an EventBridge payload arrives in. Copying
+  // it into a fresh object with plain assignment would swap that object's prototype instead.
+  it('parses a __proto__ tag key without changing the tags object prototype or Object.prototype', () => {
+    const text = JSON.stringify(loadSesEventFixture('bounce').event).replace('"tags":{', '"tags":{"__proto__":["polluted"],');
+    expect(text).toContain('"__proto__"');
+    const parsed = parseSesEvent(JSON.parse(text));
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    const { tags } = parsed.event.detail.mail;
+    expect(Array.isArray(Object.getPrototypeOf(tags))).toBe(false);
+    expect(tags['ses:configuration-set']).toEqual(['ConfigSet']);
+    expect((Object.prototype as Record<string, unknown>)['0']).toBeUndefined();
+    expect(({} as Record<string, unknown>).length).toBeUndefined();
+  });
+
+  it('gives one record key to one mailbox however the bounce spells it, so a respelled retry stays a duplicate', async () => {
+    const respelled = editableBounce();
+    const recipient = respelled.detail.bounce.bouncedRecipients[0];
+    if (recipient === undefined) throw new Error('fixture bounce has no recipient');
+    recipient.emailAddress = '  Recipient@EXAMPLE.com ';
+
+    const plain = onlyRecord(minimizeRaw(editableBounce()));
+    const other = onlyRecord(minimizeRaw(respelled));
+    expect(other.sk).toBe(plain.sk);
+    expect(other.receivingDomain).toBe('example.com');
+
+    const store = createFixtureEventStore();
+    expect(await store.putIfAbsent(plain)).toBe('written');
+    expect(await store.putIfAbsent(other)).toBe('duplicate');
+  });
+
+  it('writes one counted record per bounced recipient, each under its own key', async () => {
+    const two = editableBounce();
+    two.detail.bounce.bouncedRecipients.push({ emailAddress: 'second@example.org' });
+    const records = minimizeRaw(two);
+    expect(records).toHaveLength(2);
+    expect(new Set(records.map((record) => record.sk)).size).toBe(2);
+    expect(records.map((record) => record.receivingDomain)).toEqual(['example.com', 'example.org']);
+
+    const store = createFixtureEventStore();
+    for (const record of records) expect(await store.putIfAbsent(record)).toBe('written');
+    const first = records[0];
+    if (first === undefined) throw new Error('expected records');
+    const stored = await store.queryLane('ConfigSet', first.bucketStartMs, first.bucketStartMs, first.mailTimestampMs + ONE_HOUR_MS);
+    expect(countRecords(stored).Bounce).toBe(2);
+  });
+
+  it('chooses the address key by send time, so a rotation one millisecond later leaves the key unchanged', () => {
+    const event = editableBounce();
+    const sendMs = Date.parse(event.detail.mail.timestamp);
+    const keySetWith = (k2ActiveFromMs: number): AddressKeySet => ({
+      versions: [
+        { id: 'k1', secret: 'k1-fixture-secret-not-for-deployed-use', activeFromMs: 0 },
+        { id: 'k2', secret: 'k2-fixture-secret-not-for-deployed-use', activeFromMs: k2ActiveFromMs },
+      ],
+    });
+    const before = onlyRecord(minimizeRaw(event, keySetWith(sendMs + 1)));
+    const at = onlyRecord(minimizeRaw(event, keySetWith(sendMs)));
+    expect(before.keyVersion).toBe('k1');
+    expect(at.keyVersion).toBe('k2');
+    expect(at.recipientHmac).not.toBe(before.recipientHmac);
+  });
+
+  it('buckets and expires a late bounce by its send time, keeping the bounce time as the event time', () => {
+    const late = editableBounce();
+    const sendMs = Date.parse(late.detail.mail.timestamp);
+    const bounceMs = sendMs + 6 * ONE_HOUR_MS;
+    late.detail.bounce.timestamp = new Date(bounceMs).toISOString();
+    const record = onlyRecord(minimizeRaw(late));
+    expect(record.bucketStartMs).toBe(bucketStartMs(sendMs));
+    expect(record.expiresAt).toBe(expiresAtFor(sendMs));
+    expect(record.eventTimestampMs).toBe(bounceMs);
+  });
+
+  it('keeps the receiving server diagnostic text out of every record', () => {
+    const serialized = JSON.stringify(minimizeRaw(editableBounce()));
+    expect(JSON.stringify(loadSesEventFixture('bounce'))).toContain('user unknown');
+    expect(serialized).not.toContain('user unknown');
+    expect(serialized).not.toContain('smtp;');
+  });
+});
+
 describe('the doc-derived Bounce through core and the fixture event store', () => {
   it('parses, minimizes, writes once and counts one Bounce in its send-time bucket', async () => {
     const { parsed, keySet, records } = await minimizeFixture();
