@@ -7,6 +7,7 @@ import {
   SORT_KEY,
   TTL_ATTRIBUTE,
   expiresAtFor,
+  type EventRecord,
 } from '@fothering/core/records';
 import { BUCKET_MS, bucketStartMs, countRecords } from '@fothering/core/buckets';
 import { findLane } from '@fothering/core/lanes';
@@ -181,8 +182,10 @@ describe('the fixture ports behave like the conditional-write store and queue th
 
   // The DynamoDB document client refuses NaN and the infinities when it marshals a number
   // ("Special numeric value NaN is not allowed", util-dynamodb convertToAttr), so a record or a
-  // query value holding one fails live. The fixture must fail the same way, not store it or read
-  // a NaN bound as "every bucket".
+  // query clock holding one fails live. A query's bucket bounds never reach the marshaller: the
+  // live adapter pads them into sort-key strings, where NaN would silently select nothing, so
+  // plan 01-03's adapter refuses them explicitly. The fixture refuses both, never storing the
+  // record or reading a NaN bound as "every bucket".
   it('rejects a record holding NaN or an infinity anywhere, and stores nothing', async () => {
     const { records } = await minimizeFixture();
     const original = records[0];
@@ -196,6 +199,33 @@ describe('the fixture ports behave like the conditional-write store and queue th
     const infiniteField = structuredClone(original);
     infiniteField.fields.delayTimestampMs = Number.POSITIVE_INFINITY;
     await expect(store.putIfAbsent(infiniteField)).rejects.toThrow('Special numeric value Infinity is not allowed');
+  });
+
+  // The same marshaller, with the default options plan 01-03's adapter uses, also refuses an
+  // undefined value at any depth and a number outside the safe integer range (util-dynamodb
+  // convertToAttr and convertToNumberAttr). exactOptionalPropertyTypes keeps undefined out of
+  // typed code, so these records are built through a cast, the way untyped data would arrive.
+  it('rejects a record holding an undefined value or an unsafe integer, and stores nothing', async () => {
+    const { records } = await minimizeFixture();
+    const original = records[0];
+    if (original === undefined) throw new Error('expected at least one minimized record');
+    const store = createFixtureEventStore();
+    const undefinedMessage = 'Pass options.removeUndefinedValues=true to remove undefined values from map/array/set.';
+
+    const topLevelUndefined = { ...structuredClone(original), feedbackId: undefined } as unknown as EventRecord;
+    await expect(store.putIfAbsent(topLevelUndefined)).rejects.toThrow(undefinedMessage);
+    expect(await store.getRecord({ pk: original.pk, sk: original.sk })).toBeUndefined();
+
+    const nestedUndefined = structuredClone(original);
+    (nestedUndefined.fields as Record<string, unknown>).bounceType = undefined;
+    await expect(store.putIfAbsent(nestedUndefined)).rejects.toThrow(undefinedMessage);
+
+    const tooLarge = { ...structuredClone(original), recipientCount: Number.MAX_SAFE_INTEGER + 2 };
+    await expect(store.putIfAbsent(tooLarge)).rejects.toThrow('is greater than Number.MAX_SAFE_INTEGER');
+
+    const tooSmall = { ...structuredClone(original), recipientCount: Number.MIN_SAFE_INTEGER - 2 };
+    await expect(store.putIfAbsent(tooSmall)).rejects.toThrow('is lesser than Number.MIN_SAFE_INTEGER');
+    expect(await store.getRecord({ pk: original.pk, sk: original.sk })).toBeUndefined();
   });
 
   it('rejects a lane query whose bucket bounds or clock are not finite numbers', async () => {

@@ -140,9 +140,13 @@ function wrapHostnameMethods(target: object): void {
   }
 }
 
-function lastNonCallbackArg(args: unknown[]): unknown {
-  const withoutCallback = typeof args[args.length - 1] === 'function' ? args.slice(0, -1) : args;
-  return withoutCallback[withoutCallback.length - 1];
+// socket.send(msg[, offset, length][, port][, address][, callback]) and a connected socket's
+// send(msg[, callback]), which takes no port or address. Node's own send reads the offset form
+// only when a fifth argument or a non-function fourth one is present, and the short form's
+// address as the third; this mirrors that choice so a message is never read as a destination.
+function dgramSendAddress(args: unknown[]): unknown {
+  const usesOffsetForm = Boolean(args[4]) || (Boolean(args[3]) && typeof args[3] !== 'function');
+  return usesOffsetForm ? args[4] : args[2];
 }
 
 export function installNetworkGuard(modules: NetworkGuardModules): void {
@@ -158,7 +162,7 @@ export function installNetworkGuard(modules: NetworkGuardModules): void {
   wrapHostnameMethods(dns.promises.Resolver.prototype);
 
   wrapMethod(dgram.Socket.prototype, 'send', (args) => {
-    const target = lastNonCallbackArg(args);
+    const target = dgramSendAddress(args);
     if (typeof target === 'string') assertAllowedHostname(target);
   });
   wrapMethod(dgram.Socket.prototype, 'connect', (args) => {

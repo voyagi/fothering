@@ -13,15 +13,26 @@ function keyOf(key: RecordKey): string {
   return `${key.pk}\u0000${key.sk}`;
 }
 
-// The DynamoDB document client refuses NaN and the infinities while marshalling a number, with
-// this message (util-dynamodb convertToAttr), so a value holding one never reaches the table.
-function rejectSpecialNumbers(value: unknown): void {
+// The DynamoDB document client, with the default marshall options plan 01-03's adapter uses,
+// refuses an undefined value at any depth, NaN and the infinities, and a number outside the safe
+// integer range, with these messages (util-dynamodb convertToAttr and convertToNumberAttr), so
+// an item holding one never reaches the table. The fixture refuses the same values the same way.
+function rejectUnmarshallable(value: unknown): void {
+  if (value === undefined) {
+    throw new Error('Pass options.removeUndefinedValues=true to remove undefined values from map/array/set.');
+  }
   if (typeof value === 'number') {
     if (!Number.isFinite(value)) throw new Error(`Special numeric value ${String(value)} is not allowed`);
+    if (value > Number.MAX_SAFE_INTEGER) {
+      throw new Error(`Number ${String(value)} is greater than Number.MAX_SAFE_INTEGER. Use NumberValue from @aws-sdk/lib-dynamodb.`);
+    }
+    if (value < Number.MIN_SAFE_INTEGER) {
+      throw new Error(`Number ${String(value)} is lesser than Number.MIN_SAFE_INTEGER. Use NumberValue from @aws-sdk/lib-dynamodb.`);
+    }
     return;
   }
   if (typeof value !== 'object' || value === null) return;
-  for (const nested of Object.values(value)) rejectSpecialNumbers(nested);
+  for (const nested of Object.values(value)) rejectUnmarshallable(nested);
 }
 
 // Models the table's conditional put (attribute_not_exists(pk), D-08): the check and the set
@@ -37,14 +48,17 @@ export function createFixtureEventStore(options: FixtureOptions = {}): EventStor
       if (options.eventStoreFailure === 'put') {
         throw new FixtureWriteError('fixture event store is configured to fail on put');
       }
-      rejectSpecialNumbers(record);
+      rejectUnmarshallable(record);
       const key = keyOf(record);
       if (records.has(key)) return 'duplicate';
       records.set(key, structuredClone(record));
       return 'written';
     },
     async queryLane(configurationSet, fromBucketMs, toBucketMs, nowMs) {
-      rejectSpecialNumbers([fromBucketMs, toBucketMs, nowMs]);
+      // The clock reaches the marshaller as :now. The bucket bounds do not: the live adapter pads
+      // them into sort-key strings, where a NaN bound would silently select no records, so plan
+      // 01-03 refuses a bound that is not a finite safe integer the same way this fixture does.
+      rejectUnmarshallable([fromBucketMs, toBucketMs, nowMs]);
       const pk = `LANE#${configurationSet}`;
       const nowSeconds = Math.floor(nowMs / 1000);
       const result: EventRecord[] = [];

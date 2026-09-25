@@ -271,6 +271,23 @@ describe('installNetworkGuard', () => {
     expect(() => modules.dgram.Socket.prototype.connect(9, '192.0.2.1')).toThrow(NetworkGuardError);
   });
 
+  // A connected socket sends with no port and no address (Node's dgram docs), so its message is
+  // the only argument and must never be read as a destination; the offset form carries the
+  // address fifth, after the port.
+  it('reads the dgram destination from the argument Node uses, never from the message', () => {
+    const modules = fakeModules();
+    installNetworkGuard(modules);
+    expect(() => modules.dgram.Socket.prototype.send('a string payload')).not.toThrow();
+    expect(() => modules.dgram.Socket.prototype.send('a string payload', () => {})).not.toThrow();
+    expect(modules.calls.send).toHaveLength(2);
+    expect(() => modules.dgram.Socket.prototype.send('payload', 0, 7, 9, '192.0.2.1')).toThrow(NetworkGuardError);
+    expect(() => modules.dgram.Socket.prototype.send('payload', 0, 7, 9, '192.0.2.1', () => {})).toThrow(
+      NetworkGuardError,
+    );
+    expect(() => modules.dgram.Socket.prototype.send('payload', 9, '192.0.2.1', () => {})).toThrow(NetworkGuardError);
+    expect(modules.calls.send).toHaveLength(2);
+  });
+
   it('is idempotent: installing twice wraps only once', () => {
     const modules = fakeModules();
     installNetworkGuard(modules);

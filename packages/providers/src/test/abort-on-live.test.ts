@@ -22,7 +22,15 @@ function runProbe(switchValue: string): ProbeResult {
       [VITEST_BIN, 'run', PROBE_FILE],
       {
         cwd: process.cwd(),
-        env: { ...process.env, AWS_ACCESS_KEY_ID: 'planted-not-a-key', [LIVE_SWITCH]: switchValue },
+        // This worker's own setup already set the metadata flag to true, and a spread would hand
+        // that to the child, so the probe's check of it would pass whether or not the child's
+        // setup ran. Planting false makes the child's setup the only thing that can set it.
+        env: {
+          ...process.env,
+          AWS_ACCESS_KEY_ID: 'planted-not-a-key',
+          AWS_EC2_METADATA_DISABLED: 'false',
+          [LIVE_SWITCH]: switchValue,
+        },
         encoding: 'utf8',
         timeout: CHILD_TIMEOUT_MS,
         stdio: ['ignore', 'pipe', 'pipe'],
