@@ -32,7 +32,6 @@
     "mutate": "stryker run"
   },
   "devDependencies": {
-    "@fast-check/vitest": "0.5.0",
     "@size-limit/file": "13.1.1",
     "@stryker-mutator/core": "10.0.0",
     "@stryker-mutator/vitest-runner": "10.0.0",

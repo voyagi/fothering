@@ -47,7 +47,7 @@ export default [
     languageOptions: { ...tsParser },
     plugins: { vitest },
     rules: {
-      'vitest/expect-expect': ['error', { assertFunctionNames: ['expect', 'test.prop', 'it.prop'] }],
+      'vitest/expect-expect': ['error', { assertFunctionNames: ['expect', 'fc.assert'] }],
       'vitest/no-identical-title': 'error',
     },
   },
