@@ -8,6 +8,7 @@ import {
   countLaneBuckets,
   hardBounceRatio,
   isBucketComplete,
+  isCountedRecord,
 } from './buckets.js';
 import { minimizeEvent, type MinimizeContext } from './minimize.js';
 import { parseSesEvent } from './ses-events.js';
@@ -368,7 +369,7 @@ describe('AC-11 planted failures (design choices the properties above guard)', (
     const seen = new Map<string, EventRecord>();
     for (const envelope of envelopes) {
       for (const record of minimizeEvent(envelope, context)) {
-        if (record.kind !== 'send' && record.kind !== 'outcome' && record.kind !== 'complaint') continue;
+        if (!isCountedRecord(record)) continue;
         const key = params.identity(record);
         if (!seen.has(key)) seen.set(key, record);
       }

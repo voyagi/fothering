@@ -1,5 +1,5 @@
 import fc from 'fast-check';
-import { BUCKET_MS } from '../buckets.js';
+import { BUCKET_MS, bucketStartMs } from '../buckets.js';
 import type { SesEnvelope, SesEvent } from '../ses-events.js';
 import { minimizeEvent, type MinimizeContext } from '../minimize.js';
 import type { EventRecord } from '../records.js';
@@ -263,7 +263,5 @@ export function bucketRangeFor(cases: readonly MessageCase[]): { fromBucketMs: n
       maxMs = Math.max(maxMs, ms);
     }
   }
-  const fromBucketMs = minMs - (minMs % BUCKET_MS);
-  const toBucketMs = maxMs - (maxMs % BUCKET_MS);
-  return { fromBucketMs, toBucketMs };
+  return { fromBucketMs: bucketStartMs(minMs), toBucketMs: bucketStartMs(maxMs) };
 }

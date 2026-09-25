@@ -40,6 +40,14 @@ describe('isBucketComplete (AC-E18)', () => {
     expect(bucketStartMs(start + BUCKET_MS)).toBe(start + BUCKET_MS);
     expect(bucketStartMs(start + BUCKET_MS - 1)).toBe(start);
   });
+
+  // The JS remainder keeps the sign of the dividend, so ms - (ms % width) moved a time just before
+  // 1970 FORWARD into the bucket at 0, the next bucket, instead of down to its own start.
+  it('puts a time before 1970 in its own bucket, never the next one', () => {
+    expect(bucketStartMs(-1)).toBe(-BUCKET_MS);
+    expect(bucketStartMs(-BUCKET_MS)).toBe(-BUCKET_MS);
+    expect(bucketStartMs(-BUCKET_MS - 1)).toBe(-2 * BUCKET_MS);
+  });
 });
 
 describe('countLaneBuckets (AC-E20)', () => {

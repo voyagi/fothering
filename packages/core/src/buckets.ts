@@ -4,15 +4,23 @@ import type { EventRecord, SesEventType } from './records.js';
 // team's traffic still yields a non-zero count per bucket, and a spike shows within one bucket.
 export const BUCKET_MS = 300_000;
 
-/** Half-open buckets: an event at exactly a bucket boundary belongs to the next bucket. */
+/** Half-open buckets: an event at exactly a bucket boundary belongs to the next bucket. Floor
+ * division, not ms - (ms % width): the JS remainder keeps the dividend's sign, so the remainder
+ * form moved a time just before 1970 up into the next bucket instead of down to its own. */
 export function bucketStartMs(ms: number): number {
-  return ms - (ms % BUCKET_MS);
+  return Math.floor(ms / BUCKET_MS) * BUCKET_MS;
+}
+
+/** SPEC requirement 6's one counting rule: a send, an outcome or a Complaint's counting record
+ * counts; a complaintRecipient item exists for the recipient index and deletion only. */
+export function isCountedRecord(record: EventRecord): boolean {
+  return record.kind === 'send' || record.kind === 'outcome' || record.kind === 'complaint';
 }
 
 export function countRecords(records: readonly EventRecord[]): Partial<Record<SesEventType, number>> {
   const counts: Partial<Record<SesEventType, number>> = {};
   for (const record of records) {
-    if (record.kind !== 'send' && record.kind !== 'outcome' && record.kind !== 'complaint') continue;
+    if (!isCountedRecord(record)) continue;
     counts[record.eventType] = (counts[record.eventType] ?? 0) + 1;
   }
   return counts;
@@ -139,9 +147,8 @@ function assertBucketBounds(fromBucketMs: number, toBucketMs: number): void {
   }
 }
 
-// SPEC requirement 6: counts are derived from the same countRecords-style per-type check
-// (kind send, outcome or complaint only; a complaintRecipient item is never counted), so the
-// counting rule stays written in one place regardless of which shape the caller reads it through.
+// SPEC requirement 6: countRecords and this function both filter through isCountedRecord, so the
+// counting rule stays written in one place whichever shape the caller reads the counts through.
 export function countLaneBuckets(records: readonly EventRecord[], options: CountLaneBucketsOptions): BucketCount[] {
   assertBucketBounds(options.fromBucketMs, options.toBucketMs);
   const byBucket = new Map<number, BucketCount>();
@@ -149,7 +156,7 @@ export function countLaneBuckets(records: readonly EventRecord[], options: Count
     byBucket.set(start, emptyBucket(start, options.nowMs));
   }
   for (const record of records) {
-    if (record.kind !== 'send' && record.kind !== 'outcome' && record.kind !== 'complaint') continue;
+    if (!isCountedRecord(record)) continue;
     const bucket = byBucket.get(record.bucketStartMs);
     if (bucket === undefined) continue;
     applyRecord(bucket, record);

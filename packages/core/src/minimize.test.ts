@@ -310,6 +310,17 @@ describe('runId (D-24)', () => {
   });
 });
 
+describe('a mail timestamp before 1970', () => {
+  // The key version covers the date, so the refusal can only come from the bucket and sort key:
+  // with the shared test key (active from 0) the key lookup would refuse first and prove nothing.
+  it('is refused by the sort key, never filed under the bucket at 0', () => {
+    const event = editableBounceEvent();
+    event.detail.mail.timestamp = '1969-12-31T23:59:59Z';
+    const keySet = { versions: [{ id: 'k0', secret: 'pre-1970-test-key', activeFromMs: -1_000_000_000 }] };
+    expect(() => minimizeEvent(mustParse(event), contextFor({ keySet }))).toThrow(RangeError);
+  });
+});
+
 describe('the lane guard (unchanged from plan 01-01)', () => {
   it('still refuses to minimize an event under a lane other than its own configuration set, for every event type', () => {
     for (const name of ['send', 'delivery', 'bounce', 'complaint', 'reject', 'delivery-delay'] as const) {
