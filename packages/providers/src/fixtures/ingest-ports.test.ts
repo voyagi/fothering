@@ -422,6 +422,25 @@ describe('the fixture ports behave like the conditional-write store and queue th
     await expect(failingDeadLetter.send(records)).rejects.toThrow(FixtureWriteError);
   });
 
+  // The live queue's message body is the JSON of the records (plan 01-03), so a record the store
+  // refused for holding NaN reaches the queue with null there, and an undefined key is gone.
+  it('dead-letters a JSON copy, as the live queue message body is, so NaN reads back as null', async () => {
+    const { records } = await minimizeFixture();
+    const original = records[0];
+    if (original === undefined) throw new Error('expected at least one minimized record');
+    const refused = { ...structuredClone(original), bucketStartMs: Number.NaN, feedbackId: undefined } as unknown as EventRecord;
+    const store = createFixtureEventStore();
+    await expect(store.putIfAbsent(refused)).rejects.toThrow();
+
+    const deadLetter = createFixtureDeadLetter();
+    await deadLetter.send([refused]);
+    const [batch] = deadLetter.sent;
+    const [queued] = batch ?? [];
+    expect((queued as unknown as Record<string, unknown>).bucketStartMs).toBeNull();
+    expect(queued !== undefined && Object.hasOwn(queued, 'feedbackId')).toBe(false);
+    expect(queued?.messageId).toBe(original.messageId);
+  });
+
   it('selects the key version active at or before the send time', () => {
     const rotationMs = 1_700_000_000_000;
     const keySet: AddressKeySet = {

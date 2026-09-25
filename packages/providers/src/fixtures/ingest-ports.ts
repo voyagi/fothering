@@ -121,7 +121,9 @@ export function createFixtureDeadLetter(options: FixtureOptions = {}): FixtureDe
       if (options.deadLetterFailure === 'send') {
         throw new FixtureWriteError('fixture dead letter is configured to fail on send');
       }
-      sent.push(structuredClone([...records])); // a queue message is a serialized copy
+      // A queue message is a serialized copy: the live body is the JSON of the records (plan
+      // 01-03), so NaN and the infinities arrive as null and an undefined key is dropped.
+      sent.push(JSON.parse(JSON.stringify(records)) as EventRecord[]);
     },
   };
 }
