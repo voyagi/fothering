@@ -9,3 +9,4 @@ coverage/
 .dev.vars
 cdk.out/
 *.log
+/.stryker-tmp/
