@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { parseLaneMap, type LaneMap } from '@fothering/core/lanes';
 
-export const SES_EVENT_FIXTURE_NAMES = ['bounce'] as const;
+export const SES_EVENT_FIXTURE_NAMES = ['bounce', 'send', 'delivery', 'complaint', 'reject', 'delivery-delay'] as const;
 export type SesEventFixtureName = (typeof SES_EVENT_FIXTURE_NAMES)[number];
 
 export interface SesEventFixture {
