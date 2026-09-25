@@ -45,14 +45,16 @@ export function buildIngestRoot(options: BuildIngestRootOptions): IngestDeps {
     throw new Error('a lane map override is accepted only in runtimeContext test');
   }
 
+  // exactOptionalPropertyTypes forbids assigning `undefined` to an optional field, so an unset
+  // override is left out of the call entirely rather than passed through as `undefined`.
   const { ports, kinds } = resolvePortTable({
     runtimeContext: options.runtimeContext,
     switchValue: options.switchValue,
-    liveConfig: options.liveConfig,
-    liveClients: options.liveClients,
-    fixtures: options.fixtures,
-    dryRunSink: options.dryRunSink,
-    now: options.now,
+    ...(options.liveConfig !== undefined ? { liveConfig: options.liveConfig } : {}),
+    ...(options.liveClients !== undefined ? { liveClients: options.liveClients } : {}),
+    ...(options.fixtures !== undefined ? { fixtures: options.fixtures } : {}),
+    ...(options.dryRunSink !== undefined ? { dryRunSink: options.dryRunSink } : {}),
+    ...(options.now !== undefined ? { now: options.now } : {}),
   });
 
   const defaultSink: LogSink =

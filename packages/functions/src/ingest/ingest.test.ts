@@ -8,15 +8,16 @@ import {
   createFixtureDeadLetter,
   createFixtureEventStore,
 } from '@fothering/providers/fixtures/ingest-ports';
-import { NotBuiltError, PORT_TABLE, resolvePortTable, type PortName, type PortRow } from '@fothering/providers/ports';
-import type {
-  DryRunSink,
-  KindTable,
-  LiveClients,
-  LiveConfig,
-  ResolvedKind,
-  RuntimeContext,
-  SendClient,
+import { PORT_TABLE, resolvePortTable, type PortName, type PortRow } from '@fothering/providers/ports';
+import {
+  NotBuiltError,
+  type DryRunSink,
+  type KindTable,
+  type LiveClients,
+  type LiveConfig,
+  type ResolvedKind,
+  type RuntimeContext,
+  type SendClient,
 } from '@fothering/providers/port-types';
 import { buildIngestRoot, type IngestDeps } from './root.js';
 import { ingestEvent, type IngestResult } from './ingest.js';
