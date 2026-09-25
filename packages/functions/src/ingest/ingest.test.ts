@@ -26,6 +26,7 @@ import { buildIngestRoot, type IngestDeps } from './root.js';
 import { ingestEvent, type IngestResult } from './ingest.js';
 
 const ONE_HOUR_MS = 60 * 60 * 1000;
+const BOUNCE_MESSAGE_ID = 'EXAMPLE7c191be45-e9aedb9a-02f9-4d12-a87d-dd0099a07f8a-000000';
 
 function fixtureConfigurationSet(): string {
   const parsed = parseSesEvent(loadSesEventFixture('bounce').event);
@@ -147,7 +148,7 @@ describe('the doc-derived Bounce through the ingest composition root', () => {
     }
   });
 
-  it('drops an event whose address key set has no version active yet, logging dropped-unminimizable with the error name only', async () => {
+  it('drops an event whose address key set has no version active yet, logging dropped-unminimizable with its message id and the error name only', async () => {
     const base = buildIngestRoot({ runtimeContext: 'test', switchValue: undefined, laneMap: DOC_EXAMPLE_LANE_MAP });
     const futureKeySet: AddressKeySet = { versions: [{ id: 'k1', secret: 'x', activeFromMs: Number.MAX_SAFE_INTEGER }] };
     const lines: string[] = [];
@@ -160,16 +161,18 @@ describe('the doc-derived Bounce through the ingest composition root', () => {
     const result = await ingestEvent(loadSesEventFixture('bounce').event, deps, { provenance: 'doc-derived' });
 
     expect(result).toEqual({ outcome: 'dropped', stored: 0, duplicates: 0 });
-    expect(JSON.parse(lines[0] ?? '{}')).toEqual({ event: 'dropped-unminimizable', errorName: 'Error' });
+    expect(JSON.parse(lines[0] ?? '{}')).toEqual({ event: 'dropped-unminimizable', messageId: BOUNCE_MESSAGE_ID, errorName: 'Error' });
   });
 
-  it('sends every minimized record to the dead-letter port and resolves dead-lettered when a put fails', async () => {
-    const deps = buildIngestRoot({
+  it('sends every minimized record to the dead-letter port, logs the write error by name, and resolves dead-lettered when a put fails', async () => {
+    const base = buildIngestRoot({
       runtimeContext: 'test',
       switchValue: undefined,
       laneMap: DOC_EXAMPLE_LANE_MAP,
       fixtures: { eventStoreFailure: 'put' },
     });
+    const lines: string[] = [];
+    const deps: IngestDeps = { ...base, log: createLogger((line) => lines.push(line)) };
 
     const result = await ingestEvent(loadSesEventFixture('bounce').event, deps, { provenance: 'doc-derived' });
 
@@ -177,17 +180,43 @@ describe('the doc-derived Bounce through the ingest composition root', () => {
     const deadLetter = deps.ports.deadLetter as FixtureDeadLetterPort;
     expect(deadLetter.sent).toHaveLength(1);
     expect(deadLetter.sent[0]).toHaveLength(1);
+    expect(lines.map((line) => JSON.parse(line) as unknown)).toEqual([
+      { event: 'dead-lettered', messageId: BOUNCE_MESSAGE_ID, errorName: 'FixtureWriteError' },
+    ]);
   });
 
-  it('rethrows when the dead-letter send itself fails, so the caller’s retry can rerun the whole event', async () => {
-    const deps = buildIngestRoot({
+  it('rethrows when the dead-letter send itself fails, logging the send error by name, so the caller’s retry can rerun the whole event', async () => {
+    const base = buildIngestRoot({
       runtimeContext: 'test',
       switchValue: undefined,
       laneMap: DOC_EXAMPLE_LANE_MAP,
       fixtures: { eventStoreFailure: 'put', deadLetterFailure: 'send' },
     });
+    const lines: string[] = [];
+    const deps: IngestDeps = { ...base, log: createLogger((line) => lines.push(line)) };
 
     await expect(ingestEvent(loadSesEventFixture('bounce').event, deps, { provenance: 'doc-derived' })).rejects.toThrow();
+    expect(lines.map((line) => JSON.parse(line) as unknown)).toEqual([
+      { event: 'dead-letter-failed', messageId: BOUNCE_MESSAGE_ID, errorName: 'FixtureWriteError' },
+    ]);
+  });
+
+  it('rethrows when the address key set cannot be read, logging the error by name, so the caller’s retry can rerun the event', async () => {
+    class KeyStoreError extends Error {
+      override name = 'KeyStoreError';
+    }
+    const base = buildIngestRoot({ runtimeContext: 'test', switchValue: undefined, laneMap: DOC_EXAMPLE_LANE_MAP });
+    const lines: string[] = [];
+    const deps: IngestDeps = {
+      ...base,
+      ports: { ...base.ports, addressKey: { getKeySet: async () => Promise.reject(new KeyStoreError('secret unreadable')) } },
+      log: createLogger((line) => lines.push(line)),
+    };
+
+    await expect(ingestEvent(loadSesEventFixture('bounce').event, deps, { provenance: 'doc-derived' })).rejects.toThrow(KeyStoreError);
+    expect(lines.map((line) => JSON.parse(line) as unknown)).toEqual([
+      { event: 'key-set-unavailable', messageId: BOUNCE_MESSAGE_ID, errorName: 'KeyStoreError' },
+    ]);
   });
 
   it('leaves one item and a count of one when two ingestEvent calls for the same event run under Promise.all (AC-E22)', async () => {

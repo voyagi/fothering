@@ -20,9 +20,11 @@ function errorName(error: unknown): string {
 
 // Ordering per D-16: parse, drop without a configuration-set tag, drop an unmapped set, drop a
 // Send with no destination, minimize, conditional puts. A write failure sends the already-
-// minimized records to the dead-letter port and reports dead-lettered; a failed dead-letter send
-// is left to propagate so Lambda's asynchronous retry reruns the whole event, and the conditional
-// puts absorb whatever the first attempt already wrote.
+// minimized records to the dead-letter port and reports dead-lettered; a failed dead-letter send,
+// like an unreadable address key set, is left to propagate so Lambda's asynchronous retry reruns
+// the whole event, and the conditional puts absorb whatever the first attempt already wrote.
+// Every one of those failures writes one log line first, naming the message and the error by its
+// name only, so an operator can tell which message failed and why without any error text.
 export async function ingestEvent(rawEvent: unknown, deps: IngestDeps, options: IngestOptions): Promise<IngestResult> {
   const parsed = parseSesEvent(rawEvent);
   if (!parsed.ok) {
@@ -54,7 +56,13 @@ export async function ingestEvent(rawEvent: unknown, deps: IngestDeps, options: 
     return { outcome: 'dropped', stored: 0, duplicates: 0 };
   }
 
-  const keySet = await deps.ports.addressKey.getKeySet();
+  let keySet;
+  try {
+    keySet = await deps.ports.addressKey.getKeySet();
+  } catch (error) {
+    deps.log.error({ event: 'key-set-unavailable', messageId, errorName: errorName(error) });
+    throw error;
+  }
 
   let records;
   try {
@@ -67,7 +75,7 @@ export async function ingestEvent(rawEvent: unknown, deps: IngestDeps, options: 
       arrivalTimeMs: deps.now(),
     });
   } catch (error) {
-    deps.log.error({ event: 'dropped-unminimizable', errorName: errorName(error) });
+    deps.log.error({ event: 'dropped-unminimizable', messageId, errorName: errorName(error) });
     return { outcome: 'dropped', stored: 0, duplicates: 0 };
   }
 
@@ -79,9 +87,14 @@ export async function ingestEvent(rawEvent: unknown, deps: IngestDeps, options: 
       if (outcome === 'written') stored += 1;
       else duplicates += 1;
     }
-  } catch {
-    await deps.ports.deadLetter.send(records);
-    deps.log.error({ event: 'dead-lettered', messageId });
+  } catch (writeError) {
+    try {
+      await deps.ports.deadLetter.send(records);
+    } catch (sendError) {
+      deps.log.error({ event: 'dead-letter-failed', messageId, errorName: errorName(sendError) });
+      throw sendError;
+    }
+    deps.log.error({ event: 'dead-lettered', messageId, errorName: errorName(writeError) });
     return { outcome: 'dead-lettered', stored, duplicates };
   }
 
