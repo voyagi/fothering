@@ -301,7 +301,11 @@ function registerBucketProperties(): void {
   });
 }
 
-describe('AC-11 bucket and count properties, under UTC', () => {
+// Stryker's vitest runner forces worker threads, and assigning process.env.TZ inside a worker thread
+// leaves the timezone unchanged, so both timezone variants run only outside the mutation run.
+const underMutationRunner = process.env.STRYKER_MUTATOR_WORKER !== undefined;
+
+describe.skipIf(underMutationRunner)('AC-11 bucket and count properties, under UTC', () => {
   let originalTz: string | undefined;
 
   beforeAll(() => {
@@ -318,7 +322,7 @@ describe('AC-11 bucket and count properties, under UTC', () => {
   registerBucketProperties();
 });
 
-describe('AC-11 bucket and count properties, under Asia/Kolkata', () => {
+describe.skipIf(underMutationRunner)('AC-11 bucket and count properties, under Asia/Kolkata', () => {
   let originalTz: string | undefined;
 
   beforeAll(() => {
