@@ -59,6 +59,13 @@ export function createFixtureEventStore(options: FixtureOptions = {}): EventStor
       // them into sort-key strings, where a NaN bound would silently select no records, so plan
       // 01-03 refuses a bound that is not a finite safe integer the same way this fixture does.
       rejectUnmarshallable([fromBucketMs, toBucketMs, nowMs]);
+      // DynamoDB rejects an inverted BETWEEN key condition with a ValidationException instead of
+      // returning an empty page, so a window computed backwards fails here as it would live.
+      if (fromBucketMs > toBucketMs) {
+        throw new Error(
+          'Invalid KeyConditionExpression: The BETWEEN operator requires upper bound to be greater than or equal to lower bound',
+        );
+      }
       const pk = `LANE#${configurationSet}`;
       const nowSeconds = Math.floor(nowMs / 1000);
       const result: EventRecord[] = [];

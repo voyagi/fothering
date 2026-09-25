@@ -244,6 +244,22 @@ describe('the fixture ports behave like the conditional-write store and queue th
     ).rejects.toThrow('Special numeric value NaN is not allowed');
   });
 
+  // DynamoDB answers an inverted BETWEEN key condition with a ValidationException rather than an
+  // empty page, so a caller that computes its window backwards fails live and must fail here too.
+  it('rejects a lane query whose first bucket lies after its last, as DynamoDB rejects an inverted BETWEEN', async () => {
+    const { records } = await minimizeFixture();
+    const record = records[0];
+    if (record === undefined) throw new Error('expected at least one minimized record');
+    const store = createFixtureEventStore();
+    await store.putIfAbsent(record);
+    const nowMs = record.mailTimestampMs + ONE_HOUR_MS;
+
+    await expect(
+      store.queryLane(record.configurationSet, record.bucketStartMs + BUCKET_MS, record.bucketStartMs, nowMs),
+    ).rejects.toThrow('The BETWEEN operator requires upper bound to be greater than or equal to lower bound');
+    expect(await store.queryLane(record.configurationSet, record.bucketStartMs, record.bucketStartMs, nowMs)).toHaveLength(1);
+  });
+
   it('finds a record by its recipient hash, then a delete makes a re-read return undefined', async () => {
     const { records } = await minimizeFixture();
     const record = records[0];
