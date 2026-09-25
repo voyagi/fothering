@@ -8,10 +8,10 @@
 // runs on every commit does not have that failure mode.
 //
 // ONE RULE. Every path from `git ls-files` must equal an EXACT entry in tracked-paths.json, or sit
-// under one of its PREFIX entries. Every prefix ends in `/`, so a prefix matches only whole path
-// segments by construction: "docs/adr/" cannot match "docs/adrx/y.md", because the character right
-// after the shared "docs/adr" differs ('/' against 'x'). A tracked path matching neither is a
-// finding.
+// under one of its PREFIX entries. The loader refuses any prefix that does not end in `/`, so a
+// prefix matches only whole path segments by construction: "docs/adr/" cannot match
+// "docs/adrx/y.md", because the character right after the shared "docs/adr" differs ('/' against
+// 'x'). A tracked path matching neither is a finding.
 //
 // A MISSING OR BROKEN ALLOWLIST IS NEVER CLEAN. So is an empty tracked-file list or a git failure:
 // each is UNKNOWN (exit 2), because a check that cannot read its own rules has proven nothing.
@@ -60,6 +60,12 @@ function loadAllowlist(root) {
   }
   if (!parsed || !Array.isArray(parsed.exact) || !Array.isArray(parsed.prefixes)) {
     return { error: 'tracked-paths.json must hold an "exact" array and a "prefixes" array' };
+  }
+  // The whole-segment rule holds only while every prefix ends in "/": an empty prefix matches
+  // every path and "widgets" matches "widgets-old/", so either would pass files silently.
+  const badPrefix = parsed.prefixes.findIndex((p) => typeof p !== 'string' || !p.endsWith('/'));
+  if (badPrefix !== -1) {
+    return { error: `tracked-paths.json prefix ${JSON.stringify(parsed.prefixes[badPrefix])} must be a folder path ending in "/"` };
   }
   return { exact: new Set(parsed.exact), prefixes: parsed.prefixes };
 }
@@ -205,6 +211,19 @@ function selftest() {
     name: 'a prefix matches only whole path segments (docs/adr/ does not match docs/adrx/)',
     files: { 'tracked-paths.json': BASE_ALLOW_JSON, 'README.md': BODY, 'docs/adrx/y.md': BODY },
     expect: 'fail', expectWhy: /docs\/adrx\/y\.md <- not on the tracked-path allowlist/,
+  });
+
+  // A prefix that breaks the whole-segment rule: an empty prefix matches every path, and one
+  // without its slash matches a sibling folder, so either would pass files silently.
+  cases.push({
+    name: 'an empty prefix is UNKNOWN, not clean',
+    files: { 'tracked-paths.json': JSON.stringify({ exact: ['tracked-paths.json'], prefixes: [''] }), 'newdir/file.txt': BODY },
+    expect: 'unknown',
+  });
+  cases.push({
+    name: 'a prefix without its trailing slash is UNKNOWN, not clean',
+    files: { 'tracked-paths.json': JSON.stringify({ exact: ['tracked-paths.json'], prefixes: ['widgets'] }), 'widgets-old/x.md': BODY },
+    expect: 'unknown',
   });
 
   // A missing or unparsable allowlist, both read from a REAL fixture so the disk-reading and

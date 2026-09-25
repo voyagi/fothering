@@ -48,6 +48,9 @@ const MUTATIONS = [
   // not.
   { name: 'a prefix keeps its own trailing slash in the comparison', expect: 'a prefix matches only whole path segments (docs/adr/ does not match docs/adrx/)', find: 'f.startsWith(p)', repl: 'f.startsWith(p.slice(0, -1))' },
 
+  // --- a prefix that breaks the whole-segment rule is refused, never matched ---
+  { name: 'a prefix without its trailing slash is refused', expect: 'a prefix without its trailing slash is UNKNOWN, not clean', find: "const badPrefix = parsed.prefixes.findIndex((p) => typeof p !== 'string' || !p.endsWith('/'));", repl: 'const badPrefix = -1;' },
+
   // --- a broken allowlist is UNKNOWN, never silently treated as empty-but-valid ---
   { name: 'a missing allowlist file is reported, not swallowed', expect: 'a missing allowlist is UNKNOWN, not clean', find: "return { error: `tracked-paths.json is missing or unreadable: ${(e.message || '').split('\\n')[0]}` };", repl: 'return { exact: new Set(), prefixes: [] };' },
   { name: 'unparsable JSON is reported, not swallowed', expect: 'an unparsable allowlist is UNKNOWN, not clean', find: "return { error: `tracked-paths.json is not valid JSON: ${(e.message || '').split('\\n')[0]}` };", repl: 'return { exact: new Set(), prefixes: [] };' },
