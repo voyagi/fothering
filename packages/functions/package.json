@@ -1,0 +1,13 @@
+{
+  "name": "@fothering/functions",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./*": "./src/*.ts"
+  },
+  "dependencies": {
+    "@fothering/core": "0.0.0",
+    "@fothering/providers": "0.0.0"
+  }
+}

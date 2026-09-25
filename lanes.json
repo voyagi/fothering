@@ -1,0 +1,38 @@
+{
+  "runIdTagKey": "fothering_run",
+  "lanes": [
+    {
+      "configurationSet": "fothering-transactional",
+      "lane": "fothering-transactional",
+      "criticality": "transactional",
+      "declaredStreams": ["receipts"],
+      "streamTagKey": "stream",
+      "batchTagKey": "batch",
+      "templateTagKey": "template",
+      "campaignTagKey": "campaign",
+      "operatorAlert": false
+    },
+    {
+      "configurationSet": "fothering-bulk",
+      "lane": "fothering-bulk",
+      "criticality": "bulk",
+      "declaredStreams": ["newsletter"],
+      "streamTagKey": "stream",
+      "batchTagKey": "batch",
+      "templateTagKey": "template",
+      "campaignTagKey": "campaign",
+      "operatorAlert": false
+    },
+    {
+      "configurationSet": "fothering-alerts",
+      "lane": "fothering-alerts",
+      "criticality": "transactional",
+      "declaredStreams": ["operator"],
+      "streamTagKey": "stream",
+      "batchTagKey": "batch",
+      "templateTagKey": "template",
+      "campaignTagKey": "campaign",
+      "operatorAlert": true
+    }
+  ]
+}
