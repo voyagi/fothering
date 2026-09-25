@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { EventRecord } from '@fothering/core/records';
-import { resolvePortTable, type PortName, type PortRow } from './ports.js';
+import { PORT_TABLE, resolvePortTable, type PortName, type PortRow } from './ports.js';
 import { createFixtureAddressKey, createFixtureDeadLetter, createFixtureEventStore } from './fixtures/ingest-ports.js';
 
 // No row has a live adapter yet (each is notBuiltUntil a later plan), so this planted table is the
@@ -48,26 +48,41 @@ interface PlantedAdapters {
   deadLetter: PlantedDeadLetter;
 }
 
+// The real table gates none of these operations (SPEC requirement 1), so this planted table gates
+// two of them itself: it is the only way to reach the dry-run branch until a gated row lands.
 function plantedLiveTable(adapters: PlantedAdapters): Record<PortName, PortRow> {
   return {
     eventStore: {
       operations: ['putIfAbsent', 'queryLane', 'queryByRecipient', 'deleteRecord', 'getRecord'],
       mutatingOperations: ['putIfAbsent', 'deleteRecord'],
+      gatedOperations: ['putIfAbsent', 'deleteRecord'],
       fixture: () => createFixtureEventStore(),
       live: () => adapters.eventStore,
     },
     addressKey: {
       operations: ['getKeySet'],
       mutatingOperations: [],
+      gatedOperations: [],
       fixture: () => createFixtureAddressKey(),
       live: () => adapters.addressKey,
     },
     deadLetter: {
       operations: ['send'],
       mutatingOperations: ['send'],
+      gatedOperations: ['send'],
       fixture: () => createFixtureDeadLetter(),
       live: () => adapters.deadLetter,
     },
+  };
+}
+
+// The real PORT_TABLE's declarations with only the live side swapped for a planted adapter, so what
+// is under test is the table's own operation, mutating and gated lists, not a copy of them.
+function realTableWithPlantedLive(adapters: PlantedAdapters): Record<PortName, PortRow> {
+  return {
+    eventStore: { ...PORT_TABLE.eventStore, live: () => adapters.eventStore },
+    addressKey: { ...PORT_TABLE.addressKey, live: () => adapters.addressKey },
+    deadLetter: { ...PORT_TABLE.deadLetter, live: () => adapters.deadLetter },
   };
 }
 
@@ -91,7 +106,7 @@ describe('resolvePortTable with live adapters written as classes', () => {
     expect(adapters.eventStore.calls).toEqual(['queryLane']);
   });
 
-  it('records a mutating operation as one dry-run line and never calls the adapter when the switch is not live', async () => {
+  it('records a gated operation as one dry-run line and never calls the adapter when the switch is not live', async () => {
     const adapters = freshAdapters();
     const lines: string[] = [];
     const { ports, kinds } = resolvePortTable({
@@ -107,7 +122,7 @@ describe('resolvePortTable with live adapters written as classes', () => {
     expect(adapters.eventStore.calls).toEqual([]);
   });
 
-  it('calls the adapter for a mutating operation when the switch is exactly live', async () => {
+  it('calls the adapter for a gated operation when the switch is exactly live', async () => {
     const adapters = freshAdapters();
     const lines: string[] = [];
     const { ports, kinds } = resolvePortTable({
@@ -130,6 +145,60 @@ describe('resolvePortTable with live adapters written as classes', () => {
     expect(() =>
       resolvePortTable({ runtimeContext: 'deployed', switchValue: undefined, table: plantedLiveTable(adapters), dryRunSink: () => {} }),
     ).toThrow('the live addressKey adapter has no getKeySet operation');
+  });
+
+  // A misspelled gated name would leave the real operation ungated, live with no switch at all,
+  // which is the one failure the switch exists to prevent; so is a misspelled mutating name.
+  it.each([
+    ['gatedOperations', { gatedOperations: ['sned'] }],
+    ['mutatingOperations', { mutatingOperations: ['sned'] }],
+  ])('refuses a %s entry that is not one of the row operations, in every runtime context', (_label, override) => {
+    for (const runtimeContext of ['test', 'deployed'] as const) {
+      const table = plantedLiveTable(freshAdapters());
+      const misspelled = { ...table, deadLetter: { ...table.deadLetter, ...override } };
+      expect(() => resolvePortTable({ runtimeContext, switchValue: undefined, table: misspelled, dryRunSink: () => {} })).toThrow(
+        'the deadLetter row lists sned, which is not one of its operations',
+      );
+    }
+  });
+});
+
+// SPEC requirement 1 and plan 01-15's expected table: in 'deployed' the event store, the address key
+// and the dead-letter queue resolve live for EVERY switch value. Only SES pause, reopen and send, the
+// model call and InvokeAgentRuntime wait for the switch, and none of those rows exists yet.
+describe('the real port table gates nothing the switch does not own', () => {
+  it.each([undefined, '', '   ', 'true', 'LIVE', ' live', 'live'])(
+    'resolves every event store, address key and dead-letter operation live in deployed for switch %j',
+    (switchValue) => {
+      const { kinds } = resolvePortTable({
+        runtimeContext: 'deployed',
+        switchValue,
+        table: realTableWithPlantedLive(freshAdapters()),
+        dryRunSink: () => {},
+      });
+      for (const [portName, row] of Object.entries(kinds)) {
+        for (const [operation, kind] of Object.entries(row)) {
+          expect(`${portName}.${operation} ${kind}`).toBe(`${portName}.${operation} live`);
+        }
+      }
+    },
+  );
+
+  it('writes a record through the live adapter, never a dry-run line, when the switch is unset', async () => {
+    const adapters = freshAdapters();
+    const lines: string[] = [];
+    const { ports } = resolvePortTable({
+      runtimeContext: 'deployed',
+      switchValue: undefined,
+      table: realTableWithPlantedLive(adapters),
+      dryRunSink: (line) => lines.push(line),
+    });
+
+    await expect(ports.eventStore.putIfAbsent({} as EventRecord)).resolves.toBe('written');
+    await ports.deadLetter.send([]);
+    expect(adapters.eventStore.calls).toEqual(['putIfAbsent']);
+    expect(adapters.deadLetter.calls).toEqual(['send']);
+    expect(lines).toEqual([]);
   });
 });
 

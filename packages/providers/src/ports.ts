@@ -15,13 +15,20 @@ interface LivePortContext {
 }
 
 /**
- * One row per AWS-backed capability: its operation names, which of those mutate (D-06 decides
- * live vs dry-run per operation, not per port), its fixture factory, and its live side, either a
- * factory or a `notBuiltUntil` phase for a row no adapter has reached yet (T-01-03).
+ * One row per AWS-backed capability: its operation names, which of those mutate, which the live
+ * switch gates, its fixture factory, and its live side, either a factory or a `notBuiltUntil`
+ * phase for a row no adapter has reached yet (T-01-03).
+ *
+ * Mutating and gated are two different facts (D-06 decides live vs dry-run per operation, not per
+ * port). A gated operation resolves to the dry-run recorder in 'deployed' unless the switch is
+ * exactly `live`: SPEC requirement 1 names those as SES pause, reopen and send, the model call and
+ * InvokeAgentRuntime. A write to Fothering's own table or queue mutates but is never gated, so a
+ * deploy with the switch unset still stores the events it ingests.
  */
 export interface PortRow {
   readonly operations: readonly string[];
   readonly mutatingOperations: readonly string[];
+  readonly gatedOperations: readonly string[];
   readonly fixture: (fixtures: FixtureOptions) => unknown;
   readonly live: ((context: LivePortContext) => unknown) | { readonly notBuiltUntil: number };
 }
@@ -39,18 +46,21 @@ export const PORT_TABLE = {
   eventStore: {
     operations: ['putIfAbsent', 'queryLane', 'queryByRecipient', 'deleteRecord', 'getRecord'],
     mutatingOperations: ['putIfAbsent', 'deleteRecord'],
+    gatedOperations: [],
     fixture: (fixtures: FixtureOptions) => createFixtureEventStore(fixtures),
     live: { notBuiltUntil: 1 },
   },
   addressKey: {
     operations: ['getKeySet'],
     mutatingOperations: [],
+    gatedOperations: [],
     fixture: () => createFixtureAddressKey(),
     live: { notBuiltUntil: 1 },
   },
   deadLetter: {
     operations: ['send'],
     mutatingOperations: ['send'],
+    gatedOperations: [],
     fixture: (fixtures: FixtureOptions) => createFixtureDeadLetter(fixtures),
     live: { notBuiltUntil: 1 },
   },
@@ -96,6 +106,16 @@ function dryRunTarget(portName: string, first: unknown): string {
   return DRY_RUN_TARGET_PATTERN.test(first) ? first : UNCLASSIFIED;
 }
 
+// A misspelled gated name leaves the real operation ungated, live with no switch at all, so every
+// listed name must be one of the row's own operations, checked in every runtime context.
+function assertListedOperations(portName: string, row: PortRow): void {
+  for (const listed of [...row.mutatingOperations, ...row.gatedOperations]) {
+    if (!row.operations.includes(listed)) {
+      throw new Error(`the ${portName} row lists ${listed}, which is not one of its operations`);
+    }
+  }
+}
+
 function dryRunOperation(portName: string, operation: string, sink: DryRunSink): (...args: unknown[]) => Promise<void> {
   return async (...args: unknown[]) => {
     sink(`(dry-run) WOULD ${portName}.${operation} ${dryRunTarget(portName, args[0])}`);
@@ -116,6 +136,7 @@ export function resolvePortTable(options: ResolvePortTableOptions): { ports: Res
 
   for (const name of Object.keys(table) as PortName[]) {
     const row = table[name];
+    assertListedOperations(name, row);
     const rowKinds: Record<string, ResolvedKind> = {};
 
     if (options.runtimeContext === 'test') {
@@ -145,7 +166,7 @@ export function resolvePortTable(options: ResolvePortTableOptions): { ports: Res
       if (typeof method !== 'function') {
         throw new Error(`the live ${name} adapter has no ${operation} operation`);
       }
-      if (row.mutatingOperations.includes(operation) && mode !== 'live') {
+      if (row.gatedOperations.includes(operation) && mode !== 'live') {
         rowKinds[operation] = 'dry-run';
         wrapped[operation] = dryRunOperation(name, operation, dryRunSink);
       } else {

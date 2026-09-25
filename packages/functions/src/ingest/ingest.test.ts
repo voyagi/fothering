@@ -371,18 +371,21 @@ describe('resolvePortTable in runtimeContext deployed with a not-built table', (
       eventStore: {
         operations: ['putIfAbsent', 'queryLane', 'queryByRecipient', 'deleteRecord', 'getRecord'],
         mutatingOperations: ['putIfAbsent', 'deleteRecord'],
+        gatedOperations: [],
         fixture: () => createFixtureEventStore(),
         live: { notBuiltUntil: 1 },
       },
       addressKey: {
         operations: ['getKeySet'],
         mutatingOperations: [],
+        gatedOperations: [],
         fixture: () => createFixtureAddressKey(),
         live: { notBuiltUntil: 1 },
       },
       deadLetter: {
         operations: ['send'],
         mutatingOperations: ['send'],
+        gatedOperations: [],
         fixture: () => createFixtureDeadLetter(),
         live: { notBuiltUntil: 1 },
       },
