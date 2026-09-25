@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { bucketStartMs, countRecords } from '@fothering/core/buckets';
+import { bucketStartMs, countLaneBuckets, countRecords } from '@fothering/core/buckets';
 import { parseSesEvent } from '@fothering/core/ses-events';
 import { createLogger, type LogEntry, type LogSink } from '@fothering/core/log';
 import { parseLaneMap } from '@fothering/core/lanes';
@@ -58,6 +58,10 @@ describe('the doc-derived Bounce through the ingest composition root', () => {
     const bucket = bucketStartMs(fixtureMailTimestampMs());
     const stored = await deps.ports.eventStore.queryLane(configurationSet, bucket, bucket, deps.now());
     expect(countRecords(stored).Bounce).toBe(1);
+    // the doc fixture's own bounceType is Permanent, so plan 01-12's finer per-bucket shape
+    // reads the same one bounce as permanentBounce, not just the flat per-type count above
+    const [bucketCount] = countLaneBuckets(stored, { fromBucketMs: bucket, toBucketMs: bucket, nowMs: deps.now() });
+    expect(bucketCount?.permanentBounce).toBe(1);
   });
 
   it('absorbs a second delivery of the same envelope as a duplicate', async () => {
