@@ -122,6 +122,18 @@ describe('countLaneBuckets (AC-E20)', () => {
     expect(buckets).toHaveLength(1);
     expect(buckets[0]?.send).toBe(0);
   });
+
+  // A bound off a bucket edge builds keys no record carries, so a lane full of sends would read as
+  // silent; a backwards range returns no bucket at all. Both are refused rather than counted as 0.
+  it.each([
+    ['a start inside a bucket', { fromBucketMs: 1_000, toBucketMs: BUCKET_MS }],
+    ['an end inside a bucket', { fromBucketMs: 0, toBucketMs: BUCKET_MS + 1 }],
+    ['a backwards range', { fromBucketMs: BUCKET_MS, toBucketMs: 0 }],
+    ['a start that is not a number', { fromBucketMs: Number.NaN, toBucketMs: 0 }],
+  ])('throws a RangeError for %s instead of reading zero', (_label, bounds) => {
+    const records: EventRecord[] = [baseRecord({ kind: 'send', eventType: 'Send', bucketStartMs: 0 })];
+    expect(() => countLaneBuckets(records, { ...bounds, nowMs: 10_000_000 })).toThrow(RangeError);
+  });
 });
 
 describe('sub-second timestamps truncate consistently (AC-E21)', () => {

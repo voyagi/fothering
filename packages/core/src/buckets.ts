@@ -125,10 +125,25 @@ function applyRecord(bucket: BucketCount, record: EventRecord): void {
   }
 }
 
+// A bound off a bucket edge would build bucket keys no record carries, so every count would read 0
+// without an error, and a backwards range would return no bucket at all: both would make a lane
+// full of events look silent to the detector reading it. Either is refused instead.
+function assertBucketBounds(fromBucketMs: number, toBucketMs: number): void {
+  for (const bound of [fromBucketMs, toBucketMs]) {
+    if (!Number.isInteger(bound) || bucketStartMs(bound) !== bound) {
+      throw new RangeError(`bucket bound ${String(bound)} is not a whole number on a ${BUCKET_MS} ms bucket edge`);
+    }
+  }
+  if (fromBucketMs > toBucketMs) {
+    throw new RangeError(`bucket range ${fromBucketMs} to ${toBucketMs} runs backwards`);
+  }
+}
+
 // SPEC requirement 6: counts are derived from the same countRecords-style per-type check
 // (kind send, outcome or complaint only; a complaintRecipient item is never counted), so the
 // counting rule stays written in one place regardless of which shape the caller reads it through.
 export function countLaneBuckets(records: readonly EventRecord[], options: CountLaneBucketsOptions): BucketCount[] {
+  assertBucketBounds(options.fromBucketMs, options.toBucketMs);
   const byBucket = new Map<number, BucketCount>();
   for (let start = options.fromBucketMs; start <= options.toBucketMs; start += BUCKET_MS) {
     byBucket.set(start, emptyBucket(start, options.nowMs));
