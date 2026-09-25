@@ -23,8 +23,16 @@ const AWS_CREDENTIAL_VARS = [
 // this machine holds (D-27).
 const NO_AWS_PROFILE_DIR = join(tmpdir(), 'fothering-test-no-aws-profile');
 
+// A Bedrock API key rides in AWS_BEARER_TOKEN_BEDROCK, and the SDK derives the variable name
+// from each service's signing name, so the whole prefix goes rather than one listed name.
+const AWS_BEARER_TOKEN_PREFIX = 'AWS_BEARER_TOKEN_';
+
 export function stripAwsCredentials(env: Record<string, string | undefined>): void {
   for (const key of AWS_CREDENTIAL_VARS) delete env[key];
+  // Upper-cased before matching: Windows reads environment names case-insensitively.
+  for (const key of Object.keys(env)) {
+    if (key.toUpperCase().startsWith(AWS_BEARER_TOKEN_PREFIX)) delete env[key];
+  }
   env.AWS_SHARED_CREDENTIALS_FILE = join(NO_AWS_PROFILE_DIR, 'credentials');
   env.AWS_CONFIG_FILE = join(NO_AWS_PROFILE_DIR, 'config');
   env.AWS_EC2_METADATA_DISABLED = 'true';
@@ -66,14 +74,16 @@ export interface NetworkGuardModules {
 // itself, so it survives even if callers move it between objects.
 const GUARD_MARKER = Symbol('networkGuardWrapped');
 
-function isGuarded(fn: unknown): boolean {
+// Exported so a test can prove a real module's function is the wrapper without calling it, which
+// would reach the network if the wrap were missing.
+export function isNetworkGuarded(fn: unknown): boolean {
   return typeof fn === 'function' && (fn as unknown as Record<PropertyKey, unknown>)[GUARD_MARKER] === true;
 }
 
 function wrapMethod(target: object, prop: string, checkArgs: (args: unknown[]) => void): void {
   const bag = target as Record<string, unknown>;
   const original = bag[prop];
-  if (typeof original !== 'function' || isGuarded(original)) return;
+  if (typeof original !== 'function' || isNetworkGuarded(original)) return;
   const wrapped = function (this: unknown, ...args: unknown[]): unknown {
     checkArgs(args);
     return (original as (...fnArgs: unknown[]) => unknown).apply(this, args);
@@ -89,22 +99,28 @@ function firstConnectArg(args: unknown[]): unknown {
   return Array.isArray(args[0]) ? args[0][0] : args[0];
 }
 
+// Node's own rule for a bare string argument: it is a pipe name only when Number() does not
+// read it as a non-negative number, so connect('443', host) is a TCP port, not a path.
+function isPipeName(value: string): boolean {
+  return !(Number(value) >= 0);
+}
+
 function assertAllowedConnect(args: unknown[]): void {
   const target = firstConnectArg(args);
-  let host: string | undefined;
-  let path: string | undefined;
+  let host: unknown;
+  let path: unknown;
   if (typeof target === 'object' && target !== null) {
-    const opts = target as { host?: string; path?: string };
+    const opts = target as { host?: unknown; path?: unknown };
     host = opts.host;
     path = opts.path;
-  } else if (typeof target === 'string') {
+  } else if (typeof target === 'string' && isPipeName(target)) {
     path = target; // Socket.prototype.connect(path, ...) is the IPC form.
-  } else if (typeof target === 'number') {
-    const maybeHost = args[1];
-    host = typeof maybeHost === 'string' ? maybeHost : undefined;
+  } else {
+    host = args[1]; // connect(port, host): the port may be a number or a numeric string.
   }
-  if (path !== undefined) return; // a Unix socket or named pipe never reaches the network.
-  if (host !== undefined && !isLoopbackHost(host)) throw new NetworkGuardError(host);
+  // Node opens a pipe only for a truthy path; an empty or null path falls through to TCP.
+  if (typeof path === 'string' && path !== '') return; // a Unix socket or named pipe never reaches the network.
+  if (typeof host === 'string' && !isLoopbackHost(host)) throw new NetworkGuardError(host);
 }
 
 function assertAllowedHostname(hostname: unknown): void {
@@ -113,7 +129,8 @@ function assertAllowedHostname(hostname: unknown): void {
 
 // dns.resolve4, resolveMx, reverse and every sibling share this prefix; matching by name means a
 // Node release adding another resolve* method is covered without editing this list.
-const HOSTNAME_METHOD_RE = /^(resolve|reverse)/;
+// lookupService is the one other query: a reverse lookup whose first argument is the address.
+const HOSTNAME_METHOD_RE = /^(resolve|reverse|lookupService$)/;
 
 function wrapHostnameMethods(target: object): void {
   const bag = target as Record<string, unknown>;

@@ -1,5 +1,6 @@
 import dgram from 'node:dgram';
 import dns from 'node:dns';
+import { syncBuiltinESMExports } from 'node:module';
 import net from 'node:net';
 import { installNetworkGuard, stripAwsCredentials } from './guards.js';
 
@@ -12,3 +13,7 @@ import { installNetworkGuard, stripAwsCredentials } from './guards.js';
 // code, which is what makes AC-E6 (a module-scope connection attempt) provable.
 stripAwsCredentials(process.env);
 installNetworkGuard({ net, dns, dgram });
+// The wraps replace properties on the CommonJS exports object, and a named or namespace ESM
+// import (`import { lookup } from 'node:dns'`) is a separate binding that keeps the original
+// until this call copies the patched properties across.
+syncBuiltinESMExports();

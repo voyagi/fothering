@@ -155,6 +155,30 @@ describe('the fixture ports behave like the conditional-write store and queue th
     expect(beforeExpiry).toHaveLength(1);
   });
 
+  // DynamoDB stores and returns copies, so a caller changing its own object after a put, or a
+  // record a read returned, never changes what the table holds. The fixture must match.
+  it('keeps what was stored when the caller mutates the written or the returned record', async () => {
+    const { records } = await minimizeFixture();
+    const original = records[0];
+    if (original === undefined) throw new Error('expected at least one minimized record');
+    const record = structuredClone(original);
+    const key = { pk: record.pk, sk: record.sk };
+    const store = createFixtureEventStore();
+    await store.putIfAbsent(record);
+
+    record.messageId = 'changed-after-put';
+    expect((await store.getRecord(key))?.messageId).toBe(original.messageId);
+
+    const nowMs = record.mailTimestampMs + ONE_HOUR_MS;
+    const [returned] = await store.queryLane(record.configurationSet, record.bucketStartMs, record.bucketStartMs, nowMs);
+    if (returned === undefined) throw new Error('expected the stored record back');
+    returned.messageId = 'changed-after-read';
+    const fetched = await store.getRecord(key);
+    if (fetched === undefined) throw new Error('expected the stored record back');
+    fetched.fields.bounceType = 'changed-after-get';
+    expect(await store.getRecord(key)).toEqual(original);
+  });
+
   it('finds a record by its recipient hash, then a delete makes a re-read return undefined', async () => {
     const { records } = await minimizeFixture();
     const record = records[0];
@@ -179,7 +203,10 @@ describe('the fixture ports behave like the conditional-write store and queue th
     await expect(failingStore.putIfAbsent(record)).rejects.toThrow(FixtureWriteError);
 
     const deadLetter = createFixtureDeadLetter();
-    await deadLetter.send(records);
+    const sentCopy = structuredClone(records);
+    await deadLetter.send(sentCopy);
+    const firstSent = sentCopy[0];
+    if (firstSent !== undefined) firstSent.messageId = 'changed-after-send';
     expect(deadLetter.sent).toEqual([records]);
 
     const failingDeadLetter = createFixtureDeadLetter({ deadLetterFailure: 'send' });

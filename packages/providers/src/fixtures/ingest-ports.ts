@@ -15,7 +15,9 @@ function keyOf(key: RecordKey): string {
 
 // Models the table's conditional put (attribute_not_exists(pk), D-08): the check and the set
 // happen with no await between them, so two calls issued together under Promise.all resolve
-// exactly like DynamoDB's conditional write, one written and one duplicate.
+// exactly like DynamoDB's conditional write, one written and one duplicate. Records go in and
+// come out as copies, as they do through the real table, so a caller's later mutation of its
+// own object can never change what is stored.
 export function createFixtureEventStore(options: FixtureOptions = {}): EventStorePort {
   const records = new Map<string, EventRecord>();
 
@@ -26,7 +28,7 @@ export function createFixtureEventStore(options: FixtureOptions = {}): EventStor
       }
       const key = keyOf(record);
       if (records.has(key)) return 'duplicate';
-      records.set(key, record);
+      records.set(key, structuredClone(record));
       return 'written';
     },
     async queryLane(configurationSet, fromBucketMs, toBucketMs, nowMs) {
@@ -37,7 +39,7 @@ export function createFixtureEventStore(options: FixtureOptions = {}): EventStor
         if (record.pk !== pk) continue;
         if (record.bucketStartMs < fromBucketMs || record.bucketStartMs > toBucketMs) continue;
         if (record.expiresAt <= nowSeconds) continue;
-        result.push(record);
+        result.push(structuredClone(record));
       }
       return result;
     },
@@ -52,7 +54,8 @@ export function createFixtureEventStore(options: FixtureOptions = {}): EventStor
       records.delete(keyOf(key));
     },
     async getRecord(key) {
-      return records.get(keyOf(key));
+      const record = records.get(keyOf(key));
+      return record === undefined ? undefined : structuredClone(record);
     },
   };
 }
@@ -84,7 +87,7 @@ export function createFixtureDeadLetter(options: FixtureOptions = {}): FixtureDe
       if (options.deadLetterFailure === 'send') {
         throw new FixtureWriteError('fixture dead letter is configured to fail on send');
       }
-      sent.push([...records]);
+      sent.push(structuredClone([...records])); // a queue message is a serialized copy
     },
   };
 }
