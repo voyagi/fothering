@@ -26,6 +26,24 @@ describe('extractEnhancedStatusCode', () => {
   it('returns only the first enhanced code from a sentence holding an address and a URL', () => {
     expect(extractEnhancedStatusCode(SENTENCE_DIAGNOSTIC)).toBe('5.1.1');
   });
+
+  // A dotted IP holds runs that look like a code (10.5.1.7 holds 5.1.7), and a wrong class digit
+  // turns a temporary failure into a permanent one in the evidence.
+  it.each([
+    ['inside an IPv4 address', 'smtp; 421 Service not available, closing channel [10.5.1.7]'],
+    ['at the start of an IPv4 address', 'smtp; 421 connection to 5.9.10.11 timed out'],
+    ['with more digits than a code holds', 'smtp; 550 see 5.1.1234'],
+  ])('reads unclassified for a code-shaped run %s', (_label, text) => {
+    expect(extractEnhancedStatusCode(text)).toBe(UNCLASSIFIED);
+  });
+
+  it('reads the real code that follows an IP address', () => {
+    expect(extractEnhancedStatusCode('smtp; 421 host 10.5.1.7 said: 4.4.2 connection timed out')).toBe('4.4.2');
+  });
+
+  it('reads a code that ends a sentence', () => {
+    expect(extractEnhancedStatusCode('smtp; 550 mailbox unavailable 5.1.1.')).toBe('5.1.1');
+  });
 });
 
 describe('extractBasicReplyCode', () => {
@@ -73,6 +91,20 @@ describe('validHostname', () => {
 
   it('reads unclassified for text with no dot and a space', () => {
     expect(validHostname('not a host')).toBe(UNCLASSIFIED);
+  });
+
+  it('reads unclassified for a dotted number, which is an invalid IP address, never a hostname', () => {
+    expect(validHostname('123.456.789.012')).toBe(UNCLASSIFIED);
+    expect(reportingMta('dsn; 999.1.1.1')).toBe(UNCLASSIFIED);
+  });
+
+  it('keeps a numeric label before a lettered top-level label', () => {
+    expect(validHostname('10.mail.example.com')).toBe('10.mail.example.com');
+  });
+
+  it('reads unclassified for a label longer than 63 characters, and keeps one of exactly 63', () => {
+    expect(validHostname(`${'a'.repeat(64)}.example.com`)).toBe(UNCLASSIFIED);
+    expect(validHostname(`${'a'.repeat(63)}.example.com`)).toBe(`${'a'.repeat(63)}.example.com`);
   });
 });
 
