@@ -5,7 +5,7 @@ import sonarjs from 'eslint-plugin-sonarjs';
 import tseslint from 'typescript-eslint';
 
 export default [
-  { ignores: ['**/*.config.{ts,js,mjs,cjs}', '**/{dist,build,coverage,cdk.out,.astro,.wrangler}/**'] },
+  { ignores: ['**/*.config.{ts,js,mjs,cjs}', '**/{dist,build,coverage,cdk.out,.astro,.wrangler,.stryker-tmp}/**'] },
   {
     files: ['**/*.{ts,tsx,js,jsx,mjs,cjs}'],
     // A test enumerates cases, which is what makes it long, not tangled; the check scripts under

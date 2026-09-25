@@ -10,7 +10,7 @@ const tsParser = { parser: tseslint.parser, parserOptions: { ecmaVersion: 'lates
 const TEST_FILES = ['**/*.{test,spec}.{ts,tsx,js,jsx,mjs,cjs}'];
 
 export default [
-  { ignores: ['**/*.config.{ts,js,mjs,cjs}', '**/{dist,build,coverage,cdk.out,.astro,.wrangler}/**'] },
+  { ignores: ['**/*.config.{ts,js,mjs,cjs}', '**/{dist,build,coverage,cdk.out,.astro,.wrangler,.stryker-tmp}/**'] },
   {
     files: ['**/*.{ts,tsx,js,jsx,mjs,cjs}'],
     ignores: [...TEST_FILES, 'scripts/**'],
