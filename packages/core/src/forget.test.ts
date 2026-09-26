@@ -261,6 +261,18 @@ describe('forgetRecipient (AC-15)', () => {
 });
 
 describe('forgetRecipient key handling', () => {
+  // With no version there is nothing to hash under, so no record is searched at all: a report of
+  // 0 deleted would read as "nothing stored for this person" when nothing was looked at.
+  it('refuses a key set with no versions instead of reporting 0 deleted', async () => {
+    const store = createFixtureEventStore();
+    await seedTarget(store, 'jane@example.com');
+    const { sleep } = fakeSleep();
+
+    await expect(forgetRecipient({ address: 'jane@example.com', keySet: { versions: [] }, store, sleep })).rejects.toThrow(
+      /no key version/,
+    );
+  });
+
   it('accepts an injected maxRequeries and still converges to remaining 0 once the store settles', async () => {
     const store = createFixtureEventStore();
     const target = 'jane@example.com';

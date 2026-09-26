@@ -84,10 +84,11 @@ export class LiveConfigMissingError extends Error {
   }
 }
 
-/** The one missing-value check every live adapter shares: an empty string is as unset as undefined,
- * since a name of nothing would otherwise reach AWS and fail there without naming the variable. */
+/** The one missing-value check every live adapter shares: an empty string, or one of spaces only, is
+ * as unset as undefined, since a name of nothing would otherwise reach AWS and fail there without
+ * naming the variable. */
 export function requireLiveConfig(value: string | undefined, envVar: string): string {
-  if (value === undefined || value === '') throw new LiveConfigMissingError(envVar);
+  if (value === undefined || value.trim() === '') throw new LiveConfigMissingError(envVar);
   return value;
 }
 

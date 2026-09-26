@@ -98,6 +98,21 @@ describe('laneMapSchema (AC-E32)', () => {
     ]);
   });
 
+  it('reports a runIdTagKey collision once, for the one lane that collides', () => {
+    const result = laneMapSchema.safeParse(
+      baseMap({
+        runIdTagKey: 'fothering_run',
+        lanes: [
+          baseLane(),
+          baseLane({ configurationSet: 'fothering-bulk', lane: 'fothering-bulk', batchTagKey: 'fothering_run' }),
+          baseLane({ configurationSet: 'fothering-other', lane: 'fothering-other' }),
+        ],
+      }),
+    );
+    if (result.success) throw new Error('expected parsing to fail');
+    expect(result.error.issues.map((issue) => issue.message)).toEqual(['lanes[1].batchTagKey and runIdTagKey must be distinct']);
+  });
+
   it('rejects a tag key starting with ses:', () => {
     const paths = issuePaths(baseMap({ lanes: [baseLane({ streamTagKey: 'ses:configuration-set' })] }));
     expect(paths).toContainEqual(['lanes', 0, 'streamTagKey']);

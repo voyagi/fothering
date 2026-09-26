@@ -50,6 +50,27 @@ describe('normalizeAddress (D-14)', () => {
   );
 });
 
+// SES reports a Send's destination as the sender wrote it, display name included, while a bounce
+// names the bare address. Both must reduce to one HMAC or a forget request reaches only one of them.
+describe('normalizeAddress on name-addr edge forms', () => {
+  it.each([
+    ['a display name quoting its own angle brackets', '"Sales <EU>" <Jane@Example.com>', { local: 'jane', domain: 'example.com' }],
+    ['a quoted local part holding an angle bracket', '<"a<b"@Example.com>', { local: '"a<b"', domain: 'example.com' }],
+    ['a display name quoting an @', '"jane@evil.example" <jane@example.com>', { local: 'jane', domain: 'example.com' }],
+    ['a display name whose quote never closes', '"Jane <Jane@Example.com>', { local: 'jane', domain: 'example.com' }],
+    ['a quoted local part holding an escaped quote and a bracket', '<"a\\"<b"@Example.com>', { local: '"a\\"<b"', domain: 'example.com' }],
+  ])('reduces %s to the bare address', (_label, raw, expected) => {
+    expect(normalizeAddress(raw)).toEqual(expected);
+  });
+
+  it('hashes a display-name destination and the bare bounce address to one HMAC', () => {
+    const keySet = oneVersionKeySet('secret-one');
+    const send = pseudonymizeRecipient('"Sales <EU>" <jane@example.com>', keySet, 0);
+    const bounce = pseudonymizeRecipient('jane@example.com', keySet, 0);
+    expect(send.recipientHmac).toBe(bounce.recipientHmac);
+  });
+});
+
 describe('pseudonymizeRecipient (unchanged signature, completed normalization)', () => {
   it('gives the same HMAC for case variants and a different one for a plus-tagged address', () => {
     const keySet = oneVersionKeySet('secret-one');

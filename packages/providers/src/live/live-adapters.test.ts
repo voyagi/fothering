@@ -495,6 +495,13 @@ describe('an empty configuration value counts as missing', () => {
     await expect(deadLetter.send([])).rejects.toMatchObject({ envVar: 'FOTHERING_DLQ_URL' });
     expect(constructed).toBe(0);
   });
+
+  // No table name, queue URL or secret id can hold a space, so a value of spaces is a
+  // misconfiguration exactly like an empty one.
+  it('treats a value of spaces as missing too', async () => {
+    const store = createDynamoEventStore({ tableName: '   ', client: dynamoClient, now: () => 0 });
+    await expect(store.getRecord({ pk: 'LANE#x', sk: 'y' })).rejects.toMatchObject({ envVar: 'FOTHERING_TABLE_NAME' });
+  });
 });
 
 describe('createSesReads', () => {

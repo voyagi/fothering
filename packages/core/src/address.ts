@@ -46,6 +46,22 @@ export interface NormalizedAddress {
   domain: string;
 }
 
+// The address in a display-name form sits in the last angle brackets outside a quoted string: a
+// display name may quote a '<' of its own ("Sales <EU>" followed by the bracketed address), and a
+// quoted local part may hold one inside the brackets. -1 when there is none.
+function angleAddrStart(text: string): number {
+  let inQuotes = false;
+  let outsideQuotes = -1;
+  for (let index = 0; index < text.length; index++) {
+    const char = text[index];
+    if (inQuotes && char === '\\') index += 1;
+    else if (char === '"') inQuotes = !inQuotes;
+    else if (char === '<' && !inQuotes) outsideQuotes = index;
+  }
+  // A quote that never closes leaves no quoted part to skip, so the last bracket of all is used.
+  return inQuotes ? text.lastIndexOf('<') : outsideQuotes;
+}
+
 // D-14: trim, take the address out of an angle-bracket display-name form if present, split at the
 // last @ (a local part is free to hold its own @), domain through url.domainToASCII then
 // lowercase (an empty result is unparseable), local part normalize('NFC') then toLowerCase(),
@@ -53,7 +69,7 @@ export interface NormalizedAddress {
 // domain, or a domain domainToASCII rejects.
 export function normalizeAddress(raw: string): NormalizedAddress | undefined {
   const trimmed = raw.trim();
-  const angleStart = trimmed.indexOf('<');
+  const angleStart = angleAddrStart(trimmed);
   const angleEnd = trimmed.lastIndexOf('>');
   const unwrapped = angleStart !== -1 && angleEnd > angleStart ? trimmed.slice(angleStart + 1, angleEnd) : trimmed;
 

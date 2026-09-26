@@ -80,6 +80,10 @@ async function deleteMatches(
 // eventually consistent fashion (Pitfall 10), so `remaining` is a read at the last re-query, never
 // proof that nothing is left; a record written for an event still in flight needs a second run.
 export async function forgetRecipient(options: ForgetRecipientOptions): Promise<ForgetReport> {
+  // No version means no hash and no search, so 0 deleted would be a report of nothing looked at.
+  if (options.keySet.versions.length === 0) {
+    throw new Error('the key set holds no key version, so no record could be searched');
+  }
   const maxRequeries = options.maxRequeries ?? DEFAULT_MAX_REQUERIES;
   const hashes = hmacUnderEveryVersion(options.address, options.keySet);
   const perKeyVersion = new Map<string, number>(hashes.map((entry) => [entry.keyVersion, 0]));
