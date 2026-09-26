@@ -108,7 +108,7 @@ describe('key version selection by send time (D-34)', () => {
     expect(currentKeyVersion(keySet).id).toBe('k2');
   });
 
-  it('hashes under every retained version, newest first, matching what pseudonymizeRecipient gives at each version’s own send time', () => {
+  it('hashes under every retained version, newest first, matching what pseudonymizeRecipient gives at the send time of each version', () => {
     const every = hmacUnderEveryVersion('jane@example.com', keySet);
     expect(every.map((entry) => entry.keyVersion)).toEqual(['k2', 'k1']);
     expect(every[0]?.recipientHmac).toBe(pseudonymizeRecipient('jane@example.com', keySet, ROTATION_MS).recipientHmac);
