@@ -37,6 +37,14 @@ export interface BuildIngestRootOptions {
   now?: () => number;
 }
 
+// The three deployed table names, read as literals beside the switch (D-04's literal-read rule
+// covers every env var the deployed handler needs, not only the switch). A key whose variable is
+// unset is left out of the returned object entirely: exactOptionalPropertyTypes forbids assigning
+// `undefined` to an optional field, so a conditional spread per key is the only legal shape here.
+export function readIngestLiveConfig(): LiveConfig {
+  return {};
+}
+
 // The one place per deployable that turns a runtime context and a switch value into a resolved
 // port table, a lane map and a logger: every AWS client the ingest function ever touches comes
 // from the `ports` this returns, never from a fresh import inside ingestEvent (SAFE-01).
