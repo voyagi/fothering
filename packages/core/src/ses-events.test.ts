@@ -364,6 +364,21 @@ describe('parseSesEvent: field stays a closed vocabulary under arbitrary damage'
   });
 });
 
+// The detail-type check reads value.detail.eventType with no guard. That is safe only because the
+// schema library skips a refinement once the object has already failed, so this pins it: a library
+// update that ran the check anyway would fail here instead of throwing out of every ingest call.
+describe('parseSesEvent: a valid envelope around a broken detail fails without throwing', () => {
+  it.each([[null], [42], ['x'], [[]], [{}], [{ eventType: 'Bounce' }]])('returns ok false for detail %j', (detail) => {
+    const event = fixtureEvent('bounce');
+    event.detail = detail;
+    let result: ReturnType<typeof parseSesEvent> | undefined;
+    expect(() => {
+      result = parseSesEvent(event);
+    }).not.toThrow();
+    expect(result?.ok).toBe(false);
+  });
+});
+
 describe('parseSesEvent: hostile or near-empty input carries no field, matching the pinned 01-01 case', () => {
   it.each([{}, { detail: null }, { detail: { mail: null } }, { detail: { mail: { messageId: 42 } } }])(
     'omits field for %j even though it is a plain object',
