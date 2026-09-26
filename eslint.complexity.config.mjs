@@ -1,6 +1,8 @@
-// eslint.complexity.config.mjs - complexity is checked apart from lint (D-30), so gate:complexity
-// stops being eslint . a second time under a different name: raising or lowering this budget never
-// touches the correctness rules lint owns.
+// eslint.complexity.config.mjs - the complexity budget and the ignored folders, written once.
+// gate:complexity runs this file alone, so it is a distinct check from lint rather than eslint . a
+// second time under a different name (D-30). eslint.config.mjs spreads this same array ahead of its
+// own rules, so lint (and with it the pre-commit gate) enforces the identical budget: a budget or an
+// ignored folder changed here changes both runs, and there is no second copy to forget.
 import sonarjs from 'eslint-plugin-sonarjs';
 import tseslint from 'typescript-eslint';
 

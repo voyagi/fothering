@@ -63,8 +63,9 @@ const FAULT_TEST_RE = /\.fault\.test\.ts$/i;
 // --- the real lister -----------------------------------------------------------------------------
 
 // `vitest list --filesOnly`, run from the repo root so its own include/exclude decide the answer.
-// Plain text output, one repo-relative path per line - never `--json`, which vitest 4.1 writes to
-// a report FILE named after its argument in the current working directory rather than to stdout.
+// Plain text output, one repo-relative path per line, which compares directly with `git ls-files`.
+// Not `--json`: vitest 4.1 prints that listing with ABSOLUTE paths, and `--json=<path>` writes a
+// report file instead of printing anything.
 function realLister(root) {
   const bin = join(root, 'node_modules', 'vitest', 'vitest.mjs');
   const out = execFileSync(process.execPath, [bin, 'list', '--filesOnly'], {
