@@ -1,6 +1,9 @@
 {
   "$schema": "https://unpkg.com/knip@6/schema.json",
   "ignore": [".git/**"],
+  "includeEntryExports": true,
+  "ignoreExportsUsedInFile": true,
+  "ignoreIssues": { "*.config.{ts,mjs}": ["exports"] },
   "workspaces": {
     ".": {
       "entry": ["verify-ship.mjs", "scripts/*.mjs", "vitest.config.ts", "eslint.config.mjs", "eslint.complexity.config.mjs", "design/mockups/shared/*.js"],
