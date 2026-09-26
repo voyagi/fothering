@@ -8,7 +8,7 @@ module.exports = {
       severity: 'error',
       comment:
         'Only provider adapters may import an AWS SDK client. Everything else goes through a port, which is what keeps the fixture default and the account-level guard enforceable.',
-      from: { path: '^packages/[^/]+/src/', pathNot: '^packages/[^/]+/src/providers/' },
+      from: { path: '^packages/[^/]+/src/', pathNot: '^packages/providers/src/' },
       to: { path: '(^|/)@aws-sdk/' },
     },
     {

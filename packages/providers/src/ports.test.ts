@@ -3,9 +3,10 @@ import type { EventRecord } from '@fothering/core/records';
 import { PORT_TABLE, resolvePortTable, type PortName, type PortRow } from './ports.js';
 import { createFixtureAddressKey, createFixtureDeadLetter, createFixtureEventStore } from './fixtures/ingest-ports.js';
 
-// No row has a live adapter yet (each is notBuiltUntil a later plan), so this planted table is the
-// only place the live side of resolvePortTable runs. Its adapters are classes on purpose: a class
-// keeps its methods on the prototype, which is the shape a copied-object port table loses.
+// The real table's three rows are all live now, but none of them gates on the switch (their
+// gatedOperations stay empty), so this planted table is the only place resolvePortTable's dry-run
+// branch runs. Its adapters are classes on purpose: a class keeps its methods on the prototype,
+// which is the shape a copied-object port table loses.
 class PlantedEventStore {
   readonly calls: string[] = [];
   async putIfAbsent(): Promise<'written'> {

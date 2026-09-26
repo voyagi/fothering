@@ -1,9 +1,30 @@
+import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
+import { DynamoDBDocumentClient } from '@aws-sdk/lib-dynamodb';
+import { SecretsManagerClient } from '@aws-sdk/client-secrets-manager';
+import { SQSClient } from '@aws-sdk/client-sqs';
 import { resolveProviderMode } from '@fothering/core/mode';
 import { UNCLASSIFIED } from '@fothering/core/records';
 import type { AddressKeyPort, DeadLetterPort, EventStorePort, FixtureOptions } from './port-types.js';
 import type { DryRunSink, KindTable, LiveClients, LiveConfig, ResolvedKind, RuntimeContext } from './port-types.js';
 import { NotBuiltError } from './port-types.js';
 import { createFixtureAddressKey, createFixtureDeadLetter, createFixtureEventStore } from './fixtures/ingest-ports.js';
+import { lazyClient } from './live/lazy-client.js';
+import { createDynamoEventStore } from './live/event-store.js';
+import { createSecretsManagerAddressKey } from './live/address-key.js';
+import { createSqsDeadLetter } from './live/dead-letter.js';
+
+const LIVE_REGION = 'eu-central-1';
+
+// The one place a row decides what to call: an already-built client (a test's stub), a factory
+// (a test's construction counter), or nothing (build the real thing). Every row wires this through
+// lazyClient so a busy container still builds each client exactly once (SAFE-01).
+function resolveLiveClient<T>(provided: unknown, construct: () => T): () => T {
+  return lazyClient(() => {
+    if (typeof provided === 'function') return (provided as () => T)();
+    if (provided !== undefined) return provided as T;
+    return construct();
+  });
+}
 
 export type PortName = 'eventStore' | 'addressKey' | 'deadLetter';
 
@@ -48,21 +69,35 @@ export const PORT_TABLE = {
     mutatingOperations: ['putIfAbsent', 'deleteRecord'],
     gatedOperations: [],
     fixture: (fixtures: FixtureOptions) => createFixtureEventStore(fixtures),
-    live: { notBuiltUntil: 1 },
+    live: ({ liveConfig, liveClients, now }) =>
+      createDynamoEventStore({
+        tableName: liveConfig.tableName,
+        client: resolveLiveClient(liveClients.dynamoDb, () => DynamoDBDocumentClient.from(new DynamoDBClient({ region: LIVE_REGION }))),
+        now,
+      }),
   },
   addressKey: {
     operations: ['getKeySet'],
     mutatingOperations: [],
     gatedOperations: [],
     fixture: () => createFixtureAddressKey(),
-    live: { notBuiltUntil: 1 },
+    live: ({ liveConfig, liveClients, now }) =>
+      createSecretsManagerAddressKey({
+        secretId: liveConfig.addressKeySecretId,
+        client: resolveLiveClient(liveClients.secretsManager, () => new SecretsManagerClient({ region: LIVE_REGION })),
+        now,
+      }),
   },
   deadLetter: {
     operations: ['send'],
     mutatingOperations: ['send'],
     gatedOperations: [],
     fixture: (fixtures: FixtureOptions) => createFixtureDeadLetter(fixtures),
-    live: { notBuiltUntil: 1 },
+    live: ({ liveConfig, liveClients }) =>
+      createSqsDeadLetter({
+        queueUrl: liveConfig.deadLetterQueueUrl,
+        client: resolveLiveClient(liveClients.sqs, () => new SQSClient({ region: LIVE_REGION })),
+      }),
   },
 } satisfies Record<PortName, PortRow>;
 

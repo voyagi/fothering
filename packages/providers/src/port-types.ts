@@ -45,6 +45,11 @@ export interface SendClient {
   send(command: unknown): Promise<unknown>;
 }
 
+/**
+ * Each key holds one of three shapes: an already-built SDK client, a zero-argument factory that
+ * returns one, or nothing (the adapter constructs its own client, lazily, on first use). Tests
+ * pass a counting factory here to prove a client is built once and only when a port method runs.
+ */
 export type LiveClients = Partial<Record<'dynamoDb' | 'secretsManager' | 'sqs' | 'sesv2', unknown>>;
 
 export interface LiveConfig {
@@ -64,4 +69,31 @@ export class NotBuiltError extends Error {
     this.name = 'NotBuiltError';
     this.phase = phase;
   }
+}
+
+/** A live adapter throws this from the operation it blocks, never from resolution, naming the
+ * exact environment variable a deploy left unset (T-01-03's sibling for configuration, not code). */
+export class LiveConfigMissingError extends Error {
+  readonly envVar: string;
+
+  constructor(envVar: string) {
+    super(`missing required live configuration: ${envVar}`);
+    this.name = 'LiveConfigMissingError';
+    this.envVar = envVar;
+  }
+}
+
+/** The default configuration set an identity sends through when none is set on the call itself. */
+export interface EventDestinationFact {
+  name: string;
+  enabled: boolean;
+  eventBridge: boolean;
+  matchingEventTypes: readonly string[];
+}
+
+/** The three SESv2 reads the closeability check needs; phase 1 wires no mutating SES operation. */
+export interface SesReadPort {
+  getEmailIdentity(emailIdentity: string): Promise<string | undefined>;
+  listEmailIdentities(): Promise<string[]>;
+  getConfigurationSetEventDestinations(configurationSetName: string): Promise<EventDestinationFact[]>;
 }
