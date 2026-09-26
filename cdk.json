@@ -1,0 +1,7 @@
+{
+  "app": "node dist/infra/app.mjs",
+  "output": "cdk.out",
+  "context": {
+    "cli-telemetry": false
+  }
+}

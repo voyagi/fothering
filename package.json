@@ -29,7 +29,8 @@
     "gate:selftest": "node scripts/check-env-example.mjs --selftest && node scripts/check-tsconfig-coverage.mjs --selftest && node scripts/check-dead.mjs --selftest && node scripts/check-client-secrets.mjs --selftest && node scripts/check-hookspath.mjs --selftest && node scripts/check-license.mjs --selftest && node scripts/check-git-identity.mjs --selftest && node scripts/check-artifact-metadata.mjs --selftest && node scripts/check-privacy-accountability.mjs --selftest && node scripts/check-ai-act.mjs --selftest && node scripts/check-test-discovery.mjs --selftest && node scripts/check-tracked-paths.mjs --selftest",
     "gate": "npm run gate:tsconfig && npm run gate:tracked-paths && npm run gate:test-discovery && npm run gate:types && npm run gate:complexity && npm run gate:dup && npm run gate:deps && npm run gate:env && npm run gate:dead && npm run gate:repo",
     "verify:ship": "node verify-ship.mjs",
-    "mutate": "stryker run"
+    "mutate": "stryker run",
+    "build": "node scripts/build.mjs"
   },
   "devDependencies": {
     "@size-limit/file": "13.1.1",
@@ -37,7 +38,9 @@
     "@stryker-mutator/vitest-runner": "10.0.0",
     "@types/node": "22.20.2",
     "@vitest/eslint-plugin": "1.6.27",
+    "aws-cdk": "2.1142.0",
     "dependency-cruiser": "18.2.0",
+    "esbuild": "0.28.2",
     "eslint": "10.10.0",
     "eslint-plugin-compat": "7.0.2",
     "eslint-plugin-sonarjs": "4.2.0",

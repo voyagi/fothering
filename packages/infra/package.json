@@ -1,0 +1,14 @@
+{
+  "name": "@fothering/infra",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./*": "./src/*.ts"
+  },
+  "dependencies": {
+    "@fothering/core": "0.0.0",
+    "aws-cdk-lib": "2.269.0",
+    "constructs": "10.8.1"
+  }
+}

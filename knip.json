@@ -7,7 +7,7 @@
   "workspaces": {
     ".": {
       "entry": ["verify-ship.mjs", "scripts/*.mjs", "vitest.config.ts", "eslint.config.mjs", "eslint.complexity.config.mjs", "design/mockups/shared/*.js"],
-      "ignoreDependencies": ["@types/node", "fast-check", "schema-dts", "size-limit", "@size-limit/file", "@stryker-mutator/core", "@stryker-mutator/vitest-runner"]
+      "ignoreDependencies": ["@types/node", "fast-check", "schema-dts", "size-limit", "@size-limit/file", "@stryker-mutator/core", "@stryker-mutator/vitest-runner", "aws-cdk"]
     },
     "packages/core": {
       "entry": ["src/mode.ts"]
@@ -15,6 +15,9 @@
     "packages/providers": {},
     "packages/functions": {
       "entry": ["src/*/handler.ts"]
+    },
+    "packages/infra": {
+      "entry": ["src/app.ts", "src/*-cli.ts"]
     }
   }
 }
