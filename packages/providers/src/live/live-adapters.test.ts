@@ -474,6 +474,29 @@ describe('createSqsDeadLetter', () => {
   });
 });
 
+// A variable a deploy sets to the empty string is as missing as one it never sets: read as a name,
+// it would reach AWS and come back as a validation error that names no variable.
+describe('an empty configuration value counts as missing', () => {
+  it('names the variable and builds no client, for all three adapters', async () => {
+    let constructed = 0;
+    const count = <T>(build: () => T) => (): T => {
+      constructed += 1;
+      return build();
+    };
+    const store = createDynamoEventStore({ tableName: '', client: count(dynamoClient), now: () => 0 });
+    const addressKey = createSecretsManagerAddressKey({ secretId: '', client: count(secretsManagerClient), now: () => 0 });
+    const deadLetter = createSqsDeadLetter({
+      queueUrl: '',
+      client: count(() => new SQSClient({ region: REGION, credentials: FAKE_CREDENTIALS })),
+    });
+
+    await expect(store.getRecord({ pk: 'LANE#x', sk: 'y' })).rejects.toMatchObject({ envVar: 'FOTHERING_TABLE_NAME' });
+    await expect(addressKey.getKeySet()).rejects.toMatchObject({ envVar: 'FOTHERING_ADDRESS_KEY_SECRET_ID' });
+    await expect(deadLetter.send([])).rejects.toMatchObject({ envVar: 'FOTHERING_DLQ_URL' });
+    expect(constructed).toBe(0);
+  });
+});
+
 describe('createSesReads', () => {
   function sesClient(): SESv2Client {
     return new SESv2Client({ region: REGION, credentials: FAKE_CREDENTIALS });

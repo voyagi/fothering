@@ -84,6 +84,13 @@ export class LiveConfigMissingError extends Error {
   }
 }
 
+/** The one missing-value check every live adapter shares: an empty string is as unset as undefined,
+ * since a name of nothing would otherwise reach AWS and fail there without naming the variable. */
+export function requireLiveConfig(value: string | undefined, envVar: string): string {
+  if (value === undefined || value === '') throw new LiveConfigMissingError(envVar);
+  return value;
+}
+
 /** One event destination of a configuration set, reduced to what the closeability check reads. */
 export interface EventDestinationFact {
   name: string;

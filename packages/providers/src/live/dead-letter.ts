@@ -1,5 +1,5 @@
 import { SendMessageCommand, type SQSClient } from '@aws-sdk/client-sqs';
-import { LiveConfigMissingError, type DeadLetterPort } from '../port-types.js';
+import { requireLiveConfig, type DeadLetterPort } from '../port-types.js';
 
 export interface CreateSqsDeadLetterOptions {
   queueUrl: string | undefined;
@@ -9,10 +9,8 @@ export interface CreateSqsDeadLetterOptions {
 export function createSqsDeadLetter(options: CreateSqsDeadLetterOptions): DeadLetterPort {
   return {
     async send(records) {
-      if (options.queueUrl === undefined) throw new LiveConfigMissingError('FOTHERING_DLQ_URL');
-      await options.client().send(
-        new SendMessageCommand({ QueueUrl: options.queueUrl, MessageBody: JSON.stringify({ records }) }),
-      );
+      const queueUrl = requireLiveConfig(options.queueUrl, 'FOTHERING_DLQ_URL');
+      await options.client().send(new SendMessageCommand({ QueueUrl: queueUrl, MessageBody: JSON.stringify({ records }) }));
     },
   };
 }

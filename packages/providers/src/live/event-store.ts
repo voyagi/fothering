@@ -9,7 +9,7 @@ import {
   type EventRecord,
   type RecordKey,
 } from '@fothering/core/records';
-import { LiveConfigMissingError, type EventStorePort } from '../port-types.js';
+import { requireLiveConfig, type EventStorePort } from '../port-types.js';
 
 const CONDITIONAL_CHECK_FAILED = 'ConditionalCheckFailedException';
 // A sort key range's upper bound must clear every suffix a bucket's own rows can carry
@@ -24,8 +24,7 @@ export interface CreateDynamoEventStoreOptions {
 }
 
 function requireTableName(tableName: string | undefined): string {
-  if (tableName === undefined) throw new LiveConfigMissingError('FOTHERING_TABLE_NAME');
-  return tableName;
+  return requireLiveConfig(tableName, 'FOTHERING_TABLE_NAME');
 }
 
 export function createDynamoEventStore(options: CreateDynamoEventStoreOptions): EventStorePort {

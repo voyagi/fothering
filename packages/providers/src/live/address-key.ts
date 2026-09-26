@@ -1,7 +1,7 @@
 import { GetSecretValueCommand, type SecretsManagerClient } from '@aws-sdk/client-secrets-manager';
 import { z } from 'zod';
 import type { AddressKeySet } from '@fothering/core/address';
-import { LiveConfigMissingError, type AddressKeyPort } from '../port-types.js';
+import { requireLiveConfig, type AddressKeyPort } from '../port-types.js';
 
 const CACHE_TTL_MS = 5 * 60 * 1000;
 const MIN_SECRET_LENGTH = 32;
@@ -92,11 +92,11 @@ export function createSecretsManagerAddressKey(options: CreateSecretsManagerAddr
 
   return {
     async getKeySet() {
-      if (options.secretId === undefined) throw new LiveConfigMissingError('FOTHERING_ADDRESS_KEY_SECRET_ID');
+      const secretId = requireLiveConfig(options.secretId, 'FOTHERING_ADDRESS_KEY_SECRET_ID');
       const nowMs = options.now();
       if (cached !== undefined && nowMs - cached.fetchedAtMs < CACHE_TTL_MS) return cached.keySet;
 
-      const response = await options.client().send(new GetSecretValueCommand({ SecretId: options.secretId }));
+      const response = await options.client().send(new GetSecretValueCommand({ SecretId: secretId }));
       if (response.SecretString === undefined) throw new AddressKeySecretError('the address key secret has no SecretString');
 
       let raw: unknown;
