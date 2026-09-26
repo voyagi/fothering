@@ -41,9 +41,9 @@ export function createDynamoEventStore(options: CreateDynamoEventStoreOptions): 
           }),
         );
         return 'written';
-      } catch {
-        // RED-phase stub (01-03): duplicate mapping not implemented yet.
-        return 'written';
+      } catch (error) {
+        if (error instanceof Error && error.name === CONDITIONAL_CHECK_FAILED) return 'duplicate';
+        throw error;
       }
     },
 
