@@ -410,6 +410,8 @@ describe('createSecretsManagerAddressKey', () => {
     ['a version named current', { current: 'current', activeFrom: { current: 0 } }],
     ['a version named activeFrom', { current: 'activeFrom', activeFrom: { activeFrom: 0 } }],
     ['an empty version id', { current: 'k2', activeFrom: { '': 0, k2: 500 }, '': K1_SECRET, k2: K2_SECRET }],
+    // A tie leaves the version a send uses to the JSON key order, so it is refused whatever current names.
+    ['two versions sharing an activeFrom', { current: 'k1', activeFrom: { k1: 500, k2: 500 }, k1: K1_SECRET, k2: K2_SECRET }],
   ])('refuses %s', async (_label, secret) => {
     const client = secretsManagerClient();
     stubSend(client, () => ({ SecretString: JSON.stringify(secret) }));

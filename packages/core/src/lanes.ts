@@ -17,14 +17,14 @@ const CONFIGURATION_SET_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
 
 const laneEntrySchema = z.object({
   configurationSet: z.string().regex(CONFIGURATION_SET_PATTERN),
-  lane: z.string(),
+  lane: z.string().min(1),
   criticality: z.enum(['transactional', 'bulk']),
   declaredStreams: z.array(z.string().regex(SES_TAG_PATTERN)).min(1),
   streamTagKey: tagKeySchema,
   batchTagKey: tagKeySchema,
   templateTagKey: tagKeySchema,
   campaignTagKey: tagKeySchema,
-  tenant: z.string().optional(),
+  tenant: z.string().min(1).optional(),
   operatorAlert: z.boolean(),
 });
 
@@ -74,12 +74,13 @@ export const laneMapSchema = z
           if (first === undefined || second === undefined) continue;
           const [fieldA, valueA] = first;
           const [fieldB, valueB] = second;
+          // runIdTagKey sits on the map, so its issue path names no lane: the message does instead.
           if (valueA === valueB) {
-            ctx.addIssue({
-              code: 'custom',
-              message: `${fieldA} and ${fieldB} must be distinct`,
-              path: fieldB === 'runIdTagKey' ? ['runIdTagKey'] : ['lanes', laneIndex, fieldB],
-            });
+            ctx.addIssue(
+              fieldB === 'runIdTagKey'
+                ? { code: 'custom', message: `lanes[${laneIndex}].${fieldA} and runIdTagKey must be distinct`, path: ['runIdTagKey'] }
+                : { code: 'custom', message: `${fieldA} and ${fieldB} must be distinct`, path: ['lanes', laneIndex, fieldB] },
+            );
           }
         }
       }

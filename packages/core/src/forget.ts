@@ -37,7 +37,9 @@ export interface ForgetReport {
 
 export const FORGET_USAGE = 'usage: pass a JSON payload holding one non-empty "address" field';
 
-export const forgetPayloadSchema = z.object({ address: z.string().min(1) });
+// Trimmed before the length check: an address of spaces names no recipient, and it would still hash
+// (hashing trims too) to whatever records carry the empty input.
+export const forgetPayloadSchema = z.object({ address: z.string().trim().min(1) });
 
 export class ForgetUsageError extends Error {
   constructor() {

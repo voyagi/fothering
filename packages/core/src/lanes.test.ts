@@ -54,6 +54,11 @@ describe('laneMapSchema (AC-E32)', () => {
     },
   );
 
+  it.each(['lane', 'tenant'])('rejects a lane whose %s is empty', (field) => {
+    const paths = issuePaths(baseMap({ lanes: [baseLane({ [field]: '' })] }));
+    expect(paths).toContainEqual(['lanes', 0, field]);
+  });
+
   it('rejects a declared stream that is empty', () => {
     const paths = issuePaths(baseMap({ lanes: [baseLane({ declaredStreams: [''] })] }));
     expect(paths).toContainEqual(['lanes', 0, 'declaredStreams', 0]);
@@ -77,6 +82,20 @@ describe('laneMapSchema (AC-E32)', () => {
   it('rejects a lane whose streamTagKey equals the map runIdTagKey', () => {
     const paths = issuePaths(baseMap({ runIdTagKey: 'stream' }));
     expect(paths).toContainEqual(['runIdTagKey']);
+  });
+
+  // The runIdTagKey issue sits on the map, not on a lane, so its message is the only place that
+  // can say which lane collides; without it a map of several lanes repeats one sentence per lane.
+  it('names the lane and its field when a lane tag key equals the map runIdTagKey', () => {
+    const result = laneMapSchema.safeParse(
+      baseMap({ runIdTagKey: 'stream', lanes: [baseLane(), baseLane({ configurationSet: 'fothering-bulk', lane: 'fothering-bulk' })] }),
+    );
+    if (result.success) throw new Error('expected parsing to fail');
+    const messages = result.error.issues.filter((issue) => issue.path[0] === 'runIdTagKey').map((issue) => issue.message);
+    expect(messages).toEqual([
+      'lanes[0].streamTagKey and runIdTagKey must be distinct',
+      'lanes[1].streamTagKey and runIdTagKey must be distinct',
+    ]);
   });
 
   it('rejects a tag key starting with ses:', () => {

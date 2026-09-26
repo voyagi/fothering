@@ -1,4 +1,4 @@
-import { RemovalPolicy, Stack, type StackProps } from 'aws-cdk-lib';
+import { Duration, RemovalPolicy, Stack, type StackProps } from 'aws-cdk-lib';
 import { AttributeType, BillingMode, Table } from 'aws-cdk-lib/aws-dynamodb';
 import { Architecture, Code, Function as LambdaFunction, Runtime } from 'aws-cdk-lib/aws-lambda';
 import { Rule } from 'aws-cdk-lib/aws-events';
@@ -42,9 +42,16 @@ export class IngestStack extends Stack {
       removalPolicy: RemovalPolicy.DESTROY,
     });
 
+    // Never CDK's defaults (3 s, 128 MB, with CPU scaled to memory): one Send can carry up to 50
+    // destinations, each its own conditional put, after a cold start that also reads the key
+    // secret. A timeout is never a clean failure here, because Lambda stops the handler before its
+    // own dead-letter path runs and the event is gone after its retries. These values are headroom,
+    // not a measurement; the live runs measure the real duration.
     const ingestFunction = new LambdaFunction(this, 'IngestFunction', {
       runtime: Runtime.NODEJS_22_X,
       architecture: Architecture.ARM_64,
+      timeout: Duration.seconds(30),
+      memorySize: 512,
       code: Code.fromAsset(props.ingestAssetDir),
       handler: 'index.handler',
       environment: {

@@ -15,6 +15,7 @@ Invoke the deployed function directly, using the stack's own output for its name
 
 ```sh
 aws lambda invoke \
+  --region eu-central-1 \
   --function-name <ForgetFunctionName stack output> \
   --cli-binary-format raw-in-base64-out \
   --payload '{"address":"jane@example.org"}' \
@@ -47,8 +48,9 @@ nothing exists. A record written for an event still in flight when the command r
 second run to reach it.
 
 A run that fails partway, for example on an AWS error during a delete, returns that error and
-writes one `forget-failed` log line naming the error type. What it already removed stays removed,
-and running it again removes the rest.
+writes one `forget-failed` log line naming the error type. A run stopped by the function's time
+limit writes no such line: the invoke result reports the timeout instead. Either way, what it
+already removed stays removed, and running it again removes the rest.
 
 ## What this does not cover
 
@@ -56,7 +58,9 @@ and running it again removes the rest.
   approve a reply before it sends, and deleting a stored reply will be that later work's own job.
 - AgentCore Memory, only if the agent ever comes to store something there. Nothing here reads or
   writes it.
-- Minimized messages waiting in the dead-letter queue for redelivery. Those hold no recipient
-  address and expire on their own after four days.
+- Minimized messages waiting in the dead-letter queue. Those hold the same keyed hash, never the
+  address, and the queue drops them on its own after four days. A message redriven from the queue
+  writes its records back, so after a redrive, run this command again for any address it was run
+  for in the four days before.
 - Complaint counting records. A complaint writes one record with no recipient field to count the
   complaint itself, kept separate from the per-recipient items this command does remove.

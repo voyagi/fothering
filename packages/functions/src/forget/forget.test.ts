@@ -75,7 +75,7 @@ describe('forgetFromPayload (AC-15)', () => {
     expect(report.remaining).toBe(0);
   });
 
-  it.each([{}, { address: '' }, { address: 123 }, null, 'not an object'])(
+  it.each([{}, { address: '' }, { address: '   ' }, { address: 123 }, null, 'not an object'])(
     'rejects the payload %j with ForgetUsageError carrying the same usage line the documentation shows (AC-E28)',
     async (badPayload) => {
       const deps = buildForgetRoot({ runtimeContext: 'test', switchValue: undefined });

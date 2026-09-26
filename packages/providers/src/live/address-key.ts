@@ -34,6 +34,9 @@ const addressKeySecretSchema = z
     const rawFields = value as unknown as Record<string, unknown>;
     let newestId: string | undefined;
     let newestActiveFromMs = Number.NEGATIVE_INFINITY;
+    // Two versions active from the same moment leave the one a send is hashed under to the JSON
+    // key order (integer-like ids even reorder), so a tie is a malformed secret, not a choice.
+    const seenActiveFromMs = new Set<number>();
     for (const id of versionIds) {
       if (id === '' || RESERVED_FIELD_NAMES.has(id)) {
         ctx.addIssue('activeFrom names an empty or reserved version id');
@@ -44,7 +47,12 @@ const addressKeySecretSchema = z
         continue;
       }
       const activeFromMs = value.activeFrom[id];
-      if (activeFromMs !== undefined && activeFromMs > newestActiveFromMs) {
+      if (activeFromMs === undefined) continue;
+      if (seenActiveFromMs.has(activeFromMs)) {
+        ctx.addIssue(`activeFrom gives version ${id} the same moment as another version`);
+      }
+      seenActiveFromMs.add(activeFromMs);
+      if (activeFromMs > newestActiveFromMs) {
         newestActiveFromMs = activeFromMs;
         newestId = id;
       }

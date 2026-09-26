@@ -58,9 +58,13 @@ describe('IngestStack synth', () => {
     expect(targets).toHaveLength(1);
     expect(targets[0]?.DeadLetterConfig).toBeUndefined();
 
+    // Explicit, never CDK's 3 s and 128 MB defaults: a timeout stops the handler before its own
+    // dead-letter path runs, so a Send with many destinations must not run out of time.
     template.hasResourceProperties('AWS::Lambda::Function', {
       Runtime: 'nodejs22.x',
       Architectures: ['arm64'],
+      Timeout: 30,
+      MemorySize: 512,
     });
 
     template.hasResourceProperties('AWS::DynamoDB::Table', {
