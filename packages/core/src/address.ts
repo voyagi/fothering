@@ -17,6 +17,16 @@ export interface PseudonymizedRecipient {
   keyVersion: string;
 }
 
+// A key set with no version active at a send time is a key configuration gap (a pruned or
+// future-dated first version), not a fault in the event, so it carries its own name: ingest
+// rethrows it for the retry instead of dropping the event as unminimizable.
+export class NoActiveKeyVersionError extends Error {
+  constructor(sendTimeMs: number) {
+    super(`no address key version is active at or before ${sendTimeMs}`);
+    this.name = 'NoActiveKeyVersionError';
+  }
+}
+
 // D-34: the key version is chosen by send time, not processing time, so a retry after a
 // rotation recomputes the same HMAC and the same record key.
 export function selectKeyVersion(keySet: AddressKeySet, sendTimeMs: number): AddressKeyVersion {
@@ -26,7 +36,7 @@ export function selectKeyVersion(keySet: AddressKeySet, sendTimeMs: number): Add
     if (selected === undefined || version.activeFromMs > selected.activeFromMs) selected = version;
   }
   if (selected === undefined) {
-    throw new Error(`no address key version is active at or before ${sendTimeMs}`);
+    throw new NoActiveKeyVersionError(sendTimeMs);
   }
   return selected;
 }

@@ -3,7 +3,7 @@ import { bucketStartMs, countLaneBuckets, countRecords } from '@fothering/core/b
 import { parseSesEvent } from '@fothering/core/ses-events';
 import { createLogger, type LogEntry, type LogSink } from '@fothering/core/log';
 import { parseLaneMap } from '@fothering/core/lanes';
-import type { AddressKeySet } from '@fothering/core/address';
+import { NoActiveKeyVersionError, type AddressKeySet } from '@fothering/core/address';
 import { DOC_EXAMPLE_LANE_MAP, loadSesEventFixture } from '@fothering/providers/fixtures/ses-events/index';
 import {
   createFixtureAddressKey,
@@ -150,7 +150,10 @@ describe('the doc-derived Bounce through the ingest composition root', () => {
     }
   });
 
-  it('drops an event whose address key set has no version active yet, logging dropped-unminimizable with its message id and the error name only', async () => {
+  // A key set with no version active at the send time is a key configuration gap (a pruned or
+  // future-dated first version), not a bad event, so it takes the unreadable key set's path: logged
+  // and rethrown for the asynchronous retry, never dropped and never written.
+  it('rethrows when the address key set has no version active at the send time, logging key-version-missing and writing nothing', async () => {
     const base = buildIngestRoot({ runtimeContext: 'test', switchValue: undefined, laneMap: DOC_EXAMPLE_LANE_MAP });
     const futureKeySet: AddressKeySet = { versions: [{ id: 'k1', secret: 'x', activeFromMs: Number.MAX_SAFE_INTEGER }] };
     const lines: string[] = [];
@@ -160,10 +163,14 @@ describe('the doc-derived Bounce through the ingest composition root', () => {
       log: createLogger((line) => lines.push(line)),
     };
 
-    const result = await ingestEvent(loadSesEventFixture('bounce').event, deps, { provenance: 'doc-derived' });
-
-    expect(result).toEqual({ outcome: 'dropped', stored: 0, duplicates: 0 });
-    expect(JSON.parse(lines[0] ?? '{}')).toEqual({ event: 'dropped-unminimizable', level: 'error', messageId: BOUNCE_MESSAGE_ID, errorName: 'Error' });
+    await expect(ingestEvent(loadSesEventFixture('bounce').event, deps, { provenance: 'doc-derived' })).rejects.toThrow(
+      NoActiveKeyVersionError,
+    );
+    expect(lines.map((line) => JSON.parse(line) as unknown)).toEqual([
+      { event: 'key-version-missing', level: 'error', messageId: BOUNCE_MESSAGE_ID, errorName: 'NoActiveKeyVersionError' },
+    ]);
+    const bucket = bucketStartMs(fixtureMailTimestampMs());
+    await expect(deps.ports.eventStore.queryLane(fixtureConfigurationSet(), bucket, bucket, bucket)).resolves.toEqual([]);
   });
 
   it('sends every minimized record to the dead-letter port, logs the write error by name, and resolves dead-lettered when a put fails', async () => {

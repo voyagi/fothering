@@ -1,4 +1,5 @@
 import { parseSesEvent } from '@fothering/core/ses-events';
+import { NoActiveKeyVersionError } from '@fothering/core/address';
 import { findLane } from '@fothering/core/lanes';
 import { minimizeEvent } from '@fothering/core/minimize';
 import type { Provenance } from '@fothering/core/records';
@@ -21,8 +22,9 @@ function errorName(error: unknown): string {
 // Ordering per D-16: parse, drop without a configuration-set tag, drop an unmapped set, drop a
 // Send with no destination, minimize, conditional puts. A write failure sends the already-
 // minimized records to the dead-letter port and reports dead-lettered; a failed dead-letter send,
-// like an unreadable address key set, is left to propagate so Lambda's asynchronous retry reruns
-// the whole event, and the conditional puts absorb whatever the first attempt already wrote.
+// like an unreadable address key set or a key set with no version active at the send time, is left
+// to propagate so Lambda's asynchronous retry reruns the whole event, and the conditional puts
+// absorb whatever the first attempt already wrote.
 // Every one of those failures writes one log line first, naming the message and the error by its
 // name only, so an operator can tell which message failed and why without any error text.
 // A parse failure is an error too, not a routine drop: the rule forwards only the six SES event
@@ -78,6 +80,12 @@ export async function ingestEvent(rawEvent: unknown, deps: IngestDeps, options: 
       arrivalTimeMs: deps.now(),
     });
   } catch (error) {
+    // Only a fault in the event itself is dropped: a missing key version is fixed in the key set,
+    // after which the retry stores the event, so it propagates like an unreadable key set.
+    if (error instanceof NoActiveKeyVersionError) {
+      deps.log.error({ event: 'key-version-missing', messageId, errorName: errorName(error) });
+      throw error;
+    }
     deps.log.error({ event: 'dropped-unminimizable', messageId, errorName: errorName(error) });
     return { outcome: 'dropped', stored: 0, duplicates: 0 };
   }
