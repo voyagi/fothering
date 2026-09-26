@@ -22,8 +22,7 @@ export interface BuildAgentRootOptions {
 // LiveConfigMissingError only if a call reaches it, never at resolution.
 export function buildAgentRoot(options: BuildAgentRootOptions): AgentDeps {
   const { ports, kinds } = resolvePortTable({
-    // RED-phase stub (01-03): runtimeContext not implemented yet.
-    runtimeContext: 'test',
+    runtimeContext: options.runtimeContext,
     switchValue: options.switchValue,
     ...(options.liveClients !== undefined ? { liveClients: options.liveClients } : {}),
     ...(options.dryRunSink !== undefined ? { dryRunSink: options.dryRunSink } : {}),
