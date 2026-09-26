@@ -353,13 +353,13 @@ function minimizeComplaint(detail: Extract<SesEvent, { eventType: 'Complaint' }>
 
 function minimizeDeliveryDelay(detail: Extract<SesEvent, { eventType: 'DeliveryDelay' }>, context: MinimizeContext): EventRecord[] {
   const mailTimestampMs = Date.parse(detail.mail.timestamp);
+  const delayTimestampMs = Date.parse(detail.deliveryDelay.timestamp);
   const bucket = bucketStartMs(mailTimestampMs);
   const baseFields = commonFields(detail.mail.tags, context.lane);
   const runId = runIdFor(detail.mail.tags, context.laneMap);
 
   const records: EventRecord[] = [];
   for (const recipient of detail.deliveryDelay.delayedRecipients) {
-    const delayTimestampMs = Date.parse(detail.deliveryDelay.timestamp);
     const pseudonym = pseudonymizeRecipient(recipient.emailAddress, context.keySet, mailTimestampMs);
     const identity = identityFor({
       kind: 'DeliveryDelay',

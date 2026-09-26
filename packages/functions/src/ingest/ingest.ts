@@ -25,10 +25,13 @@ function errorName(error: unknown): string {
 // the whole event, and the conditional puts absorb whatever the first attempt already wrote.
 // Every one of those failures writes one log line first, naming the message and the error by its
 // name only, so an operator can tell which message failed and why without any error text.
+// A parse failure is an error too, not a routine drop: the rule forwards only the six SES event
+// types from mapped sets, so an event that fails the schema is a lost SES event, and an SES format
+// change that fails every event must reach a reader filtering on level.
 export async function ingestEvent(rawEvent: unknown, deps: IngestDeps, options: IngestOptions): Promise<IngestResult> {
   const parsed = parseSesEvent(rawEvent);
   if (!parsed.ok) {
-    deps.log.info({
+    deps.log.error({
       event: 'dropped-unparseable',
       ...(parsed.messageId !== undefined ? { messageId: parsed.messageId } : {}),
       ...(parsed.field !== undefined ? { field: parsed.field } : {}),

@@ -339,7 +339,10 @@ describe('the doc-derived Bounce through the ingest composition root', () => {
     expect(serializedDeadLetter).not.toContain('is unknown');
   });
 
-  it('drops an unparseable event and logs it dropped-unparseable, keeping only a readable message id', async () => {
+  // The rule forwards only the six SES event types from mapped sets, so an event that fails to parse
+  // is a lost SES event, not a routine drop: it is logged at error, where a reader filtering on
+  // level sees an SES format change that fails every event.
+  it('drops an unparseable event and logs it dropped-unparseable at error, keeping only a readable message id', async () => {
     const deps = buildIngestRoot({ runtimeContext: 'test', switchValue: undefined, laneMap: DOC_EXAMPLE_LANE_MAP });
     const lines: string[] = [];
     const loggedDeps: IngestDeps = { ...deps, log: createLogger((line) => lines.push(line)) };
@@ -347,7 +350,7 @@ describe('the doc-derived Bounce through the ingest composition root', () => {
     const result = await ingestEvent({ detail: { mail: { messageId: 'm-1' } } }, loggedDeps, { provenance: 'doc-derived' });
 
     expect(result).toEqual({ outcome: 'dropped', stored: 0, duplicates: 0 });
-    expect(JSON.parse(lines[0] ?? '{}')).toEqual({ event: 'dropped-unparseable', level: 'info', messageId: 'm-1' });
+    expect(JSON.parse(lines[0] ?? '{}')).toEqual({ event: 'dropped-unparseable', level: 'error', messageId: 'm-1' });
   });
 });
 
