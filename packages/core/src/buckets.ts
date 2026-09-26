@@ -1,4 +1,4 @@
-import type { EventRecord, SesEventType } from './records.js';
+import { UNCLASSIFIED, type EventRecord, type SesEventType } from './records.js';
 
 // D-10: 5 minutes is a product choice, not a value sourced from an AWS document. A small
 // team's traffic still yields a non-zero count per bucket, and a spike shows within one bucket.
@@ -17,6 +17,9 @@ export function isCountedRecord(record: EventRecord): boolean {
   return record.kind === 'send' || record.kind === 'outcome' || record.kind === 'complaint';
 }
 
+/** An unsplit per-type tally, never a ratio numerator: a suppressed bounce still counts under
+ * Bounce here, and a suppressed complaint or a not-spam report under Complaint. The suppression and
+ * not-spam split lives only in countLaneBuckets, which is what a detector reads. */
 export function countRecords(records: readonly EventRecord[]): Partial<Record<SesEventType, number>> {
   const counts: Partial<Record<SesEventType, number>> = {};
   for (const record of records) {
@@ -112,9 +115,16 @@ function applyBounce(bucket: BucketCount, record: EventRecord): void {
   else bucket.undeterminedBounce += 1;
 }
 
+// Every complaintSubType AWS documents (the two suppression lists) marks a message SES accepted but
+// never sent, so a subtype the parser did not recognise counts with them, outside the complaint
+// numerator, rather than pushing a lane toward closing on mail that may never have gone out
+// (https://docs.aws.amazon.com/ses/latest/dg/event-publishing-retrieving-sns-contents.html).
+function isSuppressedComplaint(subtype: string | undefined): boolean {
+  return subtype !== undefined && (subtype === UNCLASSIFIED || SUPPRESSION_COMPLAINT_SUBTYPES.includes(subtype));
+}
+
 function applyComplaint(bucket: BucketCount, record: EventRecord): void {
-  const subtype = record.fields.complaintSubType;
-  if (subtype !== undefined && SUPPRESSION_COMPLAINT_SUBTYPES.includes(subtype)) {
+  if (isSuppressedComplaint(record.fields.complaintSubType)) {
     bucket.suppressedComplaint += 1;
   } else if (record.fields.complaintFeedbackType === NOT_SPAM_FEEDBACK_TYPE) {
     bucket.notSpamComplaint += 1;
@@ -160,8 +170,9 @@ function assertBucketBounds(fromBucketMs: number, toBucketMs: number): void {
   }
 }
 
-// SPEC requirement 6: countRecords and this function both filter through isCountedRecord, so the
-// counting rule stays written in one place whichever shape the caller reads the counts through.
+// SPEC requirement 6: countRecords and this function share the kind filter, isCountedRecord, so
+// which records count is written in one place. Only this function splits suppressed bounces and
+// complaints and not-spam reports out of the numerators; countRecords stays an unsplit tally.
 export function countLaneBuckets(records: readonly EventRecord[], options: CountLaneBucketsOptions): BucketCount[] {
   assertBucketBounds(options.fromBucketMs, options.toBucketMs);
   const byBucket = new Map<number, BucketCount>();
@@ -177,11 +188,14 @@ export function countLaneBuckets(records: readonly EventRecord[], options: Count
   return [...byBucket.values()].sort((a, b) => a.bucketStartMs - b.bucketStartMs);
 }
 
-// SES counts only hard (permanent) bounces toward the account bounce rate: "Your bounce rate
-// includes only hard bounces to domains you haven't verified. Hard bounces are permanent delivery
-// failures such as 'address does not exist.' Temporary and intermittent failures such as 'mailbox
-// full,' or bounces due to blocked IP addresses, don't count toward your bounce rate."
-// (https://docs.aws.amazon.com/ses/latest/dg/faqs-enforcement.html, Bounce FAQ Q3).
+// Fothering's own lane ratio: permanent bounces over sends for one lane, across every receiving
+// domain. It is not SES's account bounce rate and is never presented as that. The two share only
+// the rule that hard bounces alone count: "Your bounce rate includes only hard bounces to domains
+// you haven't verified. Hard bounces are permanent delivery failures such as 'address does not
+// exist.' Temporary and intermittent failures such as 'mailbox full,' or bounces due to blocked IP
+// addresses, don't count toward your bounce rate."
+// (https://docs.aws.amazon.com/ses/latest/dg/faqs-enforcement.html, Bounce FAQ Q3). A lane's
+// records carry no verified-domain mark, so this ratio cannot reproduce SES's figure.
 export function hardBounceRatio(counts: Pick<BucketCount, 'send' | 'permanentBounce'>): number | null {
   return counts.send === 0 ? null : counts.permanentBounce / counts.send;
 }

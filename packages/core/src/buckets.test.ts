@@ -6,10 +6,11 @@ import {
   SUPPRESSION_COMPLAINT_SUBTYPES,
   bucketStartMs,
   countLaneBuckets,
+  countRecords,
   hardBounceRatio,
   isBucketComplete,
 } from './buckets.js';
-import type { EventRecord } from './records.js';
+import { UNCLASSIFIED, type EventRecord } from './records.js';
 
 function baseRecord(overrides: Partial<EventRecord> & Pick<EventRecord, 'kind' | 'eventType' | 'bucketStartMs'>): EventRecord {
   return {
@@ -133,6 +134,18 @@ describe('countLaneBuckets (AC-E20)', () => {
     expect(bucket.suppressedComplaint).toBe(1);
   });
 
+  // Every complaintSubType AWS documents marks a message SES accepted but never sent (the account and
+  // tenant suppression lists), so a subtype the parser did not recognise counts with them, outside
+  // the complaint numerator, rather than pushing a lane toward closing.
+  it('counts a complaint whose subtype is unclassified as suppressed, never in the complaint numerator', () => {
+    const records: EventRecord[] = [
+      baseRecord({ kind: 'complaint', eventType: 'Complaint', bucketStartMs: 0, fields: { complaintSubType: UNCLASSIFIED } }),
+    ];
+    const [bucket] = countLaneBuckets(records, { fromBucketMs: 0, toBucketMs: 0, nowMs: 10_000_000 });
+    expect(bucket?.complaint).toBe(0);
+    expect(bucket?.suppressedComplaint).toBe(1);
+  });
+
   it('ignores a record outside the requested bucket range', () => {
     const records: EventRecord[] = [baseRecord({ kind: 'send', eventType: 'Send', bucketStartMs: BUCKET_MS * 5 })];
     const buckets = countLaneBuckets(records, { fromBucketMs: 0, toBucketMs: 0, nowMs: 10_000_000 });
@@ -150,6 +163,26 @@ describe('countLaneBuckets (AC-E20)', () => {
   ])('throws a RangeError for %s instead of reading zero', (_label, bounds) => {
     const records: EventRecord[] = [baseRecord({ kind: 'send', eventType: 'Send', bucketStartMs: 0 })];
     expect(() => countLaneBuckets(records, { ...bounds, nowMs: 10_000_000 })).toThrow(RangeError);
+  });
+});
+
+// countRecords shares only the kind filter with countLaneBuckets: it is a flat per-type tally, so a
+// suppressed bounce or complaint and a not-spam report still count under their event type there.
+describe('countRecords', () => {
+  it('tallies every counted record by event type, with no suppression or not-spam split', () => {
+    const records: EventRecord[] = [
+      baseRecord({ kind: 'outcome', eventType: 'Bounce', bucketStartMs: 0, fields: { bounceType: 'Permanent', bounceSubType: 'General' } }),
+      baseRecord({
+        kind: 'outcome',
+        eventType: 'Bounce',
+        bucketStartMs: 0,
+        fields: { bounceType: 'Permanent', bounceSubType: 'OnAccountSuppressionList' },
+      }),
+      baseRecord({ kind: 'complaint', eventType: 'Complaint', bucketStartMs: 0, fields: { complaintSubType: 'OnAccountSuppressionList' } }),
+      baseRecord({ kind: 'complaint', eventType: 'Complaint', bucketStartMs: 0, fields: { complaintFeedbackType: 'not-spam' } }),
+      baseRecord({ kind: 'complaintRecipient', eventType: 'Complaint', bucketStartMs: 0 }),
+    ];
+    expect(countRecords(records)).toEqual({ Bounce: 2, Complaint: 2 });
   });
 });
 
