@@ -3,7 +3,7 @@
   "ignore": [".git/**"],
   "includeEntryExports": true,
   "ignoreExportsUsedInFile": true,
-  "ignoreIssues": { "*.config.{ts,mjs}": ["exports"] },
+  "ignoreIssues": { "*.config.{ts,mjs}": ["exports"], "packages/functions/src/*/handler.ts": ["exports"] },
   "workspaces": {
     ".": {
       "entry": ["verify-ship.mjs", "scripts/*.mjs", "vitest.config.ts", "eslint.config.mjs", "eslint.complexity.config.mjs", "design/mockups/shared/*.js"],
@@ -11,6 +11,10 @@
     },
     "packages/core": {
       "entry": ["src/mode.ts"]
+    },
+    "packages/providers": {},
+    "packages/functions": {
+      "entry": ["src/*/handler.ts"]
     }
   }
 }

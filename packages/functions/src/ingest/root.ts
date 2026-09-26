@@ -42,7 +42,14 @@ export interface BuildIngestRootOptions {
 // unset is left out of the returned object entirely: exactOptionalPropertyTypes forbids assigning
 // `undefined` to an optional field, so a conditional spread per key is the only legal shape here.
 export function readIngestLiveConfig(): LiveConfig {
-  return {};
+  const tableName = process.env.FOTHERING_TABLE_NAME;
+  const deadLetterQueueUrl = process.env.FOTHERING_DLQ_URL;
+  const addressKeySecretId = process.env.FOTHERING_ADDRESS_KEY_SECRET_ID;
+  return {
+    ...(tableName !== undefined ? { tableName } : {}),
+    ...(deadLetterQueueUrl !== undefined ? { deadLetterQueueUrl } : {}),
+    ...(addressKeySecretId !== undefined ? { addressKeySecretId } : {}),
+  };
 }
 
 // The one place per deployable that turns a runtime context and a switch value into a resolved
