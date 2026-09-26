@@ -2,7 +2,10 @@ import { z } from 'zod';
 import { SES_ID_PATTERN, UNCLASSIFIED } from './records.js';
 
 // D-12: zod objects strip unknown keys by default, so a new SES field or subtype this schema does
-// not name is dropped or mapped to unclassified rather than dropping the whole event.
+// not name is dropped or mapped to unclassified rather than dropping the whole event. The schemas
+// name only fields a record reads, so four documented fields are left out on purpose (mail.source,
+// delivery.processingTimeMillis, reject.reason, deliveryDelay.expirationTime): required, each would
+// drop a whole event whenever SES left it out, and mail.source would carry the sender address along.
 
 // An id outside SES_ID_PATTERN fails the parse rather than carrying free text into a record key.
 const sesId = z.string().regex(SES_ID_PATTERN);
@@ -63,7 +66,6 @@ const complaintSubTypeSchema = z
 const mailSchema = z.object({
   timestamp: isoTimestamp,
   messageId: sesId,
-  source: z.string(),
   destination: z.array(z.string()),
   tags: z.record(z.string(), z.array(z.string())),
 });
@@ -92,7 +94,6 @@ const deliveryDetailSchema = z.object({
   mail: mailSchema,
   delivery: z.object({
     timestamp: isoTimestamp,
-    processingTimeMillis: z.number(),
     recipients: z.array(z.string()).min(1),
     smtpResponse: z.string(),
     reportingMTA: z.string().optional(),
@@ -128,9 +129,7 @@ const complaintDetailSchema = z.object({
 const rejectDetailSchema = z.object({
   eventType: z.literal('Reject'),
   mail: mailSchema,
-  reject: z.object({
-    reason: z.string(),
-  }),
+  reject: z.object({}),
 });
 
 const deliveryDelayDetailSchema = z.object({
@@ -139,7 +138,6 @@ const deliveryDelayDetailSchema = z.object({
   deliveryDelay: z.object({
     delayType: unclassifiedEnum(DELAY_TYPES),
     delayedRecipients: z.array(delayedRecipientSchema).min(1),
-    expirationTime: z.string(),
     reportingMTA: z.string().optional(),
     timestamp: isoTimestamp,
   }),

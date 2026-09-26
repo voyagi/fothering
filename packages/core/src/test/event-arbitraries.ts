@@ -116,7 +116,6 @@ function mailBase(mc: MessageCase, configurationSet: string) {
   return {
     timestamp: new Date(mc.sendTimestampMs).toISOString(),
     messageId: `msg-${mc.messageSeed}`,
-    source: 'sender@example.com',
     destination,
     tags: { 'ses:configuration-set': [configurationSet] },
   };
@@ -163,7 +162,6 @@ function deliveryEnvelope(mc: MessageCase, configurationSet: string, timestampMs
     mail,
     delivery: {
       timestamp: new Date(timestampMs).toISOString(),
-      processingTimeMillis: 100,
       recipients: mail.destination,
       smtpResponse: '250 2.6.0 OK',
       remoteMtaIp: '192.0.2.1',
@@ -216,7 +214,6 @@ function delayEnvelope(mc: MessageCase, configurationSet: string, timestampMs: n
     deliveryDelay: {
       delayType: 'TransientCommunicationFailure',
       delayedRecipients: mail.destination.map((emailAddress) => ({ emailAddress })),
-      expirationTime: new Date(timestampMs + 3_600_000).toISOString(),
       timestamp: new Date(timestampMs).toISOString(),
     },
   };

@@ -145,6 +145,15 @@ describe('parseSesEvent: unknown object keys are stripped', () => {
     expect(Object.hasOwn(mail, 'headersTruncated')).toBe(false);
   });
 
+  it('drops mail.source, the sender address no record needs', () => {
+    for (const name of SES_EVENT_FIXTURE_NAMES) {
+      const result = parseSesEvent(fixtureEvent(name));
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(Object.hasOwn(result.event.detail.mail, 'source')).toBe(false);
+    }
+  });
+
   it('drops complaint.userAgent and arrivalDate', () => {
     const result = parseSesEvent(fixtureEvent('complaint'));
     expect(result.ok).toBe(true);
@@ -152,6 +161,26 @@ describe('parseSesEvent: unknown object keys are stripped', () => {
     const parsed = narrow(result.event.detail, 'Complaint');
     expect(Object.hasOwn(parsed.complaint, 'userAgent')).toBe(false);
     expect(Object.hasOwn(parsed.complaint, 'arrivalDate')).toBe(false);
+  });
+});
+
+// D-12: a new or missing SES field never costs a whole event. The four fields below are read by no
+// record, so an SES payload that leaves one out still parses.
+describe('parseSesEvent: a field no record reads is never required', () => {
+  it.each(SES_EVENT_FIXTURE_NAMES)('parses the %s event with mail.source removed', (name) => {
+    const event = fixtureEvent(name);
+    delete (detailOf(event).mail as Record<string, unknown>).source;
+    expect(parseSesEvent(event).ok).toBe(true);
+  });
+
+  it.each([
+    ['delivery', 'delivery', 'processingTimeMillis'],
+    ['reject', 'reject', 'reason'],
+    ['delivery-delay', 'deliveryDelay', 'expirationTime'],
+  ] as const)('parses the %s event with %s.%s removed', (name, object, key) => {
+    const event = fixtureEvent(name);
+    delete (detailOf(event)[object] as Record<string, unknown>)[key];
+    expect(parseSesEvent(event).ok).toBe(true);
   });
 });
 
@@ -291,10 +320,10 @@ describe('parseSesEvent: field is absent when the input is not an object', () =>
 // input chose, carried into a log line.
 const SCHEMA_KEYS = new Set([
   'detail', 'mail', 'timestamp', 'messageId', 'source', 'destination', 'tags', 'eventType',
-  'send', 'delivery', 'processingTimeMillis', 'recipients', 'smtpResponse', 'reportingMTA', 'remoteMtaIp',
+  'send', 'delivery', 'recipients', 'smtpResponse', 'reportingMTA', 'remoteMtaIp',
   'bounce', 'bounceType', 'bounceSubType', 'bouncedRecipients', 'emailAddress', 'action', 'status',
   'diagnosticCode', 'feedbackId', 'complaint', 'complainedRecipients', 'complaintSubType',
-  'complaintFeedbackType', 'reject', 'reason', 'deliveryDelay', 'delayType', 'delayedRecipients', 'expirationTime',
+  'complaintFeedbackType', 'reject', 'deliveryDelay', 'delayType', 'delayedRecipients',
 ]);
 
 type PathKey = string | number;
