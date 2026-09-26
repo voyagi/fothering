@@ -8,8 +8,12 @@ const STREAM_VALUE_PATTERN = /^[A-Za-z0-9_-]{1,256}$/;
 // ses:source-ip, and so on); an operator-declared tag key can never collide with one.
 const SES_AUTOMATIC_TAG_PREFIX = 'ses:';
 
+// AWS's own configuration-set naming rule: "up to 64 alphanumeric characters, including
+// letters, numbers, hyphens (-) and underscores (_) only."
+const CONFIGURATION_SET_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
+
 const laneEntrySchema = z.object({
-  configurationSet: z.string(),
+  configurationSet: z.string().regex(CONFIGURATION_SET_PATTERN),
   lane: z.string(),
   criticality: z.enum(['transactional', 'bulk']),
   declaredStreams: z.array(z.string().regex(STREAM_VALUE_PATTERN)).min(1),
@@ -35,7 +39,19 @@ export const laneMapSchema = z
       });
     }
 
+    const seenConfigurationSets = new Map<string, number>();
     map.lanes.forEach((lane, laneIndex) => {
+      const normalizedConfigurationSet = lane.configurationSet.toLowerCase();
+      if (seenConfigurationSets.has(normalizedConfigurationSet)) {
+        ctx.addIssue({
+          code: 'custom',
+          message: `configurationSet "${lane.configurationSet}" collides with lane ${seenConfigurationSets.get(normalizedConfigurationSet)}`,
+          path: ['lanes', laneIndex, 'configurationSet'],
+        });
+      } else {
+        seenConfigurationSets.set(normalizedConfigurationSet, laneIndex);
+      }
+
       const seenStreams = new Set<string>();
       lane.declaredStreams.forEach((stream, streamIndex) => {
         if (seenStreams.has(stream)) {
@@ -92,9 +108,8 @@ export function parseLaneMap(json: unknown): LaneMap {
   return laneMapSchema.parse(json);
 }
 
-// Plan 01-14 adds the stricter validation rules (duplicate names, empty streams, and so on).
-// This plan matches by exact string equality only, per the exact-match rule EventBridge itself
-// uses on the configuration-set tag.
+// Exact string equality only, matching the rule EventBridge itself uses on the
+// configuration-set tag (AC-E14): a value differing by case or a suffix never matches.
 export function findLane(laneMap: LaneMap, configurationSet: string): LaneEntry | undefined {
   return laneMap.lanes.find((entry) => entry.configurationSet === configurationSet);
 }
