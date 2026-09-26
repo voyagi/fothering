@@ -1,6 +1,5 @@
-import { createLogger, type LogSink, type Logger } from '@fothering/core/log';
+import type { LogSink, Logger } from '@fothering/core/log';
 import { parseLaneMap, type LaneMap } from '@fothering/core/lanes';
-import { resolvePortTable } from '@fothering/providers/ports';
 import type {
   DryRunSink,
   FixtureOptions,
@@ -10,6 +9,7 @@ import type {
   RuntimeContext,
 } from '@fothering/providers/port-types';
 import type { ResolvedPorts } from '@fothering/providers/ports';
+import { buildRootLogger, resolveRootPorts } from '../shared/root.js';
 import lanesJson from '../../../../lanes.json' with { type: 'json' };
 
 // The committed demo lane map (D-24, D-38): esbuild bundles this file into the ingest function in
@@ -60,30 +60,13 @@ export function buildIngestRoot(options: BuildIngestRootOptions): IngestDeps {
     throw new Error('a lane map override is accepted only in runtimeContext test');
   }
 
-  // exactOptionalPropertyTypes forbids assigning `undefined` to an optional field, so an unset
-  // override is left out of the call entirely rather than passed through as `undefined`.
-  const { ports, kinds } = resolvePortTable({
-    runtimeContext: options.runtimeContext,
-    switchValue: options.switchValue,
-    ...(options.liveConfig !== undefined ? { liveConfig: options.liveConfig } : {}),
-    ...(options.liveClients !== undefined ? { liveClients: options.liveClients } : {}),
-    ...(options.fixtures !== undefined ? { fixtures: options.fixtures } : {}),
-    ...(options.dryRunSink !== undefined ? { dryRunSink: options.dryRunSink } : {}),
-    ...(options.now !== undefined ? { now: options.now } : {}),
-  });
-
-  const defaultSink: LogSink =
-    options.runtimeContext === 'deployed'
-      ? (line) => {
-          process.stdout.write(`${line}\n`);
-        }
-      : () => {};
+  const { ports, kinds } = resolveRootPorts(options);
 
   return {
     ports,
     kinds,
     laneMap: options.laneMap ?? COMMITTED_LANE_MAP,
-    log: createLogger(options.logSink ?? defaultSink),
+    log: buildRootLogger(options.runtimeContext, options.logSink),
     now: options.now ?? Date.now,
   };
 }
