@@ -1,12 +1,15 @@
 import { z } from 'zod';
 
-// The tag-value pattern also bounds a declared stream name; SES tag values allow the same
-// alphanumeric-plus-hyphen-underscore charset up to 256 characters.
-const STREAM_VALUE_PATTERN = /^[A-Za-z0-9_-]{1,256}$/;
+// The SES MessageTag rule, the same for a tag's name and its value: "ASCII letters (a-z, A-Z),
+// numbers (0-9), underscores (_), or dashes (-)", "no more than 256 characters". A declared tag key
+// or stream outside it can never match a tag SES publishes, so its field would silently never be
+// stored. The rule also keeps out the tags SES sets itself (ses:configuration-set, ses:source-ip
+// and so on): their colon is outside the charset, so an operator key can never collide with one.
+const SES_TAG_PATTERN = /^[A-Za-z0-9_-]{1,256}$/;
+const SES_TAG_NAME_MESSAGE =
+  'a tag key must be 1 to 256 ASCII letters, digits, underscores or dashes, the SES message tag rule (so never an automatic "ses:" tag)';
 
-// SES sets these on every configuration-set event itself (ses:configuration-set,
-// ses:source-ip, and so on); an operator-declared tag key can never collide with one.
-const SES_AUTOMATIC_TAG_PREFIX = 'ses:';
+const tagKeySchema = z.string().regex(SES_TAG_PATTERN, SES_TAG_NAME_MESSAGE);
 
 // AWS's own configuration-set naming rule: "up to 64 alphanumeric characters, including
 // letters, numbers, hyphens (-) and underscores (_) only."
@@ -16,29 +19,21 @@ const laneEntrySchema = z.object({
   configurationSet: z.string().regex(CONFIGURATION_SET_PATTERN),
   lane: z.string(),
   criticality: z.enum(['transactional', 'bulk']),
-  declaredStreams: z.array(z.string().regex(STREAM_VALUE_PATTERN)).min(1),
-  streamTagKey: z.string().min(1),
-  batchTagKey: z.string().min(1),
-  templateTagKey: z.string().min(1),
-  campaignTagKey: z.string().min(1),
+  declaredStreams: z.array(z.string().regex(SES_TAG_PATTERN)).min(1),
+  streamTagKey: tagKeySchema,
+  batchTagKey: tagKeySchema,
+  templateTagKey: tagKeySchema,
+  campaignTagKey: tagKeySchema,
   tenant: z.string().optional(),
   operatorAlert: z.boolean(),
 });
 
 export const laneMapSchema = z
   .object({
-    runIdTagKey: z.string(),
+    runIdTagKey: tagKeySchema,
     lanes: z.array(laneEntrySchema).min(1),
   })
   .superRefine((map, ctx) => {
-    if (map.runIdTagKey.startsWith(SES_AUTOMATIC_TAG_PREFIX)) {
-      ctx.addIssue({
-        code: 'custom',
-        message: `runIdTagKey may not start with the automatic "${SES_AUTOMATIC_TAG_PREFIX}" prefix`,
-        path: ['runIdTagKey'],
-      });
-    }
-
     const seenConfigurationSets = new Map<string, number>();
     map.lanes.forEach((lane, laneIndex) => {
       const normalizedConfigurationSet = lane.configurationSet.toLowerCase();
@@ -71,16 +66,6 @@ export const laneMapSchema = z
         ['campaignTagKey', lane.campaignTagKey],
         ['runIdTagKey', map.runIdTagKey],
       ];
-
-      for (const [field, value] of tagKeys) {
-        if (field !== 'runIdTagKey' && value.startsWith(SES_AUTOMATIC_TAG_PREFIX)) {
-          ctx.addIssue({
-            code: 'custom',
-            message: `${field} may not start with the automatic "${SES_AUTOMATIC_TAG_PREFIX}" prefix`,
-            path: ['lanes', laneIndex, field],
-          });
-        }
-      }
 
       for (let i = 0; i < tagKeys.length; i++) {
         for (let j = i + 1; j < tagKeys.length; j++) {

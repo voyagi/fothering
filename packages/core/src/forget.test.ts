@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { createFixtureEventStore } from '@fothering/providers/fixtures/ingest-ports';
 import type { EventStorePort } from '@fothering/providers/port-types';
 import { hmacUnderEveryVersion, pseudonymizeRecipient, type AddressKeySet } from './address.js';
-import { expiresAtFor, recordKey, type EventRecord, type SesEventType } from './records.js';
+import { expiresAtFor, recordKey, type EventRecord, type RecordKey, type SesEventType } from './records.js';
 import { forgetRecipient } from './forget.js';
 
 const T_ROTATION = 1_700_000_000_000;
@@ -196,6 +196,67 @@ describe('forgetRecipient (AC-15)', () => {
     expect(report.remaining).toBe(0);
     expect(hiddenQueries).toBeGreaterThanOrEqual(2);
     await expect(store.queryByRecipient(hiddenHmac)).resolves.toHaveLength(0);
+  });
+
+  // The same lag runs the other way too: right after a delete, the index can still name the record
+  // for a moment. A re-query that meets that stale key must not count the record a second time.
+  it('counts each record once when the index still lists a record the first pass already deleted (Pitfall 10, reverse lag)', async () => {
+    const store = createFixtureEventStore();
+    const target = 'jane@example.com';
+    await seedTarget(store, target);
+    const keyText = (key: RecordKey): string => `${key.pk}|${key.sk}`;
+    const hmacByKey = new Map<string, string>();
+    const staleByHmac = new Map<string, RecordKey[]>();
+    const deletedOnce = new Set<string>();
+    const laggingStore: EventStorePort = {
+      ...store,
+      queryByRecipient: async (hmac) => {
+        const live = await store.queryByRecipient(hmac);
+        for (const key of live) hmacByKey.set(keyText(key), hmac);
+        const stale = staleByHmac.get(hmac) ?? [];
+        staleByHmac.delete(hmac);
+        return [...live, ...stale];
+      },
+      deleteRecord: async (key) => {
+        const result = await store.deleteRecord(key);
+        const hmac = hmacByKey.get(keyText(key));
+        if (hmac !== undefined && !deletedOnce.has(keyText(key))) {
+          deletedOnce.add(keyText(key));
+          staleByHmac.set(hmac, [...(staleByHmac.get(hmac) ?? []), key]);
+        }
+        return result;
+      },
+    };
+    const { sleep } = fakeSleep();
+
+    const report = await forgetRecipient({ address: target, keySet: KEY_SET, store: laggingStore, sleep });
+
+    expect(report.deleted).toBe(18);
+    expect(report.remaining).toBe(0);
+    expect(report.perKeyVersion.reduce((sum, entry) => sum + entry.deleted, 0)).toBe(18);
+  });
+
+  // A re-query issued the instant the first pass ends gives the index no time to catch up, so the
+  // wait comes before every re-query, the first one included.
+  it('waits before its first re-query, after the first pass has queried every retained hash', async () => {
+    const store = createFixtureEventStore();
+    await seedTarget(store, 'jane@example.com');
+    let queries = 0;
+    const countingStore: EventStorePort = {
+      ...store,
+      queryByRecipient: async (hmac) => {
+        queries += 1;
+        return store.queryByRecipient(hmac);
+      },
+    };
+    const queriesAtEachSleep: number[] = [];
+    const sleep = async (): Promise<void> => {
+      queriesAtEachSleep.push(queries);
+    };
+
+    await forgetRecipient({ address: 'jane@example.com', keySet: KEY_SET, store: countingStore, sleep });
+
+    expect(queriesAtEachSleep[0]).toBe(KEY_SET.versions.length);
   });
 });
 

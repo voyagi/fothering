@@ -5,6 +5,9 @@ import { LiveConfigMissingError, type AddressKeyPort } from '../port-types.js';
 
 const CACHE_TTL_MS = 5 * 60 * 1000;
 const MIN_SECRET_LENGTH = 32;
+// A version id doubles as a field name in the same object, so an id equal to one of these would
+// read that field as its key material ("current" would make the short version name the secret).
+const RESERVED_FIELD_NAMES = new Set(['current', 'activeFrom']);
 
 export class AddressKeySecretError extends Error {
   constructor(message: string) {
@@ -32,6 +35,10 @@ const addressKeySecretSchema = z
     let newestId: string | undefined;
     let newestActiveFromMs = Number.NEGATIVE_INFINITY;
     for (const id of versionIds) {
+      if (id === '' || RESERVED_FIELD_NAMES.has(id)) {
+        ctx.addIssue('activeFrom names an empty or reserved version id');
+        continue;
+      }
       if (typeof rawFields[id] !== 'string') {
         ctx.addIssue(`activeFrom names version ${id} with no matching secret field`);
         continue;

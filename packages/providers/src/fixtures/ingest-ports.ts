@@ -87,7 +87,7 @@ export function createFixtureEventStore(options: FixtureOptions = {}): EventStor
       return result;
     },
     async deleteRecord(key) {
-      records.delete(keyOf(key));
+      return records.delete(keyOf(key));
     },
     async getRecord(key) {
       const record = records.get(keyOf(key));

@@ -13,7 +13,7 @@ by hashing the target address the same way and removing every record whose hash 
 
 Invoke the deployed function directly, using the stack's own output for its name:
 
-```
+```sh
 aws lambda invoke \
   --function-name <ForgetFunctionName stack output> \
   --cli-binary-format raw-in-base64-out \
@@ -26,7 +26,7 @@ remaining count. It never holds the address or a hash.
 
 A payload with no non-empty `address` field fails with:
 
-```
+```text
 usage: pass a JSON payload holding one non-empty "address" field
 ```
 
@@ -34,13 +34,21 @@ usage: pass a JSON payload holding one non-empty "address" field
 
 The recipient index this command reads is updated in an eventually consistent fashion, so it can
 lag the table by a short moment right after a write or a delete. The command re-reads the index a
-bounded number of times after its first pass to catch a record that pass missed, and reports the
-count still showing at its last read.
+bounded number of times after its first pass, waiting briefly before each re-read, to catch a
+record that pass missed. A record the index still lists after it was deleted is not counted twice.
+
+The remaining count is how many records the last re-read still turned up. Those are removed too
+and already included in the deleted count, so it is not what is left in the table. A non-zero
+remaining count means the index was still showing new records when the re-reads ran out: run the
+command again a minute later to confirm.
 
 A remaining count of zero means the index showed nothing at that last read, not a guarantee that
 nothing exists. A record written for an event still in flight when the command runs needs a
-second run to reach it, and if the index happened to be lagging, running the command again a
-minute later confirms the count.
+second run to reach it.
+
+A run that fails partway, for example on an AWS error during a delete, returns that error and
+writes one `forget-failed` log line naming the error type. What it already removed stays removed,
+and running it again removes the rest.
 
 ## What this does not cover
 

@@ -96,8 +96,10 @@ export function pseudonymizeRecipient(
   return { receivingDomain, recipientHmac, keyVersion: version.id };
 }
 
-// The version with the greatest activeFromMs: the one a fresh event uses right now, as opposed to
-// selectKeyVersion's send-time lookup for a specific past or present event.
+// The version with the greatest activeFromMs: the newest one the key set holds, whether or not it
+// is active yet. During a rotation's margin (a new version is written at least 10 minutes before
+// its activeFrom) it is future-dated, so it is not what an event sent now is hashed under; that is
+// always selectKeyVersion's send-time lookup.
 export function currentKeyVersion(keySet: AddressKeySet): AddressKeyVersion {
   let current: AddressKeyVersion | undefined;
   for (const version of keySet.versions) {

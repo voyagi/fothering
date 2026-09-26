@@ -6,7 +6,12 @@ import { SQSClient } from '@aws-sdk/client-sqs';
 import { SESv2Client } from '@aws-sdk/client-sesv2';
 import { bucketSortKeyPrefix, type EventRecord, type RecordKey } from '@fothering/core/records';
 import { selectKeyVersion } from '@fothering/core/address';
+import { findLane } from '@fothering/core/lanes';
+import { minimizeEvent } from '@fothering/core/minimize';
+import { parseSesEvent } from '@fothering/core/ses-events';
 import { resolvePortTable } from '../ports.js';
+import { TEST_ADDRESS_KEY_SET } from '../fixtures/ingest-ports.js';
+import { DOC_EXAMPLE_LANE_MAP, SES_EVENT_FIXTURE_NAMES, loadSesEventFixture } from '../fixtures/ses-events/index.js';
 import { lazyClient } from './lazy-client.js';
 import { createDynamoEventStore } from './event-store.js';
 import { AddressKeySecretError, createSecretsManagerAddressKey } from './address-key.js';
@@ -165,14 +170,33 @@ describe('createDynamoEventStore', () => {
     });
   });
 
-  it('deletes a record with DeleteCommand', async () => {
+  it('deletes a record with a conditional DeleteCommand and resolves true', async () => {
     const client = dynamoClient();
     const calls = stubSend(client, () => ({}));
     const store = createDynamoEventStore({ tableName: 'events', client: () => client, now: () => 0 });
 
-    await store.deleteRecord({ pk: 'LANE#x', sk: 'B#0000000000001#Send#m1' });
+    await expect(store.deleteRecord({ pk: 'LANE#x', sk: 'B#0000000000001#Send#m1' })).resolves.toBe(true);
     expect(calls[0]?.name).toBe('DeleteCommand');
-    expect(calls[0]?.input).toMatchObject({ TableName: 'events', Key: { pk: 'LANE#x', sk: 'B#0000000000001#Send#m1' } });
+    expect(calls[0]?.input).toMatchObject({
+      TableName: 'events',
+      Key: { pk: 'LANE#x', sk: 'B#0000000000001#Send#m1' },
+      ConditionExpression: 'attribute_exists(pk)',
+    });
+  });
+
+  it('resolves false when the key names no stored record, and propagates any other rejection', async () => {
+    const client = dynamoClient();
+    let deletes = 0;
+    stubSend(client, () => {
+      deletes += 1;
+      const error = new Error(deletes === 1 ? 'conditional failed' : 'network blip');
+      if (deletes === 1) error.name = 'ConditionalCheckFailedException';
+      throw error;
+    });
+    const store = createDynamoEventStore({ tableName: 'events', client: () => client, now: () => 0 });
+
+    await expect(store.deleteRecord({ pk: 'LANE#x', sk: 'gone' })).resolves.toBe(false);
+    await expect(store.deleteRecord({ pk: 'LANE#x', sk: 'gone' })).rejects.toThrow('network blip');
   });
 
   it('reads a record with ConsistentRead true', async () => {
@@ -206,6 +230,56 @@ describe('createDynamoEventStore', () => {
       envVar: 'FOTHERING_TABLE_NAME',
     });
     expect(constructed).toBe(0);
+  });
+});
+
+// The store tests above replace send, so the document client's own marshalling never runs there.
+// This keeps the real send and cuts the request off at the build step: the item has been
+// marshalled by then, and nothing has been signed or sent.
+function captureMarshalledItems(client: DynamoDBDocumentClient): Record<string, unknown>[] {
+  const items: Record<string, unknown>[] = [];
+  const capture = () => async (args: { input: { Item?: Record<string, unknown> } }) => {
+    if (args.input.Item !== undefined) items.push(args.input.Item);
+    return { output: {}, response: {} };
+  };
+  const stack = client.middlewareStack as unknown as { add: (middleware: unknown, options: { step: string; name: string }) => void };
+  stack.add(capture, { step: 'build', name: 'captureMarshalledItem' });
+  return items;
+}
+
+describe('the real document client marshals every record minimize writes', () => {
+  it.each(SES_EVENT_FIXTURE_NAMES)('writes every record the %s fixture minimizes into', async (name) => {
+    const parsed = parseSesEvent(loadSesEventFixture(name).event);
+    if (!parsed.ok) throw new Error(`the ${name} fixture failed to parse`);
+    const lane = findLane(DOC_EXAMPLE_LANE_MAP, parsed.event.detail.mail.tags['ses:configuration-set']?.[0] ?? '');
+    if (lane === undefined) throw new Error(`the ${name} fixture names no lane in DOC_EXAMPLE_LANE_MAP`);
+    const timeMs = Date.parse(parsed.event.time);
+    const records = minimizeEvent(parsed.event, {
+      lane,
+      laneMap: DOC_EXAMPLE_LANE_MAP,
+      keySet: TEST_ADDRESS_KEY_SET,
+      provenance: 'doc-derived',
+      envelopeTimeMs: timeMs,
+      arrivalTimeMs: timeMs,
+    });
+    expect(records.length).toBeGreaterThan(0);
+
+    const client = dynamoClient();
+    const items = captureMarshalledItems(client);
+    const store = createDynamoEventStore({ tableName: 'events', client: () => client, now: () => 0 });
+    for (const record of records) await expect(store.putIfAbsent(record)).resolves.toBe('written');
+
+    expect(items).toHaveLength(records.length);
+    expect(items[0]).toMatchObject({ pk: { S: records[0]?.pk }, expiresAt: { N: String(records[0]?.expiresAt) } });
+  });
+
+  it('refuses a record holding an undefined field, so the capture above is the real marshaller', async () => {
+    const client = dynamoClient();
+    captureMarshalledItems(client);
+    const store = createDynamoEventStore({ tableName: 'events', client: () => client, now: () => 0 });
+    const record = { pk: 'LANE#x', sk: 'B#0000000000000#Send#m1', fields: { bounceType: undefined } } as unknown as EventRecord;
+
+    await expect(store.putIfAbsent(record)).rejects.toThrow('removeUndefinedValues');
   });
 });
 
@@ -327,6 +401,21 @@ describe('createSecretsManagerAddressKey', () => {
       expect(message).not.toContain(K1_SECRET);
       expect(message).not.toContain(K2_SECRET);
     }
+  });
+
+  // A version id is also a field name in the same JSON object, so an id that collides with one of
+  // the two reserved fields would read that field as its key material: named "current", the secret
+  // becomes the short word the current field holds, walking past the 32-character minimum.
+  it.each([
+    ['a version named current', { current: 'current', activeFrom: { current: 0 } }],
+    ['a version named activeFrom', { current: 'activeFrom', activeFrom: { activeFrom: 0 } }],
+    ['an empty version id', { current: 'k2', activeFrom: { '': 0, k2: 500 }, '': K1_SECRET, k2: K2_SECRET }],
+  ])('refuses %s', async (_label, secret) => {
+    const client = secretsManagerClient();
+    stubSend(client, () => ({ SecretString: JSON.stringify(secret) }));
+    const adapter = createSecretsManagerAddressKey({ secretId: 'address-key', client: () => client, now: () => 0 });
+
+    await expect(adapter.getKeySet()).rejects.toBeInstanceOf(AddressKeySecretError);
   });
 
   it('refuses a secret that fails its schema, without echoing any secret value', async () => {

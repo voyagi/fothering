@@ -8,19 +8,28 @@ const requeryDelay = (ms: number): Promise<void> => new Promise((resolve) => set
 // The report and the one log line it writes carry counts only (T-01-32): never the address, and
 // never one of its hashes. A caller who wants to know if the deletion reached a given address
 // re-derives the hash themselves and re-invokes the function; this function never echoes it back.
+// A run that fails partway (the key set unreadable, a query or delete refused) writes one line
+// naming the error by its name only, as ingest does, so the log shows a deletion request that
+// did not finish; what it already removed stays removed, and a second run removes the rest.
 export async function forgetFromPayload(payload: unknown, deps: ForgetDeps): Promise<ForgetReport> {
   const parsed = forgetPayloadSchema.safeParse(payload);
   if (!parsed.success) {
     throw new ForgetUsageError();
   }
 
-  const keySet = await deps.ports.addressKey.getKeySet();
-  const report = await forgetRecipient({
-    address: parsed.data.address,
-    keySet,
-    store: deps.ports.eventStore,
-    sleep: requeryDelay,
-  });
+  let report: ForgetReport;
+  try {
+    const keySet = await deps.ports.addressKey.getKeySet();
+    report = await forgetRecipient({
+      address: parsed.data.address,
+      keySet,
+      store: deps.ports.eventStore,
+      sleep: requeryDelay,
+    });
+  } catch (error) {
+    deps.log.error({ event: 'forget-failed', errorName: error instanceof Error ? error.name : 'Error' });
+    throw error;
+  }
 
   deps.log.info({ event: 'forget-completed', count: report.deleted });
   return report;

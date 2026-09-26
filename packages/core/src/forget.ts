@@ -4,7 +4,8 @@ import type { RecordKey } from './records.js';
 
 export interface ForgetStore {
   queryByRecipient(recipientHmac: string): Promise<RecordKey[]>;
-  deleteRecord(key: RecordKey): Promise<void>;
+  /** True when a record was removed, false when the key named no stored record. */
+  deleteRecord(key: RecordKey): Promise<boolean>;
 }
 
 export interface ForgetRecipientOptions {
@@ -22,8 +23,15 @@ export interface ForgetKeyVersionReport {
 }
 
 export interface ForgetReport {
+  /** Records removed under each retained key version, newest version first. */
   perKeyVersion: ForgetKeyVersionReport[];
+  /** Every record removed, the last re-read's included. */
   deleted: number;
+  /**
+   * How many records the last re-read still turned up. Those are removed too and counted in
+   * `deleted`, so this is not what is left in the table: a non-zero value means the index was still
+   * showing new records when the re-reads ran out, and a second run confirms the count.
+   */
   remaining: number;
 }
 
@@ -42,22 +50,27 @@ const DEFAULT_MAX_REQUERIES = 3;
 const REQUERY_DELAY_MS = 200;
 
 // One pass over every retained hash: query the index, delete everything it names, and add the
-// count to the running per-key-version tally. Called once for the main deletion and again, up to
-// maxRequeries times, as the bounded re-query (Pitfall 10) - a later pass finding a record the
-// first one missed deletes it too, it does not just report on it.
+// records actually removed to the running per-key-version tally. Called once for the main deletion
+// and again, up to maxRequeries times, as the bounded re-query (Pitfall 10) - a later pass finding a
+// record the first one missed deletes it too, it does not just report on it. The index lags both
+// ways, so a key it still lists after an earlier pass removed its record deletes nothing and counts
+// nothing: counting keys instead of removals would report one record twice.
 async function deleteMatches(
   store: ForgetStore,
   hashes: { keyVersion: string; recipientHmac: string }[],
   perKeyVersion: Map<string, number>,
 ): Promise<number> {
-  let found = 0;
+  let removed = 0;
   for (const { keyVersion, recipientHmac } of hashes) {
     const keys = await store.queryByRecipient(recipientHmac);
-    for (const key of keys) await store.deleteRecord(key);
-    perKeyVersion.set(keyVersion, (perKeyVersion.get(keyVersion) ?? 0) + keys.length);
-    found += keys.length;
+    let removedForHash = 0;
+    for (const key of keys) {
+      if (await store.deleteRecord(key)) removedForHash += 1;
+    }
+    perKeyVersion.set(keyVersion, (perKeyVersion.get(keyVersion) ?? 0) + removedForHash);
+    removed += removedForHash;
   }
-  return found;
+  return removed;
 }
 
 // Deletion is exact-match only, by HMAC through the recipient index: a same-domain, near-miss or
@@ -71,13 +84,15 @@ export async function forgetRecipient(options: ForgetRecipientOptions): Promise<
 
   let deleted = await deleteMatches(options.store, hashes, perKeyVersion);
 
+  // Every re-query waits first, the first one included: one issued the instant the pass before it
+  // ends gives the index no time to show a record it was still catching up on.
   let remaining = 0;
   for (let attempt = 1; attempt <= maxRequeries; attempt++) {
+    await options.sleep(REQUERY_DELAY_MS);
     const found = await deleteMatches(options.store, hashes, perKeyVersion);
     remaining = found;
     if (found === 0) break;
     deleted += found;
-    if (attempt < maxRequeries) await options.sleep(REQUERY_DELAY_MS);
   }
 
   return {

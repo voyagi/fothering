@@ -85,6 +85,40 @@ describe('laneMapSchema (AC-E32)', () => {
   });
 });
 
+// The SES MessageTag rule for a tag name: ASCII letters, digits, underscores or dashes only, at most
+// 256 characters. A declared key outside it can never match a tag SES publishes, so the field it
+// names would silently never be stored.
+describe('laneMapSchema tag key naming (the SES message tag name rule)', () => {
+  const LANE_TAG_KEYS = ['streamTagKey', 'batchTagKey', 'templateTagKey', 'campaignTagKey'];
+  const UNSENDABLE_NAMES: readonly (readonly [string, string])[] = [
+    ['a name holding a space', 'batch id'],
+    ['a name holding a dot', 'batch.id'],
+    ['a 257-character name', 'x'.repeat(257)],
+  ];
+
+  it.each(LANE_TAG_KEYS.flatMap((field) => UNSENDABLE_NAMES.map(([label, value]) => [field, label, value] as const)))(
+    'rejects a lane whose %s is %s',
+    (field, _label, value) => {
+      const paths = issuePaths(baseMap({ lanes: [baseLane({ [field]: value })] }));
+      expect(paths).toContainEqual(['lanes', 0, field]);
+    },
+  );
+
+  const RUN_ID_CASES: readonly (readonly [string, string])[] = [['an empty name', ''], ...UNSENDABLE_NAMES];
+
+  it.each(RUN_ID_CASES)('rejects a runIdTagKey that is %s', (_label, value) => {
+    const paths = issuePaths(baseMap({ runIdTagKey: value }));
+    expect(paths).toContainEqual(['runIdTagKey']);
+  });
+
+  it('accepts tag keys of exactly 256 characters', () => {
+    const result = laneMapSchema.safeParse(
+      baseMap({ runIdTagKey: 'r'.repeat(256), lanes: [baseLane({ streamTagKey: 's'.repeat(256) })] }),
+    );
+    expect(result.success).toBe(true);
+  });
+});
+
 describe('laneMapSchema configuration set naming and duplicates (AC-E33, AC-E34)', () => {
   it('accepts a configuration set matching the AWS naming rule', () => {
     const result = laneMapSchema.safeParse(baseMap({ lanes: [baseLane({ configurationSet: 'ConfigSet', lane: 'doc-examples' })] }));

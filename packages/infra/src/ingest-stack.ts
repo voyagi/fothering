@@ -8,8 +8,8 @@ import { PARTITION_KEY, SORT_KEY, TTL_ATTRIBUTE } from '@fothering/core/records'
 import type { LaneMap } from '@fothering/core/lanes';
 
 // The six detail-types EventBridge publishes for SES configuration-set event destinations
-// (SPEC requirement 5); Send is excluded here because the ingest handler drops a Send with no
-// destination itself, not because the rule filters it out (D-16's ordering runs at the handler).
+// (SPEC requirement 5). Email Sent stays in the list: the ingest handler itself drops a Send with
+// no destination (D-16's ordering runs at the handler), so the rule never filters Send out.
 const SES_DETAIL_TYPES = [
   'Email Sent',
   'Email Delivered',
@@ -26,9 +26,10 @@ export interface IngestStackProps extends StackProps {
 }
 
 // The skeleton this phase proves: one rule routing every mapped configuration set's events to one
-// function, writing into one table. Plan 01-09 completes the stack (queue, alarm, secret, log
-// groups, explicit roles, the forget function); no construct here needs a context lookup or a
-// literal account id, so `cdk synth` runs with no credentials (D-23, AC-E36).
+// function, writing into one table. Plan 01-09 completes the stack (the byRecipient index the
+// forget path queries, queue, alarm, secret, log groups, explicit roles, the forget function, and
+// the dead-letter and key-secret variables the ingest function reads); no construct here needs a
+// context lookup or a literal account id, so `cdk synth` runs with no credentials (D-23, AC-E36).
 export class IngestStack extends Stack {
   constructor(scope: Construct, id: string, props: IngestStackProps) {
     super(scope, id, props);

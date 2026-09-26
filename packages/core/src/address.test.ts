@@ -108,6 +108,12 @@ describe('key version selection by send time (D-34)', () => {
     expect(currentKeyVersion(keySet).id).toBe('k2');
   });
 
+  it('names a future-dated version as current while a send inside the rotation margin still selects the active one', () => {
+    const sendInsideMarginMs = ROTATION_MS - 5 * 60 * 1000;
+    expect(currentKeyVersion(keySet).id).toBe('k2');
+    expect(selectKeyVersion(keySet, sendInsideMarginMs).id).toBe('k1');
+  });
+
   it('hashes under every retained version, newest first, matching what pseudonymizeRecipient gives at the send time of each version', () => {
     const every = hmacUnderEveryVersion('jane@example.com', keySet);
     expect(every.map((entry) => entry.keyVersion)).toEqual(['k2', 'k1']);

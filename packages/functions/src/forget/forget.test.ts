@@ -85,6 +85,34 @@ describe('forgetFromPayload (AC-15)', () => {
     },
   );
 
+  it('logs one failure line naming the error only when a delete fails partway, then rethrows', async () => {
+    const targetAddress = 'jane@example.com';
+    const deps = buildForgetRoot({ runtimeContext: 'test', switchValue: undefined });
+    const { record, recipientHmac } = seededRecord(targetAddress);
+    await deps.ports.eventStore.putIfAbsent(record);
+    const lines: string[] = [];
+    const failingDeps: ForgetDeps = {
+      ...deps,
+      ports: {
+        ...deps.ports,
+        eventStore: {
+          ...deps.ports.eventStore,
+          deleteRecord: async () => {
+            throw new Error('throttled');
+          },
+        },
+      },
+      log: createLogger((line) => lines.push(line)),
+    };
+
+    await expect(forgetFromPayload({ address: targetAddress }, failingDeps)).rejects.toThrow('throttled');
+    expect(lines.map((line) => JSON.parse(line) as unknown)).toEqual([{ event: 'forget-failed', level: 'error', errorName: 'Error' }]);
+    for (const line of lines) {
+      expect(line.toLowerCase()).not.toContain(targetAddress.toLowerCase());
+      expect(line).not.toContain(recipientHmac);
+    }
+  });
+
   it('matches the usage line the documentation shows verbatim', () => {
     expect(docText).toContain(FORGET_USAGE);
   });

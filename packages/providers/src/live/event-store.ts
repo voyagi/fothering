@@ -95,11 +95,24 @@ export function createDynamoEventStore(options: CreateDynamoEventStoreOptions): 
       return keys;
     },
 
+    // The recipient index can still name a record for a moment after it is deleted, so the forget
+    // path must tell a removal from a no-op. The condition answers that without reading the item
+    // back: a key with no stored record fails the check instead of succeeding silently.
     async deleteRecord(key) {
       const tableName = requireTableName(options.tableName);
-      await options.client().send(
-        new DeleteCommand({ TableName: tableName, Key: { [PARTITION_KEY]: key.pk, [SORT_KEY]: key.sk } }),
-      );
+      try {
+        await options.client().send(
+          new DeleteCommand({
+            TableName: tableName,
+            Key: { [PARTITION_KEY]: key.pk, [SORT_KEY]: key.sk },
+            ConditionExpression: `attribute_exists(${PARTITION_KEY})`,
+          }),
+        );
+        return true;
+      } catch (error) {
+        if (error instanceof Error && error.name === CONDITIONAL_CHECK_FAILED) return false;
+        throw error;
+      }
     },
 
     async getRecord(key) {

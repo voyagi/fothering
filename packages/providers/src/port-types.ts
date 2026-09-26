@@ -10,7 +10,8 @@ export interface EventStorePort {
     nowMs: number,
   ): Promise<EventRecord[]>;
   queryByRecipient(recipientHmac: string): Promise<RecordKey[]>;
-  deleteRecord(key: RecordKey): Promise<void>;
+  /** Resolves true when a record was removed, false when none was stored under that key. */
+  deleteRecord(key: RecordKey): Promise<boolean>;
   getRecord(key: RecordKey): Promise<EventRecord | undefined>;
 }
 
@@ -83,7 +84,7 @@ export class LiveConfigMissingError extends Error {
   }
 }
 
-/** The default configuration set an identity sends through when none is set on the call itself. */
+/** One event destination of a configuration set, reduced to what the closeability check reads. */
 export interface EventDestinationFact {
   name: string;
   enabled: boolean;
@@ -93,6 +94,7 @@ export interface EventDestinationFact {
 
 /** The three SESv2 reads the closeability check needs; phase 1 wires no mutating SES operation. */
 export interface SesReadPort {
+  /** The default configuration set the identity sends through when none is set on the call itself. */
   getEmailIdentity(emailIdentity: string): Promise<string | undefined>;
   listEmailIdentities(): Promise<string[]>;
   getConfigurationSetEventDestinations(configurationSetName: string): Promise<EventDestinationFact[]>;

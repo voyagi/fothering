@@ -418,8 +418,10 @@ describe('the fixture ports behave like the conditional-write store and queue th
     const keys = await store.queryByRecipient(record.recipientHmac);
     expect(keys).toEqual([{ pk: record.pk, sk: record.sk }]);
 
-    await store.deleteRecord({ pk: record.pk, sk: record.sk });
+    await expect(store.deleteRecord({ pk: record.pk, sk: record.sk })).resolves.toBe(true);
     expect(await store.getRecord({ pk: record.pk, sk: record.sk })).toBeUndefined();
+    // A second delete of the same key removes nothing, as the live conditional delete reports it.
+    await expect(store.deleteRecord({ pk: record.pk, sk: record.sk })).resolves.toBe(false);
   });
 
   it('rejects a put configured to fail, and the dead letter records batches and rejects when configured to fail', async () => {

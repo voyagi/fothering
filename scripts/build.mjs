@@ -14,11 +14,21 @@
 // which is wrong: this script never WANTS any of them, it wants them GONE. Deleting by name from
 // a list, off a spread copy of the environment, reads none of them literally and asks nothing of
 // the example file.
+//
+// WHY A package.json BESIDE EACH HANDLER BUNDLE. esbuild writes CommonJS into index.js, and the
+// repo root's package.json says "type": "module", so any Node that finds that file (a local load,
+// a smoke test) reads the bundle as an ES module and it dies on `module is not defined`. Lambda
+// sees only the asset folder and so falls back to CommonJS for a .js file; a package.json naming
+// the type inside the folder makes every loader read the bundle the same way, and the load check
+// after it proves each bundle exports its handler before synth packages it.
 import { build } from 'esbuild';
 import { execFileSync } from 'node:child_process';
-import { existsSync, readdirSync, rmSync } from 'node:fs';
+import { existsSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+
+const require = createRequire(import.meta.url);
 
 const AWS_CREDENTIAL_VARS = [
   'AWS_ACCESS_KEY_ID',
@@ -43,7 +53,7 @@ function findHandlers(root) {
     .sort();
 }
 
-function sanitizedSynthEnv(root) {
+function sanitizedSynthEnv() {
   const env = { ...process.env };
   for (const name of AWS_CREDENTIAL_VARS) delete env[name];
   const missingCredentialsDir = join(tmpdir(), 'fothering-no-aws-credentials');
@@ -51,8 +61,14 @@ function sanitizedSynthEnv(root) {
   env.AWS_SHARED_CREDENTIALS_FILE = join(missingCredentialsDir, 'credentials');
   env.AWS_EC2_METADATA_DISABLED = 'true';
   env.CDK_DISABLE_CLI_TELEMETRY = 'true';
-  void root;
   return env;
+}
+
+// Loads a bundle the way the Lambda runtime does (require, then read the named export), so a
+// bundle that fails to load or lost its handler stops the build instead of reaching a deploy.
+function exportsHandler(root, outfile) {
+  const loaded = require(join(root, outfile));
+  return typeof loaded.handler === 'function';
 }
 
 async function run(root) {
@@ -74,6 +90,16 @@ async function run(root) {
       });
     } catch (error) {
       console.error(`[build] bundling ${name}/handler.ts failed: ${(error && error.message) || error}`);
+      return 1;
+    }
+    writeFileSync(join(root, 'dist', name, 'package.json'), '{ "type": "commonjs" }\n');
+    try {
+      if (!exportsHandler(root, outfile)) {
+        console.error(`[build] ${outfile} loads but exports no handler function`);
+        return 1;
+      }
+    } catch (error) {
+      console.error(`[build] ${outfile} failed to load: ${(error && error.message) || error}`);
       return 1;
     }
     bundled.push(outfile.replace(/\\/g, '/'));
@@ -103,7 +129,7 @@ async function run(root) {
   try {
     execFileSync(process.execPath, [cdkBin, 'synth', '--no-notices', '--quiet'], {
       cwd: root,
-      env: sanitizedSynthEnv(root),
+      env: sanitizedSynthEnv(),
       stdio: 'inherit',
     });
   } catch (error) {
