@@ -66,6 +66,7 @@ describe('countLaneBuckets (AC-E20)', () => {
       expect(bucket.deliveryDelay).toBe(0);
       expect(bucket.suppressedBounce).toBe(0);
       expect(bucket.suppressedComplaint).toBe(0);
+      expect(bucket.notSpamComplaint).toBe(0);
     }
   });
 
@@ -109,9 +110,17 @@ describe('countLaneBuckets (AC-E20)', () => {
         fields: { complaintSubType: 'OnTenantSuppressionList' },
       }),
       baseRecord({ kind: 'complaintRecipient', eventType: 'Complaint', bucketStartMs: bucketStart }),
+      // A not-spam feedback report corrects a message wrongly marked as spam, so it counts apart.
+      baseRecord({
+        kind: 'complaint',
+        eventType: 'Complaint',
+        bucketStartMs: bucketStart,
+        fields: { complaintFeedbackType: 'not-spam' },
+      }),
     ];
     const [bucket] = countLaneBuckets(records, { fromBucketMs: bucketStart, toBucketMs: bucketStart, nowMs });
     if (bucket === undefined) throw new Error('expected a bucket');
+    expect(bucket.notSpamComplaint).toBe(1);
     expect(bucket.send).toBe(1);
     expect(bucket.delivery).toBe(1);
     expect(bucket.reject).toBe(1);

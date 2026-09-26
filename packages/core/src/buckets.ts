@@ -45,6 +45,12 @@ export const SUPPRESSION_BOUNCE_SUBTYPES: readonly string[] = [
 ];
 export const SUPPRESSION_COMPLAINT_SUBTYPES: readonly string[] = ['OnAccountSuppressionList', 'OnTenantSuppressionList'];
 
+// The AWS event page describes a not-spam feedback report as one that "does not consider the
+// message to be spam", used "to correct a message that was incorrectly tagged or categorized as
+// spam", and does not say whether SES counts it. Fothering counts it apart, so a correction never
+// pushes a lane toward closing (https://docs.aws.amazon.com/ses/latest/dg/event-publishing-retrieving-sns-contents.html).
+const NOT_SPAM_FEEDBACK_TYPE = 'not-spam';
+
 export interface BucketCount {
   bucketStartMs: number;
   complete: boolean;
@@ -58,6 +64,7 @@ export interface BucketCount {
   deliveryDelay: number;
   suppressedBounce: number;
   suppressedComplaint: number;
+  notSpamComplaint: number;
 }
 
 /** AC-E18: half-open like bucketStartMs itself; a bucket is complete once the clock reaches its
@@ -89,6 +96,7 @@ function emptyBucket(bucketStartMsValue: number, nowMs: number): BucketCount {
     deliveryDelay: 0,
     suppressedBounce: 0,
     suppressedComplaint: 0,
+    notSpamComplaint: 0,
   };
 }
 
@@ -108,6 +116,8 @@ function applyComplaint(bucket: BucketCount, record: EventRecord): void {
   const subtype = record.fields.complaintSubType;
   if (subtype !== undefined && SUPPRESSION_COMPLAINT_SUBTYPES.includes(subtype)) {
     bucket.suppressedComplaint += 1;
+  } else if (record.fields.complaintFeedbackType === NOT_SPAM_FEEDBACK_TYPE) {
+    bucket.notSpamComplaint += 1;
   } else {
     bucket.complaint += 1;
   }
