@@ -1,4 +1,13 @@
-import { expiresAtFor, recordKey, type EventFields, type EventRecord, type Provenance, type RecordKind, type SesEventType } from './records.js';
+import {
+  expiresAtFor,
+  isStorableBucketStart,
+  recordKey,
+  type EventFields,
+  type EventRecord,
+  type Provenance,
+  type RecordKind,
+  type SesEventType,
+} from './records.js';
 import { bucketStartMs } from './buckets.js';
 import { pseudonymizeRecipient, type AddressKeySet } from './address.js';
 import type { LaneEntry, LaneMap } from './lanes.js';
@@ -23,6 +32,16 @@ export interface MinimizeContext {
   provenance: Provenance;
   envelopeTimeMs: number;
   arrivalTimeMs: number;
+}
+
+// An event whose send time has no storable bucket can never be written or read back in time order,
+// and a retry fails the same way, so it is the one minimize failure a caller drops. Every other
+// failure (a key set gap, unusable key material, a code defect) is not the event's own fault.
+export class UnstorableEventError extends RangeError {
+  constructor(mailTimestampMs: number) {
+    super(`the mail timestamp ${String(mailTimestampMs)} has no storable send-time bucket`);
+    this.name = 'UnstorableEventError';
+  }
 }
 
 type MailTags = Record<string, string[]>;
@@ -413,6 +432,12 @@ export function minimizeEvent(event: SesEnvelope, context: MinimizeContext): Eve
   // lane is closed, so a caller's lane that is not this event's own configuration set is refused.
   if (detail.mail.tags['ses:configuration-set']?.[0] !== context.lane.configurationSet) {
     throw new Error(`the event's configuration set does not match the lane ${context.lane.configurationSet}`);
+  }
+  // Checked before any key is read, so an event that can never be stored is never mistaken for a
+  // key set gap, which the caller retries.
+  const mailTimestampMs = Date.parse(detail.mail.timestamp);
+  if (!isStorableBucketStart(bucketStartMs(mailTimestampMs))) {
+    throw new UnstorableEventError(mailTimestampMs);
   }
 
   switch (detail.eventType) {

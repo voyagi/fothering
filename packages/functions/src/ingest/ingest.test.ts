@@ -173,6 +173,28 @@ describe('the doc-derived Bounce through the ingest composition root', () => {
     await expect(deps.ports.eventStore.queryLane(fixtureConfigurationSet(), bucket, bucket, bucket)).resolves.toEqual([]);
   });
 
+  // Only an event whose send time has no storable bucket is dropped. Any other minimize failure
+  // (unusable key material, a crypto fault, a code defect) is not the event's own fault, so it is
+  // logged by name and rethrown for the retry, never dropped as if the event were bad.
+  it('rethrows a minimize failure that is not the event’s own fault, logging minimize-failed and writing nothing', async () => {
+    const base = buildIngestRoot({ runtimeContext: 'test', switchValue: undefined, laneMap: DOC_EXAMPLE_LANE_MAP });
+    // A secret that is not a string makes the HMAC itself throw a TypeError.
+    const unusableKeySet = { versions: [{ id: 'k1', secret: 42, activeFromMs: 0 }] } as unknown as AddressKeySet;
+    const lines: string[] = [];
+    const deps: IngestDeps = {
+      ...base,
+      ports: { ...base.ports, addressKey: { getKeySet: async () => unusableKeySet } },
+      log: createLogger((line) => lines.push(line)),
+    };
+
+    await expect(ingestEvent(loadSesEventFixture('bounce').event, deps, { provenance: 'doc-derived' })).rejects.toThrow(TypeError);
+    expect(lines.map((line) => JSON.parse(line) as unknown)).toEqual([
+      { event: 'minimize-failed', level: 'error', messageId: BOUNCE_MESSAGE_ID, errorName: 'TypeError' },
+    ]);
+    const bucket = bucketStartMs(fixtureMailTimestampMs());
+    await expect(deps.ports.eventStore.queryLane(fixtureConfigurationSet(), bucket, bucket, bucket)).resolves.toEqual([]);
+  });
+
   it('sends every minimized record to the dead-letter port, logs the write error by name, and resolves dead-lettered when a put fails', async () => {
     const base = buildIngestRoot({
       runtimeContext: 'test',
@@ -194,19 +216,32 @@ describe('the doc-derived Bounce through the ingest composition root', () => {
     ]);
   });
 
-  it('rethrows when the dead-letter send itself fails, logging the send error by name, so the caller’s retry can rerun the whole event', async () => {
+  // The dead-letter-failed line names the send error; without a line of its own the write error that
+  // started it all would reach no reader. The send error gets its own name here so the test can tell
+  // which error each line names.
+  it('rethrows when the dead-letter send itself fails, logging the write error and then the send error by name, so the caller’s retry can rerun the whole event', async () => {
+    class DeadLetterSendError extends Error {
+      override name = 'DeadLetterSendError';
+    }
     const base = buildIngestRoot({
       runtimeContext: 'test',
       switchValue: undefined,
       laneMap: DOC_EXAMPLE_LANE_MAP,
-      fixtures: { eventStoreFailure: 'put', deadLetterFailure: 'send' },
+      fixtures: { eventStoreFailure: 'put' },
     });
     const lines: string[] = [];
-    const deps: IngestDeps = { ...base, log: createLogger((line) => lines.push(line)) };
+    const deps: IngestDeps = {
+      ...base,
+      ports: { ...base.ports, deadLetter: { send: async () => Promise.reject(new DeadLetterSendError('queue unreachable')) } },
+      log: createLogger((line) => lines.push(line)),
+    };
 
-    await expect(ingestEvent(loadSesEventFixture('bounce').event, deps, { provenance: 'doc-derived' })).rejects.toThrow();
+    await expect(ingestEvent(loadSesEventFixture('bounce').event, deps, { provenance: 'doc-derived' })).rejects.toThrow(
+      DeadLetterSendError,
+    );
     expect(lines.map((line) => JSON.parse(line) as unknown)).toEqual([
-      { event: 'dead-letter-failed', level: 'error', messageId: BOUNCE_MESSAGE_ID, errorName: 'FixtureWriteError' },
+      { event: 'put-failed', level: 'error', messageId: BOUNCE_MESSAGE_ID, errorName: 'FixtureWriteError' },
+      { event: 'dead-letter-failed', level: 'error', messageId: BOUNCE_MESSAGE_ID, errorName: 'DeadLetterSendError' },
     ]);
   });
 
@@ -245,9 +280,10 @@ describe('the doc-derived Bounce through the ingest composition root', () => {
   });
 
   // The sort key holds 13 digits of epoch milliseconds, which ends in November 2286: a later mail
-  // timestamp has no key that sorts by time, so the event is dropped as unminimizable, never
-  // written under a wrongly ordered key. The control just inside the limit is stored.
-  it('drops an event whose mail timestamp lies past the sort key range, logging RangeError, and stores one just inside it', async () => {
+  // timestamp has no key that sorts by time, so the event is dropped as unminimizable under the one
+  // error name ingest drops, never written under a wrongly ordered key. The control just inside the
+  // limit is stored.
+  it('drops an event whose mail timestamp lies past the sort key range, logging UnstorableEventError, and stores one just inside it', async () => {
     const insideLimit = '2286-11-20T00:00:00Z';
     const pastLimit = '2287-01-01T00:00:00Z';
     expect(Date.parse(insideLimit)).toBeLessThan(10 ** 13);
@@ -271,7 +307,7 @@ describe('the doc-derived Bounce through the ingest composition root', () => {
       event: 'dropped-unminimizable',
       level: 'error',
       messageId: BOUNCE_MESSAGE_ID,
-      errorName: 'RangeError',
+      errorName: 'UnstorableEventError',
     });
     expect(await ingestEvent(withTimestamp(insideLimit), deps, { provenance: 'doc-derived' })).toEqual({
       outcome: 'stored',

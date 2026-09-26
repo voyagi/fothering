@@ -2,7 +2,7 @@ import { isIP } from 'node:net';
 import { describe, expect, it } from 'vitest';
 import fc from 'fast-check';
 import { identityFor } from './identity.js';
-import { minimizeEvent, type MinimizeContext } from './minimize.js';
+import { minimizeEvent, UnstorableEventError, type MinimizeContext } from './minimize.js';
 import { parseSesEvent, type SesEnvelope } from './ses-events.js';
 import { findLane } from './lanes.js';
 import { UNCLASSIFIED, type EventFields, type EventRecord } from './records.js';
@@ -437,14 +437,37 @@ describe('runId (D-24)', () => {
   });
 });
 
-describe('a mail timestamp before 1970', () => {
-  // The key version covers the date, so the refusal can only come from the bucket and sort key:
-  // with the shared test key (active from 0) the key lookup would refuse first and prove nothing.
-  it('is refused by the sort key, never filed under the bucket at 0', () => {
+function minimizeError(run: () => unknown): unknown {
+  try {
+    run();
+  } catch (error) {
+    return error;
+  }
+  return undefined;
+}
+
+describe('a mail timestamp with no storable send-time bucket', () => {
+  // The key version covers each date, so only the bucket range can refuse these events.
+  it.each([
+    ['before 1970', '1969-12-31T23:59:59Z'],
+    ['past the 13-digit sort key range', '2287-01-01T00:00:00Z'],
+  ])('refuses one %s with UnstorableEventError, never filing it under another bucket', (_label, timestamp) => {
+    const event = editableBounceEvent();
+    event.detail.mail.timestamp = timestamp;
+    const keySet = { versions: [{ id: 'k0', secret: 'range-test-key', activeFromMs: -1_000_000_000 }] };
+    const error = minimizeError(() => minimizeEvent(mustParse(event), contextFor({ keySet })));
+    expect(error).toBeInstanceOf(UnstorableEventError);
+    expect((error as Error).name).toBe('UnstorableEventError');
+  });
+
+  // The shared test key is active only from 0, so a key lookup run first would refuse a 1969 send
+  // as a missing key version, which ingest retries: the event can never be stored, so the range
+  // refusal must come before any key is read.
+  it('refuses a send before 1970 as unstorable even when no key version covers its date', () => {
     const event = editableBounceEvent();
     event.detail.mail.timestamp = '1969-12-31T23:59:59Z';
-    const keySet = { versions: [{ id: 'k0', secret: 'pre-1970-test-key', activeFromMs: -1_000_000_000 }] };
-    expect(() => minimizeEvent(mustParse(event), contextFor({ keySet }))).toThrow(RangeError);
+    const error = minimizeError(() => minimizeEvent(mustParse(event), contextFor()));
+    expect((error as Error | undefined)?.name).toBe('UnstorableEventError');
   });
 });
 

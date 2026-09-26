@@ -1,7 +1,7 @@
 import { parseSesEvent } from '@fothering/core/ses-events';
 import { NoActiveKeyVersionError } from '@fothering/core/address';
 import { findLane } from '@fothering/core/lanes';
-import { minimizeEvent } from '@fothering/core/minimize';
+import { minimizeEvent, UnstorableEventError } from '@fothering/core/minimize';
 import type { Provenance } from '@fothering/core/records';
 import type { IngestDeps } from './root.js';
 
@@ -20,12 +20,13 @@ function errorName(error: unknown): string {
 }
 
 // Ordering per D-16: parse, drop without a configuration-set tag, drop an unmapped set, drop a
-// Send with no destination, minimize, conditional puts. A write failure sends the already-
+// Send with no destination, minimize, conditional puts. Minimize drops only an event whose send
+// time has no storable bucket, the one failure no retry can fix. A write failure sends the already-
 // minimized records to the dead-letter port and reports dead-lettered; a failed dead-letter send,
-// like an unreadable address key set or a key set with no version active at the send time, is left
-// to propagate so Lambda's asynchronous retry reruns the whole event, and the conditional puts
-// absorb whatever the first attempt already wrote.
-// Every one of those failures writes one log line first, naming the message and the error by its
+// an unreadable address key set, a key set with no version active at the send time and any other
+// minimize failure are left to propagate so Lambda's asynchronous retry reruns the whole event, and
+// the conditional puts absorb whatever the first attempt already wrote.
+// Every one of those failures writes a log line first, naming the message and the error by its
 // name only, so an operator can tell which message failed and why without any error text.
 // A parse failure is an error too, not a routine drop: the rule forwards only the six SES event
 // types from mapped sets, so an event that fails the schema is a lost SES event, and an SES format
@@ -80,14 +81,16 @@ export async function ingestEvent(rawEvent: unknown, deps: IngestDeps, options: 
       arrivalTimeMs: deps.now(),
     });
   } catch (error) {
-    // Only a fault in the event itself is dropped: a missing key version is fixed in the key set,
-    // after which the retry stores the event, so it propagates like an unreadable key set.
-    if (error instanceof NoActiveKeyVersionError) {
-      deps.log.error({ event: 'key-version-missing', messageId, errorName: errorName(error) });
-      throw error;
+    // Only a fault in the event itself is dropped. A missing key version is fixed in the key set,
+    // and unusable key material or a code defect is not the event's doing either, so each is
+    // logged under its own event name and propagates like an unreadable key set.
+    if (error instanceof UnstorableEventError) {
+      deps.log.error({ event: 'dropped-unminimizable', messageId, errorName: errorName(error) });
+      return { outcome: 'dropped', stored: 0, duplicates: 0 };
     }
-    deps.log.error({ event: 'dropped-unminimizable', messageId, errorName: errorName(error) });
-    return { outcome: 'dropped', stored: 0, duplicates: 0 };
+    const event = error instanceof NoActiveKeyVersionError ? 'key-version-missing' : 'minimize-failed';
+    deps.log.error({ event, messageId, errorName: errorName(error) });
+    throw error;
   }
 
   let stored = 0;
@@ -102,6 +105,8 @@ export async function ingestEvent(rawEvent: unknown, deps: IngestDeps, options: 
     try {
       await deps.ports.deadLetter.send(records);
     } catch (sendError) {
+      // The write error gets its own line: the send error propagates, so nothing else would name it.
+      deps.log.error({ event: 'put-failed', messageId, errorName: errorName(writeError) });
       deps.log.error({ event: 'dead-letter-failed', messageId, errorName: errorName(sendError) });
       throw sendError;
     }

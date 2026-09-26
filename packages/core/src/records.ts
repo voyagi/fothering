@@ -89,12 +89,18 @@ export interface RecordKeyInput {
   identity: string;
 }
 
+// A bucket start that is negative, fractional, NaN or longer than 13 digits would pad into text
+// whose order is not time order. One predicate for the key builder below and for minimize, which
+// refuses an event it could never store before reading any key.
+export function isStorableBucketStart(bucketStartMs: number): boolean {
+  return Number.isInteger(bucketStartMs) && bucketStartMs >= 0 && bucketStartMs < BUCKET_LIMIT_MS;
+}
+
 // The one place a bucket start becomes sort-key text: every written key and the live store's
-// range bounds are built here, so a write and a read cannot pad differently. A start that is
-// negative, fractional, NaN or longer than 13 digits would pad into text whose order is not time
-// order, so it is refused rather than written or queried.
+// range bounds are built here, so a write and a read cannot pad differently. A start that is not
+// storable is refused rather than written or queried.
 export function bucketSortKeyPrefix(bucketStartMs: number): string {
-  if (!Number.isInteger(bucketStartMs) || bucketStartMs < 0 || bucketStartMs >= BUCKET_LIMIT_MS) {
+  if (!isStorableBucketStart(bucketStartMs)) {
     throw new RangeError(
       `bucket start ${String(bucketStartMs)} is not a whole number of epoch milliseconds from 0 to ${String(BUCKET_LIMIT_MS - 1)}`,
     );
