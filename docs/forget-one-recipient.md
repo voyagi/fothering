@@ -11,7 +11,17 @@ by hashing the target address the same way and removing every record whose hash 
 
 ## How to run it
 
-Invoke the deployed function directly, using the stack's own output for its name:
+Read the function's name from the stack's own output:
+
+```sh
+aws cloudformation describe-stacks \
+  --region eu-central-1 \
+  --stack-name FotheringIngest \
+  --query "Stacks[0].Outputs[?OutputKey=='ForgetFunctionName'].OutputValue" \
+  --output text
+```
+
+Then invoke the function directly under that name:
 
 ```sh
 aws lambda invoke \
@@ -25,7 +35,8 @@ aws lambda invoke \
 `result.json` holds a deleted count per key version (newest first), a total deleted count and a
 remaining count. It never holds the address or a hash.
 
-A payload with no non-empty `address` field fails with:
+A payload with no non-empty `address` field fails. The command's own output then shows a
+`FunctionError` field, and `result.json` holds the error, whose message reads:
 
 ```text
 usage: pass a JSON payload holding one non-empty "address" field
