@@ -30,7 +30,6 @@ export interface ForgetReport {
 export const FORGET_USAGE = 'usage: pass a JSON payload holding one non-empty "address" field';
 
 export const forgetPayloadSchema = z.object({ address: z.string().min(1) });
-export type ForgetPayload = z.infer<typeof forgetPayloadSchema>;
 
 export class ForgetUsageError extends Error {
   constructor() {
