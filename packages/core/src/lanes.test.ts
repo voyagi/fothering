@@ -84,3 +84,49 @@ describe('laneMapSchema (AC-E32)', () => {
     expect(paths).toContainEqual(['lanes', 0, 'streamTagKey']);
   });
 });
+
+describe('laneMapSchema configuration set naming and duplicates (AC-E33, AC-E34)', () => {
+  it('accepts a configuration set matching the AWS naming rule', () => {
+    const result = laneMapSchema.safeParse(baseMap({ lanes: [baseLane({ configurationSet: 'ConfigSet', lane: 'doc-examples' })] }));
+    expect(result.success).toBe(true);
+  });
+
+  it('rejects a configuration set containing a dot', () => {
+    const paths = issuePaths(baseMap({ lanes: [baseLane({ configurationSet: 'fothering.transactional' })] }));
+    expect(paths).toContainEqual(['lanes', 0, 'configurationSet']);
+  });
+
+  it('rejects a configuration set containing a space', () => {
+    const paths = issuePaths(baseMap({ lanes: [baseLane({ configurationSet: 'fothering transactional' })] }));
+    expect(paths).toContainEqual(['lanes', 0, 'configurationSet']);
+  });
+
+  it('rejects a configuration set of 65 characters', () => {
+    const paths = issuePaths(baseMap({ lanes: [baseLane({ configurationSet: 'a'.repeat(65) })] }));
+    expect(paths).toContainEqual(['lanes', 0, 'configurationSet']);
+  });
+
+  it('rejects two entries differing only by case, naming the index of the second entry', () => {
+    const paths = issuePaths(
+      baseMap({
+        lanes: [
+          baseLane({ configurationSet: 'bulk', lane: 'bulk' }),
+          baseLane({ configurationSet: 'Bulk', lane: 'bulk-2' }),
+        ],
+      }),
+    );
+    expect(paths).toContainEqual(['lanes', 1, 'configurationSet']);
+  });
+
+  it('rejects the same configurationSet twice', () => {
+    const paths = issuePaths(
+      baseMap({
+        lanes: [
+          baseLane({ configurationSet: 'fothering-transactional', lane: 'a' }),
+          baseLane({ configurationSet: 'fothering-transactional', lane: 'b' }),
+        ],
+      }),
+    );
+    expect(paths).toContainEqual(['lanes', 1, 'configurationSet']);
+  });
+});
