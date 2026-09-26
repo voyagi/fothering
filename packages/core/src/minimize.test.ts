@@ -1,9 +1,12 @@
+import { isIP } from 'node:net';
 import { describe, expect, it } from 'vitest';
+import fc from 'fast-check';
 import { identityFor } from './identity.js';
 import { minimizeEvent, type MinimizeContext } from './minimize.js';
 import { parseSesEvent, type SesEnvelope } from './ses-events.js';
 import { findLane } from './lanes.js';
-import type { EventRecord } from './records.js';
+import { UNCLASSIFIED, type EventFields, type EventRecord } from './records.js';
+import { propertySeed } from './test/property-seed.js';
 import { DOC_EXAMPLE_LANE_MAP, loadSesEventFixture, type SesEventFixtureName } from '@fothering/providers/fixtures/ses-events/index';
 import { TEST_ADDRESS_KEY_SET } from '@fothering/providers/fixtures/ingest-ports';
 
@@ -241,6 +244,130 @@ describe('AC-10: a diagnosticCode holding a sentence, an address and a URL', () 
     expect(serialized).not.toContain('jane@example.com');
     expect(serialized).not.toContain('https://example.com/bounce-help');
     expect(serialized).not.toContain('mailbox');
+  });
+});
+
+describe('the status code of SES’s own expiry bounce', () => {
+  // SES writes this when its retry window closes (verbatim from an AWS re:Post question about mail
+  // sent through SES): a 550 reply whose status slot holds 4.4.7.
+  it('stores 4.4.7 and 550, and nothing else of the line', () => {
+    const event = editableBounceEvent();
+    const recipient = event.detail.bounce.bouncedRecipients[0];
+    if (recipient === undefined) throw new Error('fixture bounce has no recipient');
+    recipient.diagnosticCode =
+      'smtp; 550 4.4.7 Message expired: unable to deliver in 840 minutes.<421 4.4.1 Failed to establish connection>';
+    const [record] = minimizeEvent(mustParse(event), contextFor());
+    if (record === undefined) throw new Error('expected a record');
+    expect(record.fields.enhancedStatusCode).toBe('4.4.7');
+    expect(record.fields.basicReplyCode).toBe('550');
+    expect(JSON.stringify(record)).not.toContain('Message expired');
+  });
+});
+
+type StringField = Exclude<keyof EventFields, 'delayTimestampMs'>;
+
+const ENHANCED_CODE_RE = /^[245]\.\d{1,3}\.\d{1,3}$/;
+const HOSTNAME_LABEL_CHECK = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
+
+// Written apart from extract.ts on purpose: a check that called the extractors would agree with
+// them by construction and prove nothing.
+function isAddress(value: string): boolean {
+  return isIP(value) !== 0 && !value.includes('%');
+}
+
+function isHostname(value: string): boolean {
+  const labels = value.split('.');
+  const topLevel = labels[labels.length - 1] ?? '';
+  return value.length <= 253 && labels.length >= 2 && labels.every((label) => HOSTNAME_LABEL_CHECK.test(label)) && /[a-z]/.test(topLevel);
+}
+
+const FIELD_CHECKS: Record<StringField, (value: string) => boolean> = {
+  bounceType: (value) => ['Undetermined', 'Permanent', 'Transient'].includes(value),
+  bounceSubType: (value) => /^[A-Za-z]+$/.test(value),
+  complaintFeedbackType: (value) => ['abuse', 'auth-failure', 'fraud', 'not-spam', 'other', 'virus'].includes(value),
+  complaintSubType: (value) => ['OnAccountSuppressionList', 'OnTenantSuppressionList'].includes(value),
+  delayType: (value) => /^[A-Za-z]+$/.test(value),
+  recipientStatus: (value) => ENHANCED_CODE_RE.test(value),
+  recipientAction: (value) => ['failed', 'delayed', 'delivered', 'relayed', 'expanded'].includes(value),
+  enhancedStatusCode: (value) => ENHANCED_CODE_RE.test(value),
+  basicReplyCode: (value) => /^[245]\d{2}$/.test(value),
+  remoteMtaIp: isAddress,
+  reportingMta: (value) => isAddress(value) || isHostname(value),
+  outgoingIp: isAddress,
+  sourceIp: isAddress,
+  fromDomain: isHostname,
+  callerIdentity: (value) => /^[A-Za-z0-9+=,._-]{1,128}$/.test(value),
+  streamTagValue: (value) => /^[A-Za-z0-9_-]{1,256}$/.test(value),
+  batchTagValue: (value) => /^[A-Za-z0-9_-]{1,256}$/.test(value),
+  templateTagValue: (value) => /^[A-Za-z0-9_-]{1,256}$/.test(value),
+  campaignTagValue: (value) => /^[A-Za-z0-9_-]{1,256}$/.test(value),
+};
+
+function strayFields(fields: EventFields): string[] {
+  const strays: string[] = [];
+  for (const [name, check] of Object.entries(FIELD_CHECKS) as [StringField, (value: string) => boolean][]) {
+    const value = fields[name];
+    if (value === undefined || value === UNCLASSIFIED) continue;
+    if (!check(value)) strays.push(`${name}=${JSON.stringify(value)}`);
+  }
+  return strays;
+}
+
+// Arbitrary text, plus near misses shaped like the values each field accepts, so the property
+// reaches the accepting branches and not only the refusals.
+const textArb = fc.oneof(
+  fc.string({ unit: 'binary', maxLength: 80 }),
+  fc.stringMatching(/^(?:smtp; ?)?[245]\d{2}[ -][245]\.\d{1,4}\.\d{1,4}[ .a-z@<>-]{0,24}$/),
+  fc.stringMatching(/^(?:dsn; )?[a-z0-9-]{1,12}(?:\.[a-z0-9-]{1,12}){0,3}$/),
+  fc.constantFrom('203.0.113.9', '2001:db8::1', 'fe80::1%eth0', 'jane@example.com', 'MTA.Example.COM', 'failed', '5.1.1', 'ses_user'),
+);
+
+describe('closed vocabulary under arbitrary text', () => {
+  it('stores only a pattern-checked value or unclassified in every bounce and delivery field, whatever text the event carries', () => {
+    // Non-vacuity: every field below must be stored as a real value at least once, or the property
+    // only ever saw the refusals and never checked what an accepted value looks like.
+    const accepted = new Set<string>();
+    fc.assert(
+      fc.property(fc.array(textArb, { minLength: 11, maxLength: 11 }), (texts) => {
+        const [diagnostic, status, action, reportingMta, sourceIp, fromDomain, caller, stream, smtp, remoteIp, outgoingIp] =
+          texts as [string, string, string, string, string, string, string, string, string, string, string];
+        const bounce = editableBounceEvent();
+        const recipient = bounce.detail.bounce.bouncedRecipients[0];
+        if (recipient === undefined) throw new Error('fixture bounce has no recipient');
+        recipient.diagnosticCode = diagnostic;
+        recipient.status = status;
+        recipient.action = action;
+        bounce.detail.bounce.reportingMTA = reportingMta;
+        Object.assign(bounce.detail.mail.tags, {
+          'ses:source-ip': [sourceIp],
+          'ses:from-domain': [fromDomain],
+          'ses:caller-identity': [caller],
+          myCustomTag1: [stream],
+        });
+
+        const delivery = structuredClone(loadSesEventFixture('delivery').event) as {
+          detail: { delivery: { smtpResponse: string; remoteMtaIp: string; reportingMTA?: string }; mail: { tags: Record<string, string[]> } };
+        };
+        delivery.detail.delivery.smtpResponse = smtp;
+        delivery.detail.delivery.remoteMtaIp = remoteIp;
+        delivery.detail.delivery.reportingMTA = reportingMta;
+        delivery.detail.mail.tags['ses:outgoing-ip'] = [outgoingIp];
+
+        const records = [...minimizeEvent(mustParse(bounce), contextFor()), ...minimizeEvent(mustParse(delivery), contextFor())];
+        expect(records.flatMap((record) => strayFields(record.fields))).toEqual([]);
+        for (const record of records) {
+          for (const [name, value] of Object.entries(record.fields)) {
+            if (typeof value === 'string' && value !== UNCLASSIFIED) accepted.add(name);
+          }
+        }
+      }),
+      { seed: propertySeed(), numRuns: 300 },
+    );
+    const exercised: StringField[] = [
+      'enhancedStatusCode', 'basicReplyCode', 'recipientStatus', 'recipientAction', 'reportingMta', 'remoteMtaIp',
+      'outgoingIp', 'sourceIp', 'fromDomain', 'callerIdentity', 'streamTagValue',
+    ];
+    expect(exercised.filter((name) => !accepted.has(name))).toEqual([]);
   });
 });
 

@@ -9,12 +9,14 @@ import {
   createFixtureAddressKey,
   createFixtureDeadLetter,
   createFixtureEventStore,
+  FixtureWriteError,
   type FixtureDeadLetterPort,
 } from '@fothering/providers/fixtures/ingest-ports';
 import { PORT_TABLE, resolvePortTable, type PortName, type PortRow } from '@fothering/providers/ports';
 import {
   NotBuiltError,
   type DryRunSink,
+  type EventStorePort,
   type KindTable,
   type LiveClients,
   type LiveConfig,
@@ -199,6 +201,98 @@ describe('the doc-derived Bounce through the ingest composition root', () => {
     expect(lines.map((line) => JSON.parse(line) as unknown)).toEqual([
       { event: 'dead-letter-failed', level: 'error', messageId: BOUNCE_MESSAGE_ID, errorName: 'FixtureWriteError' },
     ]);
+  });
+
+  // A put that fails partway leaves the records before it written. The dead letter still carries
+  // every record of the event, so a replay re-puts them all and the conditional puts absorb the
+  // ones already stored.
+  it('dead-letters every record of the event, the already-written one included, when a later put fails', async () => {
+    const base = buildIngestRoot({ runtimeContext: 'test', switchValue: undefined, laneMap: DOC_EXAMPLE_LANE_MAP });
+    let puts = 0;
+    const eventStore: EventStorePort = {
+      ...base.ports.eventStore,
+      putIfAbsent: async (record) => {
+        puts += 1;
+        if (puts === 2) throw new FixtureWriteError('the second put fails');
+        return base.ports.eventStore.putIfAbsent(record);
+      },
+    };
+    const lines: string[] = [];
+    const deps: IngestDeps = { ...base, ports: { ...base.ports, eventStore }, log: createLogger((line) => lines.push(line)) };
+    const raw = structuredClone(loadSesEventFixture('send').event) as { detail: { mail: { messageId: string; destination: string[] } } };
+    raw.detail.mail.destination = ['first@example.com', 'second@example.org', 'third@example.net'];
+
+    const result = await ingestEvent(raw, deps, { provenance: 'doc-derived' });
+
+    expect(result).toEqual({ outcome: 'dead-lettered', stored: 1, duplicates: 0 });
+    expect(lines.map((line) => JSON.parse(line) as unknown)).toEqual([
+      { event: 'dead-lettered', level: 'error', messageId: raw.detail.mail.messageId, errorName: 'FixtureWriteError' },
+    ]);
+    const deadLetter = deps.ports.deadLetter as FixtureDeadLetterPort;
+    const [queued] = deadLetter.sent;
+    if (queued === undefined) throw new Error('expected one dead-letter message');
+    expect(queued).toHaveLength(3);
+    const replayed: string[] = [];
+    for (const record of queued) replayed.push(await base.ports.eventStore.putIfAbsent(record));
+    expect(replayed).toEqual(['duplicate', 'written', 'written']);
+  });
+
+  // The sort key holds 13 digits of epoch milliseconds, which ends in November 2286: a later mail
+  // timestamp has no key that sorts by time, so the event is dropped as unminimizable, never
+  // written under a wrongly ordered key. The control just inside the limit is stored.
+  it('drops an event whose mail timestamp lies past the sort key range, logging RangeError, and stores one just inside it', async () => {
+    const insideLimit = '2286-11-20T00:00:00Z';
+    const pastLimit = '2287-01-01T00:00:00Z';
+    expect(Date.parse(insideLimit)).toBeLessThan(10 ** 13);
+    expect(Date.parse(pastLimit)).toBeGreaterThanOrEqual(10 ** 13);
+
+    const base = buildIngestRoot({ runtimeContext: 'test', switchValue: undefined, laneMap: DOC_EXAMPLE_LANE_MAP });
+    const lines: string[] = [];
+    const deps: IngestDeps = { ...base, log: createLogger((line) => lines.push(line)) };
+    const withTimestamp = (timestamp: string) => {
+      const raw = structuredClone(loadSesEventFixture('bounce').event) as { detail: { mail: { timestamp: string } } };
+      raw.detail.mail.timestamp = timestamp;
+      return raw;
+    };
+
+    expect(await ingestEvent(withTimestamp(pastLimit), deps, { provenance: 'doc-derived' })).toEqual({
+      outcome: 'dropped',
+      stored: 0,
+      duplicates: 0,
+    });
+    expect(JSON.parse(lines[0] ?? '{}')).toEqual({
+      event: 'dropped-unminimizable',
+      level: 'error',
+      messageId: BOUNCE_MESSAGE_ID,
+      errorName: 'RangeError',
+    });
+    expect(await ingestEvent(withTimestamp(insideLimit), deps, { provenance: 'doc-derived' })).toEqual({
+      outcome: 'stored',
+      stored: 1,
+      duplicates: 0,
+    });
+  });
+
+  // A Complaint's counting record stands for the complaint itself, not for a recipient, so a
+  // complaint that names no recipient still counts once (plan 01-04 required a non-empty list only
+  // where an empty one would minimize to no record at all).
+  it('counts a Complaint that lists no recipient as one complaint, with no recipient item', async () => {
+    const parsedFixture = parseSesEvent(loadSesEventFixture('complaint').event);
+    if (!parsedFixture.ok) throw new Error('fixture complaint event failed to parse');
+    const mailTimestampMs = Date.parse(parsedFixture.event.detail.mail.timestamp);
+    const nowMs = mailTimestampMs + ONE_HOUR_MS;
+    const deps = buildIngestRoot({ runtimeContext: 'test', switchValue: undefined, laneMap: DOC_EXAMPLE_LANE_MAP, now: () => nowMs });
+    const raw = structuredClone(loadSesEventFixture('complaint').event) as { detail: { complaint: { complainedRecipients: unknown[] } } };
+    raw.detail.complaint.complainedRecipients = [];
+
+    expect(await ingestEvent(raw, deps, { provenance: 'doc-derived' })).toEqual({ outcome: 'stored', stored: 1, duplicates: 0 });
+
+    const bucket = bucketStartMs(mailTimestampMs);
+    const stored = await deps.ports.eventStore.queryLane(fixtureConfigurationSet(), bucket, bucket, nowMs);
+    expect(stored.map((record) => record.kind)).toEqual(['complaint']);
+    expect(stored[0]?.recipientCount).toBe(0);
+    const [bucketCount] = countLaneBuckets(stored, { fromBucketMs: bucket, toBucketMs: bucket, nowMs });
+    expect(bucketCount?.complaint).toBe(1);
   });
 
   it('rethrows when the address key set cannot be read, logging the error by name, so the caller’s retry can rerun the event', async () => {

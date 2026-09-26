@@ -14,6 +14,9 @@ const ENHANCED_STATUS_CODE_ANCHORED_RE = /^[245]\.\d{1,3}\.\d{1,3}$/;
 // An optional "smtp;" prefix, then a three-digit code not followed by a fourth digit, so a longer
 // number at the start of the text is never mistaken for the code.
 const BASIC_REPLY_CODE_RE = /^(?:smtp;\s*)?([245]\d{2})(?!\d)/i;
+// The status code's own slot: right after the reply code and the space or hyphen that ends it
+// (RFC 2034 section 3: the text of a reply is "prefaced with a status code").
+const STATUS_SLOT_RE = /^(?:smtp;\s*)?[245]\d{2}[ -]([245]\.\d{1,3}\.\d{1,3})(?!\w|\.\d)/i;
 // reportingMTA on a bounce carries a DSN-style "dsn; " prefix; on a delay it is a bare IP. Any
 // leading "word;" shape is stripped before the remainder is checked as an IP or a hostname.
 const REPORTING_MTA_PREFIX_RE = /^[A-Za-z]+;\s*/;
@@ -26,11 +29,15 @@ const CALLER_IDENTITY_RE = /^[A-Za-z0-9+=,._-]{1,128}$/;
 const TAG_VALUE_RE = /^[A-Za-z0-9_-]{1,256}$/;
 const RECIPIENT_ACTIONS = ['failed', 'delayed', 'delivered', 'relayed', 'expanded'] as const;
 
-// RFC 2034 section 4: every status code "must agree with the primary response code", so a 5xx
-// reply carries a 5.X.X code. When the text opens with a reply code, a code-shaped run of another
-// class (a server version such as Exim 4.94.2, a URL's ?code=4.2.0) is not the status and is
-// skipped; with no reply code to agree with, the first run is the code.
+// A code in the status slot right after the reply code is the status, whatever its class: SES
+// itself writes "550 4.4.7 Message expired" when its retry window closes, a 5xx reply with a
+// class 4 status. Anywhere else in the text, RFC 2034 section 4 decides: every status code "must
+// agree with the primary response code", so a code-shaped run of another class (a server version
+// such as Exim 4.94.2, a URL's ?code=4.2.0) is not the status and is skipped. With no reply code
+// to agree with, the first run is the code.
 export function extractEnhancedStatusCode(text: string): string {
+  const slotted = STATUS_SLOT_RE.exec(text)?.[1];
+  if (slotted !== undefined) return slotted;
   const replyClass = BASIC_REPLY_CODE_RE.exec(text)?.[1]?.charAt(0);
   for (const match of text.matchAll(ENHANCED_STATUS_CODE_RE)) {
     if (replyClass === undefined || match[0].startsWith(replyClass)) return match[0];

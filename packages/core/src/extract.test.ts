@@ -62,6 +62,25 @@ describe('extractEnhancedStatusCode', () => {
   it('reads the first run when the text carries no leading reply code to agree with', () => {
     expect(extractEnhancedStatusCode('X-Postfix; host mx.example.com said: 550 5.1.1 user unknown')).toBe('5.1.1');
   });
+
+  // SES writes this itself when its retry window closes (the 550 line verbatim from an AWS re:Post
+  // question about mail sent through SES): a 5xx reply whose status slot, right after the reply
+  // code (RFC 2034 section 3), holds 4.4.7. A code in that slot is the status whatever its class.
+  it.each([
+    ['550', 'smtp; 550 4.4.7 Message expired: unable to deliver in 840 minutes.<421 4.4.1 Failed to establish connection>'],
+    ['554', 'smtp; 554 4.4.7 Message expired: unable to deliver in 840 minutes.<421 4.4.0 Unable to lookup DNS for example.com>'],
+  ])('reads the status in its own slot after a %s reply, even when its class disagrees', (reply, text) => {
+    expect(extractEnhancedStatusCode(text)).toBe('4.4.7');
+    expect(extractBasicReplyCode(text)).toBe(reply);
+  });
+
+  it('reads the status in its own slot after a hyphen, the multi-line reply form', () => {
+    expect(extractEnhancedStatusCode('smtp; 550-5.1.1 The email account that you tried to reach does not exist.')).toBe('5.1.1');
+  });
+
+  it('reads unclassified when the slot holds a run with more digits than a code holds', () => {
+    expect(extractEnhancedStatusCode('smtp; 550 5.1.1234 user unknown')).toBe(UNCLASSIFIED);
+  });
 });
 
 describe('extractBasicReplyCode', () => {

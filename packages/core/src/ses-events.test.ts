@@ -1,10 +1,13 @@
 import { describe, expect, it } from 'vitest';
+import fc from 'fast-check';
 import {
   loadSesEventFixture,
   SES_EVENT_FIXTURE_NAMES,
   type SesEventFixtureName,
 } from '@fothering/providers/fixtures/ses-events/index';
+import { createLogger } from './log.js';
 import { parseSesEvent, type SesEvent } from './ses-events.js';
+import { propertySeed } from './test/property-seed.js';
 
 const BOUNCE_MESSAGE_ID = 'EXAMPLE7c191be45-e9aedb9a-02f9-4d12-a87d-dd0099a07f8a-000000';
 
@@ -283,6 +286,84 @@ describe('parseSesEvent: field is absent when the input is not an object', () =>
 // derivation rule above: a first zod issue whose path does not start with "detail" (a missing
 // top-level envelope field, the common shape of hostile or near-empty input) never surfaces a
 // field, only the empty-path cross-check and detail-rooted content issues do.
+// Every key the schemas above declare. field is read from a zod issue path, so each segment of it
+// must be one of these (or the whole field reads envelope): any other segment would be text the
+// input chose, carried into a log line.
+const SCHEMA_KEYS = new Set([
+  'detail', 'mail', 'timestamp', 'messageId', 'source', 'destination', 'tags', 'eventType',
+  'send', 'delivery', 'processingTimeMillis', 'recipients', 'smtpResponse', 'reportingMTA', 'remoteMtaIp',
+  'bounce', 'bounceType', 'bounceSubType', 'bouncedRecipients', 'emailAddress', 'action', 'status',
+  'diagnosticCode', 'feedbackId', 'complaint', 'complainedRecipients', 'complaintSubType',
+  'complaintFeedbackType', 'reject', 'reason', 'deliveryDelay', 'delayType', 'delayedRecipients', 'expirationTime',
+]);
+
+type PathKey = string | number;
+
+// Every path in a JSON value, the root and every inner object or array included.
+function pathsIn(value: unknown, prefix: readonly PathKey[] = []): PathKey[][] {
+  if (typeof value !== 'object' || value === null) return [[...prefix]];
+  const entries: [PathKey, unknown][] = Array.isArray(value)
+    ? value.map((child, index): [PathKey, unknown] => [index, child])
+    : Object.entries(value);
+  return [[...prefix], ...entries.flatMap(([key, child]) => pathsIn(child, [...prefix, key]))];
+}
+
+// A copy of the event with the value at path replaced, or removed.
+function damagedAt(event: unknown, path: readonly PathKey[], replacement: unknown, remove: boolean): unknown {
+  const last = path[path.length - 1];
+  if (last === undefined) return remove ? undefined : replacement;
+  const copy = structuredClone(event) as Record<PathKey, unknown>;
+  let node = copy;
+  for (const key of path.slice(0, -1)) node = node[key] as Record<PathKey, unknown>;
+  if (remove) delete node[last];
+  else node[last] = replacement;
+  return copy;
+}
+
+describe('parseSesEvent: field stays a closed vocabulary under arbitrary damage', () => {
+  const fixtures = SES_EVENT_FIXTURE_NAMES.map((name) => loadSesEventFixture(name).event);
+
+  it('names only schema keys, whatever value replaces or removes whatever part of a real event, and passes the logger unchanged', () => {
+    const damageArb = fc
+      .constantFrom(...fixtures)
+      .chain((event) => fc.tuple(fc.constant(event), fc.constantFrom(...pathsIn(event)), fc.jsonValue(), fc.boolean()));
+    let fielded = 0;
+    fc.assert(
+      fc.property(damageArb, ([event, path, replacement, remove]) => {
+        const result = parseSesEvent(damagedAt(event, path, replacement, remove));
+        if (result.ok || result.field === undefined) return;
+        fielded += 1;
+        const strays = result.field === 'envelope' ? [] : result.field.split('.').filter((segment) => !SCHEMA_KEYS.has(segment));
+        expect(strays).toEqual([]);
+        const lines: string[] = [];
+        createLogger((line) => lines.push(line)).error({ event: 'dropped-unparseable', field: result.field });
+        expect(JSON.parse(lines[0] ?? '{}')).toMatchObject({ field: result.field });
+      }),
+      { seed: propertySeed(), numRuns: 500 },
+    );
+    // Non-vacuity: a run where almost no damage produced a field would pass while checking nothing.
+    expect(fielded).toBeGreaterThan(100);
+  });
+
+  // The schema library drops an own __proto__ key from a record outright (probed 2026-09-26 on
+  // zod 4.6.5), so that one key parses clean and is left out here.
+  it('never names a planted tag key, whatever the key and its unreadable value', () => {
+    fc.assert(
+      fc.property(
+        fc.string({ unit: 'binary', minLength: 1 }).filter((key) => key !== '__proto__'),
+        fc.jsonValue().filter((value) => !Array.isArray(value)),
+        (key, value) => {
+          const event = fixtureEvent('bounce');
+          const tags = (detailOf(event).mail as { tags: Record<string, unknown> }).tags;
+          Object.defineProperty(tags, key, { value, enumerable: true, writable: true, configurable: true });
+          expect(parseSesEvent(event)).toEqual({ ok: false, messageId: BOUNCE_MESSAGE_ID, field: 'detail.mail.tags' });
+        },
+      ),
+      { seed: propertySeed() },
+    );
+  });
+});
+
 describe('parseSesEvent: hostile or near-empty input carries no field, matching the pinned 01-01 case', () => {
   it.each([{}, { detail: null }, { detail: { mail: null } }, { detail: { mail: { messageId: 42 } } }])(
     'omits field for %j even though it is a plain object',
