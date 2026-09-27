@@ -19,8 +19,9 @@
 // deliberate - step 1 fails fast on the cheapest honest signal.
 //
 // After the core four: the repo-hygiene chain (gate:repo, needs no build),
-// then a build, then the OPTIONAL surfaces (coverage floors, e2e, the live
-// a11y audit, mutation) - each optional step runs when its script exists and
+// then a selftest of every gate script's own --selftest controls, then a
+// build, then the OPTIONAL surfaces (coverage floors, e2e, the live a11y
+// audit, mutation) - each optional step runs when its script exists and
 // prints one loud SKIPPED line when it does not, so "not applicable" is a
 // visible statement rather than a silent absence. See the STEPS comment.
 //
@@ -40,7 +41,7 @@
 //     not) can linger and keep printing after the FAIL verdict. The verdict is
 //     still correct; kill the leftover node process manually if one hangs on.
 
-import { spawnSync } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 
 // Generous by design: it must never fail a legitimately slow FULL suite; it
@@ -65,6 +66,9 @@ const STEP_TIMEOUT_MS =
 // (with what would make it applicable) and does not fail the run; the moment the product gains
 // the script, the step runs and enforces. That is the difference between a backend product
 // honestly having no a11y surface and a web product quietly never auditing one.
+//   - selftest runs every gate script's own --selftest controls once, after the repo-hygiene
+//     chain and before the build: a gate whose --selftest itself regressed is caught here, not
+//     discovered the day a real mutation slips past it silently.
 //   - build precedes a11y/e2e because both audit BUILT output (`--if-present` keeps it a no-op
 //     on products with no build script).
 //   - a11y  = the live axe gate (a11y-live.mjs), AFTER the build, per its own section in the
@@ -95,6 +99,7 @@ const STEPS = [
   { name: 'lint',  cmd: 'npm run lint' },       // WHOLE-repo lint
   { name: 'gate',  cmd: 'npm run gate' },       // committed gate chain (floors)
   { name: 'repo', cmd: 'npm run gate:repo', script: 'gate:repo', appliesWhen: 'the repo-hygiene gates (goals, gitignore, hookspath, license, identity, artifact metadata, compliance, icon decision, human-todo classification) are installed with their gate:repo script' },
+  { name: 'selftest', cmd: 'npm run gate:selftest', script: 'gate:selftest', appliesWhen: 'the gate scripts carry --selftest controls and a gate:selftest script runs them' },
   { name: 'build', cmd: 'npm run build', script: 'build', appliesWhen: 'a package in the workspace has something to build' },
   { name: 'coverage', cmd: 'npm run test:coverage', script: 'test:coverage', appliesWhen: 'a test:coverage script with floors exists' },
   { name: 'e2e', cmd: 'npm run test:e2e', script: 'test:e2e', appliesWhen: 'a test:e2e script exists' },
@@ -107,37 +112,97 @@ const STEPS = [
 let pkgScripts = null;
 try { pkgScripts = JSON.parse(readFileSync('package.json', 'utf8')).scripts || {}; } catch { pkgScripts = null; }
 
+// Runs one step asynchronously: stdin inherited, stdout and stderr piped and written straight
+// through to the parent streams AS THEY ARRIVE (a slow step's output must never be held back
+// until it exits), while every line crossing either stream is also scanned for the uppercase
+// word SKIPPED. A sub-gate that declares itself SKIPPED inside a step that itself exits 0 is
+// otherwise invisible to anything reading only that step's own exit code - exactly the
+// scoped-pass-as-full-pass failure this script exists to catch one level up. The timeout is a
+// manual kill rather than spawnSync's built-in option, because streaming needs the async spawn
+// API; the residual Windows grandchild-lingers limitation noted at the top of this file is
+// unchanged; both mechanisms only ever signal the immediate child.
+function runStep(step, stepTimeoutMs) {
+  return new Promise((resolve) => {
+    const child = spawn(step.cmd, { shell: true, stdio: ['inherit', 'pipe', 'pipe'] });
+    const subGates = [];
+    let timedOut = false;
+    let settled = false;
+
+    const timer = setTimeout(() => {
+      timedOut = true;
+      child.kill();
+    }, stepTimeoutMs);
+
+    function scanLine(line) {
+      if (/\bSKIPPED\b/.test(line)) subGates.push(line);
+    }
+
+    function relay(source, sink) {
+      let buf = '';
+      source.on('data', (chunk) => {
+        sink.write(chunk);
+        buf += chunk.toString('utf8');
+        let newline;
+        while ((newline = buf.indexOf('\n')) !== -1) {
+          scanLine(buf.slice(0, newline));
+          buf = buf.slice(newline + 1);
+        }
+      });
+      source.on('end', () => {
+        if (buf) scanLine(buf);
+      });
+    }
+    relay(child.stdout, process.stdout);
+    relay(child.stderr, process.stderr);
+
+    function finish(result) {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve({ ...result, subGates });
+    }
+
+    child.on('error', (err) => finish({ kind: 'error', message: err.message }));
+    // Order matters: a kill from the timeout above can still deliver `code: null` or a signal
+    // through `close`, so the timedOut flag is checked first, or the message would misreport a
+    // genuine hang as "killed by signal" with no mention of the timeout that caused it.
+    child.on('close', (code) => {
+      if (timedOut) finish({ kind: 'timeout' });
+      else if (code === null) finish({ kind: 'signal' });
+      else finish({ kind: 'exit', code });
+    });
+  });
+}
+
 const results = [];
 let failed = null;
 
 for (const step of STEPS) {
   if (failed) {
-    results.push({ ...step, status: 'NOT RUN', code: null });
+    results.push({ ...step, status: 'NOT RUN', code: null, subGates: [] });
     continue;
   }
   if (step.script && pkgScripts && !Object.prototype.hasOwnProperty.call(pkgScripts, step.script)) {
     console.log(`\n[verify:ship] SKIPPED "${step.name}": no "${step.script}" script in package.json. ` +
       `Not applicable until ${step.appliesWhen}; add the script and this step enforces itself.`);
-    results.push({ ...step, status: 'SKIPPED', code: null });
+    results.push({ ...step, status: 'SKIPPED', code: null, subGates: [] });
     continue;
   }
   console.log(`\n[verify:ship] running "${step.name}": ${step.cmd}`);
   const stepTimeout = step.timeoutMs || STEP_TIMEOUT_MS;
-  const r = spawnSync(step.cmd, { shell: true, stdio: 'inherit', timeout: stepTimeout });
+  const r = await runStep(step, stepTimeout);
   let code;
-  // Order matters: a timeout kill sets BOTH r.error (ETIMEDOUT) and r.signal,
-  // so diagnose it first or the message misreports it as "could not run".
-  if (r.error && r.error.code === 'ETIMEDOUT') {
+  if (r.kind === 'timeout') {
     console.error(`[verify:ship] ${step.name} TIMED OUT after ${stepTimeout / 60000} min (hung step?) - killed`);
     code = 1;
-  } else if (r.error) {
-    console.error(`[verify:ship] ${step.name} could not run: ${r.error.message}`);
+  } else if (r.kind === 'error') {
+    console.error(`[verify:ship] ${step.name} could not run: ${r.message}`);
     code = 1;
-  } else if (r.status === null) {
-    console.error(`[verify:ship] ${step.name} killed by signal ${r.signal}`);
+  } else if (r.kind === 'signal') {
+    console.error(`[verify:ship] ${step.name} killed by signal`);
     code = 1;
   } else {
-    code = r.status;
+    code = r.code;
   }
   console.log(`[verify:ship] ${step.name} exited ${code}`);
   // A declared skip (see the skipCode note above the STEPS table) is neither a pass nor a
@@ -145,15 +210,23 @@ for (const step of STEPS) {
   // not stop the run. Only the step that declares the code may use it.
   const declaredSkip = step.skipCode !== undefined && code === step.skipCode;
   const status = code === 0 ? 'PASS' : declaredSkip ? 'SKIPPED' : 'FAIL';
-  results.push({ ...step, status, code });
+  results.push({ ...step, status, code, subGates: r.subGates });
   if (status === 'FAIL') failed = { name: step.name, code };
 }
 
 const pad = Math.max(...STEPS.map((s) => s.name.length));
+let subGateCount = 0;
 console.log('\n============ verify:ship summary ============');
 for (const r of results) {
   const codeStr = r.code === null ? '' : ` (exit ${r.code})`;
   console.log(`  ${r.name.padEnd(pad)}  ${r.status}${codeStr}`);
+  // Every SKIPPED sub-gate line the step's own output printed is repeated here, indented under
+  // its step, in run order - a PASS above must never be the only trace of a sub-gate that
+  // audited nothing.
+  for (const line of r.subGates) {
+    console.log(`      ${line}`);
+    subGateCount++;
+  }
 }
 console.log('=============================================');
 
@@ -161,15 +234,21 @@ if (failed) {
   console.log(`verify:ship: FAIL at step "${failed.name}" (exit ${failed.code})`);
   process.exit(failed.code || 1);
 }
-// The skip count prints IN the verdict line, never only in the scroll above it: a PASS that
-// silently absorbed skips is the scoped-pass-as-full-pass claim this script exists to kill.
-// `green` counts PASS only, so a skipped step is missing from the ratio as well as named in
-// the list, and the trailing clause says what the reader is entitled to conclude.
+// The skip counts print IN the verdict line, never only in the scroll above it: a PASS that
+// silently absorbed a skipped step or sub-gate is the scoped-pass-as-full-pass claim this script
+// exists to kill. `green` counts PASS only, so a skipped step is missing from the ratio as well
+// as named in the list, and the trailing clause says what the reader is entitled to conclude.
 const green = results.filter((r) => r.status === 'PASS').length;
 const skippedSteps = results.filter((r) => r.status === 'SKIPPED');
+const skipNotes = [];
+if (skippedSteps.length) {
+  skipNotes.push(`${skippedSteps.length} SKIPPED as not applicable: ${skippedSteps.map((s) => s.name).join(', ')}`);
+}
+if (subGateCount) {
+  skipNotes.push(`${subGateCount} sub-gate SKIPPED line(s) repeated above`);
+}
 console.log(`verify:ship: PASS (${green}/${STEPS.length} steps green` +
-  (skippedSteps.length
-    ? `, ${skippedSteps.length} SKIPPED as not applicable: ${skippedSteps.map((s) => s.name).join(', ')}` +
-      ' - a SKIPPED step audited nothing, so this PASS does not cover it'
+  (skipNotes.length
+    ? `, ${skipNotes.join(', ')} - a SKIPPED step or sub-gate audited nothing, so this PASS does not cover it`
     : '') + ')');
 process.exit(0);
