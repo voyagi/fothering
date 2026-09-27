@@ -1,22 +1,21 @@
 import { afterEach, describe, expect, it } from 'vitest';
+import { LIVE_SWITCH } from '@fothering/core/mode';
 import { readLiveSwitch } from './live-switch.js';
 
-const SWITCH_KEY = 'FOTHERING_LIVE';
-
 describe('readLiveSwitch', () => {
-  const saved = process.env[SWITCH_KEY];
+  const saved = process.env[LIVE_SWITCH];
   afterEach(() => {
-    if (saved === undefined) delete process.env[SWITCH_KEY];
-    else process.env[SWITCH_KEY] = saved;
+    if (saved === undefined) delete process.env[LIVE_SWITCH];
+    else process.env[LIVE_SWITCH] = saved;
   });
 
   it('returns undefined when the switch is unset', () => {
-    delete process.env[SWITCH_KEY];
+    delete process.env[LIVE_SWITCH];
     expect(readLiveSwitch()).toBeUndefined();
   });
 
   it('returns the exact process value, whitespace untouched', () => {
-    process.env[SWITCH_KEY] = ' live ';
+    process.env[LIVE_SWITCH] = ' live ';
     expect(readLiveSwitch()).toBe(' live ');
   });
 });

@@ -98,9 +98,45 @@ export default [
   // is exactly the kind of implicit choice the live providers wrapper exists to make explicit.
   // The namespace-access selector catches `new sdk.Agent()`; a renamed default import is not
   // caught by either selector, since matching a rename would need type information this rule
-  // does not have.
+  // does not have. mode.ts is the one place allowed to decide what "live" means, so it carries
+  // only the agent selectors below, in its own object further down, never these four.
   {
     files: ['packages/*/src/**/*.ts'],
+    ignores: ['packages/core/src/mode.ts'],
+    languageOptions: { ...tsParser },
+    rules: {
+      'no-restricted-syntax': ['error',
+        {
+          selector: "NewExpression[callee.name='Agent'][arguments.length=0]",
+          message: 'Build an Agent with an explicit model from the live providers.',
+        },
+        {
+          selector: "NewExpression[callee.property.name='Agent'][arguments.length=0]",
+          message: 'Build an Agent with an explicit model from the live providers.',
+        },
+        {
+          selector: "BinaryExpression[operator=/^(==|===|!=|!==)$/][right.value='live'][left.object.name='env']",
+          message: 'Only mode.ts decides live mode.',
+        },
+        {
+          selector:
+            "BinaryExpression[operator=/^(==|===|!=|!==)$/][right.value='live'][left.object.object.name='process'][left.object.property.name='env']",
+          message: 'Only mode.ts decides live mode.',
+        },
+        {
+          selector: "BinaryExpression[operator=/^(==|===|!=|!==)$/][left.value='live'][right.object.name='env']",
+          message: 'Only mode.ts decides live mode.',
+        },
+        {
+          selector:
+            "BinaryExpression[operator=/^(==|===|!=|!==)$/][left.value='live'][right.object.object.name='process'][right.object.property.name='env']",
+          message: 'Only mode.ts decides live mode.',
+        },
+      ],
+    },
+  },
+  {
+    files: ['packages/core/src/mode.ts'],
     languageOptions: { ...tsParser },
     rules: {
       'no-restricted-syntax': ['error',
