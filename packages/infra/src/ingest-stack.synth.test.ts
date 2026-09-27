@@ -32,7 +32,9 @@ describe('IngestStack synth', () => {
     if (assetDir) rmSync(assetDir, { recursive: true, force: true });
   });
 
-  it('synthesizes one rule, one function and one table matching the committed lane map', () => {
+  // A synth loads aws-cdk-lib whole and hashes an asset: 3.3 s alone, and 6.3 s once under a full
+  // parallel suite, past vitest's 5 s default. The limit is explicit so load cannot fail it.
+  it('synthesizes one rule, one function and one table matching the committed lane map', { timeout: 30_000 }, () => {
     assetDir = stubAssetDir();
     const laneMap = parseLaneMap(lanesJson);
     const app = new App();
