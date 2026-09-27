@@ -4,12 +4,15 @@ const path = require('node:path');
 module.exports = {
   forbidden: [
     {
-      name: 'aws-sdk-only-in-providers',
+      name: 'aws-clients-only-in-providers',
       severity: 'error',
+      // The exemption is path-exact (packages/providers/src/, not a prefix match), so a sibling
+      // folder that merely starts with the same name, or a package added after this rule was
+      // written, stays outside it with no edit here.
       comment:
-        'Only provider adapters may import an AWS SDK client. Everything else goes through a port, which is what keeps the fixture default and the account-level guard enforceable.',
+        'Only provider adapters may import an AWS client package. Everything else goes through a port, which is what keeps the fixture default and the account-level guard enforceable.',
       from: { path: '^packages/[^/]+/src/', pathNot: '^packages/providers/src/' },
-      to: { path: '(^|/)@aws-sdk/' },
+      to: { path: '(^|/)@aws-sdk/|(^|/)@smithy/|(^|/)@aws-crypto/|(^|/)bedrock-agentcore($|/)|(^|/)aws4fetch($|/)' },
     },
     {
       name: 'no-circular',

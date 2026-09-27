@@ -51,4 +51,68 @@ export default [
     plugins: { compat },
     rules: { 'compat/compat': 'error' },
   },
+  // The depcruise boundary bans these imports at the module level; this rule bans the same
+  // families at review time, so a violation shows up as a lint error before a commit lands, not
+  // only when gate:deps runs. BedrockModel is banned everywhere outside the live adapters, since
+  // the wrapper (not the model class) is what stays swappable.
+  {
+    files: ['packages/*/src/**/*.ts'],
+    ignores: ['packages/providers/src/**'],
+    languageOptions: { ...tsParser },
+    rules: {
+      'no-restricted-imports': ['error', {
+        patterns: [
+          { group: ['@aws-sdk/*'], message: 'AWS clients build only inside packages/providers/src.' },
+          { group: ['@smithy/*'], message: 'AWS clients build only inside packages/providers/src.' },
+          { group: ['@aws-crypto/*'], message: 'AWS clients build only inside packages/providers/src.' },
+          { group: ['bedrock-agentcore', 'bedrock-agentcore/*'], message: 'AWS clients build only inside packages/providers/src.' },
+          { group: ['aws4fetch'], message: 'AWS clients build only inside packages/providers/src.' },
+          {
+            group: ['@strands-agents/sdk', '@strands-agents/sdk/*'],
+            importNames: ['BedrockModel'],
+            message: 'BedrockModel is wired only inside packages/providers/src/live.',
+          },
+        ],
+      }],
+    },
+  },
+  // Inside providers, the AWS clients are exactly what this workspace exists to hold; only the
+  // model class stays confined to the live adapters that actually call Bedrock.
+  {
+    files: ['packages/providers/src/**/*.ts'],
+    ignores: ['packages/providers/src/live/**'],
+    languageOptions: { ...tsParser },
+    rules: {
+      'no-restricted-imports': ['error', {
+        patterns: [
+          {
+            group: ['@strands-agents/sdk', '@strands-agents/sdk/*'],
+            importNames: ['BedrockModel'],
+            message: 'BedrockModel is wired only inside packages/providers/src/live.',
+          },
+        ],
+      }],
+    },
+  },
+  // An agent built with no model argument would fall back to whatever the SDK defaults to, which
+  // is exactly the kind of implicit choice the live providers wrapper exists to make explicit.
+  // The namespace-access selector catches `new sdk.Agent()`; a renamed default import is not
+  // caught by either selector, since matching a rename would need type information this rule
+  // does not have.
+  {
+    files: ['packages/*/src/**/*.ts'],
+    languageOptions: { ...tsParser },
+    rules: {
+      'no-restricted-syntax': ['error',
+        {
+          selector: "NewExpression[callee.name='Agent'][arguments.length=0]",
+          message: 'Build an Agent with an explicit model from the live providers.',
+        },
+        {
+          selector: "NewExpression[callee.property.name='Agent'][arguments.length=0]",
+          message: 'Build an Agent with an explicit model from the live providers.',
+        },
+      ],
+    },
+  },
 ];
