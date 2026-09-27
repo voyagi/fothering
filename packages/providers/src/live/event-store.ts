@@ -12,10 +12,13 @@ import {
 import { requireLiveConfig, type EventStorePort } from '../port-types.js';
 
 const CONDITIONAL_CHECK_FAILED = 'ConditionalCheckFailedException';
-// A sort key range's upper bound must clear every suffix a bucket's own rows can carry
-// (`#<eventType>#<identity>[#<recipientHmac>]`); every character those parts can hold sorts below
-// U+FFFF, so appending it turns "up to this bucket" into "through the end of this bucket".
-const SORT_KEY_UPPER_SENTINEL = '￿';
+// A sort key range's upper bound must clear every key a bucket's own rows carry. recordKey always
+// follows the bucket prefix with '#' (byte 0x23), and DynamoDB compares string keys by the bytes
+// of their UTF-8 encoding, where U+FFFF is EF BF BF. So every key of the bucket sorts below its
+// prefix followed by U+FFFF, whatever comes after that '#', and the next bucket's prefix, whose
+// zero-padded digits differ, sorts above it: appending U+FFFF turns "up to this bucket" into
+// "through the end of this bucket". The escape keeps the noncharacter visible in the source.
+const SORT_KEY_UPPER_SENTINEL = '\uFFFF';
 
 export interface CreateDynamoEventStoreOptions {
   tableName: string | undefined;

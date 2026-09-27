@@ -1,11 +1,20 @@
 import { describe, expect, it } from 'vitest';
+import fc from 'fast-check';
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocumentClient } from '@aws-sdk/lib-dynamodb';
 import { SecretsManagerClient } from '@aws-sdk/client-secrets-manager';
 import { SQSClient } from '@aws-sdk/client-sqs';
 import { SESv2Client } from '@aws-sdk/client-sesv2';
-import { bucketSortKeyPrefix, type EventRecord, type RecordKey } from '@fothering/core/records';
+import {
+  SES_EVENT_TYPES,
+  bucketSortKeyPrefix,
+  isStorableBucketStart,
+  recordKey,
+  type EventRecord,
+  type RecordKey,
+} from '@fothering/core/records';
 import { selectKeyVersion } from '@fothering/core/address';
+import { propertySeed } from '@fothering/core/test/property-seed';
 import { findLane } from '@fothering/core/lanes';
 import { minimizeEvent } from '@fothering/core/minimize';
 import { parseSesEvent } from '@fothering/core/ses-events';
@@ -124,7 +133,7 @@ describe('createDynamoEventStore', () => {
       ExpressionAttributeValues: {
         ':pk': 'LANE#x',
         ':from': bucketSortKeyPrefix(fromBucketMs),
-        ':to': `${bucketSortKeyPrefix(toBucketMs)}￿`,
+        ':to': `${bucketSortKeyPrefix(toBucketMs)}\uFFFF`,
         ':now': Math.floor(nowMs / 1000),
       },
     });
@@ -230,6 +239,66 @@ describe('createDynamoEventStore', () => {
       envVar: 'FOTHERING_TABLE_NAME',
     });
     expect(constructed).toBe(0);
+  });
+
+  // DynamoDB "collates and compares strings using the bytes of the underlying UTF-8 string
+  // encoding" (developer guide, Supported data types and naming rules), so the lane range is
+  // checked in that order, never in JavaScript's string order, which compares UTF-16 code units
+  // and disagrees with it above U+FFFF.
+  describe('the lane range in UTF-8 byte order', () => {
+    const LAST_STORABLE_BUCKET_MS = 9_999_999_999_999;
+    const utf8 = (text: string): Buffer => Buffer.from(text, 'utf8');
+
+    // The range queryLane really sends for one bucket, read off its recorded QueryCommand, so the
+    // checks run against the store's own sentinel rather than a copy of it.
+    function laneRangeReader(): (bucketMs: number) => Promise<{ from: string; to: string }> {
+      const client = dynamoClient();
+      const calls = stubSend(client, () => ({ Items: [] }));
+      const store = createDynamoEventStore({ tableName: 'events', client: () => client, now: () => 0 });
+      return async (bucketMs) => {
+        await store.queryLane('x', bucketMs, bucketMs, 0);
+        const input = calls.at(-1)?.input as { ExpressionAttributeValues?: Record<string, unknown> } | undefined;
+        const from = input?.ExpressionAttributeValues?.[':from'];
+        const to = input?.ExpressionAttributeValues?.[':to'];
+        if (typeof from !== 'string' || typeof to !== 'string') throw new Error('queryLane sent no string :from and :to');
+        return { from, to };
+      };
+    }
+
+    // Any identity at all, the full Unicode range included: the '#' recordKey writes right after the
+    // bucket prefix is the byte the bound is compared on, so nothing the identity holds can move a
+    // key out of its bucket's range.
+    it('keeps every key recordKey can build for a bucket inside its range and below the next bucket (fixed seed)', async () => {
+      const readRange = laneRangeReader();
+      await fc.assert(
+        fc.asyncProperty(
+          fc.integer({ min: 0, max: LAST_STORABLE_BUCKET_MS }),
+          fc.constantFrom(...SES_EVENT_TYPES),
+          fc.string({ unit: 'binary' }),
+          async (bucketMs, eventType, identity) => {
+            const { from, to } = await readRange(bucketMs);
+            const key = utf8(recordKey({ configurationSet: 'x', bucketStartMs: bucketMs, eventType, identity }).sk);
+            expect(Buffer.compare(utf8(from), key)).toBeLessThan(0);
+            expect(Buffer.compare(key, utf8(to))).toBeLessThan(0);
+            if (isStorableBucketStart(bucketMs + 1)) {
+              const next = utf8(bucketSortKeyPrefix(bucketMs + 1));
+              expect(Buffer.compare(key, next)).toBeLessThan(0);
+              expect(Buffer.compare(utf8(to), next)).toBeLessThan(0);
+            }
+          },
+        ),
+        { seed: propertySeed() },
+      );
+    });
+
+    // A shape recordKey never writes, since it always follows the prefix with '#': a character above
+    // U+FFFF right after the prefix, where the two orders disagree about the bound.
+    it('puts a character above U+FFFF right after the prefix past the upper bound in UTF-8 byte order, though JavaScript string order keeps it inside', async () => {
+      const { to } = await laneRangeReader()(0);
+      const astralAfterPrefix = `${bucketSortKeyPrefix(0)}${String.fromCodePoint(0x1f600)}`;
+      expect(astralAfterPrefix < to).toBe(true);
+      expect(Buffer.compare(utf8(astralAfterPrefix), utf8(to))).toBeGreaterThan(0);
+    });
   });
 });
 
