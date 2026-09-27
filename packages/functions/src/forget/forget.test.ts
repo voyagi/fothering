@@ -116,6 +116,21 @@ describe('forgetFromPayload (AC-15)', () => {
   it('matches the usage line the documentation shows verbatim', () => {
     expect(docText).toContain(FORGET_USAGE);
   });
+
+  // A zero is only as good as the address it was asked about: a field naming two addresses is read
+  // as one malformed address and reaches neither recipient, which the documentation must say.
+  it('reads zero for a field naming two addresses, as the documentation warns', async () => {
+    const targetAddress = 'jane@example.com';
+    const deps = buildForgetRoot({ runtimeContext: 'test', switchValue: undefined });
+    const { record, recipientHmac } = seededRecord(targetAddress);
+    await deps.ports.eventStore.putIfAbsent(record);
+
+    const report = await forgetFromPayload({ address: `${targetAddress}, nobody@example.org` }, deps);
+
+    expect(report.deleted).toBe(0);
+    await expect(deps.ports.eventStore.queryByRecipient(recipientHmac)).resolves.toHaveLength(1);
+    expect(docText).toContain('one address per run');
+  });
 });
 
 describe('docs/forget-one-recipient.md', () => {

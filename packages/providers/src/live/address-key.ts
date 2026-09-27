@@ -18,13 +18,19 @@ export class AddressKeySecretError extends Error {
 
 // D-13/D-34: {"current":"k1","activeFrom":{"k1":0,...},"k1":"<secret>",...}. Every version named in
 // activeFrom needs a matching top-level secret field, and current must name the newest one -
-// checked here so a malformed secret never produces a partially built key set.
+// checked here so a malformed secret never produces a partially built key set. No message below
+// names a version id or a value: a version id is a field name, so key material pasted where an id
+// belongs would otherwise reach the function's log through the error.
 const addressKeySecretSchema = z
   .object({
     current: z.string().min(1),
     activeFrom: z.record(z.string(), z.number()),
   })
-  .catchall(z.string().min(MIN_SECRET_LENGTH))
+  .catchall(
+    z.string().min(MIN_SECRET_LENGTH, {
+      error: `every field other than current and activeFrom must be a key version secret of at least ${String(MIN_SECRET_LENGTH)} characters`,
+    }),
+  )
   .superRefine((value, ctx) => {
     const versionIds = Object.keys(value.activeFrom);
     if (versionIds.length === 0) {
@@ -43,13 +49,13 @@ const addressKeySecretSchema = z
         continue;
       }
       if (typeof rawFields[id] !== 'string') {
-        ctx.addIssue(`activeFrom names version ${id} with no matching secret field`);
+        ctx.addIssue('activeFrom names a version with no matching secret field');
         continue;
       }
       const activeFromMs = value.activeFrom[id];
       if (activeFromMs === undefined) continue;
       if (seenActiveFromMs.has(activeFromMs)) {
-        ctx.addIssue(`activeFrom gives version ${id} the same moment as another version`);
+        ctx.addIssue('activeFrom gives two versions the same moment');
       }
       seenActiveFromMs.add(activeFromMs);
       if (activeFromMs > newestActiveFromMs) {
@@ -64,7 +70,11 @@ const addressKeySecretSchema = z
 
 function parseAddressKeySet(raw: unknown): AddressKeySet {
   const result = addressKeySecretSchema.safeParse(raw);
-  if (!result.success) throw new AddressKeySecretError('the address key secret failed validation');
+  if (!result.success) {
+    // The rule messages only, never an issue path: a path is a field name, which can be an id.
+    const rules = [...new Set(result.error.issues.map((issue) => issue.message))];
+    throw new AddressKeySecretError(`the address key secret failed validation: ${rules.join('; ')}`);
+  }
 
   const { activeFrom, ...fields } = result.data;
   const secretsById = fields as Record<string, string>;

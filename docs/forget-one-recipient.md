@@ -35,6 +35,12 @@ aws lambda invoke \
 `result.json` holds a deleted count per key version (newest first), a total deleted count and a
 remaining count. It never holds the address or a hash.
 
+A deleted count of zero means no stored record matched the address as the command normalizes it:
+letter case, a display name and two Unicode spellings of one name are handled, and a plus-tag stays
+part of the address. A typo also reads zero, and so does a field holding two addresses, which is
+read as one malformed address and reaches neither. Pass one address per run, and check its
+spelling before taking a zero as the answer.
+
 A payload with no non-empty `address` field fails. The command's own output then shows a
 `FunctionError` field, and `result.json` holds the error, whose message reads:
 

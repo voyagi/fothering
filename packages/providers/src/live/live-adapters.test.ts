@@ -420,6 +420,40 @@ describe('createSecretsManagerAddressKey', () => {
     await expect(adapter.getKeySet()).rejects.toBeInstanceOf(AddressKeySecretError);
   });
 
+  // The rule a secret broke is what an operator needs to repair a rotation; a value never is. A
+  // version id is a field name, so key material pasted where an id belongs would be an id, and a
+  // message naming ids would carry it into the function's log.
+  const PASTED_KEY_MATERIAL = 'pasted-key-material-in-place-of-a-version-id-0123456789';
+  it.each([
+    [
+      'current naming an older version',
+      { current: 'k1', activeFrom: { k1: 0, k2: 1000 }, k1: K1_SECRET, k2: K2_SECRET },
+      'current does not name the version with the newest activeFrom',
+    ],
+    ['a secret that is too short', { current: 'k1', activeFrom: { k1: 0 }, k1: 'too-short' }, 'at least 32 characters'],
+    [
+      'two versions sharing an activeFrom',
+      { current: 'k1', activeFrom: { k1: 500, k2: 500 }, k1: K1_SECRET, k2: K2_SECRET },
+      'two versions the same moment',
+    ],
+    [
+      'an activeFrom version with no secret field',
+      { current: 'k1', activeFrom: { k1: 0, [PASTED_KEY_MATERIAL]: -1 }, k1: K1_SECRET },
+      'no matching secret field',
+    ],
+  ])('names the rule broken by %s, never a value or a version id', async (_label, secret, rule) => {
+    const client = secretsManagerClient();
+    stubSend(client, () => ({ SecretString: JSON.stringify(secret) }));
+    const adapter = createSecretsManagerAddressKey({ secretId: 'address-key', client: () => client, now: () => 0 });
+
+    const message = await adapter.getKeySet().then(
+      () => 'resolved, expected a rejection',
+      (error: unknown) => (error instanceof AddressKeySecretError ? error.message : `not an AddressKeySecretError: ${String(error)}`),
+    );
+    expect(message).toContain(rule);
+    for (const value of [K1_SECRET, K2_SECRET, 'too-short', PASTED_KEY_MATERIAL]) expect(message).not.toContain(value);
+  });
+
   it('refuses a secret that fails its schema, without echoing any secret value', async () => {
     const client = secretsManagerClient();
     stubSend(client, () => ({ SecretString: JSON.stringify({ current: 'k1', activeFrom: { k1: 0 }, k1: 'too-short' }) }));
