@@ -75,7 +75,17 @@ describe('forgetFromPayload (AC-15)', () => {
     expect(report.remaining).toBe(0);
   });
 
-  it.each([{}, { address: '' }, { address: '   ' }, { address: 123 }, null, 'not an object'])(
+  // A second field is refused, not ignored: a payload naming two addresses must not forget the first
+  // and report it like a run that covered both.
+  it.each([
+    {},
+    { address: '' },
+    { address: '   ' },
+    { address: 123 },
+    null,
+    'not an object',
+    { address: 'jane@example.com', second: 'nobody@example.org' },
+  ])(
     'rejects the payload %j with ForgetUsageError carrying the same usage line the documentation shows (AC-E28)',
     async (badPayload) => {
       const deps = buildForgetRoot({ runtimeContext: 'test', switchValue: undefined });

@@ -35,11 +35,13 @@ export interface ForgetReport {
   remaining: number;
 }
 
-export const FORGET_USAGE = 'usage: pass a JSON payload holding one non-empty "address" field';
+export const FORGET_USAGE = 'usage: pass a JSON payload holding one non-empty "address" field and nothing else';
 
 // Trimmed before the length check: an address of spaces names no recipient, and it would still hash
-// (hashing trims too) to whatever records carry the empty input.
-export const forgetPayloadSchema = z.object({ address: z.string().trim().min(1) });
+// (hashing trims too) to whatever records carry the empty input. Strict, because a field this
+// command does not read is a request it would silently not carry out: a second address field would
+// be dropped while the report reads like a run that covered both.
+export const forgetPayloadSchema = z.strictObject({ address: z.string().trim().min(1) });
 
 export class ForgetUsageError extends Error {
   constructor() {

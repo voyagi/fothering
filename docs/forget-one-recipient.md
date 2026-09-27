@@ -41,11 +41,12 @@ part of the address. A typo also reads zero, and so does a field holding two add
 read as one malformed address and reaches neither. Pass one address per run, and check its
 spelling before taking a zero as the answer.
 
-A payload with no non-empty `address` field fails. The command's own output then shows a
-`FunctionError` field, and `result.json` holds the error, whose message reads:
+A payload with no non-empty `address` field fails, and so does one carrying any other field beside
+it. The command's own output then shows a `FunctionError` field, and `result.json` holds the error,
+whose message reads:
 
 ```text
-usage: pass a JSON payload holding one non-empty "address" field
+usage: pass a JSON payload holding one non-empty "address" field and nothing else
 ```
 
 ## The remaining count and running it twice

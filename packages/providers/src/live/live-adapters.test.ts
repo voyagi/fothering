@@ -289,19 +289,22 @@ function secretsManagerClient(): SecretsManagerClient {
 
 const K1_SECRET = 'k1-secret-material-at-least-32-characters';
 const K2_SECRET = 'k2-secret-material-at-least-32-characters';
+// A second version's activeFrom as a real rotation writes it, in epoch milliseconds: the key read
+// refuses any activeFrom that is not 0 or a whole millisecond count from 2020 on.
+const LATER_MS = 1_700_000_000_000;
 
 describe('createSecretsManagerAddressKey', () => {
   it('parses every retained version with its activeFromMs', async () => {
     const client = secretsManagerClient();
     stubSend(client, () => ({
-      SecretString: JSON.stringify({ current: 'k2', activeFrom: { k1: 0, k2: 500 }, k1: K1_SECRET, k2: K2_SECRET }),
+      SecretString: JSON.stringify({ current: 'k2', activeFrom: { k1: 0, k2: LATER_MS }, k1: K1_SECRET, k2: K2_SECRET }),
     }));
     const adapter = createSecretsManagerAddressKey({ secretId: 'address-key', client: () => client, now: () => 0 });
 
     await expect(adapter.getKeySet()).resolves.toEqual({
       versions: [
         { id: 'k1', secret: K1_SECRET, activeFromMs: 0 },
-        { id: 'k2', secret: K2_SECRET, activeFromMs: 500 },
+        { id: 'k2', secret: K2_SECRET, activeFromMs: LATER_MS },
       ],
     });
   });
@@ -388,7 +391,7 @@ describe('createSecretsManagerAddressKey', () => {
   it('refuses a secret whose current does not name the newest activeFrom, without echoing any secret value', async () => {
     const client = secretsManagerClient();
     stubSend(client, () => ({
-      SecretString: JSON.stringify({ current: 'k1', activeFrom: { k1: 0, k2: 1000 }, k1: K1_SECRET, k2: K2_SECRET }),
+      SecretString: JSON.stringify({ current: 'k1', activeFrom: { k1: 0, k2: LATER_MS }, k1: K1_SECRET, k2: K2_SECRET }),
     }));
     const adapter = createSecretsManagerAddressKey({ secretId: 'address-key', client: () => client, now: () => 0 });
 
@@ -409,9 +412,12 @@ describe('createSecretsManagerAddressKey', () => {
   it.each([
     ['a version named current', { current: 'current', activeFrom: { current: 0 } }],
     ['a version named activeFrom', { current: 'activeFrom', activeFrom: { activeFrom: 0 } }],
-    ['an empty version id', { current: 'k2', activeFrom: { '': 0, k2: 500 }, '': K1_SECRET, k2: K2_SECRET }],
+    ['an empty version id', { current: 'k2', activeFrom: { '': 0, k2: LATER_MS }, '': K1_SECRET, k2: K2_SECRET }],
     // A tie leaves the version a send uses to the JSON key order, so it is refused whatever current names.
-    ['two versions sharing an activeFrom', { current: 'k1', activeFrom: { k1: 500, k2: 500 }, k1: K1_SECRET, k2: K2_SECRET }],
+    [
+      'two versions sharing an activeFrom',
+      { current: 'k1', activeFrom: { k1: LATER_MS, k2: LATER_MS }, k1: K1_SECRET, k2: K2_SECRET },
+    ],
   ])('refuses %s', async (_label, secret) => {
     const client = secretsManagerClient();
     stubSend(client, () => ({ SecretString: JSON.stringify(secret) }));
@@ -427,18 +433,18 @@ describe('createSecretsManagerAddressKey', () => {
   it.each([
     [
       'current naming an older version',
-      { current: 'k1', activeFrom: { k1: 0, k2: 1000 }, k1: K1_SECRET, k2: K2_SECRET },
+      { current: 'k1', activeFrom: { k1: 0, k2: LATER_MS }, k1: K1_SECRET, k2: K2_SECRET },
       'current does not name the version with the newest activeFrom',
     ],
     ['a secret that is too short', { current: 'k1', activeFrom: { k1: 0 }, k1: 'too-short' }, 'at least 32 characters'],
     [
       'two versions sharing an activeFrom',
-      { current: 'k1', activeFrom: { k1: 500, k2: 500 }, k1: K1_SECRET, k2: K2_SECRET },
+      { current: 'k1', activeFrom: { k1: LATER_MS, k2: LATER_MS }, k1: K1_SECRET, k2: K2_SECRET },
       'two versions the same moment',
     ],
     [
       'an activeFrom version with no secret field',
-      { current: 'k1', activeFrom: { k1: 0, [PASTED_KEY_MATERIAL]: -1 }, k1: K1_SECRET },
+      { current: 'k1', activeFrom: { k1: 0, [PASTED_KEY_MATERIAL]: LATER_MS }, k1: K1_SECRET },
       'no matching secret field',
     ],
   ])('names the rule broken by %s, never a value or a version id', async (_label, secret, rule) => {
@@ -452,6 +458,24 @@ describe('createSecretsManagerAddressKey', () => {
     );
     expect(message).toContain(rule);
     for (const value of [K1_SECRET, K2_SECRET, 'too-short', PASTED_KEY_MATERIAL]) expect(message).not.toContain(value);
+  });
+
+  // activeFrom is epoch milliseconds. A version written in seconds, the unit the table's own expiry
+  // uses, would be active at once and skip the rotation margin; one written in microseconds would
+  // never become active. Both pass every other rule, so the unit is refused on its own.
+  it.each([
+    ['epoch seconds', 1_700_000_000],
+    ['epoch microseconds', 1_700_000_000_000_000],
+    ['a fraction of a millisecond', LATER_MS + 0.5],
+    ['a moment before 2020', 1_500_000_000_000],
+  ])('refuses a version whose activeFrom is in %s', async (_label, activeFromMs) => {
+    const client = secretsManagerClient();
+    stubSend(client, () => ({
+      SecretString: JSON.stringify({ current: 'k2', activeFrom: { k1: 0, k2: activeFromMs }, k1: K1_SECRET, k2: K2_SECRET }),
+    }));
+    const adapter = createSecretsManagerAddressKey({ secretId: 'address-key', client: () => client, now: () => 0 });
+
+    await expect(adapter.getKeySet()).rejects.toThrow('epoch milliseconds');
   });
 
   it('refuses a secret that fails its schema, without echoing any secret value', async () => {

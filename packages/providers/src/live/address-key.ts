@@ -1,10 +1,22 @@
 import { GetSecretValueCommand, type SecretsManagerClient } from '@aws-sdk/client-secrets-manager';
 import { z } from 'zod';
 import type { AddressKeySet } from '@fothering/core/address';
+import { isStorableBucketStart } from '@fothering/core/records';
 import { requireLiveConfig, type AddressKeyPort } from '../port-types.js';
 
 const CACHE_TTL_MS = 5 * 60 * 1000;
 const MIN_SECRET_LENGTH = 32;
+const EARLIEST_ACTIVE_FROM_MS = Date.UTC(2020, 0, 1);
+
+// activeFrom is epoch milliseconds: 0 for the first version, otherwise a whole millisecond count
+// from 2020 on that fits the same 13 digits the table's time keys hold. A version written in
+// seconds, the unit the table's own expiry uses, would be active at once and skip the rotation
+// margin; one written in microseconds would never become active. Neither breaks another rule.
+const activeFromSchema = z.number().refine(
+  (activeFromMs) => activeFromMs === 0 || (isStorableBucketStart(activeFromMs) && activeFromMs >= EARLIEST_ACTIVE_FROM_MS),
+  { error: 'every activeFrom must be 0 or a whole number of epoch milliseconds from 2020 on, 13 digits at most' },
+);
+
 // A version id doubles as a field name in the same object, so an id equal to one of these would
 // read that field as its key material ("current" would make the short version name the secret).
 const RESERVED_FIELD_NAMES = new Set(['current', 'activeFrom']);
@@ -24,7 +36,7 @@ export class AddressKeySecretError extends Error {
 const addressKeySecretSchema = z
   .object({
     current: z.string().min(1),
-    activeFrom: z.record(z.string(), z.number()),
+    activeFrom: z.record(z.string(), activeFromSchema),
   })
   .catchall(
     z.string().min(MIN_SECRET_LENGTH, {
