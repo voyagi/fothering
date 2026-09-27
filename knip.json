@@ -6,7 +6,7 @@
   "ignoreIssues": { "*.config.{ts,mjs}": ["exports"], "packages/functions/src/*/handler.ts": ["exports"] },
   "workspaces": {
     ".": {
-      "entry": ["verify-ship.mjs", "scripts/*.mjs", "vitest.config.ts", "eslint.config.mjs", "eslint.complexity.config.mjs", "design/mockups/shared/*.js"],
+      "entry": ["verify-ship.mjs", "scripts/*.mjs", "vitest.config.ts", "vitest.stryker.config.ts", "eslint.config.mjs", "eslint.complexity.config.mjs", "design/mockups/shared/*.js"],
       "ignoreDependencies": ["@types/node", "fast-check", "schema-dts", "size-limit", "@size-limit/file", "@stryker-mutator/core", "@stryker-mutator/vitest-runner", "aws-cdk"]
     },
     "packages/core": {

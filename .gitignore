@@ -10,3 +10,6 @@ coverage/
 cdk.out/
 *.log
 /.stryker-tmp/
+reports/
+.knip-report.json
+trivy-*.json

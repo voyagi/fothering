@@ -6,12 +6,17 @@
   "coverageAnalysis": "perTest",
   "mutate": [
     "packages/core/src/**/*.ts",
-    "!packages/core/src/providers/**",
+    "packages/providers/src/ports.ts",
+    "packages/providers/src/dry-run.ts",
+    "packages/functions/src/*/root.ts",
+    "packages/agent/src/root.ts",
     "!packages/**/*.test.ts",
+    "!packages/**/test/**",
+    "!packages/**/fixtures/**",
     "!packages/**/*.d.ts"
   ],
   "incremental": true,
   "concurrency": 4,
   "thresholds": { "high": 80, "low": 60, "break": null },
-  "vitest": { "configFile": "vitest.config.ts" }
+  "vitest": { "configFile": "vitest.stryker.config.ts" }
 }
