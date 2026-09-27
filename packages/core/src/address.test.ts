@@ -43,7 +43,7 @@ describe('normalizeAddress (D-14)', () => {
     expect(normalizeAddress(`${nfdLocal}@example.com`)).toEqual(normalizeAddress(`${nfcLocal}@example.com`));
   });
 
-  it.each(['', '   ', 'no-at-sign', '@example.com', 'jane@', 'jane@exa mple.com'])(
+  it.each(['', '   ', 'no-at-sign', '@example.com', 'jane@', 'jane@exa mple.com', '< @example.com>', '<jane@ >'])(
     'treats %j as unparseable',
     (raw) => {
       expect(normalizeAddress(raw)).toBeUndefined();
@@ -60,6 +60,9 @@ describe('normalizeAddress on name-addr edge forms', () => {
     ['a display name quoting an @', '"jane@evil.example" <jane@example.com>', { local: 'jane', domain: 'example.com' }],
     ['a display name whose quote never closes', '"Jane <Jane@Example.com>', { local: 'jane', domain: 'example.com' }],
     ['a quoted local part holding an escaped quote and a bracket', '<"a\\"<b"@Example.com>', { local: '"a\\"<b"', domain: 'example.com' }],
+    ['spaces inside the angle brackets', 'Jane < Jane@Example.com >', { local: 'jane', domain: 'example.com' }],
+    ['spaces around the @ inside the angle brackets', 'Jane <jane @ Example.com>', { local: 'jane', domain: 'example.com' }],
+    ['a bare address with spaces around the @', 'Jane @ Example.com', { local: 'jane', domain: 'example.com' }],
   ])('reduces %s to the bare address', (_label, raw, expected) => {
     expect(normalizeAddress(raw)).toEqual(expected);
   });
@@ -69,6 +72,17 @@ describe('normalizeAddress on name-addr edge forms', () => {
     const send = pseudonymizeRecipient('"Sales <EU>" <jane@example.com>', keySet, 0);
     const bounce = pseudonymizeRecipient('jane@example.com', keySet, 0);
     expect(send.recipientHmac).toBe(bounce.recipientHmac);
+  });
+
+  // RFC 5322 lets whitespace sit inside the angle brackets, and domainToASCII returns '' for a domain
+  // carrying a space: untrimmed, this destination reads as unparseable and is hashed whole, apart
+  // from the bare address a bounce names.
+  it('hashes a destination with spaces inside its angle brackets and the bare bounce address to one HMAC, under the real receiving domain', () => {
+    const keySet = oneVersionKeySet('secret-one');
+    const send = pseudonymizeRecipient('Jane < jane@example.com >', keySet, 0);
+    const bounce = pseudonymizeRecipient('jane@example.com', keySet, 0);
+    expect(send.recipientHmac).toBe(bounce.recipientHmac);
+    expect(send.receivingDomain).toBe('example.com');
   });
 });
 

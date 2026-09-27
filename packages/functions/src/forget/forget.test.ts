@@ -147,6 +147,20 @@ describe('forgetFromPayload (AC-15)', () => {
     await expect(deps.ports.eventStore.queryByRecipient(nobody.recipientHmac)).resolves.toHaveLength(1);
     expect(docText).toContain('one address per run');
   });
+
+  // RFC 5322 lets whitespace sit inside the angle brackets, while a bounce stores the bare address, so
+  // a request written that way names the same person and must reach that person's record.
+  it('forgets the record of a bare address when the address field writes it with spaces inside the angle brackets', async () => {
+    const deps = buildForgetRoot({ runtimeContext: 'test', switchValue: undefined });
+    const { record, recipientHmac } = seededRecord('jane@example.com');
+    await deps.ports.eventStore.putIfAbsent(record);
+
+    const report = await forgetFromPayload({ address: 'Jane < jane@example.com >' }, deps);
+
+    expect(report.deleted).toBe(1);
+    expect(report.remaining).toBe(0);
+    await expect(deps.ports.eventStore.queryByRecipient(recipientHmac)).resolves.toHaveLength(0);
+  });
 });
 
 describe('docs/forget-one-recipient.md', () => {

@@ -86,10 +86,13 @@ export function holdsOneMailbox(raw: string): boolean {
 }
 
 // D-14: trim, take the address out of an angle-bracket display-name form if present, split at the
-// last @ (a local part is free to hold its own @), domain through url.domainToASCII then
-// lowercase (an empty result is unparseable), local part normalize('NFC') then toLowerCase(),
-// plus-tags kept as-is. undefined means unparseable (AC-E24): no @, an empty local part, an empty
-// domain, or a domain domainToASCII rejects.
+// last @ (a local part is free to hold its own @), then trim each side. RFC 5322's grammar lets
+// whitespace sit inside the brackets, after the '<' and before the '>', and, though the RFC
+// advises against it, on either side of the @. domainToASCII returns '' for a domain carrying a
+// space, so untrimmed, such an address would read as unparseable. Domain through
+// url.domainToASCII then lowercase (an empty result is unparseable), local part normalize('NFC')
+// then toLowerCase(), plus-tags kept as-is. undefined means unparseable (AC-E24): no @, a local
+// part or a domain that is empty once trimmed, or a domain domainToASCII rejects.
 export function normalizeAddress(raw: string): NormalizedAddress | undefined {
   const trimmed = raw.trim();
   const angleStart = angleAddrStart(trimmed);
@@ -97,10 +100,10 @@ export function normalizeAddress(raw: string): NormalizedAddress | undefined {
   const unwrapped = angleStart !== -1 && angleEnd > angleStart ? trimmed.slice(angleStart + 1, angleEnd) : trimmed;
 
   const atIndex = unwrapped.lastIndexOf('@');
-  if (atIndex <= 0) return undefined;
-  const localRaw = unwrapped.slice(0, atIndex);
-  const domainRaw = unwrapped.slice(atIndex + 1);
-  if (domainRaw === '') return undefined;
+  if (atIndex === -1) return undefined;
+  const localRaw = unwrapped.slice(0, atIndex).trim();
+  const domainRaw = unwrapped.slice(atIndex + 1).trim();
+  if (localRaw === '' || domainRaw === '') return undefined;
 
   const domain = domainToASCII(domainRaw).toLowerCase();
   if (domain === '') return undefined;
