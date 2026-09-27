@@ -46,20 +46,43 @@ export interface NormalizedAddress {
   domain: string;
 }
 
-// The address in a display-name form sits in the last angle brackets outside a quoted string: a
-// display name may quote a '<' of its own ("Sales <EU>" followed by the bracketed address), and a
-// quoted local part may hold one inside the brackets. -1 when there is none.
-function angleAddrStart(text: string): number {
+// The positions of text's characters that sit outside quoted strings, a backslash inside quotes
+// escaping the character after it. A quote that never closes leaves no quoted part to skip, so
+// then every position counts as outside.
+function unquotedPositions(text: string): number[] {
+  const positions: number[] = [];
   let inQuotes = false;
-  let outsideQuotes = -1;
   for (let index = 0; index < text.length; index++) {
     const char = text[index];
     if (inQuotes && char === '\\') index += 1;
     else if (char === '"') inQuotes = !inQuotes;
-    else if (char === '<' && !inQuotes) outsideQuotes = index;
+    else if (!inQuotes) positions.push(index);
   }
-  // A quote that never closes leaves no quoted part to skip, so the last bracket of all is used.
-  return inQuotes ? text.lastIndexOf('<') : outsideQuotes;
+  return inQuotes ? Array.from({ length: text.length }, (_, index) => index) : positions;
+}
+
+// The address in a display-name form sits in the last angle brackets outside a quoted string: a
+// display name may quote a '<' of its own ("Sales <EU>" followed by the bracketed address), and a
+// quoted local part may hold one inside the brackets. -1 when there is none.
+function angleAddrStart(text: string): number {
+  return unquotedPositions(text).findLast((index) => text[index] === '<') ?? -1;
+}
+
+// A forget request names one person, and normalizeAddress reads the LAST bracketed address of a
+// field, so "Jane <jane@...>, Bob <bob@...>" would reach Bob for a request about Jane. Outside
+// quoted strings, one mailbox holds no comma or semicolon (the list separators), at most one '<',
+// nothing after the '>' that closes it, and, written bare, no whitespace.
+export function holdsOneMailbox(raw: string): boolean {
+  const trimmed = raw.trim();
+  const outside = unquotedPositions(trimmed)
+    .map((index) => trimmed[index])
+    .join('');
+  if (/[,;]/.test(outside)) return false;
+  const opens = outside.split('<').length - 1;
+  if (opens === 0) return !/\s/.test(outside);
+  if (opens > 1) return false;
+  // With no '>' at all the slice is the whole field, which holds the '<', so it is refused too.
+  return outside.slice(outside.lastIndexOf('>') + 1).trim() === '';
 }
 
 // D-14: trim, take the address out of an angle-bracket display-name form if present, split at the

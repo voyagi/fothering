@@ -17,9 +17,9 @@ function readDocPayloadExample(): { address: string } {
   return JSON.parse(match[0]) as { address: string };
 }
 
-function seededRecord(targetAddress: string): { record: EventRecord; recipientHmac: string } {
+function seededRecord(targetAddress: string, identity = 'id-1'): { record: EventRecord; recipientHmac: string } {
   const pseudonym = pseudonymizeRecipient(targetAddress, TEST_ADDRESS_KEY_SET, 0);
-  const { pk, sk } = recordKey({ configurationSet: 'fothering-bulk', bucketStartMs: 0, eventType: 'Bounce', identity: 'id-1' });
+  const { pk, sk } = recordKey({ configurationSet: 'fothering-bulk', bucketStartMs: 0, eventType: 'Bounce', identity });
   return {
     recipientHmac: pseudonym.recipientHmac,
     record: {
@@ -127,18 +127,24 @@ describe('forgetFromPayload (AC-15)', () => {
     expect(docText).toContain(FORGET_USAGE);
   });
 
-  // A zero is only as good as the address it was asked about: a field naming two addresses is read
-  // as one malformed address and reaches neither recipient, which the documentation must say.
-  it('reads zero for a field naming two addresses, as the documentation warns', async () => {
-    const targetAddress = 'jane@example.com';
+  // A field holding more than one address is refused before any hash is taken. Read as one address,
+  // a bracketed list reaches its LAST bracketed address, so a request about Jane would delete the
+  // records of the other person named beside her.
+  it.each([
+    'jane@example.com, nobody@example.org',
+    'Jane <jane@example.com>, Nobody <nobody@example.org>',
+    'Nobody <nobody@example.org> jane@example.com',
+  ])('refuses the address field %j with the usage error and deletes nobody, as the documentation warns', async (address) => {
     const deps = buildForgetRoot({ runtimeContext: 'test', switchValue: undefined });
-    const { record, recipientHmac } = seededRecord(targetAddress);
-    await deps.ports.eventStore.putIfAbsent(record);
+    const jane = seededRecord('jane@example.com', 'id-1');
+    const nobody = seededRecord('nobody@example.org', 'id-2');
+    await deps.ports.eventStore.putIfAbsent(jane.record);
+    await deps.ports.eventStore.putIfAbsent(nobody.record);
 
-    const report = await forgetFromPayload({ address: `${targetAddress}, nobody@example.org` }, deps);
+    await expect(forgetFromPayload({ address }, deps)).rejects.toThrow(ForgetUsageError);
 
-    expect(report.deleted).toBe(0);
-    await expect(deps.ports.eventStore.queryByRecipient(recipientHmac)).resolves.toHaveLength(1);
+    await expect(deps.ports.eventStore.queryByRecipient(jane.recipientHmac)).resolves.toHaveLength(1);
+    await expect(deps.ports.eventStore.queryByRecipient(nobody.recipientHmac)).resolves.toHaveLength(1);
     expect(docText).toContain('one address per run');
   });
 });

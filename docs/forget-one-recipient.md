@@ -37,16 +37,17 @@ remaining count. It never holds the address or a hash.
 
 A deleted count of zero means no stored record matched the address as the command normalizes it:
 letter case, a display name and two Unicode spellings of one name are handled, and a plus-tag stays
-part of the address. A typo also reads zero, and so does a field holding two addresses, which is
-read as one malformed address and reaches neither. Pass one address per run, and check its
-spelling before taking a zero as the answer.
+part of the address. A typo also reads zero, so check the spelling before taking a zero as the
+answer.
 
 A payload with no non-empty `address` field fails, and so does one carrying any other field beside
-it. The command's own output then shows a `FunctionError` field, and `result.json` holds the error,
-whose message reads:
+it, or an `address` holding more than one address: a list separated by commas, semicolons or
+spaces, or a second address beside a bracketed one. Read as one address, such a list would reach
+the last bracketed address in it, a different person. Pass one address per run. The command's own
+output then shows a `FunctionError` field, and `result.json` holds the error, whose message reads:
 
 ```text
-usage: pass a JSON payload holding one non-empty "address" field and nothing else
+usage: pass a JSON payload holding one non-empty "address" field naming one address, and nothing else
 ```
 
 ## The remaining count and running it twice
@@ -54,12 +55,14 @@ usage: pass a JSON payload holding one non-empty "address" field and nothing els
 The recipient index this command reads is updated in an eventually consistent fashion, so it can
 lag the table by a short moment right after a write or a delete. The command re-reads the index a
 bounded number of times after its first pass, waiting briefly before each re-read, to catch a
-record that pass missed. A record the index still lists after it was deleted is not counted twice.
+record that pass missed, and stops early only when a re-read lists nothing. A record the index
+still lists after it was deleted is not counted twice.
 
-The remaining count is how many records the last re-read still turned up. Those are removed too
-and already included in the deleted count, so it is not what is left in the table. A non-zero
-remaining count means the index was still showing new records when the re-reads ran out: run the
-command again a minute later to confirm.
+The remaining count is how many entries the index still listed at the last re-read: records that
+re-read found and removed, which the deleted count already includes, plus entries for records an
+earlier pass removed that the index had not caught up with yet. So it is not what is left in the
+table. A non-zero remaining count means the index had not settled when the re-reads ran out: run
+the command again a minute later to confirm.
 
 A remaining count of zero means the index showed nothing at that last read, not a guarantee that
 nothing exists. A record written for an event still in flight when the command runs needs a

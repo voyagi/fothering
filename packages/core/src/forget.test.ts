@@ -236,6 +236,67 @@ describe('forgetRecipient (AC-15)', () => {
     expect(report.perKeyVersion.reduce((sum, entry) => sum + entry.deleted, 0)).toBe(18);
   });
 
+  // Both lags at once: the first re-read still lists a record the first pass removed and does not
+  // show one it is still catching up on yet. That re-read removes nothing, but the index has not
+  // settled, so the re-reads must go on and reach the record on the next one.
+  it('keeps re-reading past a re-read that lists only removed records, and reaches a record the index shows later (Pitfall 10)', async () => {
+    const store = createFixtureEventStore();
+    const target = 'jane@example.com';
+    await seedTarget(store, target);
+    const hiddenHmac = hmacUnderEveryVersion(target, KEY_SET)[0]?.recipientHmac;
+    if (hiddenHmac === undefined) throw new Error('expected at least one target hash');
+    let queries = 0;
+    let staleKey: RecordKey | undefined;
+    const laggingStore: EventStorePort = {
+      ...store,
+      queryByRecipient: async (hmac) => {
+        const live = await store.queryByRecipient(hmac);
+        if (hmac !== hiddenHmac) return live;
+        queries += 1;
+        if (queries === 1) {
+          staleKey = live[1];
+          return live.slice(1);
+        }
+        if (queries === 2) return staleKey === undefined ? [] : [staleKey];
+        return live;
+      },
+    };
+    const { sleep } = fakeSleep();
+
+    const report = await forgetRecipient({ address: target, keySet: KEY_SET, store: laggingStore, sleep });
+
+    expect(report.deleted).toBe(18);
+    expect(report.remaining).toBe(0);
+    await expect(store.queryByRecipient(hiddenHmac)).resolves.toHaveLength(0);
+  });
+
+  // remaining reports what the index still listed at the last re-read, so an index that never stops
+  // listing a removed record reads non-zero when the re-reads run out, never a settled zero.
+  it('reports the entries the last re-read still listed when the index has not settled by the time the re-reads run out', async () => {
+    const store = createFixtureEventStore();
+    const target = 'jane@example.com';
+    await seedTarget(store, target);
+    const staleHmac = hmacUnderEveryVersion(target, KEY_SET)[0]?.recipientHmac;
+    if (staleHmac === undefined) throw new Error('expected at least one target hash');
+    let staleKey: RecordKey | undefined;
+    const stuckStore: EventStorePort = {
+      ...store,
+      queryByRecipient: async (hmac) => {
+        const live = await store.queryByRecipient(hmac);
+        if (hmac !== staleHmac) return live;
+        staleKey ??= live[0];
+        return staleKey === undefined || live.length > 0 ? live : [staleKey];
+      },
+    };
+    const { sleep, calls } = fakeSleep();
+
+    const report = await forgetRecipient({ address: target, keySet: KEY_SET, store: stuckStore, sleep });
+
+    expect(report.deleted).toBe(18);
+    expect(report.remaining).toBe(1);
+    expect(calls).toHaveLength(3);
+  });
+
   // A re-query issued the instant the first pass ends gives the index no time to catch up, so the
   // wait comes before every re-query, the first one included.
   it('waits before its first re-query, after the first pass has queried every retained hash', async () => {

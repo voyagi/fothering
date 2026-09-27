@@ -5,6 +5,7 @@ import { propertySeed } from './test/property-seed.js';
 import {
   currentKeyVersion,
   hmacUnderEveryVersion,
+  holdsOneMailbox,
   normalizeAddress,
   pseudonymizeRecipient,
   selectKeyVersion,
@@ -68,6 +69,48 @@ describe('normalizeAddress on name-addr edge forms', () => {
     const send = pseudonymizeRecipient('"Sales <EU>" <jane@example.com>', keySet, 0);
     const bounce = pseudonymizeRecipient('jane@example.com', keySet, 0);
     expect(send.recipientHmac).toBe(bounce.recipientHmac);
+  });
+});
+
+// A forget request names one person, and normalizeAddress reads the LAST bracketed address of a
+// field, so a list must be refused before any hash is taken: "Jane <jane@...>, Bob <bob@...>" would
+// otherwise reach Bob for a request about Jane.
+describe('holdsOneMailbox', () => {
+  it.each([
+    ['a bare address', 'jane@example.com'],
+    ['a display-name form', 'Jane Doe <jane@example.com>'],
+    ['a display name quoting a comma', '"Doe, Jane" <jane@example.com>'],
+    ['a display name quoting its own angle brackets', '"Sales <EU>" <jane@example.com>'],
+    ['a quoted local part holding an angle bracket', '<"a<b"@example.com>'],
+    ['a display name whose quote never closes', '"Jane <jane@example.com>'],
+    ['a quoted local part holding an escaped quote and a bracket', '<"a\\"<b"@example.com>'],
+  ])('accepts %s', (_label, raw) => {
+    expect(holdsOneMailbox(raw)).toBe(true);
+  });
+
+  it.each([
+    ['two display-name forms', 'Jane <jane@example.com>, Bob <bob@example.org>'],
+    ['a display-name form then a bare address', 'Jane <jane@example.com>, bob@example.org'],
+    ['two bare addresses and a comma', 'jane@example.com, bob@example.org'],
+    ['two bare addresses and a semicolon', 'jane@example.com; bob@example.org'],
+    ['two bare addresses and a comma with no space', 'jane@example.com,bob@example.org'],
+    ['two bare addresses and a semicolon with no space', 'jane@example.com;bob@example.org'],
+    ['two bare addresses and a space', 'jane@example.com bob@example.org'],
+    ['two bracketed addresses and no separator', '<jane@example.com> <bob@example.org>'],
+    ['text after the closing bracket', 'Jane <jane@example.com> bob@example.org'],
+    ['a list behind a quote that never closes', '"Jane, <jane@example.com>, <bob@example.org>'],
+  ])('refuses %s', (_label, raw) => {
+    expect(holdsOneMailbox(raw)).toBe(false);
+  });
+
+  it('accepts every generated address, bare and inside a display-name form (fixed seed)', () => {
+    fc.assert(
+      fc.property(fc.emailAddress(), (address) => {
+        expect(holdsOneMailbox(address)).toBe(true);
+        expect(holdsOneMailbox(`Some Name <${address}>`)).toBe(true);
+      }),
+      { seed: propertySeed() },
+    );
   });
 });
 
