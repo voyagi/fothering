@@ -70,10 +70,19 @@ describe('the agent bundle answers the AgentCore contract with no model and no A
   const workDir = mkdtempSync(join(tmpdir(), 'fothering-agent-work-'));
   let child: ChildProcess | undefined;
 
-  afterAll(() => {
-    child?.kill();
-    rmSync(outDir, { recursive: true, force: true });
-    rmSync(workDir, { recursive: true, force: true });
+  afterAll(async () => {
+    if (child !== undefined && child.exitCode === null) {
+      child.kill();
+      // Windows keeps the bundle's file handle open for a moment after the process dies, and an
+      // rmSync racing that teardown fails EPERM: wait for the real exit event, not just the kill.
+      await new Promise<void>((resolveExit) => {
+        child?.once('exit', () => resolveExit());
+        setTimeout(resolveExit, 5000);
+      });
+    }
+    const retryOptions = { recursive: true, force: true, maxRetries: 5, retryDelay: 200 } as const;
+    rmSync(outDir, retryOptions);
+    rmSync(workDir, retryOptions);
   });
 
   it(

@@ -18,6 +18,9 @@
     },
     "packages/infra": {
       "entry": ["src/app.ts", "src/*-cli.ts"]
+    },
+    "packages/agent": {
+      "entry": ["src/main.ts"]
     }
   }
 }

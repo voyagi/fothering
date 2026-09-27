@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-// build.mjs - bundles every Lambda handler and the CDK app with esbuild, then synthesizes the
-// CDK app with no AWS credentials in reach (D-19, D-23, Pitfall 11).
+// build.mjs - bundles every Lambda handler, the agent runtime and the CDK app with esbuild, then
+// synthesizes the CDK app with no AWS credentials in reach (D-19, D-23, Pitfall 11).
 //
 // WHY A SANITIZED ENVIRONMENT FOR cdk synth. This machine has real AWS profiles, and the CDK CLI
 // resolves account and region from ambient credentials by default, plus fetches notices and
@@ -22,13 +22,23 @@
 // a smoke test) reads the bundle as an ES module and it dies on `module is not defined`. Lambda
 // sees only the asset folder and so falls back to CommonJS for a .js file; a package.json naming
 // the type inside the folder makes every loader read the bundle the same way, and the load check
-// after it proves each bundle exports its handler before synth packages it.
+// after it proves each bundle exports its handler before synth packages it. The agent bundle gets
+// neither: requiring main.js starts the AgentCore HTTP server as a side effect of loading it, so
+// its only load proof is the local runtime test, which runs it as its own process instead.
+//
+// WHY THE createRequire PLUGIN. bedrock-agentcore's runtime/app.js builds a private `require`
+// through `createRequire(import.meta.url)` to load two Fastify plugins CommonJS-style. Bundled to
+// CommonJS, `import.meta.url` is undefined and the file throws on load before esbuild ever
+// follows the require() calls it guards. Deleting that one line lets esbuild see and inline both
+// plugins for real (RESEARCH.md Item 1, D-32). The plugin fails loudly, not silently, when the
+// line it expects is gone, so a bedrock-agentcore upgrade cannot reintroduce the crash unnoticed.
 import { build } from 'esbuild';
 import { execFileSync } from 'node:child_process';
 import { existsSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { readFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 
 const require = createRequire(import.meta.url);
 
@@ -44,6 +54,26 @@ const AWS_CREDENTIAL_VARS = [
   'AWS_CONTAINER_CREDENTIALS_FULL_URI',
   'AWS_CONTAINER_AUTHORIZATION_TOKEN',
 ];
+
+const AGENTCORE_APP_FILTER = /bedrock-agentcore[\\/]dist[\\/]src[\\/]runtime[\\/]app\.js$/;
+const AGENTCORE_CREATE_REQUIRE_LINE = 'const require = createRequire(import.meta.url);';
+
+function agentcoreInlineRequirePlugin() {
+  return {
+    name: 'agentcore-inline-require',
+    setup(pluginBuild) {
+      pluginBuild.onLoad({ filter: AGENTCORE_APP_FILTER }, async (args) => {
+        const source = await readFile(args.path, 'utf8');
+        if (!source.includes(AGENTCORE_CREATE_REQUIRE_LINE)) {
+          throw new Error(
+            `bedrock-agentcore's runtime/app.js no longer holds "${AGENTCORE_CREATE_REQUIRE_LINE}": re-check this plugin against the installed version`,
+          );
+        }
+        return { contents: source.replace(AGENTCORE_CREATE_REQUIRE_LINE, ''), loader: 'js' };
+      });
+    },
+  };
+}
 
 function findHandlers(root) {
   const functionsSrc = join(root, 'packages', 'functions', 'src');
@@ -69,78 +99,129 @@ function sanitizedSynthEnv() {
 
 // Loads a bundle the way the Lambda runtime does (require, then read the named export), so a
 // bundle that fails to load or lost its handler stops the build instead of reaching a deploy.
-function exportsHandler(root, outfile) {
-  const loaded = require(join(root, outfile));
+function exportsHandler(outfileAbs) {
+  const loaded = require(outfileAbs);
   return typeof loaded.handler === 'function';
 }
 
-async function run(root) {
+async function buildHandlerBundle(root, name, outfileAbs) {
+  await build({
+    entryPoints: [join('packages', 'functions', 'src', name, 'handler.ts')],
+    bundle: true,
+    platform: 'node',
+    target: 'node22',
+    format: 'cjs',
+    outfile: outfileAbs,
+    absWorkingDir: root,
+  });
+  writeFileSync(join(dirname(outfileAbs), 'package.json'), '{ "type": "commonjs" }\n');
+  if (!exportsHandler(outfileAbs)) {
+    throw new Error(`${outfileAbs} loads but exports no handler function`);
+  }
+}
+
+async function buildAgentBundle(root, outfileAbs) {
+  await build({
+    entryPoints: [join('packages', 'agent', 'src', 'main.ts')],
+    bundle: true,
+    platform: 'node',
+    target: 'node22',
+    format: 'cjs',
+    outfile: outfileAbs,
+    absWorkingDir: root,
+    plugins: [agentcoreInlineRequirePlugin()],
+  });
+}
+
+async function buildInfraBundle(root, outfileAbs) {
+  await build({
+    entryPoints: [join('packages', 'infra', 'src', 'app.ts')],
+    bundle: true,
+    platform: 'node',
+    target: 'node22',
+    format: 'esm',
+    external: ['aws-cdk-lib', 'aws-cdk-lib/*', 'constructs'],
+    outfile: outfileAbs,
+    absWorkingDir: root,
+  });
+}
+
+function parseArgs(argv) {
+  const onlyIndex = argv.indexOf('--only');
+  const outdirIndex = argv.indexOf('--outdir');
+  return {
+    only: onlyIndex === -1 ? undefined : argv[onlyIndex + 1],
+    outdir: outdirIndex === -1 ? undefined : argv[outdirIndex + 1],
+  };
+}
+
+// Builds exactly one target into its own directory and skips cdk synth entirely, so a caller
+// proving one bundle in isolation (the agent runtime's local contract test) never runs the full
+// handler-plus-infra-plus-synth pipeline, and never touches the repo's own dist/.
+async function runOnly(root, only, outdir) {
+  const outDirAbs = resolve(outdir);
+  const handlerNames = findHandlers(root);
+  if (handlerNames.includes(only)) {
+    await buildHandlerBundle(root, only, join(outDirAbs, 'index.js'));
+  } else if (only === 'agent') {
+    await buildAgentBundle(root, join(outDirAbs, 'main.js'));
+  } else if (only === 'app') {
+    await buildInfraBundle(root, join(outDirAbs, 'app.mjs'));
+  } else {
+    throw new Error(`--only ${only} is not a known target (expected one of ${[...handlerNames, 'agent', 'app'].join(', ')})`);
+  }
+  console.log(`[build] --only ${only} written to ${outDirAbs}`);
+}
+
+async function runDefault(root) {
   rmSync(join(root, 'dist'), { recursive: true, force: true });
 
   const bundled = [];
-
   for (const name of findHandlers(root)) {
-    const outfile = join('dist', name, 'index.js');
-    try {
-      await build({
-        entryPoints: [join('packages', 'functions', 'src', name, 'handler.ts')],
-        bundle: true,
-        platform: 'node',
-        target: 'node22',
-        format: 'cjs',
-        outfile,
-        absWorkingDir: root,
-      });
-    } catch (error) {
-      console.error(`[build] bundling ${name}/handler.ts failed: ${(error && error.message) || error}`);
-      return 1;
-    }
-    writeFileSync(join(root, 'dist', name, 'package.json'), '{ "type": "commonjs" }\n');
-    try {
-      if (!exportsHandler(root, outfile)) {
-        console.error(`[build] ${outfile} loads but exports no handler function`);
-        return 1;
-      }
-    } catch (error) {
-      console.error(`[build] ${outfile} failed to load: ${(error && error.message) || error}`);
-      return 1;
-    }
-    bundled.push(outfile.replace(/\\/g, '/'));
+    const outfileAbs = join(root, 'dist', name, 'index.js');
+    await buildHandlerBundle(root, name, outfileAbs);
+    bundled.push(`dist/${name}/index.js`);
   }
 
-  const infraOutfile = join('dist', 'infra', 'app.mjs');
-  try {
-    await build({
-      entryPoints: [join('packages', 'infra', 'src', 'app.ts')],
-      bundle: true,
-      platform: 'node',
-      target: 'node22',
-      format: 'esm',
-      external: ['aws-cdk-lib', 'aws-cdk-lib/*', 'constructs'],
-      outfile: infraOutfile,
-      absWorkingDir: root,
-    });
-  } catch (error) {
-    console.error(`[build] bundling infra/app.ts failed: ${(error && error.message) || error}`);
-    return 1;
-  }
-  bundled.push(infraOutfile.replace(/\\/g, '/'));
+  await buildAgentBundle(root, join(root, 'dist', 'agent', 'main.js'));
+  bundled.push('dist/agent/main.js');
+
+  await buildInfraBundle(root, join(root, 'dist', 'infra', 'app.mjs'));
+  bundled.push('dist/infra/app.mjs');
 
   console.log(`[build] bundled: ${bundled.join(', ')}`);
 
   const cdkBin = join(root, 'node_modules', 'aws-cdk', 'bin', 'cdk');
-  try {
-    execFileSync(process.execPath, [cdkBin, 'synth', '--no-notices', '--quiet'], {
-      cwd: root,
-      env: sanitizedSynthEnv(),
-      stdio: 'inherit',
-    });
-  } catch (error) {
-    console.error(`[build] cdk synth failed: ${(error && error.message) || error}`);
-    return 1;
+  execFileSync(process.execPath, [cdkBin, 'synth', '--no-notices', '--quiet'], {
+    cwd: root,
+    env: sanitizedSynthEnv(),
+    stdio: 'inherit',
+  });
+}
+
+async function run(root, argv) {
+  const { only, outdir } = parseArgs(argv);
+  if (only !== undefined || outdir !== undefined) {
+    if (only === undefined || outdir === undefined) {
+      console.error('[build] --only and --outdir must be given together');
+      return 1;
+    }
+    try {
+      await runOnly(root, only, outdir);
+    } catch (error) {
+      console.error(`[build] --only ${only} failed: ${(error && error.message) || error}`);
+      return 1;
+    }
+    return 0;
   }
 
+  try {
+    await runDefault(root);
+  } catch (error) {
+    console.error(`[build] ${(error && error.message) || error}`);
+    return 1;
+  }
   return 0;
 }
 
-process.exit(await run(process.cwd()));
+process.exit(await run(process.cwd(), process.argv.slice(2)));
