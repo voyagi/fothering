@@ -2,6 +2,7 @@
 
 - Status: accepted
 - Date: 2026-09-16
+- Revised: 2026-09-24 (agent bundle corrected to CommonJS, site workspace path recorded, fallback order corrected)
 
 ## Context
 
@@ -27,7 +28,7 @@ Three constraints shape every choice below:
 | Event destination | EventBridge (default bus) | |
 | Event store | DynamoDB, on demand, TTL | |
 | Infrastructure | AWS CDK in TypeScript | `aws-cdk-lib` 2.269.0 |
-| Site | Astro, static output | 7.3.2 |
+| Site | Astro, static output, at `packages/web` inside the existing `packages/*` workspace glob | 7.3.2 |
 | Site host | Cloudflare Workers with static assets | `wrangler` 4.x |
 | Schemas | zod | 4.x |
 | Tests | vitest, fast-check, StrykerJS | vitest 4.1.x |
@@ -42,8 +43,8 @@ Three constraints shape every choice below:
 
 The one part without an official example is a Node code package deployed through our own CDK app rather than the AgentCore CLI. The CDK module README only shows Python for `fromCodeAsset`. The first deploy of the agent settles it. If it fails, in order:
 
-1. Keep the same agent code and build a linux/arm64 container with `AgentRuntimeArtifact.fromAsset`.
-2. Let the AgentCore CLI deploy the runtime and import its ARN into the CDK app for everything else.
+1. Let the AgentCore CLI deploy the runtime and import its ARN into the CDK app for everything else.
+2. Keep the same agent code and build a linux/arm64 container with `AgentRuntimeArtifact.fromAsset`.
 
 ### Why these and not the alternatives
 
@@ -60,6 +61,6 @@ The one part without an official example is a Node code package deployed through
 
 - Local development and CI run Node 22 so tests exercise the version that ships. The repo declares `engines.node` as `>=22.18`, the floor the locked tooling (size-limit, Babel under Stryker) requires.
 - Every AWS client sits behind a port with a fixture implementation and a live one. The default resolves to fixtures, and a test fails if it ever resolves live.
-- Nothing native may enter the agent bundle unless it is built for linux/arm64. The agent is bundled with esbuild into one ESM file.
+- Nothing native may enter the agent bundle unless it is built for linux/arm64. The agent is bundled with esbuild into one CommonJS file, main.js, because bedrock-agentcore builds its own require at run time and an ESM bundle cannot start on the runtime; a small build plugin removes the line that builds that require before the bundle is written.
 - Account-level SES sending is never exposed by a port and never granted by IAM.
 - Deploying anything, sending mail and calling Bedrock are manual steps run with the live switch on. None of them run in CI.

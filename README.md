@@ -17,8 +17,8 @@ npm ci
 cp .env.example .env
 ```
 
-Every AWS call runs against recorded fixtures unless `FOTHERING_LIVE` is set to `live`. Leave it unset
-for development and tests.
+Every AWS call in tests and local runs uses recorded fixtures; see Live switch below for what a
+deployed stack does with `FOTHERING_LIVE`.
 
 ## Checks
 
@@ -29,9 +29,70 @@ npm run gate        # type check, complexity, duplication, boundaries, env file
 npm run verify:ship # everything above, in order, with one verdict
 ```
 
+## Live switch
+
+`FOTHERING_LIVE` has three cases:
+
+- Tests: every provider resolves to a fixture whatever the switch holds, and the suite refuses to
+  run at all when it reads `live`.
+- A deployed stack with `FOTHERING_LIVE` unset: the product's own table, the address key secret
+  and the queue, plus every SES read the closeability check needs, are live. Every SES pause,
+  reopen and send, every model call and every InvokeAgentRuntime becomes one dry-run line instead
+  of a real call.
+- A deployed stack with `FOTHERING_LIVE` set to the exact word `live`: those mutations go live as
+  later phases build them.
+
+A deployed stack gets the switch only from the CDK context key, never from a shell variable:
+
+```sh
+npx cdk deploy FotheringIngest FotheringRuntime -c fothering:live=live
+```
+
+## Deploy and remove
+
+Run from the owner's account, in `eu-central-1`:
+
+```sh
+npm run build
+npx cdk bootstrap             # once, before the first deploy
+npx cdk deploy FotheringIngest FotheringRuntime
+npx cdk destroy FotheringIngest FotheringRuntime
+```
+
+Before sending any mail through a deployed stack, check the ingest rule's configuration-set
+condition against one sample event:
+
+```sh
+aws events test-event-pattern --event-pattern file://rule-pattern.json --event file://sample-event.json
+```
+
+## Forget one recipient
+
+See [docs/forget-one-recipient.md](docs/forget-one-recipient.md).
+
+## Rotate the address key
+
+Each container caches the key set for 5 minutes, so a rotation is one secret write, never two:
+
+1. Add the new version's secret field and its `activeFrom` (epoch milliseconds; the key read
+   refuses a value written in seconds or microseconds) at least 10 minutes after this write, and
+   move `current` to the new version, in the same write. The key read refuses a secret whose
+   `current` does not name the version with the newest `activeFrom`, so writing the new version
+   first and moving `current` afterward stops ingest and forget in between the two writes.
+2. Watch the ingest function's log for `key-set-unavailable` in the minutes after the write: a
+   malformed secret keeps working in every warm container until its 5-minute cache expires, then
+   stops ingest everywhere at once.
+3. Remove a retired version's secret field and `activeFrom` entry only after 30 days plus the few
+   days a TTL deletion can lag, so every record it could still be hashed under has expired first.
+
 ## Layout
 
 - `packages/core` - the decision core and the provider mode switch
+- `packages/providers` - the port table, fixtures and live AWS adapters
+- `packages/functions` - the ingest and forget Lambda entries
+- `packages/agent` - the no-model AgentCore runtime entry
+- `packages/infra` - the CDK app and stacks
+- `packages/web` - the judge-facing site (later phase)
 - `docs/adr` - architecture decisions
 
 ## Licence
