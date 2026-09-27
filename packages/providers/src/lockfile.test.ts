@@ -47,9 +47,7 @@ function findAwsSdkDuplicates(lockfile: LockfilePackages): DuplicateReport[] {
   }
   const duplicates: DuplicateReport[] = [];
   for (const [name, versions] of versionsByName) {
-    // TODO(RED): this should read `versions.size > 1` (D-35's actual rule). Left at `> 2` to
-    // prove the planted control below fails before the real threshold ships.
-    if (versions.size > 2) duplicates.push({ name, versions: [...versions].sort() });
+    if (versions.size > 1) duplicates.push({ name, versions: [...versions].sort() });
   }
   return duplicates.sort((a, b) => a.name.localeCompare(b.name));
 }
