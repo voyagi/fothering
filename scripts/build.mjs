@@ -4,10 +4,12 @@
 //
 // WHY A SANITIZED ENVIRONMENT FOR cdk synth. This machine has real AWS profiles, and the CDK CLI
 // resolves account and region from ambient credentials by default, plus fetches notices and
-// telemetry over the network. A local build must never touch either: the credential and profile
+// telemetry over the network, and when its output is a terminal it asks the npm registry for a
+// newer CLI version once a day. A local build must never touch either: the credential and profile
 // variables are stripped from a COPY of process.env (never deleted from process.env itself, so a
 // caller running this in-process keeps its own environment), the credential FILES are pointed at
-// a path that does not exist, IMDS is disabled, and CLI telemetry and notices are off.
+// a path that does not exist, IMDS is disabled, and CLI telemetry, notices and the version check
+// are off.
 //
 // WHY NAMED DELETION, NOT A LITERAL DOT-ACCESS READ of a credential variable. A literal read of
 // one of those names anywhere in tracked source makes gate:env demand that key in .env.example,
@@ -61,6 +63,7 @@ function sanitizedSynthEnv() {
   env.AWS_SHARED_CREDENTIALS_FILE = join(missingCredentialsDir, 'credentials');
   env.AWS_EC2_METADATA_DISABLED = 'true';
   env.CDK_DISABLE_CLI_TELEMETRY = 'true';
+  env.CDK_DISABLE_VERSION_CHECK = 'true';
   return env;
 }
 
