@@ -18,6 +18,7 @@ const BANNED_IMPORTS: ReadonlyArray<{ key: string; specifier: string }> = [
   { key: 'smithy', specifier: '@smithy/types' },
   { key: 'aws-crypto', specifier: '@aws-crypto/sha256-js' },
   { key: 'bedrock-agentcore', specifier: 'bedrock-agentcore' },
+  { key: 'bedrock-agentcore-runtime', specifier: 'bedrock-agentcore/runtime' },
   { key: 'aws4fetch', specifier: 'aws4fetch' },
 ];
 
@@ -150,8 +151,11 @@ describe('lint catches a stray BedrockModel import and an argument-less agent', 
     );
   });
 
-  it('flags an @aws-sdk/client-sqs import outside providers', async () => {
-    const code = "import { SQSClient } from '@aws-sdk/client-sqs';\nexport const c = SQSClient;\n";
+  // The lint rule and the dependency rule keep two lists of the same families, so the lint half is
+  // held to the list the dependency test above plants: a family either config drops fails here.
+  it.each(BANNED_IMPORTS)('flags $specifier outside providers and passes it inside, like the dependency rule', async ({ specifier }) => {
+    const code = `import * as banned from '${specifier}';\nexport const b = banned;\n`;
     expect(ruleIds(await lintMessages(code, 'packages/functions/src/planted.ts'))).toContain('no-restricted-imports');
+    expect(ruleIds(await lintMessages(code, 'packages/providers/src/planted.ts'))).not.toContain('no-restricted-imports');
   });
 });
