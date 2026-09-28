@@ -138,17 +138,27 @@ describe('lint catches a stray BedrockModel import and an argument-less agent', 
     );
   });
 
-  it('flags an argument-less new Agent(), by name and by namespace access, and passes one built with a model', async () => {
-    const zeroArg = 'class Agent {}\nexport const a = new Agent();\n';
-    const namespaceZeroArg = "import * as sdk from 'x';\nexport const a = new sdk.Agent();\n";
-    const withModel = 'class Agent {}\nexport const a = new Agent({ model: 1 });\n';
-    expect(ruleIds(await lintMessages(zeroArg, 'packages/agent/src/planted.ts'))).toContain('no-restricted-syntax');
-    expect(ruleIds(await lintMessages(namespaceZeroArg, 'packages/agent/src/planted2.ts'))).toContain(
-      'no-restricted-syntax',
-    );
-    expect(ruleIds(await lintMessages(withModel, 'packages/agent/src/planted3.ts'))).not.toContain(
-      'no-restricted-syntax',
-    );
+  // An options literal that names no model falls back to the SDK default exactly like no argument
+  // at all, so it is flagged too, in mode.ts as well, whose lint object repeats the Agent rule.
+  it('flags a new Agent with no model of its own, by name and by namespace access, and passes one built with a model', async () => {
+    const flagged: ReadonlyArray<[code: string, path: string]> = [
+      ['class Agent {}\nexport const a = new Agent();\n', 'packages/agent/src/planted.ts'],
+      ["import * as sdk from 'x';\nexport const a = new sdk.Agent();\n", 'packages/agent/src/planted2.ts'],
+      ['class Agent {}\nexport const a = new Agent({});\n', 'packages/agent/src/planted4.ts'],
+      ["import * as sdk from 'x';\nexport const a = new sdk.Agent({ tools: [] });\n", 'packages/agent/src/planted5.ts'],
+      ['class Agent {}\nexport const a = new Agent({ tools: [{ model: 1 }] });\n', 'packages/agent/src/planted6.ts'],
+      ['class Agent {}\nexport const a = new Agent({});\n', 'packages/core/src/mode.ts'],
+    ];
+    const passed: ReadonlyArray<[code: string, path: string]> = [
+      ['class Agent {}\nexport const a = new Agent({ model: 1 });\n', 'packages/agent/src/planted3.ts'],
+      ["import * as sdk from 'x';\nconst model = 1;\nexport const a = new sdk.Agent({ model, tools: [] });\n", 'packages/agent/src/planted7.ts'],
+    ];
+    for (const [code, path] of flagged) {
+      expect(ruleIds(await lintMessages(code, path)), code).toContain('no-restricted-syntax');
+    }
+    for (const [code, path] of passed) {
+      expect(ruleIds(await lintMessages(code, path)), code).not.toContain('no-restricted-syntax');
+    }
   });
 
   // The lint rule and the dependency rule keep two lists of the same families, so the lint half is

@@ -11,6 +11,19 @@ const tsParser = { parser: tseslint.parser, parserOptions: { ecmaVersion: 'lates
 
 const TEST_FILES = ['**/*.{test,spec}.{ts,tsx,js,jsx,mjs,cjs}'];
 
+// An agent built with no model would fall back to whatever the SDK defaults to, which is exactly
+// the kind of implicit choice the live providers wrapper exists to make explicit. So the rule
+// reports `new Agent()` and an options literal that names no model of its own (`new Agent({})`,
+// `new Agent({ tools })`, a model only nested deeper or spread in), by name and by namespace
+// access (`new sdk.Agent(...)`). Not caught: options passed in a variable, and a renamed default
+// import, since matching either would need type information this rule does not have.
+const AGENT_WITHOUT_MODEL = [
+  "NewExpression[callee.name='Agent'][arguments.length=0]",
+  "NewExpression[callee.property.name='Agent'][arguments.length=0]",
+  "NewExpression[callee.name='Agent'] > ObjectExpression:not(:has(> Property[key.name='model']))",
+  "NewExpression[callee.property.name='Agent'] > ObjectExpression:not(:has(> Property[key.name='model']))",
+].map((selector) => ({ selector, message: 'Build an Agent with an explicit model from the live providers.' }));
+
 export default [
   ...complexityConfig,
   // The check scripts are copied gate tools whose behaviour is pinned by their --selftest controls, so
@@ -94,12 +107,6 @@ export default [
       }],
     },
   },
-  // An agent built with no model argument would fall back to whatever the SDK defaults to, which
-  // is exactly the kind of implicit choice the live providers wrapper exists to make explicit.
-  // The namespace-access selector catches `new sdk.Agent()`; a renamed default import is not
-  // caught by either selector, since matching a rename would need type information this rule
-  // does not have.
-  //
   // The live selectors report any environment access, and any readLiveSwitch() call, found
   // anywhere inside a comparison to 'live': a plain or computed member of process.env or of an
   // `env` binding, behind optional chaining or a type cast, or under a call such as trim() or
@@ -113,14 +120,7 @@ export default [
     languageOptions: { ...tsParser },
     rules: {
       'no-restricted-syntax': ['error',
-        {
-          selector: "NewExpression[callee.name='Agent'][arguments.length=0]",
-          message: 'Build an Agent with an explicit model from the live providers.',
-        },
-        {
-          selector: "NewExpression[callee.property.name='Agent'][arguments.length=0]",
-          message: 'Build an Agent with an explicit model from the live providers.',
-        },
+        ...AGENT_WITHOUT_MODEL,
         {
           selector: "BinaryExpression[operator=/^(==|===|!=|!==)$/][right.value='live'] MemberExpression[property.name='env']",
           message: 'Only mode.ts decides live mode.',
@@ -152,16 +152,7 @@ export default [
     files: ['packages/core/src/mode.ts'],
     languageOptions: { ...tsParser },
     rules: {
-      'no-restricted-syntax': ['error',
-        {
-          selector: "NewExpression[callee.name='Agent'][arguments.length=0]",
-          message: 'Build an Agent with an explicit model from the live providers.',
-        },
-        {
-          selector: "NewExpression[callee.property.name='Agent'][arguments.length=0]",
-          message: 'Build an Agent with an explicit model from the live providers.',
-        },
-      ],
+      'no-restricted-syntax': ['error', ...AGENT_WITHOUT_MODEL],
     },
   },
 ];
