@@ -17,8 +17,8 @@ npm ci
 cp .env.example .env
 ```
 
-Every AWS call in tests and local runs uses recorded fixtures; see Live switch below for what a
-deployed stack does with `FOTHERING_LIVE`.
+Every AWS call in tests uses recorded fixtures; see Live switch below for what a deployed stack
+does with `FOTHERING_LIVE`.
 
 ## Checks
 
@@ -36,9 +36,9 @@ npm run verify:ship # everything above, in order, with one verdict
 - Tests: every provider resolves to a fixture whatever the switch holds, and the suite refuses to
   run at all when it reads `live`.
 - A deployed stack with `FOTHERING_LIVE` unset: the product's own table, the address key secret
-  and the queue, plus every SES read the closeability check needs, are live. Every SES pause,
-  reopen and send, every model call and every InvokeAgentRuntime becomes one dry-run line instead
-  of a real call.
+  and the queue are live. As the remaining operations join the port table, every SES read the
+  closeability check needs is live too, while every SES pause, reopen and send, every model call
+  and every InvokeAgentRuntime becomes one dry-run line instead of a real call.
 - A deployed stack with `FOTHERING_LIVE` set to the exact word `live`: those mutations go live as
   later phases build them.
 

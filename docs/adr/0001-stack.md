@@ -2,7 +2,7 @@
 
 - Status: accepted
 - Date: 2026-09-16
-- Revised: 2026-09-24 (agent bundle corrected to CommonJS, site workspace path recorded, fallback order corrected)
+- Revised: 2026-09-27 (agent bundle corrected to CommonJS, site workspace path recorded, fallback order corrected)
 
 ## Context
 

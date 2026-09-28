@@ -46,6 +46,33 @@ function contextKeysRead(sources: readonly string[]): Set<string> {
   return keys;
 }
 
+interface SourceFile {
+  path: string;
+  text: string;
+}
+
+// Every non-test TypeScript source of the CDK app, its path relative to packages/infra/src.
+function infraSources(): SourceFile[] {
+  const infraSrc = join(REPO_ROOT, 'packages', 'infra', 'src');
+  return readdirSync(infraSrc, { recursive: true, encoding: 'utf8' })
+    .filter((file) => file.endsWith('.ts') && !file.endsWith('.test.ts'))
+    .map((file) => ({ path: file, text: readFileSync(join(infraSrc, file), 'utf8') }));
+}
+
+// main.ts listens on every interface only when FOTHERING_DEPLOYED_RUNTIME reads the agent's
+// AGENTCORE_RUNTIME value, and only the stack that deploys the runtime sets it. A runtime deployed
+// without it listens on loopback inside the microVM and fails its first health check, so a source
+// importing an AgentCore construct module must name the variable and that value.
+const AGENTCORE_CONSTRUCT_IMPORT_RE = /\bfrom\s+['"][^'"]*bedrock-?agentcore[^'"]*['"]|\brequire\(\s*['"][^'"]*bedrock-?agentcore[^'"]*['"]\s*\)/i;
+const AGENTCORE_VALUE_RE = /\bAGENTCORE_RUNTIME\b|['"`]agentcore['"`]/;
+
+function runtimeBuildersMissingListenVar(files: readonly SourceFile[]): string[] {
+  return files
+    .filter((f) => AGENTCORE_CONSTRUCT_IMPORT_RE.test(f.text))
+    .filter((f) => !f.text.includes('FOTHERING_DEPLOYED_RUNTIME') || !AGENTCORE_VALUE_RE.test(f.text))
+    .map((f) => f.path);
+}
+
 describe('repo hardening: every gate, config and document ships what it claims', () => {
   const pkg = readJson<PackageJson>('package.json');
 
@@ -247,11 +274,7 @@ describe('repo hardening: every gate, config and document ships what it claims',
   });
 
   it('every CDK context key the README passes is read by the CDK app', () => {
-    const infraSrc = join(REPO_ROOT, 'packages', 'infra', 'src');
-    const sources = readdirSync(infraSrc, { recursive: true, encoding: 'utf8' })
-      .filter((file) => file.endsWith('.ts') && !file.endsWith('.test.ts'))
-      .map((file) => readFileSync(join(infraSrc, file), 'utf8'));
-    const read = contextKeysRead(sources);
+    const read = contextKeysRead(infraSources().map((f) => f.text));
     for (const key of contextKeysPassed(readText('README.md'))) {
       expect(read.has(key), `the README passes -c ${key}, which no stack reads, so it changes nothing`).toBe(true);
     }
@@ -268,6 +291,25 @@ describe('repo hardening: every gate, config and document ships what it claims',
     expect(contextKeysRead(['const v = app.node.getContext("a.b");']).has('a.b')).toBe(true);
     expect(contextKeysRead(['const v = this.node.tryGetContext(`c`);']).has('c')).toBe(true);
     expect(contextKeysRead(['const v = 1;']).size).toBe(0);
+  });
+
+  it('a CDK source that builds the agent runtime sets the variable that opens its listener', () => {
+    expect(readText('packages/agent/src/main.ts')).toContain('process.env.FOTHERING_DEPLOYED_RUNTIME');
+    expect(runtimeBuildersMissingListenVar(infraSources())).toEqual([]);
+
+    // Controls: a construct import with neither, or with the name alone, is caught in the stable and
+    // the alpha module spelling; the name set to the agent's constant passes, and so does a source
+    // that builds no runtime.
+    const stable = "import { Runtime } from 'aws-cdk-lib/aws-bedrockagentcore';\n";
+    const alpha = "import * as agentcore from '@aws-cdk/aws-bedrock-agentcore-alpha';\n";
+    const setsIt = "import { AGENTCORE_RUNTIME } from '@fothering/agent/listen-host';\nconst env = { FOTHERING_DEPLOYED_RUNTIME: AGENTCORE_RUNTIME };\n";
+    expect(runtimeBuildersMissingListenVar([
+      { path: 'bare.ts', text: stable },
+      { path: 'alpha.ts', text: alpha },
+      { path: 'name-only.ts', text: `${stable}const env = { FOTHERING_DEPLOYED_RUNTIME: 'x' };\n` },
+      { path: 'sets-it.ts', text: `${stable}${setsIt}` },
+      { path: 'no-runtime.ts', text: "import { Stack } from 'aws-cdk-lib';\n" },
+    ])).toEqual(['bare.ts', 'alpha.ts', 'name-only.ts']);
   });
 
   it('the stack record names the CommonJS bundle, the site workspace, and orders the fallback CLI deploy before the container', () => {
