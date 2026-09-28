@@ -57,7 +57,14 @@ async function buildHandlerBundle(root, name, outfileAbs) {
     absWorkingDir: root,
   });
   writeFileSync(join(dirname(outfileAbs), 'package.json'), '{ "type": "commonjs" }\n');
-  if (!exportsHandler(outfileAbs)) {
+  // A bundle that throws while loading names only what it threw, so the path is added here.
+  let exported;
+  try {
+    exported = exportsHandler(outfileAbs);
+  } catch (error) {
+    throw new Error(`${outfileAbs} failed to load: ${(error && error.message) || error}`, { cause: error });
+  }
+  if (!exported) {
     throw new Error(`${outfileAbs} loads but exports no handler function`);
   }
 }
@@ -85,13 +92,17 @@ async function buildInfraBundle(root, outfileAbs) {
   });
 }
 
+// A flag's value is the argument after it; a flag that is last, or followed by another flag, was
+// given with no value, which is not the same as not given at all.
+function flagArg(argv, flag) {
+  const index = argv.indexOf(flag);
+  if (index === -1) return { given: false, value: undefined };
+  const value = argv[index + 1];
+  return { given: true, value: value === undefined || value.startsWith('--') ? undefined : value };
+}
+
 function parseArgs(argv) {
-  const onlyIndex = argv.indexOf('--only');
-  const outdirIndex = argv.indexOf('--outdir');
-  return {
-    only: onlyIndex === -1 ? undefined : argv[onlyIndex + 1],
-    outdir: outdirIndex === -1 ? undefined : argv[outdirIndex + 1],
-  };
+  return { only: flagArg(argv, '--only'), outdir: flagArg(argv, '--outdir') };
 }
 
 // Builds exactly one target into its own directory and skips cdk synth entirely, so a caller
@@ -139,10 +150,12 @@ async function runDefault(root) {
 }
 
 async function run(root, argv) {
-  const { only, outdir } = parseArgs(argv);
-  if (only !== undefined || outdir !== undefined) {
+  const args = parseArgs(argv);
+  if (args.only.given || args.outdir.given) {
+    const only = args.only.value;
+    const outdir = args.outdir.value;
     if (only === undefined || outdir === undefined) {
-      console.error('[build] --only and --outdir must be given together');
+      console.error('[build] --only and --outdir each need a value, and are given together');
       return 1;
     }
     try {

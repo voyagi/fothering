@@ -40,10 +40,10 @@ interface CommandResult {
   combined: string;
 }
 
-function runBuild(args: string[]): CommandResult {
+function runBuild(args: string[], cwd: string = REPO_ROOT): CommandResult {
   try {
     const stdout = execFileSync(process.execPath, [BUILD_SCRIPT, ...args], {
-      cwd: REPO_ROOT,
+      cwd,
       encoding: 'utf8',
       timeout: CHILD_TIMEOUT_MS,
       stdio: ['ignore', 'pipe', 'pipe'],
@@ -186,6 +186,36 @@ describe('the agent bundle answers the AgentCore contract with no model and no A
       expect(status, combined).toBe(1);
       expect(combined).toContain('is not a known target');
       expect(existsSync(emptyOut) ? readdirSync(emptyOut) : []).toEqual([]);
+    },
+    CHILD_TIMEOUT_MS,
+  );
+
+  it.each([[['--only']], [['--outdir']], [['--only', '--outdir', 'x']], [['--only', 'agent', '--outdir']]])(
+    'the build script refuses %j instead of falling through to the full build',
+    (args) => {
+      // A temp folder as the working directory: were the refusal missing, the full build would find
+      // nothing to bundle there and fail on its own, never touching the repo's own dist/.
+      const { status, combined } = runBuild(args, workDir);
+      expect(status, combined).toBe(1);
+      expect(combined).toContain('--only and --outdir each need a value');
+    },
+    CHILD_TIMEOUT_MS,
+  );
+
+  it(
+    'names the handler bundle that throws while loading',
+    () => {
+      const plantedRoot = join(workDir, 'planted-handler-root');
+      const handlerDir = join(plantedRoot, 'packages', 'functions', 'src', 'planted');
+      mkdirSync(handlerDir, { recursive: true });
+      writeFileSync(
+        join(handlerDir, 'handler.ts'),
+        "throw new Error('planted load failure');\nexport const handler = (): void => {};\n",
+      );
+      const out = join(workDir, 'planted-handler-out');
+      const { status, combined } = runBuild(['--only', 'planted', '--outdir', out], plantedRoot);
+      expect(status, combined).toBe(1);
+      expect(combined).toContain(`${join(out, 'index.js')} failed to load: planted load failure`);
     },
     CHILD_TIMEOUT_MS,
   );
