@@ -62,13 +62,19 @@ function infraSources(): SourceFile[] {
 // main.ts listens on every interface only when FOTHERING_DEPLOYED_RUNTIME reads the agent's
 // AGENTCORE_RUNTIME value, and only the stack that deploys the runtime sets it. A runtime deployed
 // without it listens on loopback inside the microVM and fails its first health check, so a source
-// importing an AgentCore construct module must name the variable and that value.
-const AGENTCORE_CONSTRUCT_IMPORT_RE = /\bfrom\s+['"][^'"]*bedrock-?agentcore[^'"]*['"]|\brequire\(\s*['"][^'"]*bedrock-?agentcore[^'"]*['"]\s*\)/i;
+// importing an AgentCore construct module must name the variable and that value. A type-only
+// import builds nothing, so it is the one import left out (group 1 holds its `type` keyword).
+const AGENTCORE_CONSTRUCT_IMPORT_RE =
+  /\bimport\s+(type\s+)?(?:(?!\bimport\b)[^;])*?\bfrom\s+['"][^'"]*bedrock-?agentcore[^'"]*['"]|\brequire\(\s*['"][^'"]*bedrock-?agentcore[^'"]*['"]\s*\)/gi;
 const AGENTCORE_VALUE_RE = /\bAGENTCORE_RUNTIME\b|['"`]agentcore['"`]/;
+
+function importsAgentCoreConstructs(text: string): boolean {
+  return [...text.matchAll(AGENTCORE_CONSTRUCT_IMPORT_RE)].some((m) => m[1] === undefined);
+}
 
 function runtimeBuildersMissingListenVar(files: readonly SourceFile[]): string[] {
   return files
-    .filter((f) => AGENTCORE_CONSTRUCT_IMPORT_RE.test(f.text))
+    .filter((f) => importsAgentCoreConstructs(f.text))
     .filter((f) => !f.text.includes('FOTHERING_DEPLOYED_RUNTIME') || !AGENTCORE_VALUE_RE.test(f.text))
     .map((f) => f.path);
 }
@@ -298,8 +304,8 @@ describe('repo hardening: every gate, config and document ships what it claims',
     expect(runtimeBuildersMissingListenVar(infraSources())).toEqual([]);
 
     // Controls: a construct import with neither, or with the name alone, is caught in the stable and
-    // the alpha module spelling; the name set to the agent's constant passes, and so does a source
-    // that builds no runtime.
+    // the alpha module spelling, and so is a value import listed after a type-only one; the name set
+    // to the agent's constant passes, and so do a type-only import and a source that builds no runtime.
     const stable = "import { Runtime } from 'aws-cdk-lib/aws-bedrockagentcore';\n";
     const alpha = "import * as agentcore from '@aws-cdk/aws-bedrock-agentcore-alpha';\n";
     const setsIt = "import { AGENTCORE_RUNTIME } from '@fothering/agent/listen-host';\nconst env = { FOTHERING_DEPLOYED_RUNTIME: AGENTCORE_RUNTIME };\n";
@@ -309,7 +315,9 @@ describe('repo hardening: every gate, config and document ships what it claims',
       { path: 'name-only.ts', text: `${stable}const env = { FOTHERING_DEPLOYED_RUNTIME: 'x' };\n` },
       { path: 'sets-it.ts', text: `${stable}${setsIt}` },
       { path: 'no-runtime.ts', text: "import { Stack } from 'aws-cdk-lib';\n" },
-    ])).toEqual(['bare.ts', 'alpha.ts', 'name-only.ts']);
+      { path: 'types-only.ts', text: "import type { RuntimeProps } from 'aws-cdk-lib/aws-bedrockagentcore';\n" },
+      { path: 'types-then-value.ts', text: `import type { RuntimeProps } from 'aws-cdk-lib/aws-bedrockagentcore';\n${stable}` },
+    ])).toEqual(['bare.ts', 'alpha.ts', 'name-only.ts', 'types-then-value.ts']);
   });
 
   it('the stack record names the CommonJS bundle, the site workspace, and orders the fallback CLI deploy before the container', () => {
