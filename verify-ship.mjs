@@ -37,11 +37,12 @@
 //   - On POSIX the kernel truncates a child's exit status to 8 bits, so a tool
 //     exiting with an exact multiple of 256 reads as 0 everywhere (any shell,
 //     not just this script). No mainstream tool does that.
-//   - On Windows a timed-out step's grandchildren (the shell dies, npm/node may
-//     not) can linger and keep printing after the FAIL verdict. The verdict is
-//     still correct; kill the leftover node process manually if one hangs on.
+//   - On POSIX a timed-out step is signalled through its direct child only (npm
+//     passes the signal on), so a grandchild that ignores it can linger and keep
+//     printing after the FAIL verdict. The verdict is still reached on time: see
+//     DRAIN_GRACE_MS. On Windows the whole step tree is ended (killStepTree).
 
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 
 // Generous by design: it must never fail a legitimately slow FULL suite; it
@@ -112,6 +113,24 @@ const STEPS = [
 let pkgScripts = null;
 try { pkgScripts = JSON.parse(readFileSync('package.json', 'utf8')).scripts || {}; } catch { pkgScripts = null; }
 
+// How long a step's output pipes may stay open after the step's own process exited. Anything
+// the step left running (a timed-out step's surviving grandchild, a daemon a script started)
+// inherits those pipes, and `close` waits for every holder: without this bound the run would
+// hang with no verdict, the exact failure the step timeout exists to prevent.
+const DRAIN_GRACE_MS = 5000;
+
+// Ends a timed-out step. On Windows a signalled shell dies alone while npm, node and the tool
+// under them live on holding the output pipes, so the whole tree is ended from this one PID with
+// taskkill /T (by PID, never by name). Everywhere else, and whenever taskkill fails, the direct
+// child is signalled.
+function killStepTree(child) {
+  if (process.platform === 'win32' && child.pid !== undefined) {
+    const r = spawnSync('taskkill', ['/PID', String(child.pid), '/T', '/F'], { stdio: 'ignore' });
+    if (r.status === 0) return;
+  }
+  child.kill();
+}
+
 // Runs one step asynchronously: stdin inherited, stdout and stderr piped and written straight
 // through to the parent streams AS THEY ARRIVE (a slow step's output must never be held back
 // until it exits), while every line crossing either stream is also scanned for the uppercase
@@ -119,18 +138,21 @@ try { pkgScripts = JSON.parse(readFileSync('package.json', 'utf8')).scripts || {
 // otherwise invisible to anything reading only that step's own exit code - exactly the
 // scoped-pass-as-full-pass failure this script exists to catch one level up. The timeout is a
 // manual kill rather than spawnSync's built-in option, because streaming needs the async spawn
-// API; the residual Windows grandchild-lingers limitation noted at the top of this file is
-// unchanged; both mechanisms only ever signal the immediate child.
+// API; killStepTree and DRAIN_GRACE_MS are what keep a hung step from hanging the run.
 function runStep(step, stepTimeoutMs) {
   return new Promise((resolve) => {
     const child = spawn(step.cmd, { shell: true, stdio: ['inherit', 'pipe', 'pipe'] });
     const subGates = [];
     let timedOut = false;
     let settled = false;
+    let drainTimer;
 
     const timer = setTimeout(() => {
+      // A step that already exited is only draining its pipes: that is DRAIN_GRACE_MS's job, and
+      // reporting it as TIMED OUT would blame a step that finished.
+      if (child.exitCode !== null || child.signalCode !== null) return;
       timedOut = true;
-      child.kill();
+      killStepTree(child);
     }, stepTimeoutMs);
 
     function scanLine(line) {
@@ -159,18 +181,29 @@ function runStep(step, stepTimeoutMs) {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      clearTimeout(drainTimer);
+      // Whatever the step left running must not interleave its output with the summary.
+      child.stdout.destroy();
+      child.stderr.destroy();
       resolve({ ...result, subGates });
     }
 
+    // Order matters: a kill from the timeout above can still deliver `code: null` or a signal,
+    // so the timedOut flag is checked first, or the message would misreport a genuine hang as
+    // "killed by signal" with no mention of the timeout that caused it.
+    function outcome(code) {
+      if (timedOut) return { kind: 'timeout' };
+      if (code === null) return { kind: 'signal' };
+      return { kind: 'exit', code };
+    }
+
     child.on('error', (err) => finish({ kind: 'error', message: err.message }));
-    // Order matters: a kill from the timeout above can still deliver `code: null` or a signal
-    // through `close`, so the timedOut flag is checked first, or the message would misreport a
-    // genuine hang as "killed by signal" with no mention of the timeout that caused it.
-    child.on('close', (code) => {
-      if (timedOut) finish({ kind: 'timeout' });
-      else if (code === null) finish({ kind: 'signal' });
-      else finish({ kind: 'exit', code });
+    // `close` normally follows `exit` within milliseconds, once the pipes drain; the grace timer
+    // reaches the verdict anyway when something the step left behind keeps them open.
+    child.on('exit', (code) => {
+      drainTimer = setTimeout(() => finish(outcome(code)), DRAIN_GRACE_MS);
     });
+    child.on('close', (code) => finish(outcome(code)));
   });
 }
 
@@ -193,7 +226,8 @@ for (const step of STEPS) {
   const r = await runStep(step, stepTimeout);
   let code;
   if (r.kind === 'timeout') {
-    console.error(`[verify:ship] ${step.name} TIMED OUT after ${stepTimeout / 60000} min (hung step?) - killed`);
+    const limit = stepTimeout >= 60000 ? `${stepTimeout / 60000} min` : `${stepTimeout / 1000} s`;
+    console.error(`[verify:ship] ${step.name} TIMED OUT after ${limit} (hung step?) - killed`);
     code = 1;
   } else if (r.kind === 'error') {
     console.error(`[verify:ship] ${step.name} could not run: ${r.message}`);
