@@ -19,6 +19,8 @@ function readJson<T>(rel: string): T {
 
 interface PackageJson {
   scripts: Record<string, string>;
+  dependencies?: Record<string, string>;
+  devDependencies?: Record<string, string>;
 }
 
 interface StrykerConfig {
@@ -112,7 +114,19 @@ describe('repo hardening: every gate, config and document ships what it claims',
     expect(ci).toContain('npm rebuild esbuild');
     expect(ci).toMatch(/TRIVY_INCLUDE_DEV_DEPS:\s*'true'/);
     expect(ci).toContain('list-all-pkgs');
-    expect(ci).toContain('-le 1');
+    // The dev-dependency proof is a named devDependency in the lockfile's package list, never a
+    // count: the production tree alone already reports well over one package.
+    expect(ci).toContain('select(.Name=="vitest")');
+    expect(ci).toMatch(/if \[ "\$dev_marker" -lt 1 \]; then/);
+    expect(ci).not.toContain('-le 1');
+    // The marker holds only while vitest stays a devDependency: listed as a production dependency
+    // anywhere, a scan without dev dependencies would list it too and pass.
+    expect(pkg.devDependencies, 'vitest must stay a root devDependency').toHaveProperty('vitest');
+    const packagesDir = join(REPO_ROOT, 'packages');
+    for (const ws of readdirSync(packagesDir)) {
+      const manifest = readJson<PackageJson>(join('packages', ws, 'package.json'));
+      expect(manifest.dependencies ?? {}, `packages/${ws} lists vitest as a production dependency`).not.toHaveProperty('vitest');
+    }
     expect(ci).toContain('packages/*/package.json');
     expect(ci).toContain('check-client-secrets.mjs');
 

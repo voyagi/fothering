@@ -50,10 +50,15 @@ jobs:
         run: |
           test -s trivy-vulns.json || { echo 'trivy produced no report - refusing to read that as clean'; exit 1; }
           jq -e . trivy-vulns.json > /dev/null || { echo 'trivy report did not parse - refusing to read that as clean'; exit 1; }
+          # A package count cannot tell the two scans apart: without dev dependencies the lockfile
+          # still reports the providers workspace's production tree (157 packages against 611 with
+          # them, measured 2026-09-28 with trivy 0.74.0). vitest is a devDependency that never ships,
+          # so it is listed exactly when dev dependencies were scanned.
           lockfile_pkgs=$(jq '[.Results[]? | select(.Target=="package-lock.json") | .Packages[]?] | length' trivy-vulns.json)
-          echo "package-lock.json packages in the report: $lockfile_pkgs"
-          if [ "$lockfile_pkgs" -le 1 ]; then
-            echo 'a scan without dev dependencies reports 1 package or fewer for package-lock.json on this repo - refusing to read that as clean'
+          dev_marker=$(jq '[.Results[]? | select(.Target=="package-lock.json") | .Packages[]? | select(.Name=="vitest")] | length' trivy-vulns.json)
+          echo "package-lock.json packages in the report: $lockfile_pkgs, vitest entries: $dev_marker"
+          if [ "$dev_marker" -lt 1 ]; then
+            echo 'the report does not list vitest, a devDependency, so this scan skipped dev dependencies - refusing to read that as clean'
             exit 1
           fi
           count=$(jq '[.Results[]?.Vulnerabilities[]? | select(.Severity=="HIGH" or .Severity=="CRITICAL")] | length' trivy-vulns.json)
