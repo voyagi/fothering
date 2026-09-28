@@ -6,7 +6,7 @@ import { createServer, type AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { afterAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 // This file lives at packages/agent/src/, two levels below the repo root every path here is
 // read relative to.
@@ -71,12 +71,16 @@ function findFreePort(): Promise<number> {
   });
 }
 
-async function waitForOk(url: string, deadlineMs: number): Promise<Response> {
+// exitedEarly names why the server can never answer (its process already ended), so a runtime
+// that dies at start fails with its own output instead of fifteen seconds of refused connections.
+async function waitForOk(url: string, deadlineMs: number, exitedEarly: () => string | undefined): Promise<Response> {
   const start = Date.now();
   for (;;) {
     try {
       return await fetch(url);
     } catch (error) {
+      const early = exitedEarly();
+      if (early !== undefined) throw new Error(early, { cause: error });
       if (Date.now() - start > deadlineMs) throw error;
       await new Promise((resolveDelay) => setTimeout(resolveDelay, 200));
     }
@@ -88,7 +92,23 @@ describe('the agent bundle answers the AgentCore contract with no model and no A
   const workDir = mkdtempSync(join(tmpdir(), 'fothering-agent-work-'));
   const listenGuard = join(workDir, 'listen-guard.mjs');
   writeFileSync(listenGuard, LISTEN_GUARD_SOURCE);
+  const preloadOut = join(workDir, 'guard-preload.mjs');
+  let bundleBuild: CommandResult = { status: 1, combined: 'the shared bundle build never ran' };
   let child: ChildProcess | undefined;
+
+  // Built once, before any test, so every test below also passes when run alone by name: the
+  // bundle the runtime tests start, and the network guard preloaded into every child.
+  beforeAll(async () => {
+    bundleBuild = runBuild(['--only', 'agent', '--outdir', outDir]);
+    await build({
+      entryPoints: [join(REPO_ROOT, 'packages', 'providers', 'src', 'test', 'guards.setup.ts')],
+      bundle: true,
+      platform: 'node',
+      target: 'node22',
+      format: 'esm',
+      outfile: preloadOut,
+    });
+  }, CHILD_TIMEOUT_MS);
 
   afterAll(async () => {
     if (child !== undefined && child.exitCode === null) {
@@ -108,7 +128,7 @@ describe('the agent bundle answers the AgentCore contract with no model and no A
   it(
     'node scripts/build.mjs --only agent --outdir writes exactly one main.js, valid as CommonJS, no native module',
     () => {
-      const { status, combined } = runBuild(['--only', 'agent', '--outdir', outDir]);
+      const { status, combined } = bundleBuild;
       expect(status, combined).toBe(0);
       expect(readdirSync(outDir)).toEqual(['main.js']);
       expect(readdirSync(outDir).some((name) => name.endsWith('.node'))).toBe(false);
@@ -167,16 +187,6 @@ describe('the agent bundle answers the AgentCore contract with no model and no A
   it(
     'a planted child under the same guard preload exits with NetworkGuardError on a non-loopback connect',
     async () => {
-      const preloadOut = join(workDir, 'guard-preload.mjs');
-      await build({
-        entryPoints: [join(REPO_ROOT, 'packages', 'providers', 'src', 'test', 'guards.setup.ts')],
-        bundle: true,
-        platform: 'node',
-        target: 'node22',
-        format: 'esm',
-        outfile: preloadOut,
-      });
-
       const probeScript = join(workDir, 'guard-probe.mjs');
       await writeFile(probeScript, "import net from 'node:net';\nnet.connect({ host: '192.0.2.1', port: 80 });\n");
 
@@ -192,7 +202,6 @@ describe('the agent bundle answers the AgentCore contract with no model and no A
   it(
     'answers /ping and /invocations locally with no model and no AWS client (AC-21, AC-E38)',
     async () => {
-      const preloadOut = join(workDir, 'guard-preload.mjs');
       const port = await findFreePort();
       const host = '127.0.0.1';
 
@@ -203,14 +212,20 @@ describe('the agent bundle answers the AgentCore contract with no model and no A
         ['--import', pathToFileURL(preloadOut).href, '--import', pathToFileURL(listenGuard).href, 'main.js', '--port', String(port)],
         { cwd: outDir, env: { ...process.env, FOTHERING_DEPLOYED_RUNTIME: undefined }, stdio: ['ignore', 'pipe', 'pipe'] },
       );
-      let stderr = '';
-      child.stderr?.on('data', (chunk: Buffer) => {
-        stderr += chunk.toString();
-      });
+      let output = '';
+      const collect = (chunk: Buffer): void => {
+        output += chunk.toString();
+      };
+      child.stdout?.on('data', collect);
+      child.stderr?.on('data', collect);
+      const exitedEarly = (): string | undefined => {
+        const code = child?.exitCode;
+        return code === null || code === undefined ? undefined : `the runtime exited ${code} before answering /ping:\n${output}`;
+      };
 
       const pingUrl = `http://${host}:${port}/ping`;
-      const first = await waitForOk(pingUrl, 15000);
-      expect(first.status, stderr).toBe(200);
+      const first = await waitForOk(pingUrl, 15000, exitedEarly);
+      expect(first.status, output).toBe(200);
       const firstBody = (await first.json()) as { status: string; time_of_last_update: number };
       expect(firstBody.status).toBe('Healthy');
       expect(typeof firstBody.time_of_last_update).toBe('number');
