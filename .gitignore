@@ -1,6 +1,10 @@
+# A rule for an output only the repo root receives starts with a slash, so a source folder of the
+# same name deeper in the tree (a reports page, a coverage module) is never silently untracked.
+# dist/, .astro/ and .wrangler/ stay unanchored because each workspace writes its own.
 node_modules/
 dist/
-coverage/
+/coverage/
+packages/*/coverage/
 .astro/
 .wrangler/
 .env
@@ -10,6 +14,6 @@ coverage/
 cdk.out/
 *.log
 /.stryker-tmp/
-reports/
-.knip-report.json
-trivy-*.json
+/reports/
+/.knip-report.json
+/trivy-*.json

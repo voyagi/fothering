@@ -1,7 +1,9 @@
-import { readFileSync, readdirSync } from 'node:fs';
+import { execFileSync, spawnSync } from 'node:child_process';
+import { copyFileSync, mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { describe, expect, it } from 'vitest';
+import { afterAll, describe, expect, it } from 'vitest';
 
 // This file lives at packages/infra/src/repo/, four levels below the repo root every path here
 // is read relative to.
@@ -156,11 +158,53 @@ describe('repo hardening: every gate, config and document ships what it claims',
     expect(vitestConfig).toContain("'**/*.fault.test.ts'");
   });
 
-  it('every path a verified ship run writes is ignored', () => {
-    const gitignore = readText('.gitignore');
-    for (const entry of ['dist/', 'cdk.out/', 'reports/', '.stryker-tmp/', '.knip-report.json', 'trivy-*.json']) {
-      expect(gitignore, `expected ${entry} in .gitignore`).toContain(entry);
+  // Git itself is the judge, in a throwaway repo holding only this .gitignore, so neither this
+  // clone's .git/info/exclude nor a global excludes file can hide a rule that stopped matching.
+  describe('the ignore rules', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'gitignore-st-'));
+    afterAll(() => rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }));
+    execFileSync('git', ['init', '-q'], { cwd: dir });
+    copyFileSync(join(REPO_ROOT, '.gitignore'), join(dir, '.gitignore'));
+
+    function isIgnored(path: string): boolean {
+      const r = spawnSync(
+        'git',
+        ['-c', `core.excludesFile=${join(dir, 'no-global-excludes')}`, 'check-ignore', '--no-index', '-q', path],
+        { cwd: dir, encoding: 'utf8' },
+      );
+      // Exit 0 means ignored and 1 means not; anything else is git failing, never an answer.
+      if (r.status !== 0 && r.status !== 1) throw new Error(`git check-ignore ${path} exited ${String(r.status)}: ${r.stderr}`);
+      return r.status === 0;
     }
+
+    it.each([
+      'dist/agent/main.js',
+      'packages/web/dist/index.html',
+      'cdk.out/manifest.json',
+      'reports/mutation/mutation.html',
+      'reports/stryker-incremental.json',
+      'coverage/index.html',
+      'packages/web/coverage/index.html',
+      '.stryker-tmp/sandbox/x.ts',
+      '.knip-report.json',
+      'trivy-vulns.json',
+      'trivy-licenses.json',
+    ])('ignores %s, which a verified ship run or a build writes', (path) => {
+      expect(isIgnored(path)).toBe(true);
+    });
+
+    // A rule written for a root output folder must not swallow a source folder of the same name:
+    // an incident-report page or a coverage module would then never reach a clone or a deploy.
+    it.each([
+      'packages/web/src/pages/reports/index.astro',
+      'packages/core/src/reports/digest.ts',
+      'packages/functions/src/reports/handler.ts',
+      'packages/core/src/coverage/lanes.ts',
+      'packages/providers/src/fixtures/trivy-sample.json',
+      'packages/providers/src/fixtures/.knip-report.json',
+    ])('tracks %s, a source path sharing a name with a root output', (path) => {
+      expect(isIgnored(path)).toBe(false);
+    });
   });
 
   it('the stack record names the CommonJS bundle, the site workspace, and orders the fallback CLI deploy before the container', () => {
