@@ -160,6 +160,27 @@ describe('verify:ship selftest step and sub-gate reporting', () => {
   );
 
   it(
+    'repeats the test runner summary line that counts skipped or todo tests, and only from the tests step',
+    { timeout: 60_000 },
+    () => {
+      // The runner's own shapes, measured 2026-09-28 on vitest 4.1.11: it never prints SKIPPED.
+      const skipped = '      Tests  5 passed | 2 skipped | 1 todo (8)';
+      const clean = '      Tests  8 passed (8)';
+      const dir = makeProject({ test: 'node runner-summary.mjs', lint: 'node lint-says-skipped.mjs' });
+      dirs.push(dir);
+      writeFileSync(join(dir, 'runner-summary.mjs'), `console.log('${skipped}');\nconsole.log('${clean}');\n`);
+      writeFileSync(join(dir, 'lint-says-skipped.mjs'), "console.log(' Test Files  1 skipped (1)');\n");
+      const { stdout, status } = run(dir);
+      expect(status).toBe(0);
+      const summary = stdout.slice(stdout.indexOf('verify:ship summary'));
+      expect(summary).toContain(skipped.trim());
+      expect(summary).not.toContain(clean.trim());
+      expect(summary).not.toContain('Test Files  1 skipped');
+      expect(stdout).toContain('2 sub-gate SKIPPED line(s) repeated above');
+    },
+  );
+
+  it(
     'repeats a SKIPPED line intact when a two-byte character arrives split across two output chunks',
     { timeout: 60_000 },
     () => {

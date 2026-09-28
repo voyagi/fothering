@@ -59,7 +59,7 @@ The one part without an official example is a Node code package deployed through
 
 ## Consequences
 
-- Local development and CI run Node 22 so tests exercise the version that ships. The repo declares `engines.node` as `>=22.18`, the floor the locked tooling (size-limit, Babel under Stryker) requires.
+- CI runs Node 22, so every pull request runs the tests on the version that ships. A local run uses whatever Node the machine defaults to, so only the CI run speaks for Node 22. The repo declares `engines.node` as `>=22.18`, the floor the locked tooling (size-limit, Babel under Stryker) requires.
 - Every AWS client sits behind a port with a fixture implementation and a live one. The default resolves to fixtures, and a test fails if it ever resolves live.
 - Nothing native may enter the agent bundle unless it is built for linux/arm64. The agent is bundled with esbuild into one CommonJS file, main.js, because bedrock-agentcore builds its own require at run time and an ESM bundle cannot start on the runtime; a small build plugin removes the line that builds that require before the bundle is written.
 - Account-level SES sending is never exposed by a port and never granted by IAM.

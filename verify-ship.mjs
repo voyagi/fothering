@@ -95,9 +95,15 @@ const STEP_TIMEOUT_MS =
 // skipped" would be a new hole of exactly the shape this script exists to close: tsc exits 3
 // for an invalid project (ExitStatus.InvalidProject_OutputsSkipped), so a broken tsconfig
 // under the `types` step would be recorded SKIPPED and the run would print PASS over it.
+//
+// The test runner never prints SKIPPED: a skipped or todo test shows only as a lower-case count on
+// its summary lines ("Tests  5 passed | 2 skipped | 1 todo (8)", vitest 4.1). The tests step names
+// that shape as its skipLine, so the line is repeated like a sub-gate's and a PASS never absorbs a
+// test that did not run. Only that step: another tool's lower-case word means nothing here.
+const RUNNER_SKIP_RE = /^\s*Test(?:s| Files)\s.*\b\d+ (?:skipped|todo)\b/;
 const STEPS = [
   { name: 'types', cmd: 'npm run gate:types' }, // tsc --noEmit
-  { name: 'tests', cmd: 'npm test' },           // FULL suite, one-shot
+  { name: 'tests', cmd: 'npm test', skipLine: RUNNER_SKIP_RE }, // FULL suite, one-shot
   { name: 'lint',  cmd: 'npm run lint' },       // WHOLE-repo lint
   { name: 'gate',  cmd: 'npm run gate' },       // committed gate chain (floors)
   { name: 'repo', cmd: 'npm run gate:repo', script: 'gate:repo', appliesWhen: 'the repo-hygiene gates (goals, gitignore, hookspath, license, identity, artifact metadata, compliance, icon decision, human-todo classification) are installed with their gate:repo script' },
@@ -126,6 +132,10 @@ const DRAIN_GRACE_MS = 5000;
 // is set aside. Only that exact prefix at the start of the line is: a failing control exits non-zero
 // and fails its step, and any other line naming the word is still repeated.
 const SELFTEST_PASS_RE = /^selftest ok: /;
+
+// Colour codes are dropped before any match, and from the line the summary repeats, so a tool run
+// with colour forced on matches exactly as it does in a plain pipe.
+const COLOUR_CODE_RE = /\u001b\[[0-9;]*m/g;
 
 // Ends a timed-out step. On Windows a signalled shell dies alone while npm, node and the tool
 // under them live on holding the output pipes, so the whole tree is ended from this one PID with
@@ -164,7 +174,10 @@ function runStep(step, stepTimeoutMs) {
     }, stepTimeoutMs);
 
     function scanLine(line) {
-      if (/\bSKIPPED\b/.test(line) && !SELFTEST_PASS_RE.test(line)) subGates.push(line);
+      const plain = line.replace(COLOUR_CODE_RE, '');
+      const gateSkip = /\bSKIPPED\b/.test(plain) && !SELFTEST_PASS_RE.test(plain);
+      const runnerSkip = step.skipLine !== undefined && step.skipLine.test(plain);
+      if (gateSkip || runnerSkip) subGates.push(plain);
     }
 
     // A multi-byte character can straddle two chunks. Decoded chunk by chunk, both halves become
