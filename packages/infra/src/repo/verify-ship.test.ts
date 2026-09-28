@@ -12,6 +12,7 @@ const VERIFY_SHIP = join(REPO_ROOT, 'verify-ship.mjs');
 
 const STEP_ORDER = ['types', 'tests', 'lint', 'gate', 'repo', 'selftest', 'build', 'coverage', 'e2e', 'a11y', 'mutation'];
 const SUB_GATE_LINE = 'neutral-subgate: SKIPPED, nothing to check';
+const SELFTEST_PASS_LINE = 'selftest ok: an absent file is a loud SKIPPED, exit 0';
 const HANG_PID_FILE = 'hang.pid';
 
 function makeProject(overrides: Record<string, string> = {}): string {
@@ -19,6 +20,8 @@ function makeProject(overrides: Record<string, string> = {}): string {
   writeFileSync(join(dir, 'ok.mjs'), 'process.exit(0);\n');
   writeFileSync(join(dir, 'skip.mjs'), `console.log('${SUB_GATE_LINE}');\nprocess.exit(0);\n`);
   writeFileSync(join(dir, 'fail.mjs'), 'process.exit(1);\n');
+  // The shape every gate script's --selftest prints for a PASSING control that names the word.
+  writeFileSync(join(dir, 'selftest-pass.mjs'), `console.log('${SELFTEST_PASS_LINE}');\nprocess.exit(0);\n`);
   // A step that never ends, run the way a real one is (npm, then a shell, then node), which
   // records its own PID so the test can tell whether the timeout reached it.
   writeFileSync(
@@ -119,6 +122,40 @@ describe('verify:ship selftest step and sub-gate reporting', () => {
 
       expect(summary).toContain(SUB_GATE_LINE);
       expect(stdout).toContain('verify:ship: PASS');
+    },
+  );
+
+  it(
+    'counts only sub-gates that audited nothing: a passing selftest control is not one, and one skip printed by two steps counts once',
+    { timeout: 60_000 },
+    () => {
+      // gate and repo both print the same skip, the way the real gate chain runs gate:repo inside
+      // itself, and the selftest step prints a passing control that names the word.
+      const dir = makeProject({ gate: 'node skip.mjs', 'gate:selftest': 'node selftest-pass.mjs' });
+      dirs.push(dir);
+      const { stdout, status } = run(dir);
+      expect(status).toBe(0);
+
+      const summary = stdout.slice(stdout.indexOf('verify:ship summary'));
+      expect(summary.split(SUB_GATE_LINE).length - 1, 'the skip is still listed under each step that printed it').toBe(2);
+      expect(summary).not.toContain(SELFTEST_PASS_LINE);
+      expect(stdout).toContain('1 sub-gate SKIPPED line(s) repeated above');
+    },
+  );
+
+  it(
+    'still repeats a skip line that only mentions selftest further in, since only the exact passing-control prefix is set aside',
+    { timeout: 60_000 },
+    () => {
+      const lookalike = '[selftest-runner] SKIPPED: selftest ok: prefix not at the start';
+      const dir = makeProject({ 'gate:selftest': 'node lookalike.mjs' });
+      dirs.push(dir);
+      writeFileSync(join(dir, 'lookalike.mjs'), `console.log('${lookalike}');\nprocess.exit(0);\n`);
+      const { stdout, status } = run(dir);
+      expect(status).toBe(0);
+      const summary = stdout.slice(stdout.indexOf('verify:ship summary'));
+      expect(summary).toContain(lookalike);
+      expect(stdout).toContain('2 sub-gate SKIPPED line(s) repeated above');
     },
   );
 

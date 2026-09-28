@@ -119,6 +119,13 @@ try { pkgScripts = JSON.parse(readFileSync('package.json', 'utf8')).scripts || {
 // hang with no verdict, the exact failure the step timeout exists to prevent.
 const DRAIN_GRACE_MS = 5000;
 
+// A gate script's --selftest prints `selftest ok: <control>` for each control that PASSED, and some
+// of those controls are about skipping (`selftest ok: an absent file is a loud SKIPPED, exit 0`).
+// Such a line proves a gate skips loudly; it is never itself a sub-gate that audited nothing, so it
+// is set aside. Only that exact prefix at the start of the line is: a failing control exits non-zero
+// and fails its step, and any other line naming the word is still repeated.
+const SELFTEST_PASS_RE = /^selftest ok: /;
+
 // Ends a timed-out step. On Windows a signalled shell dies alone while npm, node and the tool
 // under them live on holding the output pipes, so the whole tree is ended from this one PID with
 // taskkill /T (by PID, never by name). Everywhere else, and whenever taskkill fails, the direct
@@ -156,7 +163,7 @@ function runStep(step, stepTimeoutMs) {
     }, stepTimeoutMs);
 
     function scanLine(line) {
-      if (/\bSKIPPED\b/.test(line)) subGates.push(line);
+      if (/\bSKIPPED\b/.test(line) && !SELFTEST_PASS_RE.test(line)) subGates.push(line);
     }
 
     function relay(source, sink) {
@@ -249,7 +256,9 @@ for (const step of STEPS) {
 }
 
 const pad = Math.max(...STEPS.map((s) => s.name.length));
-let subGateCount = 0;
+// Counted by text: the gate chain runs gate:repo inside itself and the repo step runs it again, so
+// one sub-gate's skip is printed twice and would otherwise read as two sub-gates that audited nothing.
+const distinctSubGates = new Set();
 console.log('\n============ verify:ship summary ============');
 for (const r of results) {
   const codeStr = r.code === null ? '' : ` (exit ${r.code})`;
@@ -259,9 +268,10 @@ for (const r of results) {
   // audited nothing.
   for (const line of r.subGates) {
     console.log(`      ${line}`);
-    subGateCount++;
+    distinctSubGates.add(line.trim());
   }
 }
+const subGateCount = distinctSubGates.size;
 console.log('=============================================');
 
 if (failed) {
