@@ -25,8 +25,11 @@ jobs:
         with:
           node-version: 22
           cache: npm
-      # No third-party install script runs during install; only the one allowlisted rebuild
-      # (esbuild's own postinstall, which downloads its platform binary) runs afterward, alone.
+      # No third-party install script runs during install; only the one allowlisted rebuild runs
+      # afterward, alone. esbuild's postinstall finds its platform binary in the @esbuild/*
+      # optional package the lockfile already installed, links it in and checks its version; it
+      # downloads only when that package is missing. esbuild also runs without it (checked
+      # 2026-09-28 with a scriptless install, build and agent tests all green).
       - run: npm ci --ignore-scripts
       - run: npm rebuild esbuild
       # This repo's tooling (vitest, stryker, esbuild, the CDK CLI) is entirely devDependencies,
