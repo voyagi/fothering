@@ -152,6 +152,7 @@ describe('lint catches a stray BedrockModel import and an argument-less agent', 
     const passed: ReadonlyArray<[code: string, path: string]> = [
       ['class Agent {}\nexport const a = new Agent({ model: 1 });\n', 'packages/agent/src/planted3.ts'],
       ["import * as sdk from 'x';\nconst model = 1;\nexport const a = new sdk.Agent({ model, tools: [] });\n", 'packages/agent/src/planted7.ts'],
+      ["class Agent {}\nexport const a = new Agent({ 'model': 1 });\n", 'packages/agent/src/planted8.ts'],
     ];
     for (const [code, path] of flagged) {
       expect(ruleIds(await lintMessages(code, path)), code).toContain('no-restricted-syntax');

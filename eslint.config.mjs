@@ -20,8 +20,8 @@ const TEST_FILES = ['**/*.{test,spec}.{ts,tsx,js,jsx,mjs,cjs}'];
 const AGENT_WITHOUT_MODEL = [
   "NewExpression[callee.name='Agent'][arguments.length=0]",
   "NewExpression[callee.property.name='Agent'][arguments.length=0]",
-  "NewExpression[callee.name='Agent'] > ObjectExpression:not(:has(> Property[key.name='model']))",
-  "NewExpression[callee.property.name='Agent'] > ObjectExpression:not(:has(> Property[key.name='model']))",
+  "NewExpression[callee.name='Agent'] > ObjectExpression:not(:has(> Property[key.name='model'])):not(:has(> Property[key.value='model']))",
+  "NewExpression[callee.property.name='Agent'] > ObjectExpression:not(:has(> Property[key.name='model'])):not(:has(> Property[key.value='model']))",
 ].map((selector) => ({ selector, message: 'Build an Agent with an explicit model from the live providers.' }));
 
 export default [
