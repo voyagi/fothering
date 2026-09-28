@@ -32,14 +32,16 @@ interface LockFile {
   packages?: Record<string, { hasInstallScript?: boolean }>;
 }
 
+// Every spelling the CDK CLI takes a context pair in: -c k=v, --context k=v, the = forms, quoted.
 function contextKeysPassed(text: string): string[] {
-  return [...text.matchAll(/(?:^|\s)(?:-c|--context)\s+([\w:.-]+)=/g)].map((m) => m[1] as string);
+  return [...text.matchAll(/(?:^|\s)(?:-c|--context)(?:=|\s+)["']?([\w:.-]+)=/g)].map((m) => m[1] as string);
 }
 
+// Every way a construct reads one: tryGetContext or getContext, with any quote style.
 function contextKeysRead(sources: readonly string[]): Set<string> {
   const keys = new Set<string>();
   for (const source of sources) {
-    for (const m of source.matchAll(/tryGetContext\(\s*['"]([^'"]+)['"]\s*\)/g)) keys.add(m[1] as string);
+    for (const m of source.matchAll(/\b(?:tryGetContext|getContext)\(\s*['"`]([^'"`]+)['"`]\s*\)/g)) keys.add(m[1] as string);
   }
   return keys;
 }
@@ -254,10 +256,17 @@ describe('repo hardening: every gate, config and document ships what it claims',
       expect(read.has(key), `the README passes -c ${key}, which no stack reads, so it changes nothing`).toBe(true);
     }
 
-    // Controls: both extractors find what they exist to find.
+    // Controls: both extractors find what they exist to find, in every spelling the CLI takes a
+    // context pair in and every way a construct reads one.
     expect(contextKeysPassed('npx cdk deploy --all -c fothering:live=live')).toEqual(['fothering:live']);
     expect(contextKeysPassed('npx cdk deploy --all --context a.b=1')).toEqual(['a.b']);
+    expect(contextKeysPassed('npx cdk deploy --all --context=a.b=1')).toEqual(['a.b']);
+    expect(contextKeysPassed('npx cdk deploy --all -c=a.b=1')).toEqual(['a.b']);
+    expect(contextKeysPassed('npx cdk deploy --all -c "a:b=1" --context \'c=2\'')).toEqual(['a:b', 'c']);
+    expect(contextKeysPassed('npx cdk deploy --all --ci')).toEqual([]);
     expect(contextKeysRead(["const v = this.node.tryGetContext('fothering:live');"]).has('fothering:live')).toBe(true);
+    expect(contextKeysRead(['const v = app.node.getContext("a.b");']).has('a.b')).toBe(true);
+    expect(contextKeysRead(['const v = this.node.tryGetContext(`c`);']).has('c')).toBe(true);
     expect(contextKeysRead(['const v = 1;']).size).toBe(0);
   });
 

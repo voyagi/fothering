@@ -44,7 +44,9 @@ function findLiteralOutsideAllowlist(files: ReadonlyArray<FileText>, allowlist: 
 // A read through the constant (`process.env[LIVE_SWITCH]`) carries no literal name, so the
 // name list and the literal read count both miss it. Tests and the suite's own setup under
 // src/test/ read it that way on purpose; any production file doing so is a second reader.
-const CONSTANT_READ_RE = /\benv\s*\[\s*LIVE_SWITCH\s*\]/;
+// Plain, optional-chained and namespace-member forms: env[LIVE_SWITCH], env?.[LIVE_SWITCH],
+// env[mode.LIVE_SWITCH].
+const CONSTANT_READ_RE = /\benv\s*(?:\?\.)?\s*\[\s*(?:\w+\s*\.\s*)?LIVE_SWITCH\s*\]/;
 const TEST_SUPPORT_RE = /\.test\.ts$|^packages\/[^/]+\/src\/test\//;
 
 function findConstantReaders(files: ReadonlyArray<FileText>): string[] {
@@ -91,10 +93,16 @@ describe('the switch name lives only in the named files', () => {
     // setup and a test file reading the same way are not.
     const planted: FileText[] = [
       { path: 'packages/functions/src/planted.ts', text: 'const v = process.env[ LIVE_SWITCH ];\n' },
+      { path: 'packages/functions/src/planted-optional.ts', text: 'const v = process.env?.[LIVE_SWITCH];\n' },
+      { path: 'packages/functions/src/planted-namespace.ts', text: 'const v = process.env[mode.LIVE_SWITCH];\n' },
       { path: 'packages/providers/src/test/global-setup.ts', text: 'const v = process.env[LIVE_SWITCH];\n' },
       { path: 'packages/core/src/mode.test.ts', text: 'const v = process.env[LIVE_SWITCH];\n' },
     ];
-    expect(findConstantReaders(planted)).toEqual(['packages/functions/src/planted.ts']);
+    expect(findConstantReaders(planted)).toEqual([
+      'packages/functions/src/planted.ts',
+      'packages/functions/src/planted-optional.ts',
+      'packages/functions/src/planted-namespace.ts',
+    ]);
   });
 
   it('.env.example declares the switch on a line that is exactly the name, an equals sign, and nothing else', () => {
