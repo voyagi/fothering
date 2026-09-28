@@ -32,6 +32,18 @@ interface LockFile {
   packages?: Record<string, { hasInstallScript?: boolean }>;
 }
 
+function contextKeysPassed(text: string): string[] {
+  return [...text.matchAll(/(?:^|\s)(?:-c|--context)\s+([\w:.-]+)=/g)].map((m) => m[1] as string);
+}
+
+function contextKeysRead(sources: readonly string[]): Set<string> {
+  const keys = new Set<string>();
+  for (const source of sources) {
+    for (const m of source.matchAll(/tryGetContext\(\s*['"]([^'"]+)['"]\s*\)/g)) keys.add(m[1] as string);
+  }
+  return keys;
+}
+
 describe('repo hardening: every gate, config and document ships what it claims', () => {
   const pkg = readJson<PackageJson>('package.json');
 
@@ -219,6 +231,34 @@ describe('repo hardening: every gate, config and document ships what it claims',
     ])('tracks %s, a source path sharing a name with a root output', (path) => {
       expect(isIgnored(path)).toBe(false);
     });
+  });
+
+  // The CDK CLI fails a stack list only when NO name matches (aws-cdk 2.1142.0: deploy's selector
+  // goes through mustMatch, which throws only below one match), so a README naming one real stack
+  // and one the app lacks deploys the real one, skips the other and exits 0. --all cannot drift.
+  it('the README deploys and destroys with --all, never a list of stack names', () => {
+    const cdkLines = readText('README.md')
+      .split('\n')
+      .filter((line) => /\bcdk (deploy|destroy)\b/.test(line));
+    expect(cdkLines.length, 'expected the README to show a deploy and a destroy').toBeGreaterThanOrEqual(2);
+    for (const line of cdkLines) expect(line).toMatch(/\bcdk (deploy|destroy) --all(\s|$)/);
+  });
+
+  it('every CDK context key the README passes is read by the CDK app', () => {
+    const infraSrc = join(REPO_ROOT, 'packages', 'infra', 'src');
+    const sources = readdirSync(infraSrc, { recursive: true, encoding: 'utf8' })
+      .filter((file) => file.endsWith('.ts') && !file.endsWith('.test.ts'))
+      .map((file) => readFileSync(join(infraSrc, file), 'utf8'));
+    const read = contextKeysRead(sources);
+    for (const key of contextKeysPassed(readText('README.md'))) {
+      expect(read.has(key), `the README passes -c ${key}, which no stack reads, so it changes nothing`).toBe(true);
+    }
+
+    // Controls: both extractors find what they exist to find.
+    expect(contextKeysPassed('npx cdk deploy --all -c fothering:live=live')).toEqual(['fothering:live']);
+    expect(contextKeysPassed('npx cdk deploy --all --context a.b=1')).toEqual(['a.b']);
+    expect(contextKeysRead(["const v = this.node.tryGetContext('fothering:live');"]).has('fothering:live')).toBe(true);
+    expect(contextKeysRead(['const v = 1;']).size).toBe(0);
   });
 
   it('the stack record names the CommonJS bundle, the site workspace, and orders the fallback CLI deploy before the container', () => {

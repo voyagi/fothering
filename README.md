@@ -42,11 +42,8 @@ npm run verify:ship # everything above, in order, with one verdict
 - A deployed stack with `FOTHERING_LIVE` set to the exact word `live`: those mutations go live as
   later phases build them.
 
-A deployed stack gets the switch only from the CDK context key, never from a shell variable:
-
-```sh
-npx cdk deploy FotheringIngest FotheringRuntime -c fothering:live=live
-```
+A deployed stack never takes the switch from a shell variable. No stack passes it to its functions
+yet, so every deployed function runs as the unset case above.
 
 ## Deploy and remove
 
@@ -55,12 +52,16 @@ Run from the owner's account, in `eu-central-1`:
 ```sh
 npm run build
 npx cdk bootstrap             # once, before the first deploy
-npx cdk deploy FotheringIngest FotheringRuntime
-npx cdk destroy FotheringIngest FotheringRuntime
+npx cdk deploy --all
+npx cdk destroy --all
 ```
 
-Before sending any mail through a deployed stack, check the ingest rule's configuration-set
-condition against one sample event:
+Before sending any mail through a deployed stack, check that the ingest rule catches your
+configuration sets. `npm run build` writes the rule into `cdk.out/FotheringIngest.template.json`:
+save the `EventPattern` of its `AWS::Events::Rule` resource as `rule-pattern.json`. Save the `event`
+object of `packages/providers/src/fixtures/ses-events/bounce.json` as `sample-event.json`, with its
+`ses:configuration-set` tag set to one of the sets in `lanes.json`. This reports whether the rule
+matches that event; a configuration set missing from `lanes.json` never matches:
 
 ```sh
 aws events test-event-pattern --event-pattern file://rule-pattern.json --event file://sample-event.json
