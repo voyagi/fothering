@@ -26,19 +26,15 @@
 // neither: requiring main.js starts the AgentCore HTTP server as a side effect of loading it, so
 // its only load proof is the local runtime test, which runs it as its own process instead.
 //
-// WHY THE createRequire PLUGIN. bedrock-agentcore's runtime/app.js builds a private `require`
-// through `createRequire(import.meta.url)` to load two Fastify plugins CommonJS-style. Bundled to
-// CommonJS, `import.meta.url` is undefined and the file throws on load before esbuild ever
-// follows the require() calls it guards. Deleting that one line lets esbuild see and inline both
-// plugins for real (RESEARCH.md Item 1, D-32). The plugin fails loudly, not silently, when the
-// line it expects is gone, so a bedrock-agentcore upgrade cannot reintroduce the crash unnoticed.
+// The CommonJS settings both bundle kinds share, and the agent's createRequire plugin, live in
+// bundle-options.mjs with the reasons for each.
 import { build } from 'esbuild';
 import { execFileSync } from 'node:child_process';
 import { existsSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
-import { readFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
+import { CJS_BUNDLE_BASE, agentcoreInlineRequirePlugin } from './bundle-options.mjs';
 
 const require = createRequire(import.meta.url);
 
@@ -54,26 +50,6 @@ const AWS_CREDENTIAL_VARS = [
   'AWS_CONTAINER_CREDENTIALS_FULL_URI',
   'AWS_CONTAINER_AUTHORIZATION_TOKEN',
 ];
-
-const AGENTCORE_APP_FILTER = /bedrock-agentcore[\\/]dist[\\/]src[\\/]runtime[\\/]app\.js$/;
-const AGENTCORE_CREATE_REQUIRE_LINE = 'const require = createRequire(import.meta.url);';
-
-function agentcoreInlineRequirePlugin() {
-  return {
-    name: 'agentcore-inline-require',
-    setup(pluginBuild) {
-      pluginBuild.onLoad({ filter: AGENTCORE_APP_FILTER }, async (args) => {
-        const source = await readFile(args.path, 'utf8');
-        if (!source.includes(AGENTCORE_CREATE_REQUIRE_LINE)) {
-          throw new Error(
-            `bedrock-agentcore's runtime/app.js no longer holds "${AGENTCORE_CREATE_REQUIRE_LINE}": re-check this plugin against the installed version`,
-          );
-        }
-        return { contents: source.replace(AGENTCORE_CREATE_REQUIRE_LINE, ''), loader: 'js' };
-      });
-    },
-  };
-}
 
 function findHandlers(root) {
   const functionsSrc = join(root, 'packages', 'functions', 'src');
@@ -106,11 +82,8 @@ function exportsHandler(outfileAbs) {
 
 async function buildHandlerBundle(root, name, outfileAbs) {
   await build({
+    ...CJS_BUNDLE_BASE,
     entryPoints: [join('packages', 'functions', 'src', name, 'handler.ts')],
-    bundle: true,
-    platform: 'node',
-    target: 'node22',
-    format: 'cjs',
     outfile: outfileAbs,
     absWorkingDir: root,
   });
@@ -122,11 +95,8 @@ async function buildHandlerBundle(root, name, outfileAbs) {
 
 async function buildAgentBundle(root, outfileAbs) {
   await build({
+    ...CJS_BUNDLE_BASE,
     entryPoints: [join('packages', 'agent', 'src', 'main.ts')],
-    bundle: true,
-    platform: 'node',
-    target: 'node22',
-    format: 'cjs',
     outfile: outfileAbs,
     absWorkingDir: root,
     plugins: [agentcoreInlineRequirePlugin()],

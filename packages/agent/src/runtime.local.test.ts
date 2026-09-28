@@ -1,4 +1,4 @@
-import { build } from 'esbuild';
+import { build, type BuildOptions } from 'esbuild';
 import { execFileSync, spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { copyFileSync, mkdtempSync, readdirSync, rmSync } from 'node:fs';
 import { readFile, writeFile } from 'node:fs/promises';
@@ -12,6 +12,7 @@ import { afterAll, describe, expect, it } from 'vitest';
 // read relative to.
 const REPO_ROOT = fileURLToPath(new URL('../../../', import.meta.url));
 const BUILD_SCRIPT = join(REPO_ROOT, 'scripts', 'build.mjs');
+const BUNDLE_OPTIONS = join(REPO_ROOT, 'scripts', 'bundle-options.mjs');
 const AGENTCORE_APP_JS = join(REPO_ROOT, 'node_modules', 'bedrock-agentcore', 'dist', 'src', 'runtime', 'app.js');
 const CREATE_REQUIRE_LINE = 'const require = createRequire(import.meta.url);';
 const CHILD_TIMEOUT_MS = 60000;
@@ -118,6 +119,28 @@ describe('the agent bundle answers the AgentCore contract with no model and no A
         await writeFile(AGENTCORE_APP_JS, original);
         rmSync(plantedDir, { recursive: true, force: true });
       }
+    },
+    CHILD_TIMEOUT_MS,
+  );
+
+  it(
+    'the shared CommonJS settings fail a planted import.meta use instead of bundling it as undefined',
+    async () => {
+      const { CJS_BUNDLE_BASE } = (await import(pathToFileURL(BUNDLE_OPTIONS).href)) as { CJS_BUNDLE_BASE: BuildOptions };
+      const planted = join(workDir, 'planted-import-meta.mjs');
+      await writeFile(planted, 'export const where = import.meta.url;\n');
+      const failure = await build({ ...CJS_BUNDLE_BASE, entryPoints: [planted], write: false, logLevel: 'silent' }).then(
+        () => undefined,
+        (error: unknown) => error as { errors?: Array<{ id?: string }> },
+      );
+      expect(failure?.errors?.map((e) => e.id)).toContain('empty-import-meta');
+
+      // Control: the same settings bundle a file with no import.meta, so the failure above is the
+      // override firing, not settings that fail every build.
+      const clean = join(workDir, 'clean-entry.mjs');
+      await writeFile(clean, 'export const where = 1;\n');
+      const ok = await build({ ...CJS_BUNDLE_BASE, entryPoints: [clean], write: false, logLevel: 'silent' });
+      expect(ok.errors).toEqual([]);
     },
     CHILD_TIMEOUT_MS,
   );

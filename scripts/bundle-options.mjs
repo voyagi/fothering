@@ -1,0 +1,46 @@
+// bundle-options.mjs - the esbuild settings every CommonJS bundle shares, and the one plugin the
+// agent bundle needs. They live outside build.mjs because importing build.mjs runs a whole
+// build, and a test must be able to build a planted input with exactly the settings the real
+// build uses.
+//
+// WHY empty-import-meta IS AN ERROR. Bundled to CommonJS, esbuild rewrites every `import.meta` to
+// an empty object and only warns, so `import.meta.url` is undefined at run time while the build
+// still succeeds. The plugin below removes the one use bedrock-agentcore 0.4.4 has; raising the
+// warning to an error stops a new use, from an upgrade or any other dependency, from shipping a
+// bundle that dies on the first code path that touches it.
+//
+// WHY THE createRequire PLUGIN. bedrock-agentcore's runtime/app.js builds a private `require`
+// through `createRequire(import.meta.url)` to load two Fastify plugins CommonJS-style. Bundled to
+// CommonJS, `import.meta.url` is undefined and the file throws on load before esbuild ever
+// follows the require() calls it guards. Deleting that one line lets esbuild see and inline both
+// plugins for real. The plugin fails loudly, not silently, when the line it expects is gone, so a
+// bedrock-agentcore upgrade cannot reintroduce the crash unnoticed.
+import { readFile } from 'node:fs/promises';
+
+export const CJS_BUNDLE_BASE = Object.freeze({
+  bundle: true,
+  platform: 'node',
+  target: 'node22',
+  format: 'cjs',
+  logOverride: { 'empty-import-meta': 'error' },
+});
+
+const AGENTCORE_APP_FILTER = /bedrock-agentcore[\\/]dist[\\/]src[\\/]runtime[\\/]app\.js$/;
+const AGENTCORE_CREATE_REQUIRE_LINE = 'const require = createRequire(import.meta.url);';
+
+export function agentcoreInlineRequirePlugin() {
+  return {
+    name: 'agentcore-inline-require',
+    setup(pluginBuild) {
+      pluginBuild.onLoad({ filter: AGENTCORE_APP_FILTER }, async (args) => {
+        const source = await readFile(args.path, 'utf8');
+        if (!source.includes(AGENTCORE_CREATE_REQUIRE_LINE)) {
+          throw new Error(
+            `bedrock-agentcore's runtime/app.js no longer holds "${AGENTCORE_CREATE_REQUIRE_LINE}": re-check this plugin against the installed version`,
+          );
+        }
+        return { contents: source.replace(AGENTCORE_CREATE_REQUIRE_LINE, ''), loader: 'js' };
+      });
+    },
+  };
+}

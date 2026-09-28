@@ -63,6 +63,12 @@ describe('repo hardening: every gate, config and document ships what it claims',
     }
   });
 
+  it('every CommonJS bundle in the build takes the shared settings, so none escapes the import.meta error', () => {
+    const buildScript = readText('scripts/build.mjs');
+    expect(buildScript, 'a CommonJS format set here bypasses bundle-options.mjs').not.toMatch(/format:\s*'cjs'/);
+    expect(buildScript.match(/\.\.\.CJS_BUNDLE_BASE/g) ?? []).toHaveLength(2);
+  });
+
   it('the ship-verification runner declares a selftest step', () => {
     const verifyShip = readText('verify-ship.mjs');
     expect(verifyShip).toMatch(/name:\s*'selftest'/);
