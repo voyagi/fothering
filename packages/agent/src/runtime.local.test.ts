@@ -1,6 +1,6 @@
-import { build, type BuildOptions } from 'esbuild';
+import { build, type BuildOptions, type Plugin } from 'esbuild';
 import { execFileSync, spawn, spawnSync, type ChildProcess } from 'node:child_process';
-import { copyFileSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { readFile, writeFile } from 'node:fs/promises';
 import { createServer, type AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -143,21 +143,49 @@ describe('the agent bundle answers the AgentCore contract with no model and no A
   );
 
   it(
-    'a planted app.js without the createRequire line makes the plugin throw its named error',
+    'a planted app.js without the createRequire line makes the plugin throw its named error, and one with it builds',
     async () => {
-      const original = await readFile(AGENTCORE_APP_JS, 'utf8');
-      expect(original).toContain(CREATE_REQUIRE_LINE);
-      const plantedDir = mkdtempSync(join(tmpdir(), 'fothering-agent-planted-'));
-      try {
-        await writeFile(AGENTCORE_APP_JS, original.replace(CREATE_REQUIRE_LINE, ''));
-        const { status, combined } = runBuild(['--only', 'agent', '--outdir', plantedDir]);
-        expect(status).not.toBe(0);
-        expect(combined).toContain('no longer holds');
-        expect(readdirSync(plantedDir)).toEqual([]);
-      } finally {
-        await writeFile(AGENTCORE_APP_JS, original);
-        rmSync(plantedDir, { recursive: true, force: true });
-      }
+      // The installed file is read, never written: a run killed mid-build must not leave a broken
+      // dependency behind for every later build to trip over.
+      expect(await readFile(AGENTCORE_APP_JS, 'utf8')).toContain(CREATE_REQUIRE_LINE);
+
+      const { CJS_BUNDLE_BASE, agentcoreInlineRequirePlugin } = (await import(pathToFileURL(BUNDLE_OPTIONS).href)) as {
+        CJS_BUNDLE_BASE: BuildOptions;
+        agentcoreInlineRequirePlugin: () => Plugin;
+      };
+      // A private copy of the package path the plugin's filter matches, under this test's own folder.
+      const plantedRoot = join(workDir, 'planted-agentcore');
+      const runtimeDir = join(plantedRoot, 'node_modules', 'bedrock-agentcore', 'dist', 'src', 'runtime');
+      mkdirSync(runtimeDir, { recursive: true });
+      const plantedApp = join(runtimeDir, 'app.js');
+      const entry = join(plantedRoot, 'entry.mjs');
+      await writeFile(entry, "import './node_modules/bedrock-agentcore/dist/src/runtime/app.js';\n");
+      const bundle = () =>
+        build({ ...CJS_BUNDLE_BASE, entryPoints: [entry], plugins: [agentcoreInlineRequirePlugin()], write: false, logLevel: 'silent' });
+
+      await writeFile(plantedApp, "import { createRequire } from 'node:module';\nexport const kind = typeof createRequire;\n");
+      const failure = await bundle().then(
+        () => undefined,
+        (error: unknown) => error as Error,
+      );
+      expect(failure?.message).toContain('no longer holds');
+
+      // Control: the same file with the line builds, so the failure above is the missing line alone.
+      await writeFile(plantedApp, `import { createRequire } from 'node:module';\n${CREATE_REQUIRE_LINE}\nexport const kind = typeof require;\n`);
+      const ok = await bundle();
+      expect(ok.errors).toEqual([]);
+    },
+    CHILD_TIMEOUT_MS,
+  );
+
+  it(
+    'the build script exits non-zero and writes nothing when the one target it is asked for cannot be built',
+    () => {
+      const emptyOut = join(workDir, 'unknown-target-out');
+      const { status, combined } = runBuild(['--only', 'no-such-target', '--outdir', emptyOut]);
+      expect(status, combined).toBe(1);
+      expect(combined).toContain('is not a known target');
+      expect(existsSync(emptyOut) ? readdirSync(emptyOut) : []).toEqual([]);
     },
     CHILD_TIMEOUT_MS,
   );
