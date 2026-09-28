@@ -1,6 +1,6 @@
 import { build, type BuildOptions } from 'esbuild';
 import { execFileSync, spawn, spawnSync, type ChildProcess } from 'node:child_process';
-import { copyFileSync, mkdtempSync, readdirSync, rmSync } from 'node:fs';
+import { copyFileSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { readFile, writeFile } from 'node:fs/promises';
 import { createServer, type AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -17,6 +17,23 @@ const AGENTCORE_APP_JS = join(REPO_ROOT, 'node_modules', 'bedrock-agentcore', 'd
 const CREATE_REQUIRE_LINE = 'const require = createRequire(import.meta.url);';
 const CHILD_TIMEOUT_MS = 60000;
 const SESSION_HEADER = 'x-amzn-bedrock-agentcore-runtime-session-id';
+const LISTEN_REFUSED = 'listen guard refused a non-loopback bind';
+
+// Preloaded into every runtime child: any listen on an address that is not loopback throws before
+// a socket is bound, so no test run of the bundle can open a port to the network, and the deployed
+// path can be proven by the refusal instead of by binding every interface on this machine.
+const LISTEN_GUARD_SOURCE = String.raw`import net from 'node:net';
+const listen = net.Server.prototype.listen;
+const LOOPBACK = /^(?:127\.\d{1,3}\.\d{1,3}\.\d{1,3}|::1|localhost)$/i;
+net.Server.prototype.listen = function guardedListen(...args) {
+  const first = args[0];
+  const host = typeof first === 'object' && first !== null ? first.host : args[1];
+  if (typeof host !== 'string' || !LOOPBACK.test(host)) {
+    throw new Error('${LISTEN_REFUSED} to ' + String(host));
+  }
+  return listen.apply(this, args);
+};
+`;
 
 interface CommandResult {
   status: number;
@@ -69,6 +86,8 @@ async function waitForOk(url: string, deadlineMs: number): Promise<Response> {
 describe('the agent bundle answers the AgentCore contract with no model and no AWS client', () => {
   const outDir = mkdtempSync(join(tmpdir(), 'fothering-agent-bundle-'));
   const workDir = mkdtempSync(join(tmpdir(), 'fothering-agent-work-'));
+  const listenGuard = join(workDir, 'listen-guard.mjs');
+  writeFileSync(listenGuard, LISTEN_GUARD_SOURCE);
   let child: ChildProcess | undefined;
 
   afterAll(async () => {
@@ -177,10 +196,12 @@ describe('the agent bundle answers the AgentCore contract with no model and no A
       const port = await findFreePort();
       const host = '127.0.0.1';
 
+      // No deploy variable and the listen guard preloaded: the runtime must choose loopback on its
+      // own, or the guard ends it before it answers a single ping.
       child = spawn(
         process.execPath,
-        ['--import', pathToFileURL(preloadOut).href, 'main.js', '--port', String(port), '--host', host],
-        { cwd: outDir, env: { ...process.env }, stdio: ['ignore', 'pipe', 'pipe'] },
+        ['--import', pathToFileURL(preloadOut).href, '--import', pathToFileURL(listenGuard).href, 'main.js', '--port', String(port)],
+        { cwd: outDir, env: { ...process.env, FOTHERING_DEPLOYED_RUNTIME: undefined }, stdio: ['ignore', 'pipe', 'pipe'] },
       );
       let stderr = '';
       child.stderr?.on('data', (chunk: Buffer) => {
@@ -216,6 +237,21 @@ describe('the agent bundle answers the AgentCore contract with no model and no A
         body: '{}',
       });
       expect(noSession.status).toBe(400);
+    },
+    CHILD_TIMEOUT_MS,
+  );
+
+  it(
+    'asks for every interface only when the deploying stack sets FOTHERING_DEPLOYED_RUNTIME, refused here by the listen guard',
+    async () => {
+      const port = await findFreePort();
+      const result = spawnSync(
+        process.execPath,
+        ['--import', pathToFileURL(listenGuard).href, 'main.js', '--port', String(port)],
+        { cwd: outDir, env: { ...process.env, FOTHERING_DEPLOYED_RUNTIME: 'agentcore' }, encoding: 'utf8', timeout: 20000 },
+      );
+      expect(`${result.stdout}${result.stderr}`).toContain(LISTEN_REFUSED);
+      expect(result.status).not.toBe(0);
     },
     CHILD_TIMEOUT_MS,
   );

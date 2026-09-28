@@ -10,6 +10,7 @@
     "packages/providers/src/dry-run.ts",
     "packages/functions/src/*/root.ts",
     "packages/agent/src/root.ts",
+    "packages/agent/src/listen-host.ts",
     "!packages/**/*.test.ts",
     "!packages/**/test/**",
     "!packages/**/fixtures/**",
