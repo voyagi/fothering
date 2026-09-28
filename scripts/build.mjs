@@ -17,17 +17,20 @@
 // sees only the asset folder and so falls back to CommonJS for a .js file; a package.json naming
 // the type inside the folder makes every loader read the bundle the same way, and the load check
 // after it proves each bundle exports its handler before synth packages it. The agent bundle gets
-// neither: requiring main.js starts the AgentCore HTTP server as a side effect of loading it, so
-// its only load proof is the local runtime test, which runs it as its own process instead.
+// neither inside its own folder, because that folder is the code zip and holds main.js alone, and
+// requiring main.js starts the AgentCore HTTP server as a side effect of loading it, so its load
+// proof is the local runtime test, which runs it as its own process. The default build marks dist/
+// itself as CommonJS instead, so a local run of dist/agent/main.js inside the repo loads it the way
+// the zip does.
 //
 // The CommonJS settings both bundle kinds share, and the agent's createRequire plugin, live in
 // bundle-options.mjs with the reasons for each.
 import { build } from 'esbuild';
 import { execFileSync } from 'node:child_process';
-import { existsSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, readdirSync, rmSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
-import { CJS_BUNDLE_BASE, agentcoreInlineRequirePlugin } from './bundle-options.mjs';
+import { CJS_BUNDLE_BASE, agentcoreInlineRequirePlugin, markCommonJsScope } from './bundle-options.mjs';
 import { sanitizedSynthEnv } from './synth-env.mjs';
 
 const require = createRequire(import.meta.url);
@@ -56,7 +59,7 @@ async function buildHandlerBundle(root, name, outfileAbs) {
     outfile: outfileAbs,
     absWorkingDir: root,
   });
-  writeFileSync(join(dirname(outfileAbs), 'package.json'), '{ "type": "commonjs" }\n');
+  markCommonJsScope(dirname(outfileAbs));
   // A bundle that throws while loading names only what it threw, so the path is added here.
   let exported;
   try {
@@ -134,6 +137,7 @@ async function runDefault(root) {
   }
 
   await buildAgentBundle(root, join(root, 'dist', 'agent', 'main.js'));
+  markCommonJsScope(join(root, 'dist'));
   bundled.push('dist/agent/main.js');
 
   await buildInfraBundle(root, join(root, 'dist', 'infra', 'app.mjs'));

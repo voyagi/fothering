@@ -15,7 +15,14 @@
 // follows the require() calls it guards. Deleting that one line lets esbuild see and inline both
 // plugins for real. The plugin fails loudly, not silently, when the line it expects is gone, so a
 // bedrock-agentcore upgrade cannot reintroduce the crash unnoticed.
+//
+// WHY A COMMONJS SCOPE MARKER. The repo root's package.json says "type": "module", so Node reads
+// every .js file below it as an ES module unless a nearer package.json says otherwise, and a
+// CommonJS bundle read that way dies on its first require(). markCommonJsScope writes that nearer
+// file into a folder, so every bundle under it loads the same way inside the repo as outside it.
+import { writeFileSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
+import { join } from 'node:path';
 
 export const CJS_BUNDLE_BASE = Object.freeze({
   bundle: true,
@@ -25,7 +32,11 @@ export const CJS_BUNDLE_BASE = Object.freeze({
   logOverride: { 'empty-import-meta': 'error' },
 });
 
-const AGENTCORE_APP_FILTER = /bedrock-agentcore[\\/]dist[\\/]src[\\/]runtime[\\/]app\.js$/;
+export function markCommonJsScope(dir) {
+  writeFileSync(join(dir, 'package.json'), '{ "type": "commonjs" }\n');
+}
+
+const AGENTCORE_APP_FILTER =/bedrock-agentcore[\\/]dist[\\/]src[\\/]runtime[\\/]app\.js$/;
 const AGENTCORE_CREATE_REQUIRE_LINE = 'const require = createRequire(import.meta.url);';
 
 export function agentcoreInlineRequirePlugin() {

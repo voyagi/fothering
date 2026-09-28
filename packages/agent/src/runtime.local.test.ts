@@ -328,4 +328,38 @@ describe('the agent bundle answers the AgentCore contract with no model and no A
     },
     CHILD_TIMEOUT_MS,
   );
+
+  // The repo root says "type": "module", so main.js copied under a folder like it is misread as an
+  // ES module and dies on its first require(); after the marker the default build writes into dist/,
+  // the same file runs as CommonJS up to its listen, where the guard refuses the deployed bind.
+  it(
+    'runs as CommonJS under a module-typed root once dist/ carries the marker the default build writes',
+    async () => {
+      const repoLike = join(workDir, 'repo-like');
+      const agentDir = join(repoLike, 'dist', 'agent');
+      mkdirSync(agentDir, { recursive: true });
+      writeFileSync(join(repoLike, 'package.json'), '{ "type": "module" }\n');
+      copyFileSync(join(outDir, 'main.js'), join(agentDir, 'main.js'));
+      const runDeployed = (): string => {
+        const result = spawnSync(process.execPath, ['--import', pathToFileURL(listenGuard).href, 'main.js'], {
+          cwd: agentDir,
+          env: { ...process.env, FOTHERING_DEPLOYED_RUNTIME: 'agentcore' },
+          encoding: 'utf8',
+          timeout: 20000,
+        });
+        return `${result.stdout}${result.stderr}`;
+      };
+
+      const misread = runDeployed();
+      expect(misread).toContain('ES module');
+      expect(misread).not.toContain(LISTEN_REFUSED);
+
+      const { markCommonJsScope } = (await import(pathToFileURL(BUNDLE_OPTIONS).href)) as {
+        markCommonJsScope: (dir: string) => void;
+      };
+      markCommonJsScope(join(repoLike, 'dist'));
+      expect(runDeployed()).toContain(LISTEN_REFUSED);
+    },
+    CHILD_TIMEOUT_MS,
+  );
 });
