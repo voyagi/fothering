@@ -160,6 +160,30 @@ describe('verify:ship selftest step and sub-gate reporting', () => {
   );
 
   it(
+    'repeats a SKIPPED line intact when a two-byte character arrives split across two output chunks',
+    { timeout: 60_000 },
+    () => {
+      // The fixture writes the line in two parts, cut inside the two bytes of U+00E9, with a pause
+      // between them so the pipe delivers them as separate chunks. Both strings stay ASCII here.
+      const expected = `split-gate: SKIPPED, caf${String.fromCodePoint(0xe9)} menu`;
+      const dir = makeProject({ 'gate:repo': 'node split.mjs' });
+      dirs.push(dir);
+      writeFileSync(
+        join(dir, 'split.mjs'),
+        "const line = Buffer.from('split-gate: SKIPPED, caf\\u00e9 menu\\n', 'utf8');\n" +
+          'const cut = line.indexOf(0xc3) + 1;\n' +
+          'process.stdout.write(line.subarray(0, cut));\n' +
+          'setTimeout(() => process.stdout.write(line.subarray(cut)), 300);\n',
+      );
+      const { stdout, status } = run(dir);
+      expect(status).toBe(0);
+      const summary = stdout.slice(stdout.indexOf('verify:ship summary'));
+      expect(summary).toContain(expected);
+      expect(summary).not.toContain(String.fromCodePoint(0xfffd));
+    },
+  );
+
+  it(
     'fails at gate and reads every later step as NOT RUN',
     { timeout: 60_000 },
     () => {

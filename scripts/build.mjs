@@ -9,13 +9,7 @@
 // variables are stripped from a COPY of process.env (never deleted from process.env itself, so a
 // caller running this in-process keeps its own environment), the credential FILES are pointed at
 // a path that does not exist, IMDS is disabled, and CLI telemetry, notices and the version check
-// are off.
-//
-// WHY NAMED DELETION, NOT A LITERAL DOT-ACCESS READ of a credential variable. A literal read of
-// one of those names anywhere in tracked source makes gate:env demand that key in .env.example,
-// which is wrong: this script never WANTS any of them, it wants them GONE. Deleting by name from
-// a list, off a spread copy of the environment, reads none of them literally and asks nothing of
-// the example file.
+// are off. synth-env.mjs builds that environment, every spelling of each name included.
 //
 // WHY A package.json BESIDE EACH HANDLER BUNDLE. esbuild writes CommonJS into index.js, and the
 // repo root's package.json says "type": "module", so any Node that finds that file (a local load,
@@ -32,24 +26,11 @@ import { build } from 'esbuild';
 import { execFileSync } from 'node:child_process';
 import { existsSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
-import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { CJS_BUNDLE_BASE, agentcoreInlineRequirePlugin } from './bundle-options.mjs';
+import { sanitizedSynthEnv } from './synth-env.mjs';
 
 const require = createRequire(import.meta.url);
-
-const AWS_CREDENTIAL_VARS = [
-  'AWS_ACCESS_KEY_ID',
-  'AWS_SECRET_ACCESS_KEY',
-  'AWS_SESSION_TOKEN',
-  'AWS_PROFILE',
-  'AWS_DEFAULT_PROFILE',
-  'AWS_ROLE_ARN',
-  'AWS_WEB_IDENTITY_TOKEN_FILE',
-  'AWS_CONTAINER_CREDENTIALS_RELATIVE_URI',
-  'AWS_CONTAINER_CREDENTIALS_FULL_URI',
-  'AWS_CONTAINER_AUTHORIZATION_TOKEN',
-];
 
 function findHandlers(root) {
   const functionsSrc = join(root, 'packages', 'functions', 'src');
@@ -59,18 +40,6 @@ function findHandlers(root) {
     .map((entry) => entry.name)
     .filter((name) => existsSync(join(functionsSrc, name, 'handler.ts')))
     .sort();
-}
-
-function sanitizedSynthEnv() {
-  const env = { ...process.env };
-  for (const name of AWS_CREDENTIAL_VARS) delete env[name];
-  const missingCredentialsDir = join(tmpdir(), 'fothering-no-aws-credentials');
-  env.AWS_CONFIG_FILE = join(missingCredentialsDir, 'config');
-  env.AWS_SHARED_CREDENTIALS_FILE = join(missingCredentialsDir, 'credentials');
-  env.AWS_EC2_METADATA_DISABLED = 'true';
-  env.CDK_DISABLE_CLI_TELEMETRY = 'true';
-  env.CDK_DISABLE_VERSION_CHECK = 'true';
-  return env;
 }
 
 // Loads a bundle the way the Lambda runtime does (require, then read the named export), so a

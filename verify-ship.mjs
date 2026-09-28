@@ -44,6 +44,7 @@
 
 import { spawn, spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
+import { StringDecoder } from 'node:string_decoder';
 
 // Generous by design: it must never fail a legitimately slow FULL suite; it
 // only backstops a genuine hang (watch mode, a stuck prompt). Raise per
@@ -166,11 +167,15 @@ function runStep(step, stepTimeoutMs) {
       if (/\bSKIPPED\b/.test(line) && !SELFTEST_PASS_RE.test(line)) subGates.push(line);
     }
 
+    // A multi-byte character can straddle two chunks. Decoded chunk by chunk, both halves become
+    // replacement characters in the line the summary repeats; one decoder per stream holds the
+    // partial bytes back until the rest arrives.
     function relay(source, sink) {
+      const decoder = new StringDecoder('utf8');
       let buf = '';
       source.on('data', (chunk) => {
         sink.write(chunk);
-        buf += chunk.toString('utf8');
+        buf += decoder.write(chunk);
         let newline;
         while ((newline = buf.indexOf('\n')) !== -1) {
           scanLine(buf.slice(0, newline));
@@ -178,6 +183,7 @@ function runStep(step, stepTimeoutMs) {
         }
       });
       source.on('end', () => {
+        buf += decoder.end();
         if (buf) scanLine(buf);
       });
     }
