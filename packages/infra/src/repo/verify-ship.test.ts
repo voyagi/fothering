@@ -87,13 +87,28 @@ function hangPid(dir: string): number | undefined {
 
 describe('verify:ship selftest step and sub-gate reporting', () => {
   const dirs: string[] = [];
-  afterEach(() => {
+  afterEach(async () => {
     for (const d of dirs.splice(0)) {
-      // A failed run can leave the hung fixture alive; stop it by the PID it recorded (never by
-      // name), or Windows refuses to remove the folder it is running in.
+      // A run can leave the hung or lingering fixture alive; stop it by the PID it recorded (never
+      // by name), then wait until it is really gone, since Windows refuses to remove the folder a
+      // process is still running in.
       const pid = hangPid(d);
-      if (pid !== undefined && isAlive(pid)) process.kill(pid);
-      rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+      if (pid !== undefined && isAlive(pid)) {
+        process.kill(pid);
+        for (let waited = 0; isAlive(pid) && waited < 5000; waited += 100) {
+          await new Promise((resolveWait) => setTimeout(resolveWait, 100));
+        }
+      }
+      try {
+        rmSync(d, { recursive: true, force: true, maxRetries: 20, retryDelay: 200 });
+      } catch (error) {
+        // Under Node 22 on Windows the folder can stay locked after every process the fixture
+        // started is gone (measured 2026-09-28: no fixture process left, EBUSY still). The test's
+        // assertions have already run, so a folder left in the OS temp directory is reported by
+        // name rather than failing it; any other error still fails.
+        if ((error as NodeJS.ErrnoException).code !== 'EBUSY') throw error;
+        console.warn(`verify-ship.test: temp folder still locked, left behind: ${d}`);
+      }
     }
   });
 
