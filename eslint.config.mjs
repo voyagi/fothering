@@ -98,8 +98,15 @@ export default [
   // is exactly the kind of implicit choice the live providers wrapper exists to make explicit.
   // The namespace-access selector catches `new sdk.Agent()`; a renamed default import is not
   // caught by either selector, since matching a rename would need type information this rule
-  // does not have. mode.ts is the one place allowed to decide what "live" means, so it carries
-  // only the agent selectors below, in its own object further down, never these four.
+  // does not have.
+  //
+  // The live selectors report any environment access, and any readLiveSwitch() call, found
+  // anywhere inside a comparison to 'live': a plain or computed member of process.env or of an
+  // `env` binding, behind optional chaining or a type cast, or under a call such as trim() or
+  // toLowerCase(), the loose matches mode.ts refuses on purpose. Not caught: 'live' written as a
+  // template literal, a switch case, or a call such as includes() or Object.is(); the switch-name
+  // gate and mode.ts's exact-match tests guard the switch itself. mode.ts is the one place allowed
+  // to decide what "live" means, so it carries only the agent selectors, in its own object below.
   {
     files: ['packages/*/src/**/*.ts'],
     ignores: ['packages/core/src/mode.ts'],
@@ -115,21 +122,27 @@ export default [
           message: 'Build an Agent with an explicit model from the live providers.',
         },
         {
-          selector: "BinaryExpression[operator=/^(==|===|!=|!==)$/][right.value='live'][left.object.name='env']",
+          selector: "BinaryExpression[operator=/^(==|===|!=|!==)$/][right.value='live'] MemberExpression[property.name='env']",
           message: 'Only mode.ts decides live mode.',
         },
         {
-          selector:
-            "BinaryExpression[operator=/^(==|===|!=|!==)$/][right.value='live'][left.object.object.name='process'][left.object.property.name='env']",
+          selector: "BinaryExpression[operator=/^(==|===|!=|!==)$/][left.value='live'] MemberExpression[property.name='env']",
           message: 'Only mode.ts decides live mode.',
         },
         {
-          selector: "BinaryExpression[operator=/^(==|===|!=|!==)$/][left.value='live'][right.object.name='env']",
+          selector: "BinaryExpression[operator=/^(==|===|!=|!==)$/][right.value='live'] MemberExpression[object.name='env']",
           message: 'Only mode.ts decides live mode.',
         },
         {
-          selector:
-            "BinaryExpression[operator=/^(==|===|!=|!==)$/][left.value='live'][right.object.object.name='process'][right.object.property.name='env']",
+          selector: "BinaryExpression[operator=/^(==|===|!=|!==)$/][left.value='live'] MemberExpression[object.name='env']",
+          message: 'Only mode.ts decides live mode.',
+        },
+        {
+          selector: "BinaryExpression[operator=/^(==|===|!=|!==)$/][right.value='live'] CallExpression[callee.name='readLiveSwitch']",
+          message: 'Only mode.ts decides live mode.',
+        },
+        {
+          selector: "BinaryExpression[operator=/^(==|===|!=|!==)$/][left.value='live'] CallExpression[callee.name='readLiveSwitch']",
           message: 'Only mode.ts decides live mode.',
         },
       ],

@@ -41,6 +41,18 @@ function findLiteralOutsideAllowlist(files: ReadonlyArray<FileText>, allowlist: 
   return files.filter((f) => f.text.includes(LIVE_SWITCH) && !allowlist.has(f.path)).map((f) => f.path);
 }
 
+// A read through the constant (`process.env[LIVE_SWITCH]`) carries no literal name, so the
+// name list and the literal read count both miss it. Tests and the suite's own setup under
+// src/test/ read it that way on purpose; any production file doing so is a second reader.
+const CONSTANT_READ_RE = /\benv\s*\[\s*LIVE_SWITCH\s*\]/;
+const TEST_SUPPORT_RE = /\.test\.ts$|^packages\/[^/]+\/src\/test\//;
+
+function findConstantReaders(files: ReadonlyArray<FileText>): string[] {
+  return files
+    .filter((f) => f.path.endsWith('.ts') && !TEST_SUPPORT_RE.test(f.path) && CONSTANT_READ_RE.test(f.text))
+    .map((f) => f.path);
+}
+
 describe('the switch name lives only in the named files', () => {
   const files: FileText[] = trackedFiles().map((path) => ({ path, text: readFileSync(join(REPO_ROOT, path), 'utf8') }));
   const holders = files.filter((f) => f.text.includes(LIVE_SWITCH)).map((f) => f.path);
@@ -72,6 +84,19 @@ describe('the switch name lives only in the named files', () => {
     expect(hits).toEqual([{ file: 'packages/providers/src/live-switch.ts', count: 1 }]);
   });
 
+  it('no production file reads the switch through the LIVE_SWITCH constant', () => {
+    expect(findConstantReaders(files)).toEqual([]);
+
+    // Control: a planted production reader is found, spacing included, while the suite's own
+    // setup and a test file reading the same way are not.
+    const planted: FileText[] = [
+      { path: 'packages/functions/src/planted.ts', text: 'const v = process.env[ LIVE_SWITCH ];\n' },
+      { path: 'packages/providers/src/test/global-setup.ts', text: 'const v = process.env[LIVE_SWITCH];\n' },
+      { path: 'packages/core/src/mode.test.ts', text: 'const v = process.env[LIVE_SWITCH];\n' },
+    ];
+    expect(findConstantReaders(planted)).toEqual(['packages/functions/src/planted.ts']);
+  });
+
   it('.env.example declares the switch on a line that is exactly the name, an equals sign, and nothing else', () => {
     const text = readFileSync(join(REPO_ROOT, '.env.example'), 'utf8');
     expect(text.split(/\r?\n/)).toContain(`${LIVE_SWITCH}=`);
@@ -96,11 +121,21 @@ describe('lint rejects an environment comparison to live outside mode.ts', () =>
     ["'live' === process.env.X", "if ('live' === process.env.X) { }\n"],
     ["process.env['X'] !== 'live'", "if (process.env['X'] !== 'live') { }\n"],
     ["env.X == 'live'", "const env = {};\nif (env.X == 'live') { }\n"],
+    ["process.env.X?.trim() === 'live'", "if (process.env.X?.trim() === 'live') { }\n"],
+    ["'live' == (process.env.X as string).toLowerCase()", "if ('live' == (process.env.X as string).toLowerCase()) { }\n"],
+    ["globalThis.process.env['X'] === 'live'", "if (globalThis.process.env['X'] === 'live') { }\n"],
+    ["readLiveSwitch() === 'live'", "declare function readLiveSwitch(): string | undefined;\nif (readLiveSwitch() === 'live') { }\n"],
+    ["'live' !== readLiveSwitch()?.trim()", "declare function readLiveSwitch(): string | undefined;\nif ('live' !== readLiveSwitch()?.trim()) { }\n"],
   ];
 
   it.each(FORMS)('flags %s outside mode.ts, and passes the same text inside it', async (_label, code) => {
     expect(ruleIds(await lintMessages(code, 'packages/functions/src/planted-env.ts'))).toContain('no-restricted-syntax');
     expect(ruleIds(await lintMessages(code, 'packages/core/src/mode.ts'))).not.toContain('no-restricted-syntax');
+  });
+
+  it('passes a comparison of a resolved mode to live, which reads neither the environment nor the switch', async () => {
+    const code = "const mode = String(Date.now() % 2 === 0 ? 'live' : 'fixture');\nif (mode !== 'live') { }\n";
+    expect(ruleIds(await lintMessages(code, 'packages/functions/src/planted-mode.ts'))).not.toContain('no-restricted-syntax');
   });
 });
 
