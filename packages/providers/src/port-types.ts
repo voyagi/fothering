@@ -23,10 +23,19 @@ export interface DeadLetterPort {
   send(records: readonly EventRecord[]): Promise<void>;
 }
 
-/** Fixture-only failure injection (D-26); no live adapter reads these options. */
+/** One canned answer: the operation, the exact request it answers and the response it returns. */
+export interface Recording {
+  readonly operation: string;
+  readonly request: unknown;
+  readonly response: unknown;
+}
+
+/** Fixture-only failure injection and canned answers (D-26); no live adapter reads these options. */
 export interface FixtureOptions {
   eventStoreFailure?: 'put';
   deadLetterFailure?: 'send';
+  /** A call with no matching recording throws instead of answering, so a test cannot pass on an invented reply. */
+  recordings?: Partial<Record<'ses' | 'bedrockModel' | 'agentCore' | 'replyBucket', readonly Recording[]>>;
 }
 
 // The composition-root contracts (D-05, D-06): a runtimeContext picks fixture over live wholesale,
@@ -100,10 +109,55 @@ export interface EventDestinationFact {
   matchingEventTypes: readonly string[];
 }
 
-/** The three SESv2 reads the closeability check needs; phase 1 wires no mutating SES operation. */
+/** The three SESv2 reads the closeability check needs. */
 export interface SesReadPort {
   /** The default configuration set the identity sends through when none is set on the call itself. */
   getEmailIdentity(emailIdentity: string): Promise<string | undefined>;
   listEmailIdentities(): Promise<string[]>;
   getConfigurationSetEventDestinations(configurationSetName: string): Promise<EventDestinationFact[]>;
+}
+
+export interface SendEmailRequest {
+  from: string;
+  to: string[];
+  subject: string;
+  text: string;
+  configurationSetName?: string;
+}
+
+/** The reads above plus the three operations that change what SES does, all gated by the live switch. */
+export interface SesPort extends SesReadPort {
+  pauseConfigurationSet(configurationSet: string): Promise<void>;
+  reopenConfigurationSet(configurationSet: string): Promise<void>;
+  sendEmail(request: SendEmailRequest): Promise<{ messageId: string }>;
+}
+
+export interface BedrockModelPort {
+  converse(request: { modelId: string; prompt: string }): Promise<{ text: string }>;
+}
+
+export interface AgentCorePort {
+  invokeAgentRuntime(request: { runtimeArn: string; sessionId: string; payload: unknown }): Promise<unknown>;
+}
+
+export interface ReplyBucketPort {
+  getReplyObject(key: string): Promise<Uint8Array>;
+}
+
+const KIND_BRAND = Symbol('fothering.portKind');
+
+/**
+ * Stamps what an implementation is (fixture, live, dry-run recorder, not-built stub) on the object
+ * itself, out of enumeration so a spread copy in a test double drops the stamp instead of carrying
+ * a stale one. resolvePortTable reports each operation's kind from this stamp, never from the
+ * table slot the implementation was found in (T-01-10).
+ */
+export function brandPort<T extends object>(port: T, kind: ResolvedKind): T {
+  Object.defineProperty(port, KIND_BRAND, { value: kind, enumerable: false, configurable: true });
+  return port;
+}
+
+export function kindOf(port: unknown): ResolvedKind | undefined {
+  if (typeof port !== 'object' || port === null) return undefined;
+  return (port as { [KIND_BRAND]?: ResolvedKind })[KIND_BRAND];
 }

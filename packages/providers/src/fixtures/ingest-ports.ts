@@ -1,6 +1,8 @@
 import { bucketSortKeyPrefix, type EventRecord, type RecordKey } from '@fothering/core/records';
 import type { AddressKeySet } from '@fothering/core/address';
 import type { AddressKeyPort, DeadLetterPort, EventStorePort, FixtureOptions } from '../port-types.js';
+import { brandPort } from '../port-types.js';
+import { DEAD_LETTER_QUEUE_TARGET, type DryRunLog } from '../dry-run.js';
 
 export class FixtureWriteError extends Error {
   constructor(message: string) {
@@ -39,12 +41,14 @@ function rejectUnmarshallable(value: unknown): void {
 // happen with no await between them, so two calls issued together under Promise.all resolve
 // exactly like DynamoDB's conditional write, one written and one duplicate. Records go in and
 // come out as copies, as they do through the real table, so a caller's later mutation of its
-// own object can never change what is stored.
-export function createFixtureEventStore(options: FixtureOptions = {}): EventStorePort {
+// own object can never change what is stored. A write leaves one dry-run line when the caller
+// passes a log, and the line comes first, so the intent is on record even for a write that fails.
+export function createFixtureEventStore(options: FixtureOptions = {}, dryRun?: DryRunLog): EventStorePort {
   const records = new Map<string, EventRecord>();
 
-  return {
+  return brandPort({
     async putIfAbsent(record) {
+      await dryRun?.would('eventStore.putIfAbsent', record.pk, record);
       if (options.eventStoreFailure === 'put') {
         throw new FixtureWriteError('fixture event store is configured to fail on put');
       }
@@ -87,13 +91,14 @@ export function createFixtureEventStore(options: FixtureOptions = {}): EventStor
       return result;
     },
     async deleteRecord(key) {
+      await dryRun?.would('eventStore.deleteRecord', key.pk, key);
       return records.delete(keyOf(key));
     },
     async getRecord(key) {
       const record = records.get(keyOf(key));
       return record === undefined ? undefined : structuredClone(record);
     },
-  };
+  }, 'fixture');
 }
 
 // D-13: keyVersion is the map key. The generated secret in the real table is a 64-character
@@ -104,22 +109,23 @@ export const TEST_ADDRESS_KEY_SET: AddressKeySet = {
 };
 
 export function createFixtureAddressKey(): AddressKeyPort {
-  return {
+  return brandPort({
     async getKeySet() {
       return TEST_ADDRESS_KEY_SET;
     },
-  };
+  }, 'fixture');
 }
 
 export interface FixtureDeadLetterPort extends DeadLetterPort {
   readonly sent: readonly (readonly EventRecord[])[];
 }
 
-export function createFixtureDeadLetter(options: FixtureOptions = {}): FixtureDeadLetterPort {
+export function createFixtureDeadLetter(options: FixtureOptions = {}, dryRun?: DryRunLog): FixtureDeadLetterPort {
   const sent: EventRecord[][] = [];
-  return {
+  return brandPort({
     sent,
     async send(records) {
+      await dryRun?.would('deadLetter.send', DEAD_LETTER_QUEUE_TARGET, records);
       if (options.deadLetterFailure === 'send') {
         throw new FixtureWriteError('fixture dead letter is configured to fail on send');
       }
@@ -127,5 +133,5 @@ export function createFixtureDeadLetter(options: FixtureOptions = {}): FixtureDe
       // 01-03), so NaN and the infinities arrive as null and an undefined key is dropped.
       sent.push(JSON.parse(JSON.stringify(records)) as EventRecord[]);
     },
-  };
+  }, 'fixture');
 }
