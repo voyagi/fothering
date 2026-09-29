@@ -11,22 +11,26 @@ export interface SynthesizedStacks {
   readonly laneMap: LaneMap;
   readonly ingest: Template;
   readonly runtime: Template;
+  /** The folder the synth wrote its assembly to. */
+  readonly outdir: string;
   dispose(): void;
 }
 
 type Resources = Record<string, { Type: string; Properties?: Record<string, unknown>; [key: string]: unknown }>;
 
 // The deployed context plus whatever a test adds, over stub bundles, so a synth loads aws-cdk-lib
-// and hashes two small folders and nothing more.
+// and hashes two small folders and nothing more. The assembly goes inside the stub folder: an App
+// with no outdir writes to a new temp folder of its own, which nothing ever removes.
 export function synthStacks(extraContext: Record<string, unknown> = {}): SynthesizedStacks {
   const assets = createStubAssets();
   const laneMap = parseLaneMap(lanesJson);
-  const app = new App({ context: { ...cdkJsonContext, ...extraContext } });
+  const app = new App({ context: { ...cdkJsonContext, ...extraContext }, outdir: assets.outdir });
   const { ingest, runtime } = addFotheringStacks(app, { laneMap, ...assets });
   return {
     laneMap,
     ingest: Template.fromStack(ingest),
     runtime: Template.fromStack(runtime),
+    outdir: app.outdir,
     dispose: assets.remove,
   };
 }

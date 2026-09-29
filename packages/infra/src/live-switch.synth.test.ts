@@ -1,5 +1,8 @@
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { App, Stack } from 'aws-cdk-lib';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { LIVE_SWITCH } from '@fothering/core/mode';
 import { liveSwitchEnvironment } from './live-switch.js';
 import { resourcesOfType, synthStacks, type SynthesizedStacks } from './test/synth.js';
@@ -24,8 +27,16 @@ function synthEnvironments(context: Record<string, unknown>): ReturnType<typeof 
 }
 
 describe('liveSwitchEnvironment reads only the fothering:live context key, and only the exact value live', () => {
+  // An App built with no outdir makes a temp folder of its own on construction, synth or not, and
+  // nothing removes it; every probe App here shares one folder this block deletes.
+  let outdir = '';
+  beforeAll(() => {
+    outdir = mkdtempSync(join(tmpdir(), 'fothering-switch-probe-'));
+  });
+  afterAll(() => rmSync(outdir, { recursive: true, force: true }));
+
   function forContext(context: Record<string, unknown>): Record<string, string> {
-    return liveSwitchEnvironment(new Stack(new App({ context }), 'Probe'));
+    return liveSwitchEnvironment(new Stack(new App({ context, outdir }), 'Probe'));
   }
 
   it('forwards the switch for the exact value live', () => {
