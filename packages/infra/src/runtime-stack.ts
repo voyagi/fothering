@@ -13,7 +13,12 @@ export interface RuntimeStackProps extends StackProps {
 }
 
 // The runtime deployed here holds no model and no AWS client, so its role can write its own log
-// group and nothing else.
+// group and nothing else. AWS's published direct deploy execution role (the permissions page cited
+// below) holds four more statements this role leaves out: logs:CreateLogGroup (the stack creates
+// the group, see below), logs:PutResourcePolicy on the runtime's own log groups, X-Ray trace writes
+// and cloudwatch:PutMetricData in the bedrock-agentcore namespace. The last two carry telemetry from
+// instrumented agent code, and this runtime has none. If the first deployed runtime fails to start
+// or writes no log line, those four are what to add back, CreateLogGroup first.
 //
 // The trust conditions are the pair AWS documents for this role ("AgentCore Runtime trust policy",
 // https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-permissions.html): this
