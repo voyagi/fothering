@@ -323,7 +323,7 @@ describe('the agent bundle answers the AgentCore contract with no model and no A
         ['--import', pathToFileURL(listenGuard).href, 'main.js', '--port', String(port)],
         { cwd: outDir, env: { ...process.env, FOTHERING_DEPLOYED_RUNTIME: 'agentcore' }, encoding: 'utf8', timeout: 20000 },
       );
-      expect(`${result.stdout}${result.stderr}`).toContain(LISTEN_REFUSED);
+      expect(`${result.stdout}${result.stderr}`).toContain(`${LISTEN_REFUSED} to 0.0.0.0`);
       expect(result.status).not.toBe(0);
     },
     CHILD_TIMEOUT_MS,
