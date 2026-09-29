@@ -27,9 +27,11 @@ const NOW_MS = BASE_BUCKET_MS + ONE_HOUR_MS;
 const WINDOW_START_MS = BASE_BUCKET_MS - ONE_HOUR_MS;
 
 const FULL_DESTINATION = { enabled: true, eventBridge: true, matchingEventTypes: [...REQUIRED_EVENT_TYPES] };
+const LANE_SETS = LANE_MAP.lanes.map((lane) => lane.configurationSet);
 
 function sesFacts(overrides: Partial<SesConfigurationFacts> = {}): SesConfigurationFacts {
   return {
+    configurationSets: new Set(LANE_SETS),
     defaultConfigurationSets: new Set(['fothering-default']),
     eventDestinations: new Map(LANE_MAP.lanes.map((lane) => [lane.configurationSet, [FULL_DESTINATION]])),
     ...overrides,
@@ -131,6 +133,12 @@ const RULE_PAIRS: RulePair[] = [
     twin: { records: [...baseline().records, ...healthyLane(TRANSACTIONAL, 'receipts', 'tx-sender')] },
   },
   {
+    rule: 'unlisted-configuration-set',
+    expected: ['unlisted-configuration-set'],
+    refusing: { ...baseline(), ses: sesFacts({ configurationSets: new Set([...LANE_SETS, 'a-set-nobody-declared']) }) },
+    twin: { ...baseline(), ses: sesFacts({ configurationSets: new Set(LANE_SETS) }) },
+  },
+  {
     rule: 'default-configuration-set',
     expected: ['default-configuration-set'],
     refusing: { ...baseline(), ses: sesFacts({ defaultConfigurationSets: new Set([BULK]) }) },
@@ -217,6 +225,12 @@ describe('every refusal rule refuses its fixture and passes its twin (AC-16)', (
   it('sees a caller shared with a set the lane map does not list', () => {
     const stray = healthyLane('a-set-nobody-declared', 'newsletter', 'bulk-sender');
     expect(reasonsOf(evaluate({ records: [...baseline().records, ...stray] }))).toEqual(['caller-on-another-set']);
+  });
+
+  // The rule looks one way only: a lane-map set SES does not hold sends nothing, so it hides no
+  // caller, and its own lane is refused by the destination rule instead.
+  it('does not count a lane-map set SES does not hold as an unlisted set', () => {
+    expect(evaluate({ ...baseline(), ses: sesFacts({ configurationSets: new Set([BULK]) }) }).state).toBe('closeable');
   });
 });
 
@@ -448,7 +462,11 @@ function build(generated: Generated): { laneMap: LaneMap; records: EventRecord[]
   return {
     laneMap,
     records,
-    ses: { defaultConfigurationSets: new Set(generated.defaults), eventDestinations },
+    ses: {
+      configurationSets: new Set(laneMap.lanes.map((lane) => lane.configurationSet)),
+      defaultConfigurationSets: new Set(generated.defaults),
+      eventDestinations,
+    },
     nowMs: BASE_BUCKET_MS + generated.nowBuckets * BUCKET_MS,
   };
 }

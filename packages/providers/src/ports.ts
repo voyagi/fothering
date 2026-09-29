@@ -145,6 +145,7 @@ export const PORT_TABLE = {
     operations: [
       'getEmailIdentity',
       'listEmailIdentities',
+      'listConfigurationSets',
       'getConfigurationSetEventDestinations',
       'pauseConfigurationSet',
       'reopenConfigurationSet',

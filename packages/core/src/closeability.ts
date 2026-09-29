@@ -16,6 +16,7 @@ export const REFUSAL_REASONS = [
   'stream-tag-missing',
   'caller-unknown',
   'caller-on-another-set',
+  'unlisted-configuration-set',
   'default-configuration-set',
   'destination-missing-event-types',
   'operator-alert',
@@ -30,6 +31,8 @@ export type CloseableLane = LaneEntry & { readonly [closeableBrand]: true };
 
 /** Declared structurally so the providers package's destination facts fit without core importing from it. */
 export interface SesConfigurationFacts {
+  /** Every configuration set SES holds in the Region, listed in lanes.json or not. */
+  configurationSets: ReadonlySet<string>;
   defaultConfigurationSets: ReadonlySet<string>;
   eventDestinations: ReadonlyMap<
     string,
@@ -121,7 +124,8 @@ function assertFiniteTimes(options: ObserveLanesOptions): void {
  * set seen only in the records is included too, because its callers matter to the sets that share
  * them. Such a set is one taken out of lanes.json whose stored records have not expired yet: a set
  * never listed stores nothing (the ingest rule and ingestEvent drop its events), so a caller it
- * shares with a listed set is never seen here.
+ * shares with a listed set is never seen here, and checkCloseability refuses every lane while SES
+ * holds such a set.
  */
 export function observeLanes(
   records: readonly EventRecord[],
@@ -176,6 +180,16 @@ function sharesCallerWithAnotherSet(
   return false;
 }
 
+// Events from a set lanes.json does not list are dropped before storage, so caller-on-another-set
+// cannot see a caller that also sends through it. While SES holds such a set the check cannot tell
+// a lane's caller is its own, so it refuses instead of assuming the unlisted set is idle.
+function sesHoldsUnlistedSet(options: CheckCloseabilityOptions): boolean {
+  for (const configurationSet of options.ses.configurationSets) {
+    if (findLane(options.laneMap, configurationSet) === undefined) return true;
+  }
+  return false;
+}
+
 // A disabled destination publishes nothing, and a destination of another kind (SNS, Firehose,
 // CloudWatch) never reaches the bus, so only enabled EventBridge destinations add to the union.
 function eventBridgePublishesEveryType(configurationSet: string, ses: SesConfigurationFacts): boolean {
@@ -195,6 +209,7 @@ function refusalReasons(lane: LaneEntry, own: ObservedLaneFacts, options: CheckC
     'stream-tag-missing': own.recordsWithoutValidStream > 0,
     'caller-unknown': own.recordsWithoutCaller > 0,
     'caller-on-another-set': sharesCallerWithAnotherSet(lane.configurationSet, options.observed, own),
+    'unlisted-configuration-set': sesHoldsUnlistedSet(options),
     'default-configuration-set': options.ses.defaultConfigurationSets.has(lane.configurationSet),
     'destination-missing-event-types': !eventBridgePublishesEveryType(lane.configurationSet, options.ses),
     'operator-alert': lane.operatorAlert,

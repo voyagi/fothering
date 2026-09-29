@@ -1,6 +1,7 @@
 import {
   GetConfigurationSetEventDestinationsCommand,
   GetEmailIdentityCommand,
+  paginateListConfigurationSets,
   paginateListEmailIdentities,
   type SESv2Client,
 } from '@aws-sdk/client-sesv2';
@@ -44,9 +45,9 @@ export interface CreateSesReadsOptions {
   wait?: Wait;
 }
 
-// The closeability check's only three reads (D-06, Item 7): the identity's default configuration
-// set, the full identity list, and one set's event destinations. No SES write ever goes through
-// this adapter; plan 01-15 builds the full SesPort on top of it.
+// The closeability check's only four reads (D-06, Item 7): the identity's default configuration
+// set, the full identity list, the full configuration set list, and one set's event destinations.
+// No SES write ever goes through this adapter; plan 01-15 builds the full SesPort on top of it.
 export function createSesReads(options: CreateSesReadsOptions): SesReadPort {
   const wait = options.wait ?? sleep;
   return {
@@ -67,6 +68,13 @@ export function createSesReads(options: CreateSesReadsOptions): SesReadPort {
     async listEmailIdentities() {
       const pages = paginateListEmailIdentities({ client: options.client(), pageSize: LIST_PAGE_SIZE }, {});
       return collectPages(pages, wait, (page) => (page.EmailIdentities ?? []).map((identity) => identity.IdentityName));
+    },
+
+    // API_ListConfigurationSets documents no page-size range, so the pages keep SES's own default
+    // size and are spaced a second apart like the identity list's.
+    async listConfigurationSets() {
+      const pages = paginateListConfigurationSets({ client: options.client() }, {});
+      return collectPages(pages, wait, (page) => page.ConfigurationSets ?? []);
     },
 
     // A lane-map set SES does not hold publishes nothing, so it answers no destinations and the

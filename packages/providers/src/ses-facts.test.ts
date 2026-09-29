@@ -48,8 +48,9 @@ async function closeabilityOfBulk(recordings: readonly Recording[]): Promise<Clo
 }
 
 describe('readSesFacts on recorded fixtures', () => {
-  it('reads every identity default and every lane-map set destination list', async () => {
+  it('reads the set list, every identity default and every lane-map set destination list', async () => {
     const facts = await readSesFacts(fixtureSes(loadRecordings('complete')), LANE_MAP, { wait: NO_WAIT });
+    expect(facts.configurationSets).toEqual(new Set(LANE_SETS));
     expect(facts.defaultConfigurationSets).toEqual(new Set(['fothering-default']));
     expect([...facts.eventDestinations.keys()].sort()).toEqual([...LANE_SETS].sort());
     expect(facts.eventDestinations.get(BULK)?.[0]?.matchingEventTypes).toContain('DELIVERY_DELAY');
@@ -62,6 +63,17 @@ describe('readSesFacts on recorded fixtures', () => {
   it('refuses the bulk set for an identity default and a destination missing DELIVERY_DELAY', async () => {
     const result = await closeabilityOfBulk(loadRecordings('gaps'));
     expect(result).toEqual({ state: 'refused', reasons: ['default-configuration-set', 'destination-missing-event-types'] });
+  });
+
+  // Events from a set lanes.json does not list are dropped before storage, so a caller shared with
+  // it is invisible to the check; SES's own set list is what shows the set exists.
+  it('refuses the bulk set when SES holds a configuration set lanes.json does not list', async () => {
+    const recordings = loadRecordings('complete').map((recording) =>
+      recording.operation === 'ses.listConfigurationSets'
+        ? { ...recording, response: [...LANE_SETS, 'a-set-nobody-declared'] }
+        : recording,
+    );
+    expect(await closeabilityOfBulk(recordings)).toEqual({ state: 'refused', reasons: ['unlisted-configuration-set'] });
   });
 
   it.each(loadRecordings('complete').map((recording, index) => ({ index, label: `${index + 1} (${JSON.stringify(recording.request)})` })))(
@@ -102,6 +114,7 @@ function spyPort(identities: string[]): SpyPort {
     maxInFlight: () => peak,
     port: {
       listEmailIdentities: () => tracked('list', identities),
+      listConfigurationSets: () => tracked('sets', [...LANE_SETS]),
       getEmailIdentity: (identity) => tracked(`identity ${identity}`, undefined),
       getConfigurationSetEventDestinations: (configurationSet) => tracked(`destinations ${configurationSet}`, [] as EventDestinationFact[]),
     },
@@ -109,7 +122,7 @@ function spyPort(identities: string[]): SpyPort {
 }
 
 describe('the SES read quota of one request per second', () => {
-  it('reads the list once, each identity once and each lane set once, one at a time, waiting a second before every read after the first', async () => {
+  it('reads each list once, each identity once and each lane set once, one at a time, waiting a second before every read after the first', async () => {
     const spy = spyPort(['example.com', 'example.org', 'example.com']);
     const wait = vi.fn(async (ms: number) => {
       spy.events.push(`wait ${ms}`);
@@ -121,6 +134,8 @@ describe('the SES read quota of one request per second', () => {
     const spacer = 'wait 1000';
     expect(spy.events).toEqual([
       'list',
+      spacer,
+      'sets',
       spacer,
       'identity example.com',
       spacer,
@@ -142,9 +157,11 @@ describe('the SES read quota of one request per second', () => {
     await vi.advanceTimersByTimeAsync(SES_READ_SPACING_MS - 1);
     expect(spy.events).toEqual(['list']);
     await vi.advanceTimersByTimeAsync(1);
-    expect(spy.events).toEqual(['list', 'identity example.com']);
+    expect(spy.events).toEqual(['list', 'sets']);
     await vi.advanceTimersByTimeAsync(SES_READ_SPACING_MS);
-    expect(spy.events).toEqual(['list', 'identity example.com', `destinations ${BULK}`]);
+    expect(spy.events).toEqual(['list', 'sets', 'identity example.com']);
+    await vi.advanceTimersByTimeAsync(SES_READ_SPACING_MS);
+    expect(spy.events).toEqual(['list', 'sets', 'identity example.com', `destinations ${BULK}`]);
     await pending;
   });
 

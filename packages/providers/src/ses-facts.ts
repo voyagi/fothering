@@ -3,10 +3,10 @@ import type { LaneMap } from '@fothering/core/lanes';
 import type { EventDestinationFact, SesReadPort } from './port-types.js';
 
 // SES throttles every API action except sending at one request per second per account
-// (https://docs.aws.amazon.com/ses/latest/dg/quotas.html), and these facts take one read per
-// identity plus one per lane-map set, so the reads are spaced instead of fired together. The
-// identity list is one request per 1,000 identities, and the live adapter spaces its pages by the
-// same second, so no two requests ever fall inside one second.
+// (https://docs.aws.amazon.com/ses/latest/dg/quotas.html), and these facts take two list reads,
+// one read per identity and one per lane-map set, so the reads are spaced instead of fired
+// together. The identity list is one request per 1,000 identities, and the live adapter spaces the
+// pages of both lists by the same second, so no two requests ever fall inside one second.
 export const SES_READ_SPACING_MS = 1_000;
 
 export interface ReadSesFactsOptions {
@@ -36,6 +36,7 @@ export async function readSesFacts(
   }
 
   const identities = new Set(await spaced(() => ses.listEmailIdentities()));
+  const configurationSets = new Set(await spaced(() => ses.listConfigurationSets()));
 
   const defaultConfigurationSets = new Set<string>();
   for (const identity of identities) {
@@ -51,5 +52,5 @@ export async function readSesFacts(
     );
   }
 
-  return { defaultConfigurationSets, eventDestinations };
+  return { configurationSets, defaultConfigurationSets, eventDestinations };
 }

@@ -30,6 +30,9 @@ export function createFixtureSes(options: FixtureMutatingOptions): SesPort {
       async listEmailIdentities() {
         return recorded.respond<string[]>('ses.listEmailIdentities', undefined);
       },
+      async listConfigurationSets() {
+        return recorded.respond<string[]>('ses.listConfigurationSets', undefined);
+      },
       async getConfigurationSetEventDestinations(configurationSetName: string) {
         return recorded.respond<EventDestinationFact[]>('ses.getConfigurationSetEventDestinations', configurationSetName);
       },

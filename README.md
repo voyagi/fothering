@@ -88,7 +88,9 @@ aws events test-event-pattern --event-pattern file://rule-pattern.json --event f
 List every configuration set you send through in `lanes.json`, transactional ones included (the
 closeability check never marks a transactional lane closeable). Events from an unlisted set are
 dropped before storage, so the check that refuses a lane whose sender also sends through another
-set cannot see that set.
+set cannot see that set. The closeability check therefore refuses every lane while SES holds a
+configuration set in `eu-central-1` that `lanes.json` does not list, one you no longer send
+through included: list the set in `lanes.json` or delete it from SES.
 
 Fothering reads SES in `eu-central-1` only: the closeability check lists identities and reads
 configuration sets there, and SES keeps verified identities separately in each Region. Send the

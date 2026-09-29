@@ -109,11 +109,13 @@ export interface EventDestinationFact {
   matchingEventTypes: readonly string[];
 }
 
-/** The three SESv2 reads the closeability check needs. */
+/** The four SESv2 reads the closeability check needs. */
 export interface SesReadPort {
   /** The default configuration set the identity sends through when none is set on the call itself. */
   getEmailIdentity(emailIdentity: string): Promise<string | undefined>;
   listEmailIdentities(): Promise<string[]>;
+  /** Every configuration set SES holds in the Region, so the check can see one lanes.json leaves out. */
+  listConfigurationSets(): Promise<string[]>;
   getConfigurationSetEventDestinations(configurationSetName: string): Promise<EventDestinationFact[]>;
 }
 

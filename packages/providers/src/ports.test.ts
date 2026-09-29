@@ -653,6 +653,7 @@ describe('recorded fixtures (AC-E5)', () => {
     expect((refusal as FixtureMissError).message).toContain('ses.getEmailIdentity');
     expect((refusal as FixtureMissError).message).not.toContain('jane');
     await expect(ses.listEmailIdentities()).rejects.toThrow(FixtureMissError);
+    await expect(ses.listConfigurationSets()).rejects.toThrow('ses.listConfigurationSets');
     await expect(ses.getConfigurationSetEventDestinations('fothering-bulk')).rejects.toThrow('ses.getConfigurationSetEventDestinations');
     await expect(createFixtureReplyBucket({ recordings: [] }).getReplyObject('key')).rejects.toThrow('replyBucket.getReplyObject');
   });

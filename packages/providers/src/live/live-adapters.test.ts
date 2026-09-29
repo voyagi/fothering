@@ -704,6 +704,26 @@ describe('createSesReads', () => {
     expect(pageSizes).toEqual([1000, 1000]);
   });
 
+  // The API page documents no page-size range for this list, so the read leaves SES's own default.
+  it('listConfigurationSets collects every set name across two stubbed pages, a second apart, sending no page size', async () => {
+    const client = sesClient();
+    const events: string[] = [];
+    stubSend(client, (command) => {
+      const input = command.input as { NextToken?: string; PageSize?: number };
+      events.push(`${command.name} ${input.NextToken ?? 'first'} size ${String(input.PageSize)}`);
+      if (input.NextToken === 'page-2') return { ConfigurationSets: ['fothering-alerts'] };
+      return { ConfigurationSets: ['fothering-transactional', 'fothering-bulk'], NextToken: 'page-2' };
+    });
+    const reads = createSesReads({ client: () => client, wait: recordWait(events) });
+
+    await expect(reads.listConfigurationSets()).resolves.toEqual(['fothering-transactional', 'fothering-bulk', 'fothering-alerts']);
+    expect(events).toEqual([
+      'ListConfigurationSetsCommand first size undefined',
+      'wait 1000',
+      'ListConfigurationSetsCommand page-2 size undefined',
+    ]);
+  });
+
   it('getConfigurationSetEventDestinations maps Name, Enabled, MatchingEventTypes and eventBridge true only with an EventBridgeDestination', async () => {
     const client = sesClient();
     stubSend(client, () => ({
