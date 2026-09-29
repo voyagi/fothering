@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
+import { SWITCH_VALUES, assertRootMatrix } from '@fothering/providers/test/root-matrix';
 import { buildAgentRoot } from './root.js';
-
-const SWITCH_VALUES = [undefined, '', 'true', 'LIVE', ' live', 'live'];
 
 describe('buildAgentRoot', () => {
   it("resolves every kind to fixture in 'test', for every switch value", () => {
@@ -15,15 +14,8 @@ describe('buildAgentRoot', () => {
     }
   });
 
-  it("resolves the event store, address key and dead-letter rows live in 'deployed', for every switch value", () => {
-    for (const switchValue of SWITCH_VALUES) {
-      const { kinds } = buildAgentRoot({ runtimeContext: 'deployed', switchValue });
-      for (const portName of ['eventStore', 'addressKey', 'deadLetter']) {
-        for (const kind of Object.values(kinds[portName] ?? {})) {
-          expect(kind).toBe('live');
-        }
-      }
-    }
+  it('resolves every operation of every row to its expected kind over 2 contexts and 7 switch values', () => {
+    expect(() => assertRootMatrix(buildAgentRoot)).not.toThrow();
   });
 
   it("in 'deployed', building the root with counting client factories constructs 0 clients", () => {
@@ -36,11 +28,13 @@ describe('buildAgentRoot', () => {
         },
       };
     };
-    buildAgentRoot({
-      runtimeContext: 'deployed',
-      switchValue: undefined,
-      liveClients: { dynamoDb: countingClient, secretsManager: countingClient, sqs: countingClient },
-    });
+    for (const switchValue of SWITCH_VALUES) {
+      buildAgentRoot({
+        runtimeContext: 'deployed',
+        switchValue,
+        liveClients: { dynamoDb: countingClient, secretsManager: countingClient, sqs: countingClient, sesv2: countingClient },
+      });
+    }
     expect(constructions).toBe(0);
   });
 

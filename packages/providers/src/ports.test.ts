@@ -12,6 +12,7 @@ import {
 } from './fixtures/ingest-ports.js';
 import { createFixtureAgentCore, createFixtureBedrockModel, createFixtureReplyBucket, createFixtureSes } from './fixtures/later-ports.js';
 import { FixtureMissError, canonicalJson, recordedPort } from './fixtures/recorded.js';
+import { assertRootMatrix, type RootMatrixOptions } from './test/root-matrix.js';
 
 const SWITCH_VALUES = [undefined, '', '   ', 'true', 'LIVE', ' live', 'live'];
 const RECORD_KEY = { pk: 'LANE#fothering-bulk', sk: 'B#0000000000000#Send#m1' };
@@ -345,6 +346,32 @@ describe('the real port table', () => {
     } finally {
       write.mockRestore();
     }
+  });
+});
+
+// Each resolved kind is read from the implementation's own brand, so a live adapter wired in as a
+// row's test default reports live and the expected-kind comparison turns red (AC-2, T-01-10).
+describe('the expected-kind comparison against resolvePortTable directly', () => {
+  const compare = (table: Record<PortName, PortRow>) => (): void =>
+    assertRootMatrix(({ runtimeContext, switchValue }: RootMatrixOptions) =>
+      resolvePortTable({ runtimeContext, switchValue, table, dryRunSink: NO_LINES }),
+    );
+
+  it('passes for the real table, which is the positive control for the planted case below', () => {
+    expect(compare(PORT_TABLE)).not.toThrow();
+  });
+
+  it('turns red when a row puts its live factory in the fixture slot, and reports live for that row in test', () => {
+    const planted: Record<PortName, PortRow> = {
+      ...PORT_TABLE,
+      eventStore: {
+        ...PORT_TABLE.eventStore,
+        fixture: () => PORT_TABLE.eventStore.live({ liveConfig: {}, liveClients: {}, dryRunSink: NO_LINES, now: Date.now }),
+      },
+    };
+
+    expect(resolvePortTable({ runtimeContext: 'test', switchValue: undefined, table: planted }).kinds.eventStore?.queryLane).toBe('live');
+    expect(compare(planted)).toThrow();
   });
 });
 
