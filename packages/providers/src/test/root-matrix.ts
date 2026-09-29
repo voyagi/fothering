@@ -11,6 +11,8 @@ type KindColumns = readonly [test: ResolvedKind, deployed: ResolvedKind, deploye
 // Written out operation by operation, never computed from PORT_TABLE, so it stays an oracle that
 // disagrees with a table whose declaration and behavior have drifted together.
 // Columns: runtimeContext test; deployed with any switch value but exactly live; deployed with live.
+// Which column a switch value reads comes from resolveProviderMode, which mode.test.ts pins to the
+// exact word live; a root that decided the switch any other way disagrees with this table.
 export const EXPECTED_KINDS: Readonly<Record<string, Readonly<Record<string, KindColumns>>>> = {
   eventStore: {
     putIfAbsent: ['fixture', 'live', 'live'],

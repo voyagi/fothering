@@ -71,7 +71,11 @@ interface LivePortContext {
  */
 export interface PortRow {
   readonly operations: readonly string[];
+  /** Operations that change state anywhere. No resolution path reads this list: ports.test.ts holds
+   * each one to exactly one dry-run line per call in 'test', and a gated row to gating all of them. */
   readonly mutatingOperations: readonly string[];
+  /** Operations the live switch owns: resolvePortTable serves these from the row's dryRun recorder in
+   * 'deployed' until the switch is exactly live. */
   readonly gatedOperations: readonly string[];
   readonly fixture: (fixtures: FixtureOptions, dryRun: DryRunLog) => unknown;
   readonly live: ((context: LivePortContext) => unknown) | { readonly notBuiltUntil: number };

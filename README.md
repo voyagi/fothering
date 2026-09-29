@@ -30,8 +30,10 @@ npm run verify:ship # everything above, in order, with one verdict
 npm run permissions:snapshot # rewrite packages/infra/permissions.json after a role change
 ```
 
-`packages/infra/permissions.json` lists every permission the two stacks grant. The test suite fails
-until it matches the synthesized templates, so a change to a role shows up as a change to that file.
+`packages/infra/permissions.json` lists every permission the two stacks give their three roles, and
+who may assume each role. The test suite fails until it matches the synthesized templates, so a
+change to a role shows up as a change to that file. The one grant made outside a role, the ingest
+rule's permission to invoke the ingest function, is pinned by the ingest stack's synth test.
 
 ## Live switch
 
@@ -40,9 +42,10 @@ until it matches the synthesized templates, so a change to a role shows up as a 
 - Tests: every provider resolves to a fixture whatever the switch holds, and the suite refuses to
   run at all when it reads `live`.
 - A deployed stack with `FOTHERING_LIVE` unset: the product's own table, the address key secret
-  and the queue are live. As the remaining operations join the port table, every SES read the
-  closeability check needs is live too, while every SES pause, reopen and send, every model call
-  and every InvokeAgentRuntime becomes one dry-run line instead of a real call.
+  and the queue are live, and so is every SES read the closeability check needs, while every SES
+  pause, reopen and send, every model call and every InvokeAgentRuntime becomes one dry-run line
+  instead of a real call. No deployed role holds an SES or model permission yet: each arrives with
+  the phase that first makes the call.
 - A deployed stack with `FOTHERING_LIVE` set to the exact word `live`: those mutations go live as
   later phases build them.
 
