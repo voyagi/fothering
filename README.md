@@ -53,8 +53,13 @@ rule's permission to invoke the ingest function, is pinned by the ingest stack's
 A deployed stack never takes the switch from a shell variable. It reaches a deployed function or
 the runtime only through the CDK context key `fothering:live`, and only when that key is exactly
 `live`: `LIVE`, `true` and a `FOTHERING_LIVE` set in your shell leave every function and the
-runtime as the unset case above. A deploy without the key therefore gives the dry-run setup, and
-`-c fothering:live=live` (see Deploy and remove) is the one way to change that.
+runtime as the unset case above. A deploy without the key therefore gives the dry-run setup.
+
+CDK reads that key from every context source it has: `-c` on the command line, the `context`
+object in this repo's `cdk.json`, a `cdk.context.json` beside it, and the `context` object in
+`~/.cdk.json` in your home folder. Pass it as `-c fothering:live=live` on the one deploy that should
+go live (see Deploy and remove). A key left in any of those files switches every later deploy on
+until you remove it; the test suite fails when `cdk.json` carries it.
 
 ## Deploy and remove
 

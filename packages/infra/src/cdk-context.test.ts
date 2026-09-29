@@ -9,4 +9,11 @@ describe('cdk.json context', () => {
     expect(cdkJsonContext['cli-telemetry']).toBe(false);
     expect(cdkJsonContext['@aws-cdk/core:enableAdditionalMetadataCollection']).toBe(false);
   });
+
+  // CDK reads the live switch key from every context source, files included, and a key left in a
+  // file switches every later deploy on. The committed file must never carry it, so going live
+  // stays one -c flag on one deploy command.
+  it('never carries the live switch key', () => {
+    expect(Object.keys(cdkJsonContext)).not.toContain('fothering:live');
+  });
 });
