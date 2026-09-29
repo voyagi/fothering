@@ -14,13 +14,23 @@ export interface RuntimeStackProps extends StackProps {
 
 // The runtime deployed here holds no model and no AWS client, so its role can write its own log
 // group and nothing else.
+//
+// The trust conditions are the pair AWS documents for this role ("AgentCore Runtime trust policy",
+// https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-permissions.html): this
+// account, and a source ARN of any AgentCore resource in this account and Region, which needs no
+// runtime ARN and so is written before the first deploy.
 export class RuntimeStack extends Stack {
   constructor(scope: Construct, id: string, props: RuntimeStackProps) {
     super(scope, id, props);
 
     const role = new Role(this, 'RuntimeRole', {
       assumedBy: new ServicePrincipal('bedrock-agentcore.amazonaws.com', {
-        conditions: { StringEquals: { 'aws:SourceAccount': this.account } },
+        conditions: {
+          StringEquals: { 'aws:SourceAccount': this.account },
+          ArnLike: {
+            'aws:SourceArn': this.formatArn({ service: 'bedrock-agentcore', resource: '*', arnFormat: ArnFormat.NO_RESOURCE_NAME }),
+          },
+        },
       }),
     });
 
@@ -32,15 +42,21 @@ export class RuntimeStack extends Stack {
       }),
       // The read-only wrapper drops the statements the construct would otherwise add on its own,
       // among them read access to the code asset bucket, so the role holds exactly what is written
-      // below and the permissions snapshot can show it.
+      // below and the permissions snapshot can show it. The direct deploy execution role AWS
+      // publishes on the permissions page cited above carries no S3 action, so the code zip is not
+      // read with this role; the first deploy is the proof.
       executionRole: role.withoutPolicyUpdates(),
       // Without the runtime marker the agent listens on loopback and fails its first health check:
       // the AgentCore contract needs every interface inside the runtime's own microVM.
       environmentVariables: { FOTHERING_DEPLOYED_RUNTIME: AGENTCORE_RUNTIME, ...liveSwitchEnvironment(this) },
     });
 
-    // AgentCore writes to this name on the first invocation and would otherwise create the group
-    // itself, with no retention and outside the stack's removal.
+    // AgentCore writes the runtime's logs to this name (<runtime id>-<endpoint name>, DEFAULT being
+    // the endpoint every runtime gets) and creates a missing group through the execution role,
+    // which AWS's published policy lets it do. This role holds no logs:CreateLogGroup, so the stack
+    // creates the group, with a retention and inside the stack's removal, and AgentCore can never
+    // create it first. The first invocation after the first deploy must show a log line here;
+    // without one, the create permission is the fallback.
     const logGroup = new LogGroup(this, 'RuntimeLogs', {
       logGroupName: `/aws/bedrock-agentcore/runtimes/${runtime.agentRuntimeId}-DEFAULT`,
       retention: RetentionDays.ONE_MONTH,
@@ -50,6 +66,9 @@ export class RuntimeStack extends Stack {
     // A policy of its own, not the role's default one: the runtime depends on everything under its
     // role, and this policy names the log group, whose name comes from the runtime's id, so a
     // statement added to the role itself would make the three wait on each other.
+    // DescribeLogStreams authorizes on the log group itself, so its ARN has no ":*" suffix; the
+    // stream writes authorize on log streams and so take the ":log-stream:*" form (CloudWatch Logs
+    // guide, "Using identity-based policies", examples 3a and 3b).
     new Policy(this, 'RuntimeLogPolicy', {
       roles: [role],
       statements: [

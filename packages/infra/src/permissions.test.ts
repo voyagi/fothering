@@ -154,7 +154,9 @@ describe('the permissions snapshot', () => {
       ['RuntimeRole', '{"Service":"bedrock-agentcore.amazonaws.com"}', 'sts:AssumeRole'],
     ]);
     const runtimeTrust = trust.find((entry) => entry.stack === 'FotheringRuntime');
-    expect(runtimeTrust?.condition).toBe('{"StringEquals":{"aws:SourceAccount":{"Ref":"AWS::AccountId"}}}');
+    expect(runtimeTrust?.condition).toBe(
+      '{"ArnLike":{"aws:SourceArn":{"Fn::Join":["",["arn:aws:bedrock-agentcore:eu-central-1:",{"Ref":"AWS::AccountId"},":*"]]}},"StringEquals":{"aws:SourceAccount":{"Ref":"AWS::AccountId"}}}',
+    );
     for (const entry of synthesized.filter((candidate) => candidate.kind === 'permission')) expect(entry.effect).toBe('Allow');
   });
 });

@@ -177,6 +177,6 @@
     "action": "sts:AssumeRole",
     "resource": null,
     "principal": "{\"Service\":\"bedrock-agentcore.amazonaws.com\"}",
-    "condition": "{\"StringEquals\":{\"aws:SourceAccount\":{\"Ref\":\"AWS::AccountId\"}}}"
+    "condition": "{\"ArnLike\":{\"aws:SourceArn\":{\"Fn::Join\":[\"\",[\"arn:aws:bedrock-agentcore:eu-central-1:\",{\"Ref\":\"AWS::AccountId\"},\":*\"]]}},\"StringEquals\":{\"aws:SourceAccount\":{\"Ref\":\"AWS::AccountId\"}}}"
   }
 ]

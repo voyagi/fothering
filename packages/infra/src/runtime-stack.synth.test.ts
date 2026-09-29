@@ -29,7 +29,7 @@ describe('RuntimeStack synth', () => {
     expect(runtimeProperties().EnvironmentVariables).toEqual({ FOTHERING_DEPLOYED_RUNTIME: AGENTCORE_RUNTIME });
   });
 
-  it('runs under one role that only bedrock-agentcore.amazonaws.com in this account can assume', () => {
+  it('runs under one role that only bedrock-agentcore.amazonaws.com, acting for this account and Region, can assume', () => {
     const roleId = logicalIdOf(stacks.runtime, 'AWS::IAM::Role');
     expect(runtimeProperties().RoleArn).toEqual({ 'Fn::GetAtt': [roleId, 'Arn'] });
     const [role] = Object.values(resourcesOfType(stacks.runtime, 'AWS::IAM::Role'));
@@ -41,7 +41,10 @@ describe('RuntimeStack synth', () => {
           Action: 'sts:AssumeRole',
           Effect: 'Allow',
           Principal: { Service: 'bedrock-agentcore.amazonaws.com' },
-          Condition: { StringEquals: { 'aws:SourceAccount': { Ref: 'AWS::AccountId' } } },
+          Condition: {
+            StringEquals: { 'aws:SourceAccount': { Ref: 'AWS::AccountId' } },
+            ArnLike: { 'aws:SourceArn': { 'Fn::Join': ['', ['arn:aws:bedrock-agentcore:eu-central-1:', { Ref: 'AWS::AccountId' }, ':*']] } },
+          },
         },
       ],
     });
