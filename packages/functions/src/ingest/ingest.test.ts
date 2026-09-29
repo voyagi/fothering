@@ -506,8 +506,11 @@ describe('resolvePortTable in runtimeContext test', () => {
 });
 
 describe('resolvePortTable in runtimeContext deployed with a not-built table', () => {
+  // The three product rows are planted not built; the four later rows stay the real ones and are
+  // proven by the root matrix, so only the planted three are read below.
   function plantedNotBuiltTable(): Record<PortName, PortRow> {
     return {
+      ...PORT_TABLE,
       eventStore: {
         operations: ['putIfAbsent', 'queryLane', 'queryByRecipient', 'deleteRecord', 'getRecord'],
         mutatingOperations: ['putIfAbsent', 'deleteRecord'],
@@ -538,8 +541,8 @@ describe('resolvePortTable in runtimeContext deployed with a not-built table', (
       switchValue: undefined,
       table: plantedNotBuiltTable(),
     });
-    for (const row of Object.values(kinds)) {
-      for (const kind of Object.values(row)) {
+    for (const portName of ['eventStore', 'addressKey', 'deadLetter'] as const) {
+      for (const kind of Object.values(kinds[portName] ?? {})) {
         expect(kind).toBe('not-built-until-phase-1');
       }
     }
@@ -566,8 +569,16 @@ describe('buildIngestRoot laneMap defaults', () => {
 });
 
 describe('the port table type contract', () => {
-  it('names exactly the three phase 1 ports', () => {
-    expect(Object.keys(PORT_TABLE).sort()).toEqual(['addressKey', 'deadLetter', 'eventStore']);
+  it('names the seven ports', () => {
+    expect(Object.keys(PORT_TABLE).sort()).toEqual([
+      'addressKey',
+      'agentCore',
+      'bedrockModel',
+      'deadLetter',
+      'eventStore',
+      'replyBucket',
+      'ses',
+    ]);
   });
 
   it('is exactly Record<PortName, PortRow>, so a table missing a row is a type error', () => {

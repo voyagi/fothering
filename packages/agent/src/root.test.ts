@@ -18,8 +18,8 @@ describe('buildAgentRoot', () => {
   it("resolves the event store, address key and dead-letter rows live in 'deployed', for every switch value", () => {
     for (const switchValue of SWITCH_VALUES) {
       const { kinds } = buildAgentRoot({ runtimeContext: 'deployed', switchValue });
-      for (const row of Object.values(kinds)) {
-        for (const kind of Object.values(row)) {
+      for (const portName of ['eventStore', 'addressKey', 'deadLetter']) {
+        for (const kind of Object.values(kinds[portName] ?? {})) {
           expect(kind).toBe('live');
         }
       }

@@ -1,17 +1,35 @@
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocumentClient } from '@aws-sdk/lib-dynamodb';
 import { SecretsManagerClient } from '@aws-sdk/client-secrets-manager';
+import { SESv2Client } from '@aws-sdk/client-sesv2';
 import { SQSClient } from '@aws-sdk/client-sqs';
-import { resolveProviderMode } from '@fothering/core/mode';
-import { UNCLASSIFIED } from '@fothering/core/records';
-import type { AddressKeyPort, DeadLetterPort, EventStorePort, FixtureOptions } from './port-types.js';
+import { resolveProviderMode, type ProviderMode } from '@fothering/core/mode';
+import type {
+  AddressKeyPort,
+  AgentCorePort,
+  BedrockModelPort,
+  DeadLetterPort,
+  EventStorePort,
+  FixtureOptions,
+  ReplyBucketPort,
+  SesPort,
+} from './port-types.js';
 import type { DryRunSink, KindTable, LiveClients, LiveConfig, ResolvedKind, RuntimeContext } from './port-types.js';
-import { NotBuiltError } from './port-types.js';
+import { NotBuiltError, brandPort, kindOf } from './port-types.js';
+import {
+  createAgentCoreDryRun,
+  createBedrockModelDryRun,
+  createDryRunLog,
+  createSesDryRun,
+  type DryRunLog,
+} from './dry-run.js';
 import { createFixtureAddressKey, createFixtureDeadLetter, createFixtureEventStore } from './fixtures/ingest-ports.js';
+import { createFixtureAgentCore, createFixtureBedrockModel, createFixtureReplyBucket, createFixtureSes } from './fixtures/later-ports.js';
 import { lazyClient } from './live/lazy-client.js';
 import { createDynamoEventStore } from './live/event-store.js';
 import { createSecretsManagerAddressKey } from './live/address-key.js';
 import { createSqsDeadLetter } from './live/dead-letter.js';
+import { createSesReads } from './live/ses-reads.js';
 
 const LIVE_REGION = 'eu-central-1';
 
@@ -26,7 +44,7 @@ function resolveLiveClient<T>(provided: unknown, construct: () => T): () => T {
   });
 }
 
-export type PortName = 'eventStore' | 'addressKey' | 'deadLetter';
+export type PortName = 'eventStore' | 'addressKey' | 'deadLetter' | 'ses' | 'bedrockModel' | 'agentCore' | 'replyBucket';
 
 interface LivePortContext {
   liveConfig: LiveConfig;
@@ -37,27 +55,38 @@ interface LivePortContext {
 
 /**
  * One row per AWS-backed capability: its operation names, which of those mutate, which the live
- * switch gates, its fixture factory, and its live side, either a factory or a `notBuiltUntil`
- * phase for a row no adapter has reached yet (T-01-03).
+ * switch gates, its fixture factory, its live side, and the recorder a gated operation uses until
+ * the switch is exactly `live`.
  *
  * Mutating and gated are two different facts (D-06 decides live vs dry-run per operation, not per
- * port). A gated operation resolves to the dry-run recorder in 'deployed' unless the switch is
- * exactly `live`: those are SES pause, reopen and send, the model call and InvokeAgentRuntime. A
- * write to Fothering's own table or queue mutates but is never gated, so a deploy with the switch
- * unset still stores the events it ingests.
+ * port). A gated operation resolves to the row's dry-run recorder in 'deployed' unless the switch is
+ * exactly `live`, whether or not its live side exists yet; with the switch live it resolves to the
+ * live adapter, or to its not-built phase when there is none. A write to Fothering's own table or
+ * queue mutates but is never gated, so a deploy with the switch unset still stores the events it
+ * ingests.
+ *
+ * The live side is a factory or, for a row no adapter has reached yet, a `notBuiltUntil` phase for
+ * the whole row (T-01-03). A row whose adapter covers only part of its operations lists the rest
+ * in `notBuiltOperations`, each with the phase that builds it.
  */
 export interface PortRow {
   readonly operations: readonly string[];
   readonly mutatingOperations: readonly string[];
   readonly gatedOperations: readonly string[];
-  readonly fixture: (fixtures: FixtureOptions) => unknown;
+  readonly fixture: (fixtures: FixtureOptions, dryRun: DryRunLog) => unknown;
   readonly live: ((context: LivePortContext) => unknown) | { readonly notBuiltUntil: number };
+  readonly notBuiltOperations?: Readonly<Record<string, number>>;
+  readonly dryRun?: (log: DryRunLog) => unknown;
 }
 
 export interface ResolvedPorts {
   eventStore: EventStorePort;
   addressKey: AddressKeyPort;
   deadLetter: DeadLetterPort;
+  ses: SesPort;
+  bedrockModel: BedrockModelPort;
+  agentCore: AgentCorePort;
+  replyBucket: ReplyBucketPort;
 }
 
 // `satisfies` keeps the literal per-row types (each fixture's real return type) while still
@@ -68,13 +97,16 @@ export const PORT_TABLE = {
     operations: ['putIfAbsent', 'queryLane', 'queryByRecipient', 'deleteRecord', 'getRecord'],
     mutatingOperations: ['putIfAbsent', 'deleteRecord'],
     gatedOperations: [],
-    fixture: (fixtures: FixtureOptions) => createFixtureEventStore(fixtures),
+    fixture: (fixtures: FixtureOptions, dryRun: DryRunLog) => createFixtureEventStore(fixtures, dryRun),
     live: ({ liveConfig, liveClients, now }) =>
-      createDynamoEventStore({
-        tableName: liveConfig.tableName,
-        client: resolveLiveClient(liveClients.dynamoDb, () => DynamoDBDocumentClient.from(new DynamoDBClient({ region: LIVE_REGION }))),
-        now,
-      }),
+      brandPort(
+        createDynamoEventStore({
+          tableName: liveConfig.tableName,
+          client: resolveLiveClient(liveClients.dynamoDb, () => DynamoDBDocumentClient.from(new DynamoDBClient({ region: LIVE_REGION }))),
+          now,
+        }),
+        'live',
+      ),
   },
   addressKey: {
     operations: ['getKeySet'],
@@ -82,22 +114,71 @@ export const PORT_TABLE = {
     gatedOperations: [],
     fixture: () => createFixtureAddressKey(),
     live: ({ liveConfig, liveClients, now }) =>
-      createSecretsManagerAddressKey({
-        secretId: liveConfig.addressKeySecretId,
-        client: resolveLiveClient(liveClients.secretsManager, () => new SecretsManagerClient({ region: LIVE_REGION })),
-        now,
-      }),
+      brandPort(
+        createSecretsManagerAddressKey({
+          secretId: liveConfig.addressKeySecretId,
+          client: resolveLiveClient(liveClients.secretsManager, () => new SecretsManagerClient({ region: LIVE_REGION })),
+          now,
+        }),
+        'live',
+      ),
   },
   deadLetter: {
     operations: ['send'],
     mutatingOperations: ['send'],
     gatedOperations: [],
-    fixture: (fixtures: FixtureOptions) => createFixtureDeadLetter(fixtures),
+    fixture: (fixtures: FixtureOptions, dryRun: DryRunLog) => createFixtureDeadLetter(fixtures, dryRun),
     live: ({ liveConfig, liveClients }) =>
-      createSqsDeadLetter({
-        queueUrl: liveConfig.deadLetterQueueUrl,
-        client: resolveLiveClient(liveClients.sqs, () => new SQSClient({ region: LIVE_REGION })),
-      }),
+      brandPort(
+        createSqsDeadLetter({
+          queueUrl: liveConfig.deadLetterQueueUrl,
+          client: resolveLiveClient(liveClients.sqs, () => new SQSClient({ region: LIVE_REGION })),
+        }),
+        'live',
+      ),
+  },
+  ses: {
+    operations: [
+      'getEmailIdentity',
+      'listEmailIdentities',
+      'getConfigurationSetEventDestinations',
+      'pauseConfigurationSet',
+      'reopenConfigurationSet',
+      'sendEmail',
+    ],
+    mutatingOperations: ['pauseConfigurationSet', 'reopenConfigurationSet', 'sendEmail'],
+    gatedOperations: ['pauseConfigurationSet', 'reopenConfigurationSet', 'sendEmail'],
+    fixture: (fixtures: FixtureOptions, dryRun: DryRunLog) =>
+      createFixtureSes({ recordings: fixtures.recordings?.ses ?? [], dryRun }),
+    live: ({ liveClients }) =>
+      brandPort(createSesReads({ client: resolveLiveClient(liveClients.sesv2, () => new SESv2Client({ region: LIVE_REGION })) }), 'live'),
+    notBuiltOperations: { pauseConfigurationSet: 3, reopenConfigurationSet: 3, sendEmail: 4 },
+    dryRun: (log: DryRunLog) => createSesDryRun(log),
+  },
+  bedrockModel: {
+    operations: ['converse'],
+    mutatingOperations: ['converse'],
+    gatedOperations: ['converse'],
+    fixture: (fixtures: FixtureOptions, dryRun: DryRunLog) =>
+      createFixtureBedrockModel({ recordings: fixtures.recordings?.bedrockModel ?? [], dryRun }),
+    live: { notBuiltUntil: 2 },
+    dryRun: (log: DryRunLog) => createBedrockModelDryRun(log),
+  },
+  agentCore: {
+    operations: ['invokeAgentRuntime'],
+    mutatingOperations: ['invokeAgentRuntime'],
+    gatedOperations: ['invokeAgentRuntime'],
+    fixture: (fixtures: FixtureOptions, dryRun: DryRunLog) =>
+      createFixtureAgentCore({ recordings: fixtures.recordings?.agentCore ?? [], dryRun }),
+    live: { notBuiltUntil: 2 },
+    dryRun: (log: DryRunLog) => createAgentCoreDryRun(log),
+  },
+  replyBucket: {
+    operations: ['getReplyObject'],
+    mutatingOperations: [],
+    gatedOperations: [],
+    fixture: (fixtures: FixtureOptions) => createFixtureReplyBucket({ recordings: fixtures.recordings?.replyBucket ?? [] }),
+    live: { notBuiltUntil: 4 },
   },
 } satisfies Record<PortName, PortRow>;
 
@@ -113,104 +194,163 @@ interface ResolvePortTableOptions {
   table?: Record<PortName, PortRow>;
 }
 
-const DEFAULT_DRY_RUN_SINK: DryRunSink = (line) => {
-  process.stdout.write(`${line}\n`);
-};
+interface ResolvedRow {
+  port: unknown;
+  kinds: Record<string, ResolvedKind>;
+}
+
+// A deployed function logs its dry-run lines to stdout for CloudWatch; a test writes nowhere, and
+// one that wants the lines passes its own sink.
+function defaultDryRunSink(runtimeContext: RuntimeContext): DryRunSink {
+  return runtimeContext === 'deployed'
+    ? (line) => {
+        process.stdout.write(`${line}\n`);
+      }
+    : () => {};
+}
 
 // Every named operation rejects, never throws synchronously: a caller awaiting a port method
 // (all of them are async in the real interfaces) must see a rejected promise, not an uncaught
 // throw before one exists.
-function notBuiltPort(operations: readonly string[], phase: number): Record<string, (...args: unknown[]) => Promise<never>> {
+function notBuiltPort(operations: readonly string[], phase: number): object {
   const port: Record<string, (...args: unknown[]) => Promise<never>> = {};
   for (const operation of operations) {
     port[operation] = async () => {
       throw new NotBuiltError(phase);
     };
   }
-  return port;
-}
-
-// AC-P9: a live adapter reduces its request to a receiving domain or a lane name before this
-// fires. The recorder does not rely on that: a string first argument is printed only when it
-// matches a shape that cannot hold an address or a sentence, anything else prints as
-// unclassified, and a non-string argument (a whole command or record) prints the port name.
-const DRY_RUN_TARGET_PATTERN = /^[A-Za-z0-9._:-]{1,256}$/;
-
-function dryRunTarget(portName: string, first: unknown): string {
-  if (typeof first !== 'string') return portName;
-  return DRY_RUN_TARGET_PATTERN.test(first) ? first : UNCLASSIFIED;
+  return brandPort(port, `not-built-until-phase-${phase}`);
 }
 
 // A misspelled gated name leaves the real operation ungated, live with no switch at all, so every
 // listed name must be one of the row's own operations, checked in every runtime context.
 function assertListedOperations(portName: string, row: PortRow): void {
-  for (const listed of [...row.mutatingOperations, ...row.gatedOperations]) {
-    if (!row.operations.includes(listed)) {
-      throw new Error(`the ${portName} row lists ${listed}, which is not one of its operations`);
+  const listed = [...row.mutatingOperations, ...row.gatedOperations, ...Object.keys(row.notBuiltOperations ?? {})];
+  for (const operation of listed) {
+    if (!row.operations.includes(operation)) {
+      throw new Error(`the ${portName} row lists ${operation}, which is not one of its operations`);
     }
   }
 }
 
-function dryRunOperation(portName: string, operation: string, sink: DryRunSink): (...args: unknown[]) => Promise<void> {
-  return async (...args: unknown[]) => {
-    sink(`(dry-run) WOULD ${portName}.${operation} ${dryRunTarget(portName, args[0])}`);
+function requireOperations(description: string, implementation: unknown, operations: readonly string[]): Record<string, unknown> {
+  const source = implementation as Record<string, unknown>;
+  for (const operation of operations) {
+    if (typeof source[operation] !== 'function') throw new Error(`${description} has no ${operation} operation`);
+  }
+  return source;
+}
+
+// The kind is whatever the implementation says it is, never the slot it was found in: a live
+// adapter wired into a row's fixture slot must report live, so a table that does so fails its
+// expected-kind comparison instead of passing on its own declaration (T-01-10).
+function requireKind(description: string, implementation: unknown): ResolvedKind {
+  const kind = kindOf(implementation);
+  if (kind === undefined) throw new Error(`${description} carries no kind brand`);
+  return kind;
+}
+
+// Gated operations need a recorder in every context, not only where one is used: a gate whose
+// recorder is missing would otherwise fail on the first deployed call instead of when the root builds.
+function gatedRecorders(portName: string, row: PortRow, log: DryRunLog): Record<string, unknown> | undefined {
+  if (row.gatedOperations.length === 0) return undefined;
+  const recorders = (row.dryRun?.(log) ?? {}) as Record<string, unknown>;
+  for (const operation of row.gatedOperations) {
+    if (typeof recorders[operation] !== 'function') {
+      throw new Error(`the ${portName} row gates ${operation} but its dry-run recorder has no ${operation} operation`);
+    }
+  }
+  return brandPort(recorders, 'dry-run');
+}
+
+function resolveFixtureRow(portName: string, row: PortRow, fixtures: FixtureOptions, log: DryRunLog): ResolvedRow {
+  const description = `the ${portName} fixture`;
+  const implementation = row.fixture(fixtures, log);
+  const kind = requireKind(description, implementation);
+  requireOperations(description, implementation, row.operations);
+  return { port: implementation, kinds: Object.fromEntries(row.operations.map((operation) => [operation, kind])) };
+}
+
+interface DeployedRowInput {
+  portName: string;
+  row: PortRow;
+  mode: ProviderMode;
+  recorders: Record<string, unknown> | undefined;
+  liveContext: LivePortContext;
+}
+
+// Which implementation serves one operation in 'deployed' (D-06): the recorder while a gated
+// operation waits for the switch, the not-built stub when nothing is built yet for it, else the
+// live adapter.
+function notBuiltPhase(row: PortRow, operation: string): number | undefined {
+  if (typeof row.live !== 'function') return row.live.notBuiltUntil;
+  return row.notBuiltOperations?.[operation];
+}
+
+function resolveDeployedRow(input: DeployedRowInput): ResolvedRow {
+  const { portName, row, mode, recorders, liveContext } = input;
+  const stubs = new Map<number, object>();
+  let liveInstance: Record<string, unknown> | undefined;
+
+  const sourceFor = (operation: string): { description: string; implementation: unknown } => {
+    if (row.gatedOperations.includes(operation) && mode !== 'live') {
+      return { description: `the ${portName} row's dry-run recorder`, implementation: recorders };
+    }
+    const phase = notBuiltPhase(row, operation);
+    if (phase !== undefined) {
+      const stub = stubs.get(phase) ?? notBuiltPort(row.operations, phase);
+      stubs.set(phase, stub);
+      return { description: `the not-built ${portName} stub`, implementation: stub };
+    }
+    // Reaching here means the row's live side is a factory: a whole-row notBuiltUntil returned above.
+    liveInstance ??= (row.live as (context: LivePortContext) => Record<string, unknown>)(liveContext);
+    return { description: `the live ${portName} adapter`, implementation: liveInstance };
   };
+
+  const port: Record<string, unknown> = {};
+  const kinds: Record<string, ResolvedKind> = {};
+  // Each operation is read off the instance and bound to it, never copied with a spread: a spread
+  // keeps own properties only, so an adapter written as a class would lose every method on its
+  // prototype and report 'live' for an operation that is not there. A missing operation fails
+  // here, when the composition root is built, not on the first call in a deployed function.
+  for (const operation of row.operations) {
+    const { description, implementation } = sourceFor(operation);
+    const source = requireOperations(description, implementation, [operation]);
+    kinds[operation] = requireKind(description, implementation);
+    port[operation] = (source[operation] as (...args: unknown[]) => unknown).bind(source);
+  }
+  return { port, kinds };
 }
 
 export function resolvePortTable(options: ResolvePortTableOptions): { ports: ResolvedPorts; kinds: KindTable } {
   const table = options.table ?? PORT_TABLE;
   const mode = resolveProviderMode(options.switchValue);
   const fixtures = options.fixtures ?? {};
-  const dryRunSink = options.dryRunSink ?? DEFAULT_DRY_RUN_SINK;
+  const dryRunSink = options.dryRunSink ?? defaultDryRunSink(options.runtimeContext);
   const now = options.now ?? Date.now;
-  const liveConfig = options.liveConfig ?? {};
-  const liveClients = options.liveClients ?? {};
+  const liveContext: LivePortContext = { liveConfig: options.liveConfig ?? {}, liveClients: options.liveClients ?? {}, dryRunSink, now };
 
   const ports: Record<string, unknown> = {};
   const kinds: Record<string, Record<string, ResolvedKind>> = {};
 
-  for (const name of Object.keys(table) as PortName[]) {
-    const row = table[name];
-    assertListedOperations(name, row);
-    const rowKinds: Record<string, ResolvedKind> = {};
+  // The key set is read through `ports` when a line needs it, not when the table resolves: a table
+  // declared in another order resolves its ses row before its addressKey row, and the log must not care.
+  const log = createDryRunLog({
+    sink: dryRunSink,
+    addressKey: { getKeySet: () => (ports.addressKey as AddressKeyPort).getKeySet() },
+    now,
+  });
 
-    if (options.runtimeContext === 'test') {
-      for (const operation of row.operations) rowKinds[operation] = 'fixture';
-      ports[name] = row.fixture(fixtures);
-      kinds[name] = rowKinds;
-      continue;
-    }
-
-    if (typeof row.live !== 'function') {
-      const phase = row.live.notBuiltUntil;
-      const kind: ResolvedKind = `not-built-until-phase-${phase}`;
-      for (const operation of row.operations) rowKinds[operation] = kind;
-      ports[name] = notBuiltPort(row.operations, phase);
-      kinds[name] = rowKinds;
-      continue;
-    }
-
-    // Each operation is read off the instance and bound to it, never copied with a spread: a spread
-    // keeps own properties only, so an adapter written as a class would lose every method on its
-    // prototype and report 'live' for an operation that is not there. A missing operation fails
-    // here, when the composition root is built, not on the first call in a deployed function.
-    const liveInstance = row.live({ liveConfig, liveClients, dryRunSink, now }) as Record<string, unknown>;
-    const wrapped: Record<string, unknown> = {};
-    for (const operation of row.operations) {
-      const method = liveInstance[operation];
-      if (typeof method !== 'function') {
-        throw new Error(`the live ${name} adapter has no ${operation} operation`);
-      }
-      if (row.gatedOperations.includes(operation) && mode !== 'live') {
-        rowKinds[operation] = 'dry-run';
-        wrapped[operation] = dryRunOperation(name, operation, dryRunSink);
-      } else {
-        rowKinds[operation] = 'live';
-        wrapped[operation] = (method as (...args: unknown[]) => unknown).bind(liveInstance);
-      }
-    }
-    ports[name] = wrapped;
-    kinds[name] = rowKinds;
+  for (const portName of Object.keys(table) as PortName[]) {
+    const row = table[portName];
+    assertListedOperations(portName, row);
+    const recorders = gatedRecorders(portName, row, log);
+    const resolved =
+      options.runtimeContext === 'test'
+        ? resolveFixtureRow(portName, row, fixtures, log)
+        : resolveDeployedRow({ portName, row, mode, recorders, liveContext });
+    ports[portName] = resolved.port;
+    kinds[portName] = resolved.kinds;
   }
 
   return { ports: ports as unknown as ResolvedPorts, kinds };
