@@ -69,6 +69,15 @@ describe('laneMapSchema (AC-E32)', () => {
     expect(paths).toContainEqual(['lanes', 0, 'declaredStreams', 0]);
   });
 
+  // The closeability check reads a stream tag of unclassified as no stream at all, so a lane that
+  // declared it could never close; the map refuses it where the operator can see why.
+  it('rejects unclassified as a declared stream and names the reserved word', () => {
+    const result = laneMapSchema.safeParse(baseMap({ lanes: [baseLane({ declaredStreams: ['receipts', 'unclassified'] })] }));
+    if (result.success) throw new Error('expected parsing to fail');
+    expect(result.error.issues.map((issue) => issue.path)).toContainEqual(['lanes', 0, 'declaredStreams', 1]);
+    expect(result.error.issues.map((issue) => issue.message).join(' ')).toContain('unclassified');
+  });
+
   it('rejects a repeated declared stream', () => {
     const paths = issuePaths(baseMap({ lanes: [baseLane({ declaredStreams: ['receipts', 'receipts'] })] }));
     expect(paths).toContainEqual(['lanes', 0, 'declaredStreams', 1]);

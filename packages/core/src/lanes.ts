@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { UNCLASSIFIED } from './records.js';
 
 // The SES MessageTag rule, the same for a tag's name and its value: "ASCII letters (a-z, A-Z),
 // numbers (0-9), underscores (_), or dashes (-)", "no more than 256 characters". A declared tag key
@@ -15,11 +16,18 @@ const tagKeySchema = z.string().regex(SES_TAG_PATTERN, SES_TAG_NAME_MESSAGE);
 // letters, numbers, hyphens (-) and underscores (_) only."
 const CONFIGURATION_SET_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
 
+// The closeability check reads a stream tag of unclassified, the word every validator stores for
+// an unknown value, as no stream at all, so a lane declaring it could never close.
+const declaredStreamSchema = z
+  .string()
+  .regex(SES_TAG_PATTERN)
+  .refine((stream) => stream !== UNCLASSIFIED, `"${UNCLASSIFIED}" is reserved for an unknown value and cannot be a declared stream`);
+
 const laneEntrySchema = z.object({
   configurationSet: z.string().regex(CONFIGURATION_SET_PATTERN),
   lane: z.string().min(1),
   criticality: z.enum(['transactional', 'bulk']),
-  declaredStreams: z.array(z.string().regex(SES_TAG_PATTERN)).min(1),
+  declaredStreams: z.array(declaredStreamSchema).min(1),
   streamTagKey: tagKeySchema,
   batchTagKey: tagKeySchema,
   templateTagKey: tagKeySchema,

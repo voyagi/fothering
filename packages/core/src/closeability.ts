@@ -81,7 +81,9 @@ function emptyTally(): Tally {
 }
 
 // The minimizer writes UNCLASSIFIED for a caller identity it could not validate and leaves a
-// stream tag it could not validate out, so either of those, or an empty string, is no evidence.
+// stream tag it could not validate out, so either of those, or an empty string, is no evidence. A
+// stream tag an operator set to the literal word unclassified counts as missing too, and the lane
+// map refuses that word as a declared stream so no lane can depend on it.
 function usable(value: string | undefined): value is string {
   return value !== undefined && value !== '' && value !== UNCLASSIFIED;
 }
