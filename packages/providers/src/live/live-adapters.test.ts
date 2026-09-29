@@ -4,7 +4,7 @@ import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocumentClient } from '@aws-sdk/lib-dynamodb';
 import { SecretsManagerClient } from '@aws-sdk/client-secrets-manager';
 import { SQSClient } from '@aws-sdk/client-sqs';
-import { SESv2Client } from '@aws-sdk/client-sesv2';
+import { NotFoundException, SESv2Client, TooManyRequestsException } from '@aws-sdk/client-sesv2';
 import {
   SES_EVENT_TYPES,
   bucketSortKeyPrefix,
@@ -690,6 +690,34 @@ describe('createSesReads', () => {
       { name: 'eb', enabled: true, eventBridge: true, matchingEventTypes: ['SEND', 'BOUNCE'] },
       { name: 'sns', enabled: false, eventBridge: false, matchingEventTypes: ['COMPLAINT'] },
     ]);
+  });
+
+  // readSesFacts reads one lane-map set after another, a second apart: a set deleted from SES, or
+  // an identity deleted after the list read, must cost only its own answer, never the whole read.
+  it('answers no destinations for a configuration set SES does not hold, and passes any other error on', async () => {
+    const client = sesClient();
+    stubSend(client, (command) => {
+      const name = (command.input as { ConfigurationSetName: string }).ConfigurationSetName;
+      if (name === 'gone') throw new NotFoundException({ message: 'Configuration set gone does not exist.', $metadata: {} });
+      throw new TooManyRequestsException({ message: 'Too many requests.', $metadata: {} });
+    });
+    const reads = createSesReads({ client: () => client });
+
+    await expect(reads.getConfigurationSetEventDestinations('gone')).resolves.toEqual([]);
+    await expect(reads.getConfigurationSetEventDestinations('busy')).rejects.toBeInstanceOf(TooManyRequestsException);
+  });
+
+  it('answers no default set for an identity SES no longer holds, and passes any other error on', async () => {
+    const client = sesClient();
+    stubSend(client, (command) => {
+      const identity = (command.input as { EmailIdentity: string }).EmailIdentity;
+      if (identity === 'gone.example.com') throw new NotFoundException({ message: 'Identity does not exist.', $metadata: {} });
+      throw new TooManyRequestsException({ message: 'Too many requests.', $metadata: {} });
+    });
+    const reads = createSesReads({ client: () => client });
+
+    await expect(reads.getEmailIdentity('gone.example.com')).resolves.toBeUndefined();
+    await expect(reads.getEmailIdentity('busy.example.com')).rejects.toBeInstanceOf(TooManyRequestsException);
   });
 });
 

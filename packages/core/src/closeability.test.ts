@@ -294,6 +294,20 @@ describe('NO DATA (VER-09)', () => {
     });
     expect(observed.get(ALERTS)?.recordCount).toBe(0);
   });
+
+  // A NaN now makes every bucket read as still open, so sends with no outcome would pass as data;
+  // a NaN window start drops the window's lower edge. Either is refused, never read as a time.
+  it.each([
+    ['nowMs', { nowMs: Number.NaN }],
+    ['nowMs', { nowMs: Number.POSITIVE_INFINITY }],
+    ['windowStartMs', { windowStartMs: Number.NaN }],
+    ['windowStartMs', { windowStartMs: Number.NEGATIVE_INFINITY }],
+  ])('refuses a %s that is not a finite number', (name, override) => {
+    const sendsOnly = healthyLane(BULK, 'newsletter', 'bulk-sender').filter((record) => record.kind === 'send');
+    const observe = (): unknown => observeLanes(sendsOnly, { laneMap: LANE_MAP, windowStartMs: WINDOW_START_MS, nowMs: NOW_MS, ...override });
+    expect(observe).toThrow(RangeError);
+    expect(observe).toThrow(name);
+  });
 });
 
 describe('the closeable type (AC-17)', () => {

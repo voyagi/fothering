@@ -101,6 +101,16 @@ function addRecord(tally: Tally, record: EventRecord, nowMs: number): void {
   else if (record.kind === 'outcome') tally.completeOutcomes += 1;
 }
 
+// A NaN now reads every bucket as still open, so a lane of sends with no outcome would pass as
+// data instead of NO DATA, and a NaN window start compares false and drops the lower edge.
+function assertFiniteTimes(options: ObserveLanesOptions): void {
+  for (const [name, value] of [['windowStartMs', options.windowStartMs], ['nowMs', options.nowMs]] as const) {
+    if (!Number.isFinite(value)) {
+      throw new RangeError(`${name} ${String(value)} is not a finite number of epoch milliseconds, so no window can be read from it`);
+    }
+  }
+}
+
 /**
  * Reads what a snapshot of stored events shows per configuration set. The window has no upper
  * edge: a record in a bucket after nowMs (a sender's clock ahead of ours) still counts, since
@@ -111,6 +121,7 @@ export function observeLanes(
   records: readonly EventRecord[],
   options: ObserveLanesOptions,
 ): ReadonlyMap<string, ObservedLaneFacts> {
+  assertFiniteTimes(options);
   const firstBucketMs = bucketStartMs(options.windowStartMs);
   const tallies = new Map<string, Tally>(options.laneMap.lanes.map((lane) => [lane.configurationSet, emptyTally()]));
 
