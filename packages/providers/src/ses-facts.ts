@@ -5,15 +5,16 @@ import type { EventDestinationFact, SesReadPort } from './port-types.js';
 // SES throttles every API action except sending at one request per second per account
 // (https://docs.aws.amazon.com/ses/latest/dg/quotas.html), and these facts take one read per
 // identity plus one per lane-map set, so the reads are spaced instead of fired together. The
-// identity list itself is one request per 1,000 identities, its pages back to back inside the
-// adapter, so only an account past 1,000 identities sends two requests inside one second.
+// identity list is one request per 1,000 identities, and the live adapter spaces its pages by the
+// same second, so no two requests ever fall inside one second.
 export const SES_READ_SPACING_MS = 1_000;
 
 export interface ReadSesFactsOptions {
   wait?: (ms: number) => Promise<void>;
 }
 
-function sleep(ms: number): Promise<void> {
+/** The real pause behind every SES read spacing; tests pass a recorder in its place. */
+export function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => {
     setTimeout(resolve, ms);
   });

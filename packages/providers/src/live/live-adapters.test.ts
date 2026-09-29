@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import fc from 'fast-check';
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocumentClient } from '@aws-sdk/lib-dynamodb';
@@ -19,6 +19,7 @@ import { findLane } from '@fothering/core/lanes';
 import { minimizeEvent } from '@fothering/core/minimize';
 import { parseSesEvent } from '@fothering/core/ses-events';
 import { resolvePortTable } from '../ports.js';
+import { SES_READ_SPACING_MS } from '../ses-facts.js';
 import { TEST_ADDRESS_KEY_SET } from '../fixtures/ingest-ports.js';
 import { DOC_EXAMPLE_LANE_MAP, SES_EVENT_FIXTURE_NAMES, loadSesEventFixture } from '../fixtures/ses-events/index.js';
 import { lazyClient } from './lazy-client.js';
@@ -636,6 +637,16 @@ describe('createSesReads', () => {
     return new SESv2Client({ region: REGION, credentials: FAKE_CREDENTIALS });
   }
 
+  function recordWait(events: string[]): (ms: number) => Promise<void> {
+    return async (ms) => {
+      events.push(`wait ${ms}`);
+    };
+  }
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it("getEmailIdentity returns the identity's ConfigurationSetName", async () => {
     const client = sesClient();
     stubSend(client, () => ({ ConfigurationSetName: 'fothering-transactional' }));
@@ -644,20 +655,42 @@ describe('createSesReads', () => {
     await expect(reads.getEmailIdentity('sender@example.com')).resolves.toBe('fothering-transactional');
   });
 
-  it('listEmailIdentities collects IdentityName across two stubbed pages', async () => {
+  // SES allows one request a second for every action but sending, so a second page waits a second
+  // after the first, and nothing waits after the last page.
+  it('listEmailIdentities collects IdentityName across two stubbed pages, waiting a second before the second page only', async () => {
     const client = sesClient();
+    const events: string[] = [];
     stubSend(client, (command) => {
       const input = command.input as { NextToken?: string };
+      events.push(`page ${input.NextToken ?? 'first'}`);
       if (input.NextToken === 'page-2') return { EmailIdentities: [{ IdentityName: 'b.example.com' }] };
       return { EmailIdentities: [{ IdentityName: 'a.example.com' }], NextToken: 'page-2' };
     });
-    const reads = createSesReads({ client: () => client });
+    const reads = createSesReads({ client: () => client, wait: recordWait(events) });
 
     await expect(reads.listEmailIdentities()).resolves.toEqual(['a.example.com', 'b.example.com']);
+    expect(events).toEqual(['page first', 'wait 1000', 'page page-2']);
   });
 
-  // The pages go back to back inside one read, so the largest page SES allows keeps an account of up
-  // to 1,000 identities at one request under the one-a-second quota readSesFacts paces for.
+  it('uses a real one second timer between identity pages when no wait is given', async () => {
+    vi.useFakeTimers();
+    const client = sesClient();
+    const tokens: (string | undefined)[] = [];
+    stubSend(client, (command) => {
+      const input = command.input as { NextToken?: string };
+      tokens.push(input.NextToken);
+      return input.NextToken === 'page-2' ? { EmailIdentities: [] } : { EmailIdentities: [], NextToken: 'page-2' };
+    });
+
+    const pending = createSesReads({ client: () => client }).listEmailIdentities();
+    await vi.advanceTimersByTimeAsync(SES_READ_SPACING_MS - 1);
+    expect(tokens).toEqual([undefined]);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(tokens).toEqual([undefined, 'page-2']);
+    await pending;
+  });
+
+  // The largest page SES allows keeps an account of up to 1,000 identities at one request.
   it('asks for the largest page SES allows on every page', async () => {
     const client = sesClient();
     const pageSizes: unknown[] = [];
@@ -667,7 +700,7 @@ describe('createSesReads', () => {
       return input.NextToken === 'page-2' ? { EmailIdentities: [] } : { EmailIdentities: [], NextToken: 'page-2' };
     });
 
-    await createSesReads({ client: () => client }).listEmailIdentities();
+    await createSesReads({ client: () => client, wait: recordWait([]) }).listEmailIdentities();
     expect(pageSizes).toEqual([1000, 1000]);
   });
 

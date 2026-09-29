@@ -5,8 +5,30 @@ import {
   type SESv2Client,
 } from '@aws-sdk/client-sesv2';
 import type { EventDestinationFact, SesReadPort } from '../port-types.js';
+import { SES_READ_SPACING_MS, sleep } from '../ses-facts.js';
 
 const LIST_PAGE_SIZE = 1_000;
+
+type Wait = (ms: number) => Promise<void>;
+
+// SES allows one request a second for every action but sending, the quota readSesFacts spaces its
+// reads for. The paginator asks for the next page only when this loop comes back for it, and only
+// when the last page carried a token, so waiting after a page with a token keeps every request of
+// a list a second apart and adds no wait after the last page.
+async function collectPages<Page extends { NextToken?: string | undefined }>(
+  pages: AsyncIterable<Page>,
+  wait: Wait,
+  namesOf: (page: Page) => readonly (string | undefined)[],
+): Promise<string[]> {
+  const names: string[] = [];
+  for await (const page of pages) {
+    for (const name of namesOf(page)) {
+      if (name !== undefined) names.push(name);
+    }
+    if (page.NextToken !== undefined && page.NextToken !== '') await wait(SES_READ_SPACING_MS);
+  }
+  return names;
+}
 
 // The error both per-item reads throw when the identity or the configuration set does not exist
 // (the command pages for GetEmailIdentity and GetConfigurationSetEventDestinations).
@@ -18,12 +40,15 @@ function isNotFound(error: unknown): boolean {
 
 export interface CreateSesReadsOptions {
   client: () => SESv2Client;
+  /** The pause between the pages of a list; a real one-second timer when left out. */
+  wait?: Wait;
 }
 
 // The closeability check's only three reads (D-06, Item 7): the identity's default configuration
 // set, the full identity list, and one set's event destinations. No SES write ever goes through
 // this adapter; plan 01-15 builds the full SesPort on top of it.
 export function createSesReads(options: CreateSesReadsOptions): SesReadPort {
+  const wait = options.wait ?? sleep;
   return {
     // An identity deleted after the list read (readSesFacts reads them a second apart) can no longer
     // send, so it defaults no send to any set: the same answer as an identity with no default set.
@@ -37,18 +62,11 @@ export function createSesReads(options: CreateSesReadsOptions): SesReadPort {
       }
     },
 
-    // The pages follow each other with no pause, so every page is the largest SES allows (1,000,
-    // API_ListEmailIdentities): an account of up to 1,000 identities lists in one request, inside
-    // the one-a-second quota readSesFacts paces its reads for.
+    // Every page is the largest SES allows (1,000, API_ListEmailIdentities), so an account of up to
+    // 1,000 identities lists in one request and a larger one waits a second per extra page.
     async listEmailIdentities() {
-      const names: string[] = [];
       const pages = paginateListEmailIdentities({ client: options.client(), pageSize: LIST_PAGE_SIZE }, {});
-      for await (const page of pages) {
-        for (const identity of page.EmailIdentities ?? []) {
-          if (identity.IdentityName !== undefined) names.push(identity.IdentityName);
-        }
-      }
-      return names;
+      return collectPages(pages, wait, (page) => (page.EmailIdentities ?? []).map((identity) => identity.IdentityName));
     },
 
     // A lane-map set SES does not hold publishes nothing, so it answers no destinations and the
