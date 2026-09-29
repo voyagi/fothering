@@ -429,6 +429,26 @@ describe('createDryRunLog targets (AC-P9)', () => {
     expect(lines).toEqual([]);
   });
 
+  // A record key reaches the line as it stands, so its shape is all that keeps a key built by hand
+  // from printing an address: both halves must look like the keys recordKey builds.
+  it.each([
+    ['an address in the sort key', { pk: 'LANE#fothering-bulk', sk: 'B#0000000000000#Send#jane@example.com' }],
+    ['a sentence as the sort key', { pk: 'LANE#fothering-bulk', sk: 'the mailbox is full' }],
+    ['an address as the partition key', { pk: 'jane@example.com', sk: 'B#0000000000000#Send#m1' }],
+  ])('refuses a record key with %s in a store line and a dead-letter line, and never echoes it', async (_label, key) => {
+    const { log, lines } = logWithLines();
+    const refusals = [
+      await log.would('eventStore.deleteRecord', 'LANE#fothering-bulk', key).catch((error: unknown) => error),
+      await log.would('deadLetter.send', 'dead-letter-queue', [key]).catch((error: unknown) => error),
+    ];
+    for (const refusal of refusals) {
+      expect(refusal).toBeInstanceOf(TypeError);
+      expect((refusal as Error).message).not.toContain('jane');
+      expect((refusal as Error).message).not.toContain('mailbox');
+    }
+    expect(lines).toEqual([]);
+  });
+
   it('refuses an operation it has no line shape for, and a request that lacks the shape its line records', async () => {
     const { log, lines } = logWithLines();
     await expect(log.would('ses.deleteIdentity', 'fothering-bulk', 'fothering-bulk')).rejects.toThrow('no dry-run line is defined for ses.deleteIdentity');

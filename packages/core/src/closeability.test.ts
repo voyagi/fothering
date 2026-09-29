@@ -483,6 +483,39 @@ describe('properties over generated lane maps and observations', () => {
     expect(closeableSeen).toBeGreaterThan(0);
   });
 
+  // The oracle asks, type by type, whether some usable destination publishes it; the check builds a
+  // union instead. The six types are dealt out across three destinations, some dropped, some
+  // destinations disabled or not EventBridge, so splits that cover and splits with a hole both occur.
+  it('closes a healthy bulk set exactly when its usable destinations publish every type and no identity defaults to it', () => {
+    const types = [...REQUIRED_EVENT_TYPES];
+    const switchArbitrary = fc.record({ enabled: fc.constantFrom(true, true, true, false), eventBridge: fc.constantFrom(true, true, true, false) });
+    const dealArbitrary = fc.record({
+      owners: fc.array(fc.nat(2), { minLength: types.length, maxLength: types.length }),
+      dropped: fc.subarray(types, { maxLength: 2 }),
+      switches: fc.array(switchArbitrary, { minLength: 3, maxLength: 3 }),
+      defaultsToBulk: fc.constantFrom(false, false, false, true),
+    });
+    const seen = { closeable: 0, refused: 0 };
+    fc.assert(
+      fc.property(dealArbitrary, ({ owners, dropped, switches, defaultsToBulk }) => {
+        const destinations = switches.map((switchState, index) => ({
+          ...switchState,
+          matchingEventTypes: [...types.filter((type, position) => owners[position] === index && !dropped.includes(type)), 'OPEN'],
+        }));
+        const covered = types.every((type) =>
+          destinations.some((destination) => destination.enabled && destination.eventBridge && destination.matchingEventTypes.includes(type)),
+        );
+        const ses = { ...destinationsFor(BULK, destinations), defaultConfigurationSets: new Set(defaultsToBulk ? [BULK] : []) };
+        const closeable = evaluate({ ...baseline(), ses }).state === 'closeable';
+        seen[closeable ? 'closeable' : 'refused'] += 1;
+        expect(closeable).toBe(covered && !defaultsToBulk);
+      }),
+      { seed: propertySeed(), numRuns: 300 },
+    );
+    expect(seen.closeable).toBeGreaterThan(0);
+    expect(seen.refused).toBeGreaterThan(0);
+  });
+
   it('gives every set the same result whatever order the lanes sit in the file (AC-E34)', () => {
     fc.assert(
       fc.property(generatedArbitrary, fc.array(fc.integer(), { minLength: SET_COUNT, maxLength: SET_COUNT }), (generated, keys) => {

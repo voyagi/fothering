@@ -29,11 +29,14 @@ export const DRY_RUN_MESSAGE_ID = 'dry-run-not-sent';
 const CONFIGURATION_SET = /^[A-Za-z0-9_-]{1,64}$/;
 const RECEIVING_DOMAIN = /^[a-z0-9._-]{1,253}$/;
 const RECORD_PARTITION_KEY = /^LANE#[A-Za-z0-9_-]{1,64}$/;
+// recordKey's sort key: B#, a 13-digit bucket start, then the event type and an identity made of
+// SES ids, HMAC hex and a timestamp, joined by #. A key built any other way is refused, not printed.
+const RECORD_SORT_KEY = /^B#\d{13}#[A-Za-z0-9._#-]{1,1024}$/;
 const MODEL_ID = /^[A-Za-z0-9._:-]{1,256}$/;
 const RUNTIME_ARN = /^arn:[A-Za-z0-9:/_.-]{1,512}$/;
 const DEAD_LETTER_TARGET = new RegExp(`^${DEAD_LETTER_QUEUE_TARGET}$`);
 
-const recordKeySchema = z.object({ pk: z.string(), sk: z.string() });
+const recordKeySchema = z.object({ pk: z.string().regex(RECORD_PARTITION_KEY), sk: z.string().regex(RECORD_SORT_KEY) });
 const configurationSetSchema = z.string().regex(CONFIGURATION_SET);
 const sendEmailSchema = z.object({
   from: z.string(),
