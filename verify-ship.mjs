@@ -40,7 +40,8 @@
 //   - On POSIX a timed-out step is signalled through its direct child only (npm
 //     passes the signal on), so a grandchild that ignores it can linger and keep
 //     printing after the FAIL verdict. The verdict is still reached on time: see
-//     DRAIN_GRACE_MS. On Windows the whole step tree is ended (killStepTree).
+//     DRAIN_GRACE_MS, and runStep's second deadline for a direct child that ignores
+//     the signal as well. On Windows the whole step tree is ended (killStepTree).
 
 import { spawn, spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
@@ -164,6 +165,7 @@ function runStep(step, stepTimeoutMs) {
     let timedOut = false;
     let settled = false;
     let drainTimer;
+    let forceTimer;
 
     const timer = setTimeout(() => {
       // A step that already exited is only draining its pipes: that is DRAIN_GRACE_MS's job, and
@@ -171,6 +173,13 @@ function runStep(step, stepTimeoutMs) {
       if (child.exitCode !== null || child.signalCode !== null) return;
       timedOut = true;
       killStepTree(child);
+      // A direct child that ignores the stop signal never fires `exit`, so the drain timer never
+      // starts and nothing would reach a verdict. One grace period after the kill it is killed
+      // outright, and the verdict is given either way.
+      forceTimer = setTimeout(() => {
+        child.kill('SIGKILL');
+        finish(outcome(null));
+      }, DRAIN_GRACE_MS);
     }, stepTimeoutMs);
 
     function scanLine(line) {
@@ -208,6 +217,7 @@ function runStep(step, stepTimeoutMs) {
       settled = true;
       clearTimeout(timer);
       clearTimeout(drainTimer);
+      clearTimeout(forceTimer);
       // Whatever the step left running must not interleave its output with the summary.
       child.stdout.destroy();
       child.stderr.destroy();

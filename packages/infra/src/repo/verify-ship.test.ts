@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -54,13 +54,13 @@ interface RunResult {
   hung: boolean;
 }
 
-function run(dir: string, stepTimeoutMs = 60_000, watchdogMs = 55_000): RunResult {
+function run(dir: string, stepTimeoutMs = 60_000, watchdogMs = 55_000, extraEnv: Record<string, string> = {}): RunResult {
   try {
     const stdout = execFileSync(process.execPath, [VERIFY_SHIP], {
       cwd: dir,
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'pipe'],
-      env: { ...process.env, VERIFY_SHIP_TIMEOUT_MS: String(stepTimeoutMs) },
+      env: { ...process.env, VERIFY_SHIP_TIMEOUT_MS: String(stepTimeoutMs), ...extraEnv },
       timeout: watchdogMs,
     });
     return { stdout, stderr: '', status: 0, hung: false };
@@ -274,6 +274,27 @@ describe('verify:ship selftest step and sub-gate reporting', () => {
       expect(status).toBe(0);
       expect(stdout).toMatch(/types\s+PASS \(exit 0\)/);
       expect(hangPid(dir), 'the lingering process never started').toBeDefined();
+    },
+  );
+
+  // On POSIX the stop signal reaches only the step's direct child. When the shell hands the step
+  // to npm in its own process, that child is the stand-in npm below, which ignores the signal, so
+  // only the second deadline can reach a verdict. Windows ends the whole tree with taskkill /F,
+  // which no process can ignore, so there the case does not exist.
+  it.skipIf(process.platform === 'win32')(
+    'reaches TIMED OUT when the timed-out step ignores the stop signal',
+    { timeout: 60_000 },
+    () => {
+      const dir = makeProject();
+      dirs.push(dir);
+      const binDir = join(dir, 'bin');
+      mkdirSync(binDir);
+      // Records its PID for cleanup, ignores the stop signal, and ends by itself after 30 s.
+      writeFileSync(join(binDir, 'npm'), `#!/bin/sh\necho $$ > ${HANG_PID_FILE}\ntrap '' TERM\nsleep 30\n`, { mode: 0o755 });
+      const { stderr, status, hung } = run(dir, 3_000, 40_000, { PATH: `${binDir}:${process.env.PATH ?? ''}` });
+      expect(hung, 'verify:ship never reached a verdict for a step that ignored the stop signal').toBe(false);
+      expect(stderr).toContain('types TIMED OUT');
+      expect(status).not.toBe(0);
     },
   );
 });
