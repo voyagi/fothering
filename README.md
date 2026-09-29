@@ -9,6 +9,7 @@ Status: early build, not yet runnable end to end.
 
 - Node.js 22.18 or later on the 22 line (Amazon Bedrock AgentCore Runtime runs Node.js 22)
 - npm 10 or later
+- AWS CLI version 2, for the deploy checks and the forget command below (both are written for it)
 
 ## Setup
 
@@ -83,6 +84,20 @@ matches that event; a configuration set missing from `lanes.json` never matches:
 ```sh
 aws events test-event-pattern --event-pattern file://rule-pattern.json --event file://sample-event.json
 ```
+
+Fothering reads SES in `eu-central-1` only: the closeability check lists identities and reads
+configuration sets there, and SES keeps verified identities separately in each Region. Send the
+mail you want guarded through SES in `eu-central-1`, with every set in `lanes.json` created there.
+The check above never looks at a Region, so it also passes for a set that lives elsewhere. This one
+answers with the set's settings only when SES holds it in `eu-central-1`:
+
+```sh
+aws sesv2 get-configuration-set --region eu-central-1 --configuration-set-name <a set from lanes.json>
+```
+
+The ingest stack holds three CloudWatch alarms: ingest function errors, ingest events Lambda
+dropped, and messages waiting in the dead-letter queue. None of them notifies anyone yet, so check
+their state in the CloudWatch console in `eu-central-1` after sending.
 
 ## Forget one recipient
 

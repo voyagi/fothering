@@ -93,6 +93,9 @@ already removed stays removed, and running it again removes the rest.
   for in the four days before.
 - Complaint counting records. A complaint writes one record with no recipient field to count the
   complaint itself, kept separate from the per-recipient items this command does remove.
+- Log lines. With the live switch off, the line that records an email Fothering would have sent
+  names each recipient by receiving domain and keyed hash, never the address. This command does not
+  reach log lines; every log group the stacks create deletes a line after 30 days.
 - Records hashed under an address-key version already removed from the key secret. This command
   hashes only under the versions the secret still holds, so keep a retired version there for 30
   days after its successor became active, plus the few days expired records can take to disappear.
