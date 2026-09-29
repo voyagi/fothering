@@ -6,6 +6,8 @@ export interface StubAssets {
   readonly ingestAssetDir: string;
   readonly forgetAssetDir: string;
   readonly agentAssetDir: string;
+  /** Where a synth of these bundles may write its assembly; created by the synth, removed with the rest. */
+  readonly outdir: string;
   remove(): void;
 }
 
@@ -22,6 +24,7 @@ export function createStubAssets(): StubAssets {
     ingestAssetDir: dirs.ingest,
     forgetAssetDir: dirs.forget,
     agentAssetDir: dirs.agent,
+    outdir: join(root, 'cdk.out'),
     remove: () => rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }),
   };
 }
