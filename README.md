@@ -43,10 +43,13 @@ rule's permission to invoke the ingest function, is pinned by the ingest stack's
 - Tests: every provider resolves to a fixture whatever the switch holds, and the suite refuses to
   run at all when it reads `live`.
 - A deployed stack with `FOTHERING_LIVE` unset: the product's own table, the address key secret
-  and the queue are live, and so is every SES read the closeability check needs, while every SES
-  pause, reopen and send, every model call and every InvokeAgentRuntime becomes one dry-run line
-  instead of a real call. No deployed role holds an SES or model permission yet: each arrives with
-  the phase that first makes the call.
+  and the queue are live, while every SES pause, reopen and send, every model call and every
+  InvokeAgentRuntime becomes one dry-run line instead of a real call. The four SES reads the
+  closeability check needs resolve live too, but no deployed function calls them yet. No deployed
+  role holds an SES or model permission yet: the role of the phase that first calls those reads
+  gains `ses:ListEmailIdentities`, `ses:ListConfigurationSets`, `ses:GetEmailIdentity` and
+  `ses:GetConfigurationSetEventDestinations`, and every other permission arrives with the phase
+  that first makes its call.
 - A deployed stack with `FOTHERING_LIVE` set to the exact word `live`: those mutations go live as
   later phases build them.
 
