@@ -58,10 +58,13 @@ export class RuntimeStack extends Stack {
 
     // AgentCore writes the runtime's logs to this name (<runtime id>-<endpoint name>, DEFAULT being
     // the endpoint every runtime gets) and creates a missing group through the execution role,
-    // which AWS's published policy lets it do. This role holds no logs:CreateLogGroup, so the stack
-    // creates the group, with a retention and inside the stack's removal, and AgentCore can never
-    // create it first. The first invocation after the first deploy must show a log line here;
-    // without one, the create permission is the fallback.
+    // which AWS's published policy lets it do. The name needs the runtime's id, so CloudFormation
+    // creates this group, and the log policy below, only after the runtime exists. The role holds
+    // no logs:CreateLogGroup, so AgentCore cannot create the group in that gap and make the stack's
+    // own create of the same name fail; a line the runtime wrote in the gap would be lost, and
+    // nothing in this build invokes the runtime. The stack's group carries a retention and goes
+    // with the stack's removal. The first invocation after the first deploy must show a log line
+    // here; without one, the create permission is the fallback.
     const logGroup = new LogGroup(this, 'RuntimeLogs', {
       logGroupName: `/aws/bedrock-agentcore/runtimes/${runtime.agentRuntimeId}-DEFAULT`,
       retention: RetentionDays.ONE_MONTH,
