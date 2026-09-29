@@ -656,6 +656,21 @@ describe('createSesReads', () => {
     await expect(reads.listEmailIdentities()).resolves.toEqual(['a.example.com', 'b.example.com']);
   });
 
+  // The pages go back to back inside one read, so the largest page SES allows keeps an account of up
+  // to 1,000 identities at one request under the one-a-second quota readSesFacts paces for.
+  it('asks for the largest page SES allows on every page', async () => {
+    const client = sesClient();
+    const pageSizes: unknown[] = [];
+    stubSend(client, (command) => {
+      const input = command.input as { NextToken?: string; PageSize?: number };
+      pageSizes.push(input.PageSize);
+      return input.NextToken === 'page-2' ? { EmailIdentities: [] } : { EmailIdentities: [], NextToken: 'page-2' };
+    });
+
+    await createSesReads({ client: () => client }).listEmailIdentities();
+    expect(pageSizes).toEqual([1000, 1000]);
+  });
+
   it('getConfigurationSetEventDestinations maps Name, Enabled, MatchingEventTypes and eventBridge true only with an EventBridgeDestination', async () => {
     const client = sesClient();
     stubSend(client, () => ({

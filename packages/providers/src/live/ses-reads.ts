@@ -6,6 +6,8 @@ import {
 } from '@aws-sdk/client-sesv2';
 import type { EventDestinationFact, SesReadPort } from '../port-types.js';
 
+const LIST_PAGE_SIZE = 1_000;
+
 export interface CreateSesReadsOptions {
   client: () => SESv2Client;
 }
@@ -20,9 +22,12 @@ export function createSesReads(options: CreateSesReadsOptions): SesReadPort {
       return response.ConfigurationSetName;
     },
 
+    // The pages follow each other with no pause, so every page is the largest SES allows (1,000,
+    // API_ListEmailIdentities): an account of up to 1,000 identities lists in one request, inside
+    // the one-a-second quota readSesFacts paces its reads for.
     async listEmailIdentities() {
       const names: string[] = [];
-      const pages = paginateListEmailIdentities({ client: options.client() }, {});
+      const pages = paginateListEmailIdentities({ client: options.client(), pageSize: LIST_PAGE_SIZE }, {});
       for await (const page of pages) {
         for (const identity of page.EmailIdentities ?? []) {
           if (identity.IdentityName !== undefined) names.push(identity.IdentityName);
