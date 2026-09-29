@@ -32,6 +32,16 @@ export const CJS_BUNDLE_BASE = Object.freeze({
   logOverride: { 'empty-import-meta': 'error' },
 });
 
+// The settings for a bundle of the CDK app or of a tool that builds its stacks. aws-cdk-lib and
+// constructs stay external so the tool and the deployed app load the same installed copy.
+export const CDK_TOOL_BUNDLE_BASE = Object.freeze({
+  bundle: true,
+  platform: 'node',
+  target: 'node22',
+  format: 'esm',
+  external: ['aws-cdk-lib', 'aws-cdk-lib/*', 'constructs'],
+});
+
 export function markCommonJsScope(dir) {
   writeFileSync(join(dir, 'package.json'), '{ "type": "commonjs" }\n');
 }

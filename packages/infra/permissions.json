@@ -1,1 +1,182 @@
-[]
+[
+  {
+    "stack": "FotheringIngest",
+    "role": "ForgetRole9C1F5950",
+    "kind": "permission",
+    "effect": "Allow",
+    "action": "dynamodb:DeleteItem",
+    "resource": "{\"Fn::GetAtt\":[\"EventStore165FCE28\",\"Arn\"]}",
+    "principal": null,
+    "condition": null
+  },
+  {
+    "stack": "FotheringIngest",
+    "role": "ForgetRole9C1F5950",
+    "kind": "permission",
+    "effect": "Allow",
+    "action": "dynamodb:Query",
+    "resource": "{\"Fn::GetAtt\":[\"EventStore165FCE28\",\"Arn\"]}",
+    "principal": null,
+    "condition": null
+  },
+  {
+    "stack": "FotheringIngest",
+    "role": "ForgetRole9C1F5950",
+    "kind": "permission",
+    "effect": "Allow",
+    "action": "dynamodb:Query",
+    "resource": "{\"Fn::Join\":[\"\",[{\"Fn::GetAtt\":[\"EventStore165FCE28\",\"Arn\"]},\"/index/byRecipient\"]]}",
+    "principal": null,
+    "condition": null
+  },
+  {
+    "stack": "FotheringIngest",
+    "role": "ForgetRole9C1F5950",
+    "kind": "permission",
+    "effect": "Allow",
+    "action": "logs:CreateLogStream",
+    "resource": "{\"Fn::Join\":[\"\",[\"arn:aws:logs:eu-central-1:\",{\"Ref\":\"AWS::AccountId\"},\":log-group:\",{\"Ref\":\"ForgetLogsE8A7F87C\"},\":log-stream:*\"]]}",
+    "principal": null,
+    "condition": null
+  },
+  {
+    "stack": "FotheringIngest",
+    "role": "ForgetRole9C1F5950",
+    "kind": "permission",
+    "effect": "Allow",
+    "action": "logs:PutLogEvents",
+    "resource": "{\"Fn::Join\":[\"\",[\"arn:aws:logs:eu-central-1:\",{\"Ref\":\"AWS::AccountId\"},\":log-group:\",{\"Ref\":\"ForgetLogsE8A7F87C\"},\":log-stream:*\"]]}",
+    "principal": null,
+    "condition": null
+  },
+  {
+    "stack": "FotheringIngest",
+    "role": "ForgetRole9C1F5950",
+    "kind": "permission",
+    "effect": "Allow",
+    "action": "secretsmanager:GetSecretValue",
+    "resource": "{\"Ref\":\"AddressKey1F8FD90D\"}",
+    "principal": null,
+    "condition": null
+  },
+  {
+    "stack": "FotheringIngest",
+    "role": "ForgetRole9C1F5950",
+    "kind": "trust",
+    "effect": "Allow",
+    "action": "sts:AssumeRole",
+    "resource": null,
+    "principal": "{\"Service\":\"lambda.amazonaws.com\"}",
+    "condition": null
+  },
+  {
+    "stack": "FotheringIngest",
+    "role": "IngestRoleAF8AE6D8",
+    "kind": "permission",
+    "effect": "Allow",
+    "action": "dynamodb:PutItem",
+    "resource": "{\"Fn::GetAtt\":[\"EventStore165FCE28\",\"Arn\"]}",
+    "principal": null,
+    "condition": null
+  },
+  {
+    "stack": "FotheringIngest",
+    "role": "IngestRoleAF8AE6D8",
+    "kind": "permission",
+    "effect": "Allow",
+    "action": "logs:CreateLogStream",
+    "resource": "{\"Fn::Join\":[\"\",[\"arn:aws:logs:eu-central-1:\",{\"Ref\":\"AWS::AccountId\"},\":log-group:\",{\"Ref\":\"IngestLogs7327CBDC\"},\":log-stream:*\"]]}",
+    "principal": null,
+    "condition": null
+  },
+  {
+    "stack": "FotheringIngest",
+    "role": "IngestRoleAF8AE6D8",
+    "kind": "permission",
+    "effect": "Allow",
+    "action": "logs:PutLogEvents",
+    "resource": "{\"Fn::Join\":[\"\",[\"arn:aws:logs:eu-central-1:\",{\"Ref\":\"AWS::AccountId\"},\":log-group:\",{\"Ref\":\"IngestLogs7327CBDC\"},\":log-stream:*\"]]}",
+    "principal": null,
+    "condition": null
+  },
+  {
+    "stack": "FotheringIngest",
+    "role": "IngestRoleAF8AE6D8",
+    "kind": "permission",
+    "effect": "Allow",
+    "action": "secretsmanager:GetSecretValue",
+    "resource": "{\"Ref\":\"AddressKey1F8FD90D\"}",
+    "principal": null,
+    "condition": null
+  },
+  {
+    "stack": "FotheringIngest",
+    "role": "IngestRoleAF8AE6D8",
+    "kind": "permission",
+    "effect": "Allow",
+    "action": "sqs:SendMessage",
+    "resource": "{\"Fn::GetAtt\":[\"DeadLetterQueue9F481546\",\"Arn\"]}",
+    "principal": null,
+    "condition": null
+  },
+  {
+    "stack": "FotheringIngest",
+    "role": "IngestRoleAF8AE6D8",
+    "kind": "trust",
+    "effect": "Allow",
+    "action": "sts:AssumeRole",
+    "resource": null,
+    "principal": "{\"Service\":\"lambda.amazonaws.com\"}",
+    "condition": null
+  },
+  {
+    "stack": "FotheringRuntime",
+    "role": "RuntimeRoleFD8790A4",
+    "kind": "permission",
+    "effect": "Allow",
+    "action": "logs:CreateLogStream",
+    "resource": "{\"Fn::Join\":[\"\",[\"arn:aws:logs:eu-central-1:\",{\"Ref\":\"AWS::AccountId\"},\":log-group:\",{\"Ref\":\"RuntimeLogs92941AA6\"},\":log-stream:*\"]]}",
+    "principal": null,
+    "condition": null
+  },
+  {
+    "stack": "FotheringRuntime",
+    "role": "RuntimeRoleFD8790A4",
+    "kind": "permission",
+    "effect": "Allow",
+    "action": "logs:DescribeLogGroups",
+    "resource": "{\"Fn::Join\":[\"\",[\"arn:aws:logs:eu-central-1:\",{\"Ref\":\"AWS::AccountId\"},\":log-group:*\"]]}",
+    "principal": null,
+    "condition": null
+  },
+  {
+    "stack": "FotheringRuntime",
+    "role": "RuntimeRoleFD8790A4",
+    "kind": "permission",
+    "effect": "Allow",
+    "action": "logs:DescribeLogStreams",
+    "resource": "{\"Fn::Join\":[\"\",[\"arn:aws:logs:eu-central-1:\",{\"Ref\":\"AWS::AccountId\"},\":log-group:\",{\"Ref\":\"RuntimeLogs92941AA6\"}]]}",
+    "principal": null,
+    "condition": null
+  },
+  {
+    "stack": "FotheringRuntime",
+    "role": "RuntimeRoleFD8790A4",
+    "kind": "permission",
+    "effect": "Allow",
+    "action": "logs:PutLogEvents",
+    "resource": "{\"Fn::Join\":[\"\",[\"arn:aws:logs:eu-central-1:\",{\"Ref\":\"AWS::AccountId\"},\":log-group:\",{\"Ref\":\"RuntimeLogs92941AA6\"},\":log-stream:*\"]]}",
+    "principal": null,
+    "condition": null
+  },
+  {
+    "stack": "FotheringRuntime",
+    "role": "RuntimeRoleFD8790A4",
+    "kind": "trust",
+    "effect": "Allow",
+    "action": "sts:AssumeRole",
+    "resource": null,
+    "principal": "{\"Service\":\"bedrock-agentcore.amazonaws.com\"}",
+    "condition": "{\"StringEquals\":{\"aws:SourceAccount\":{\"Ref\":\"AWS::AccountId\"}}}"
+  }
+]

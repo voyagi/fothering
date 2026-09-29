@@ -30,7 +30,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, readdirSync, rmSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
-import { CJS_BUNDLE_BASE, agentcoreInlineRequirePlugin, markCommonJsScope } from './bundle-options.mjs';
+import { CDK_TOOL_BUNDLE_BASE, CJS_BUNDLE_BASE, agentcoreInlineRequirePlugin, markCommonJsScope } from './bundle-options.mjs';
 import { sanitizedSynthEnv } from './synth-env.mjs';
 
 const require = createRequire(import.meta.url);
@@ -84,12 +84,8 @@ async function buildAgentBundle(root, outfileAbs) {
 
 async function buildInfraBundle(root, outfileAbs) {
   await build({
+    ...CDK_TOOL_BUNDLE_BASE,
     entryPoints: [join('packages', 'infra', 'src', 'app.ts')],
-    bundle: true,
-    platform: 'node',
-    target: 'node22',
-    format: 'esm',
-    external: ['aws-cdk-lib', 'aws-cdk-lib/*', 'constructs'],
     outfile: outfileAbs,
     absWorkingDir: root,
   });

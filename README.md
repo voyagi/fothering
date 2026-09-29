@@ -27,7 +27,11 @@ npm test            # unit and property tests
 npm run lint        # whole-repo lint
 npm run gate        # type check, complexity, duplication, boundaries, env file
 npm run verify:ship # everything above, in order, with one verdict
+npm run permissions:snapshot # rewrite packages/infra/permissions.json after a role change
 ```
+
+`packages/infra/permissions.json` lists every permission the two stacks grant. The test suite fails
+until it matches the synthesized templates, so a change to a role shows up as a change to that file.
 
 ## Live switch
 
