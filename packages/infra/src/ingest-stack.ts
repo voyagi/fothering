@@ -14,9 +14,9 @@ import type { LaneMap } from '@fothering/core/lanes';
 import { liveSwitchEnvironment } from './live-switch.js';
 import { logWriteStatement } from './log-statements.js';
 
-// The six detail-types EventBridge publishes for SES configuration-set event destinations. Email
-// Sent stays in the list: the ingest handler itself drops a Send with no destination, so the rule
-// never filters Send out.
+// The six of the SES detail-types EventBridge carries that a lane's health is read from; opens,
+// clicks, rendering failures and subscriptions are never ingested. Email Sent stays in the list:
+// the ingest handler itself drops a Send with no destination, so the rule never filters Send out.
 const SES_DETAIL_TYPES = [
   'Email Sent',
   'Email Delivered',

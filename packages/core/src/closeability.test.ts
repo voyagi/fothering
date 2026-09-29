@@ -90,6 +90,8 @@ interface RulePair {
 }
 
 const PARTIAL_DESTINATION = { ...FULL_DESTINATION, matchingEventTypes: REQUIRED_EVENT_TYPES.filter((type) => type !== 'DELIVERY_DELAY') };
+const SPLIT_FIRST_HALF = { ...FULL_DESTINATION, matchingEventTypes: ['SEND', 'REJECT', 'BOUNCE'] };
+const SPLIT_SECOND_HALF = { ...FULL_DESTINATION, matchingEventTypes: ['COMPLAINT', 'DELIVERY', 'DELIVERY_DELAY'] };
 
 const RULE_PAIRS: RulePair[] = [
   {
@@ -173,14 +175,23 @@ describe('every refusal rule refuses its fixture and passes its twin (AC-16)', (
     ['a destination with no matching event types', [{ ...FULL_DESTINATION, matchingEventTypes: [] }]],
     ['no destination at all', []],
     [
-      'coverage split across two destinations, none covering all six',
+      'two destinations that between them leave out DELIVERY_DELAY',
       [
         { ...FULL_DESTINATION, matchingEventTypes: ['SEND', 'REJECT', 'BOUNCE'] },
-        { ...FULL_DESTINATION, matchingEventTypes: ['COMPLAINT', 'DELIVERY', 'DELIVERY_DELAY'] },
+        { ...FULL_DESTINATION, matchingEventTypes: ['COMPLAINT', 'DELIVERY'] },
       ],
     ],
+    ['a split whose second half is disabled', [SPLIT_FIRST_HALF, { ...SPLIT_SECOND_HALF, enabled: false }]],
+    ['a split whose second half is not an EventBridge destination', [SPLIT_FIRST_HALF, { ...SPLIT_SECOND_HALF, eventBridge: false }]],
   ])('refuses %s', (_label, destinations) => {
     expect(reasonsOf(evaluate({ ...baseline(), ses: destinationsFor(BULK, destinations) }))).toEqual(['destination-missing-event-types']);
+  });
+
+  // A set may hold several event destinations, and every EventBridge destination publishes to the
+  // default bus the ingest rule reads, so two that split the six types between them miss nothing.
+  it('accepts the six types split across two enabled EventBridge destinations', () => {
+    const ses = destinationsFor(BULK, [SPLIT_FIRST_HALF, SPLIT_SECOND_HALF]);
+    expect(evaluate({ ...baseline(), ses }).state).toBe('closeable');
   });
 
   it('refuses a set the SES facts hold no destination list for', () => {

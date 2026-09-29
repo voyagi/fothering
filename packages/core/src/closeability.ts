@@ -2,9 +2,10 @@ import { bucketStartMs, isBucketComplete, isCountedRecord } from './buckets.js';
 import { findLane, type LaneEntry, type LaneMap } from './lanes.js';
 import { UNCLASSIFIED, type EventRecord } from './records.js';
 
-// SES event types an event destination must publish before Fothering reads a lane's health from it.
-// One destination has to cover all six: two destinations that split them leave each event stream
-// with a hole, so a union across destinations does not count.
+// SES event types a set's enabled EventBridge destinations must publish, between them, before
+// Fothering reads a lane's health from it. A set may hold several event destinations (SES guide,
+// "Creating Amazon SES event destinations"), and every EventBridge destination publishes to the
+// default bus the ingest rule reads, so two that split the six types between them miss nothing.
 export const REQUIRED_EVENT_TYPES = ['SEND', 'REJECT', 'BOUNCE', 'COMPLAINT', 'DELIVERY', 'DELIVERY_DELAY'] as const;
 
 // The order a result lists its reasons in.
@@ -170,14 +171,15 @@ function sharesCallerWithAnotherSet(
   return false;
 }
 
-function hasCoveringDestination(configurationSet: string, ses: SesConfigurationFacts): boolean {
-  const destinations = ses.eventDestinations.get(configurationSet) ?? [];
-  return destinations.some(
-    (destination) =>
-      destination.enabled &&
-      destination.eventBridge &&
-      REQUIRED_EVENT_TYPES.every((type) => destination.matchingEventTypes.includes(type)),
-  );
+// A disabled destination publishes nothing, and a destination of another kind (SNS, Firehose,
+// CloudWatch) never reaches the bus, so only enabled EventBridge destinations add to the union.
+function eventBridgePublishesEveryType(configurationSet: string, ses: SesConfigurationFacts): boolean {
+  const published = new Set<string>();
+  for (const destination of ses.eventDestinations.get(configurationSet) ?? []) {
+    if (!destination.enabled || !destination.eventBridge) continue;
+    for (const type of destination.matchingEventTypes) published.add(type);
+  }
+  return REQUIRED_EVENT_TYPES.every((type) => published.has(type));
 }
 
 function refusalReasons(lane: LaneEntry, own: ObservedLaneFacts, options: CheckCloseabilityOptions): RefusalReason[] {
@@ -189,7 +191,7 @@ function refusalReasons(lane: LaneEntry, own: ObservedLaneFacts, options: CheckC
     'caller-unknown': own.recordsWithoutCaller > 0,
     'caller-on-another-set': sharesCallerWithAnotherSet(lane.configurationSet, options.observed, own),
     'default-configuration-set': options.ses.defaultConfigurationSets.has(lane.configurationSet),
-    'destination-missing-event-types': !hasCoveringDestination(lane.configurationSet, options.ses),
+    'destination-missing-event-types': !eventBridgePublishesEveryType(lane.configurationSet, options.ses),
     'operator-alert': lane.operatorAlert,
     transactional: lane.criticality === 'transactional',
   };
