@@ -328,7 +328,7 @@ describe('IngestStack synth', () => {
       ]);
     });
 
-    it('lets the forget role query the table and its recipient index, delete items, read the address key and write its own log group, and nothing more', () => {
+    it('lets the forget role query only its recipient index, delete items, read the address key and write its own log group, and nothing more', () => {
       const statements = statementsByRole(stacks.ingest)[roleOf(forgetFunction().properties)] ?? [];
       const tableArn = { 'Fn::GetAtt': [logicalIdOf(stacks.ingest, 'AWS::DynamoDB::Table'), 'Arn'] };
       expect(roleActions(roleOf(forgetFunction().properties))).toEqual([
@@ -338,7 +338,6 @@ describe('IngestStack synth', () => {
         'secretsmanager:GetSecretValue',
       ]);
       expect(statements.find((s) => s.actions.includes('dynamodb:Query'))?.resources).toEqual([
-        tableArn,
         { 'Fn::Join': ['', [tableArn, `/index/${RECIPIENT_INDEX_NAME}`]] },
       ]);
       expect(statements.find((s) => s.actions.includes('dynamodb:DeleteItem'))?.resources).toEqual([tableArn]);

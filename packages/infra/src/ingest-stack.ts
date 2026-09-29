@@ -75,11 +75,13 @@ export class IngestStack extends Stack {
       new PolicyStatement({ effect: Effect.ALLOW, actions: ['secretsmanager:GetSecretValue'], resources: [addressKey.secretArn] }),
       new PolicyStatement({ effect: Effect.ALLOW, actions: ['sqs:SendMessage'], resources: [queue.queueArn] }),
     ]);
+    // Forget finds a recipient's records through the recipient index alone and never queries the
+    // base table, so Query names only the index.
     const forgetRole = this.createFunctionRole('Forget', [
       new PolicyStatement({
         effect: Effect.ALLOW,
         actions: ['dynamodb:Query'],
-        resources: [table.tableArn, `${table.tableArn}/index/${RECIPIENT_INDEX_NAME}`],
+        resources: [`${table.tableArn}/index/${RECIPIENT_INDEX_NAME}`],
       }),
       new PolicyStatement({ effect: Effect.ALLOW, actions: ['dynamodb:DeleteItem'], resources: [table.tableArn] }),
       new PolicyStatement({ effect: Effect.ALLOW, actions: ['secretsmanager:GetSecretValue'], resources: [addressKey.secretArn] }),

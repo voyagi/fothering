@@ -15,16 +15,6 @@
     "kind": "permission",
     "effect": "Allow",
     "action": "dynamodb:Query",
-    "resource": "{\"Fn::GetAtt\":[\"EventStore165FCE28\",\"Arn\"]}",
-    "principal": null,
-    "condition": null
-  },
-  {
-    "stack": "FotheringIngest",
-    "role": "ForgetRole9C1F5950",
-    "kind": "permission",
-    "effect": "Allow",
-    "action": "dynamodb:Query",
     "resource": "{\"Fn::Join\":[\"\",[{\"Fn::GetAtt\":[\"EventStore165FCE28\",\"Arn\"]},\"/index/byRecipient\"]]}",
     "principal": null,
     "condition": null
