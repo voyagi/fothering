@@ -231,6 +231,11 @@ export function checkCloseability(configurationSet: string, options: CheckClosea
     );
   }
 
+  // Records in buckets still open count as data. A bucket completes only LATENESS_HORIZON_MS after
+  // it ends, so requiring a complete one would keep every lane NO DATA that long after its first
+  // send and stop any shorter incident window from ever closing a lane. Outcomes are judged across
+  // the complete buckets together, not bucket by bucket, because SES delivers events to
+  // EventBridge best effort: one event lost in a quiet bucket must not turn a working lane to NO DATA.
   const own = options.observed.get(configurationSet);
   if (own === undefined || own.recordCount === 0 || own.completeBucketsHoldSendsWithoutOutcomes) {
     return { state: 'no-data' };
