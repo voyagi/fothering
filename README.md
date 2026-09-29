@@ -85,6 +85,11 @@ matches that event; a configuration set missing from `lanes.json` never matches:
 aws events test-event-pattern --event-pattern file://rule-pattern.json --event file://sample-event.json
 ```
 
+List every configuration set you send through in `lanes.json`, transactional ones included (the
+closeability check never marks a transactional lane closeable). Events from an unlisted set are
+dropped before storage, so the check that refuses a lane whose sender also sends through another
+set cannot see that set.
+
 Fothering reads SES in `eu-central-1` only: the closeability check lists identities and reads
 configuration sets there, and SES keeps verified identities separately in each Region. Send the
 mail you want guarded through SES in `eu-central-1`, with every set in `lanes.json` created there.

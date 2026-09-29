@@ -118,7 +118,10 @@ function assertFiniteTimes(options: ObserveLanesOptions): void {
  * Reads what a snapshot of stored events shows per configuration set. The window has no upper
  * edge: a record in a bucket after nowMs (a sender's clock ahead of ours) still counts, since
  * dropping it could hide a second stream. Every lane-map set gets an entry, records or not, and a
- * set seen only in the records is included too, because its callers matter to the sets that share them.
+ * set seen only in the records is included too, because its callers matter to the sets that share
+ * them. Such a set is one taken out of lanes.json whose stored records have not expired yet: a set
+ * never listed stores nothing (the ingest rule and ingestEvent drop its events), so a caller it
+ * shares with a listed set is never seen here.
  */
 export function observeLanes(
   records: readonly EventRecord[],
