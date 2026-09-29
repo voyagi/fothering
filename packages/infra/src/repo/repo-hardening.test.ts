@@ -175,6 +175,8 @@ describe('repo hardening: every gate, config and document ships what it claims',
       expect(manifest.dependencies ?? {}, `packages/${ws} lists vitest as a production dependency`).not.toHaveProperty('vitest');
     }
     expect(ci).toContain('packages/*/package.json');
+    // The site is planned under apps/, so the client scan must read those manifests too.
+    expect(ci).toContain('packages/*/package.json apps/*/package.json');
     expect(ci).toContain('check-client-secrets.mjs');
 
     const lines = ci.split('\n');
@@ -246,6 +248,7 @@ describe('repo hardening: every gate, config and document ships what it claims',
       'reports/stryker-incremental.json',
       'coverage/index.html',
       'packages/web/coverage/index.html',
+      'apps/web/coverage/index.html',
       '.stryker-tmp/sandbox/x.ts',
       '.knip-report.json',
       'trivy-vulns.json',

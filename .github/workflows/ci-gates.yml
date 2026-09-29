@@ -99,13 +99,16 @@ jobs:
           path: trivy-licenses.json
       - run: npm run verify:ship
       # Only a workspace that BUILDS can leak a secret into a client bundle, so the loop is keyed
-      # on scripts.build rather than a fixed apps/web path: the site does not exist yet, and this
-      # reaches it the day it does, without a second edit here. Each workspace found prints its
-      # own scan; the SKIPPED line names the reason only when none declares a build at all.
+      # on scripts.build rather than a fixed apps/web path, and it reads apps/* as well as
+      # packages/*: the site does not exist yet, and this reaches it the day it does, without a
+      # second edit here. A declared build whose dist/ is missing fails the scan (exit 2, could not
+      # run), so a site added later must build before this step. Each workspace found prints its
+      # own scan; the SKIPPED line names the reason only when none declares a build at all. The
+      # repo root's dist/ holds server bundles only (Lambda handlers, the agent runtime).
       - name: client bundle secret scan
         run: |
           found_build=0
-          for manifest in packages/*/package.json; do
+          for manifest in packages/*/package.json apps/*/package.json; do
             [ -f "$manifest" ] || continue
             workspace=$(dirname "$manifest")
             has_build=$(jq -r '.scripts.build // empty' "$manifest")
@@ -115,5 +118,5 @@ jobs:
             fi
           done
           if [ "$found_build" -eq 0 ]; then
-            echo "client bundle secret scan: SKIPPED, no packages/*/package.json declares a build script in this revision"
+            echo "client bundle secret scan: SKIPPED, no packages/* or apps/* package.json declares a build script in this revision"
           fi
