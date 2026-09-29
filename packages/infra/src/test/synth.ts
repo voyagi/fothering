@@ -20,19 +20,25 @@ type Resources = Record<string, { Type: string; Properties?: Record<string, unkn
 
 // The deployed context plus whatever a test adds, over stub bundles, so a synth loads aws-cdk-lib
 // and hashes two small folders and nothing more. The assembly goes inside the stub folder: an App
-// with no outdir writes to a new temp folder of its own, which nothing ever removes.
+// with no outdir writes to a new temp folder of its own, which nothing ever removes. A synth that
+// throws returns no dispose to its caller, so the folder is removed here before the error goes on.
 export function synthStacks(extraContext: Record<string, unknown> = {}): SynthesizedStacks {
   const assets = createStubAssets();
-  const laneMap = parseLaneMap(lanesJson);
-  const app = new App({ context: { ...cdkJsonContext, ...extraContext }, outdir: assets.outdir });
-  const { ingest, runtime } = addFotheringStacks(app, { laneMap, ...assets });
-  return {
-    laneMap,
-    ingest: Template.fromStack(ingest),
-    runtime: Template.fromStack(runtime),
-    outdir: app.outdir,
-    dispose: assets.remove,
-  };
+  try {
+    const laneMap = parseLaneMap(lanesJson);
+    const app = new App({ context: { ...cdkJsonContext, ...extraContext }, outdir: assets.outdir });
+    const { ingest, runtime } = addFotheringStacks(app, { laneMap, ...assets });
+    return {
+      laneMap,
+      ingest: Template.fromStack(ingest),
+      runtime: Template.fromStack(runtime),
+      outdir: app.outdir,
+      dispose: assets.remove,
+    };
+  } catch (error) {
+    assets.remove();
+    throw error;
+  }
 }
 
 // The Template matchers throw a readable diff on a mismatch, and the lint rule that wants every test

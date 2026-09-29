@@ -177,9 +177,11 @@ describe('docs/forget-one-recipient.md', () => {
   });
 
   // The AWS CLI gives up after 60 s by default and then retries the invoke, starting a second run.
-  // 300 s is the forget function's timeout, set in ingest-stack.ts and pinned by its synth test.
-  it('waits past the forget function 300 s limit in its invoke command', () => {
+  // 300 s is the forget function's timeout, set in ingest-stack.ts and pinned by its synth test. A
+  // cold start's Init phase runs before that timeout starts and may take up to 10 s (Lambda's
+  // execution environment page), so the wait covers both, plus 20 s for the network.
+  it('waits past the forget function Init phase and 300 s limit in its invoke command', () => {
     const readTimeout = /--cli-read-timeout (\d+)/.exec(docText)?.[1];
-    expect(Number(readTimeout)).toBeGreaterThan(300);
+    expect(Number(readTimeout)).toBeGreaterThanOrEqual(10 + 300 + 20);
   });
 });

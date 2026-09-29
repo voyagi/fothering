@@ -1,5 +1,5 @@
 import { CfnOutput, Duration, RemovalPolicy, Stack, type StackProps } from 'aws-cdk-lib';
-import { Alarm, ComparisonOperator, TreatMissingData } from 'aws-cdk-lib/aws-cloudwatch';
+import { Alarm, ComparisonOperator, TreatMissingData, type IMetric } from 'aws-cdk-lib/aws-cloudwatch';
 import { AttributeType, BillingMode, ProjectionType, Table } from 'aws-cdk-lib/aws-dynamodb';
 import { Rule } from 'aws-cdk-lib/aws-events';
 import { LambdaFunction as LambdaFunctionTarget } from 'aws-cdk-lib/aws-events-targets';
@@ -141,22 +141,31 @@ export class IngestStack extends Stack {
 
     // Lambda drops an event that failed its retries with no record, and the queue alarm never sees
     // it, so a failing ingest function would be silent without this one.
-    new Alarm(this, 'IngestErrorsAlarm', {
-      metric: ingestFunction.metricErrors({ period: ALARM_PERIOD, statistic: 'Sum' }),
-      threshold: 1,
-      evaluationPeriods: 1,
-      comparisonOperator: ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
-      treatMissingData: TreatMissingData.NOT_BREACHING,
-    });
-    new Alarm(this, 'DeadLetterDepthAlarm', {
-      metric: queue.metricApproximateNumberOfMessagesVisible({ period: ALARM_PERIOD, statistic: 'Maximum' }),
-      threshold: 1,
-      evaluationPeriods: 1,
-      comparisonOperator: ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
-      treatMissingData: TreatMissingData.NOT_BREACHING,
-    });
+    this.alarmOnAny('IngestErrorsAlarm', ingestFunction.metricErrors({ period: ALARM_PERIOD, statistic: 'Sum' }));
+    // The errors alarm fires on a failed attempt, even one a retry then fixes; this one fires on an
+    // event that is gone. It also sees the drops the errors alarm cannot: Lambda counts a throttled
+    // request as neither an invocation nor an error, so an event still throttled when its 6 hours
+    // run out, or one met by a reserved concurrency of 0, is dropped without a single error
+    // (Lambda metrics page, AsyncEventsDropped).
+    this.alarmOnAny('IngestDroppedEventsAlarm', ingestFunction.metric('AsyncEventsDropped', { period: ALARM_PERIOD, statistic: 'Sum' }));
+    this.alarmOnAny(
+      'DeadLetterDepthAlarm',
+      queue.metricApproximateNumberOfMessagesVisible({ period: ALARM_PERIOD, statistic: 'Maximum' }),
+    );
 
     new CfnOutput(this, 'ForgetFunctionName', { value: forgetFunction.functionName });
+  }
+
+  // Every alarm here fires on a single occurrence within one period and acts on nothing: the
+  // operator reads the alarm state, and no action exists yet for it to take.
+  private alarmOnAny(id: string, metric: IMetric): Alarm {
+    return new Alarm(this, id, {
+      metric,
+      threshold: 1,
+      evaluationPeriods: 1,
+      comparisonOperator: ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
+      treatMissingData: TreatMissingData.NOT_BREACHING,
+    });
   }
 
   private createTable(): Table {

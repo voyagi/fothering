@@ -28,7 +28,7 @@ aws lambda invoke \
   --region eu-central-1 \
   --function-name <ForgetFunctionName stack output> \
   --cli-binary-format raw-in-base64-out \
-  --cli-read-timeout 310 \
+  --cli-read-timeout 330 \
   --payload '{"address":"jane@example.org"}' \
   result.json
 ```
@@ -36,8 +36,9 @@ aws lambda invoke \
 The function may run for up to its 5-minute limit, and the AWS CLI stops waiting for an answer
 after 60 seconds unless told otherwise, then retries on its own (Lambda's page on synchronous
 invocation: the AWS CLI and SDKs "automatically retry on client timeouts"), which starts the run
-again. `--cli-read-timeout 310` keeps the command waiting past the function's limit, so one command
-is one run and `result.json` holds its counts.
+again. On a cold start, up to 10 seconds of setup come before that limit starts (Lambda's page on
+the execution environment lifecycle). `--cli-read-timeout 330` keeps the command waiting past both,
+so one command is one run and `result.json` holds its counts.
 
 `result.json` holds a deleted count per key version (newest first), a total deleted count and a
 remaining count. It never holds the address or a hash.

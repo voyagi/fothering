@@ -188,8 +188,25 @@ describe('IngestStack synth', () => {
     });
   });
 
-  it('holds exactly two alarms and none of them acts on anything', () => {
-    stacks.ingest.resourceCountIs('AWS::CloudWatch::Alarm', 2);
+  // Lambda counts a throttled request as neither an invocation nor an error, so an event that
+  // expires in the asynchronous queue never reaches the errors alarm; this metric counts every event
+  // Lambda drops, whatever the reason.
+  it('alarms on any ingest event Lambda drops in a 5-minute period, since a throttled event that expires is no error', () => {
+    expect(alarmProperties('AsyncEventsDropped')).toEqual({
+      Namespace: 'AWS/Lambda',
+      MetricName: 'AsyncEventsDropped',
+      Dimensions: [{ Name: 'FunctionName', Value: { Ref: ingestFunction().logicalId } }],
+      Statistic: 'Sum',
+      Period: 300,
+      EvaluationPeriods: 1,
+      Threshold: 1,
+      ComparisonOperator: 'GreaterThanOrEqualToThreshold',
+      TreatMissingData: 'notBreaching',
+    });
+  });
+
+  it('holds exactly three alarms and none of them acts on anything', () => {
+    stacks.ingest.resourceCountIs('AWS::CloudWatch::Alarm', 3);
     for (const alarm of Object.values(resourcesOfType(stacks.ingest, 'AWS::CloudWatch::Alarm'))) {
       expect(alarm.Properties?.AlarmActions).toBeUndefined();
       expect(alarm.Properties?.OKActions).toBeUndefined();
@@ -240,6 +257,7 @@ describe('IngestStack synth', () => {
       .filter((type) => type !== 'AWS::CDK::Metadata')
       .sort();
     expect(types).toEqual([
+      'AWS::CloudWatch::Alarm',
       'AWS::CloudWatch::Alarm',
       'AWS::CloudWatch::Alarm',
       'AWS::DynamoDB::Table',
