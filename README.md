@@ -51,7 +51,9 @@ rule's permission to invoke the ingest function, is pinned by the ingest stack's
   `ses:GetConfigurationSetEventDestinations`, and every other permission arrives with the phase
   that first makes its call.
 - A deployed stack with `FOTHERING_LIVE` set to the exact word `live`: those mutations go live as
-  later phases build them.
+  later phases build them. Until a phase builds an operation, a call to it fails with a
+  `not built until phase N` error instead of writing a dry-run line, so going live before phases
+  2 to 4 have landed stops those calls rather than recording them.
 
 A deployed stack never takes the switch from a shell variable. It reaches a deployed function or
 the runtime only through the CDK context key `fothering:live`, and only when that key is exactly
