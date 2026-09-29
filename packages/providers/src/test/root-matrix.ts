@@ -8,7 +8,41 @@ const RUNTIME_CONTEXTS: readonly RuntimeContext[] = ['test', 'deployed'];
 
 type KindColumns = readonly [test: ResolvedKind, deployed: ResolvedKind, deployedLive: ResolvedKind];
 
-export const EXPECTED_KINDS: Readonly<Record<string, Readonly<Record<string, KindColumns>>>> = {};
+// Written out operation by operation, never computed from PORT_TABLE, so it stays an oracle that
+// disagrees with a table whose declaration and behavior have drifted together.
+// Columns: runtimeContext test; deployed with any switch value but exactly live; deployed with live.
+export const EXPECTED_KINDS: Readonly<Record<string, Readonly<Record<string, KindColumns>>>> = {
+  eventStore: {
+    putIfAbsent: ['fixture', 'live', 'live'],
+    queryLane: ['fixture', 'live', 'live'],
+    queryByRecipient: ['fixture', 'live', 'live'],
+    deleteRecord: ['fixture', 'live', 'live'],
+    getRecord: ['fixture', 'live', 'live'],
+  },
+  addressKey: {
+    getKeySet: ['fixture', 'live', 'live'],
+  },
+  deadLetter: {
+    send: ['fixture', 'live', 'live'],
+  },
+  ses: {
+    getEmailIdentity: ['fixture', 'live', 'live'],
+    listEmailIdentities: ['fixture', 'live', 'live'],
+    getConfigurationSetEventDestinations: ['fixture', 'live', 'live'],
+    pauseConfigurationSet: ['fixture', 'dry-run', 'not-built-until-phase-3'],
+    reopenConfigurationSet: ['fixture', 'dry-run', 'not-built-until-phase-3'],
+    sendEmail: ['fixture', 'dry-run', 'not-built-until-phase-4'],
+  },
+  bedrockModel: {
+    converse: ['fixture', 'dry-run', 'not-built-until-phase-2'],
+  },
+  agentCore: {
+    invokeAgentRuntime: ['fixture', 'dry-run', 'not-built-until-phase-2'],
+  },
+  replyBucket: {
+    getReplyObject: ['fixture', 'not-built-until-phase-4', 'not-built-until-phase-4'],
+  },
+};
 
 export interface RootMatrixOptions {
   runtimeContext: RuntimeContext;

@@ -65,7 +65,7 @@ describe('buildIngestRoot against the expected-kind table', () => {
   });
 
   it('reports the same kinds when the table is declared in reverse order', () => {
-    const reversed = Object.fromEntries(Object.entries(PORT_TABLE).reverse()) as Record<PortName, PortRow>;
+    const reversed = Object.fromEntries(Object.entries(PORT_TABLE).reverse()) as unknown as Record<PortName, PortRow>;
     expect(Object.keys(reversed)).not.toEqual(Object.keys(PORT_TABLE));
     for (const runtimeContext of ['test', 'deployed'] as const) {
       for (const switchValue of SWITCH_VALUES) {
