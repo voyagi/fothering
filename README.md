@@ -42,8 +42,11 @@ npm run verify:ship # everything above, in order, with one verdict
 - A deployed stack with `FOTHERING_LIVE` set to the exact word `live`: those mutations go live as
   later phases build them.
 
-A deployed stack never takes the switch from a shell variable. No stack passes it to its functions
-yet, so every deployed function runs as the unset case above.
+A deployed stack never takes the switch from a shell variable. It reaches a deployed function or
+the runtime only through the CDK context key `fothering:live`, and only when that key is exactly
+`live`: `LIVE`, `true` and a `FOTHERING_LIVE` set in your shell leave every function and the
+runtime as the unset case above. A deploy without the key therefore gives the dry-run setup, and
+`-c fothering:live=live` (see Deploy and remove) is the one way to change that.
 
 ## Deploy and remove
 
@@ -54,6 +57,13 @@ npm run build
 npx cdk bootstrap             # once, before the first deploy
 npx cdk deploy --all
 npx cdk destroy --all
+```
+
+To deploy with the switch on, pass the context key. Do this only after a dry-run week you are
+happy with:
+
+```sh
+npx cdk deploy --all -c fothering:live=live
 ```
 
 Before sending any mail through a deployed stack, check that the ingest rule catches your
