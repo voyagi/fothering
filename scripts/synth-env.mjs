@@ -25,6 +25,10 @@ export const AWS_CREDENTIAL_VARS = Object.freeze([
   'AWS_CONTAINER_CREDENTIALS_RELATIVE_URI',
   'AWS_CONTAINER_CREDENTIALS_FULL_URI',
   'AWS_CONTAINER_AUTHORIZATION_TOKEN',
+  // Both named in the CDK CLI's bundled code (checked 2026-09-29): the token's file form, and the
+  // older spelling beside AWS_SESSION_TOKEN.
+  'AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE',
+  'AWS_SECURITY_TOKEN',
 ]);
 
 // Returns a new object; the source environment is never changed, so a caller running a build
