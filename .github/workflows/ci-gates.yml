@@ -39,7 +39,11 @@ jobs:
       # its README says such flags go in as TRIVY_* variables. list-all-pkgs makes the report list
       # what it scanned, and `version` pins trivy itself: the action's default, 0.69.3, drops a
       # lockfile whose license field is a list, which 0.74.0 reads (GHSA-69fq-xp46-6x23 names
-      # 0.69.4 as the one malicious release).
+      # 0.69.4 as the one malicious release). `trivy-config: /dev/null` keeps a trivy.yaml in this
+      # repository out of the verdict: trivy reads that file from the folder it runs in, and the
+      # action passes on only the inputs that differ from its defaults, so a `severity: [LOW]`
+      # there would turn this verdict green over HIGH findings. .trivyignore still applies, one
+      # advisory per line.
       - if: github.event_name == 'push'
         uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # v0.35.0
         env:
@@ -55,6 +59,7 @@ jobs:
           exit-code: '0'
           cache: 'true'
           version: v0.74.0
+          trivy-config: /dev/null
       - if: github.event_name == 'push'
         name: fail on HIGH/CRITICAL vulnerabilities
         run: |
@@ -77,9 +82,10 @@ jobs:
             exit 1
           fi
       # The license census reports and never fails on a license, but it must exist, parse and
-      # cover the lockfile, dev dependencies included, for the reason above. Its steps run on
-      # !cancelled() rather than the default success(), so a failing vulnerability verdict, which
-      # can stay red until an upstream fix ships, does not switch the census off with it.
+      # cover the lockfile, with dev dependencies in and any trivy.yaml out, for the reasons above.
+      # Its steps run on !cancelled() rather than the default success(), so a failing
+      # vulnerability verdict, which can stay red until an upstream fix ships, does not switch the
+      # census off with it.
       - if: ${{ !cancelled() && github.event_name == 'push' }}
         uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # v0.35.0
         env:
@@ -94,6 +100,7 @@ jobs:
           exit-code: '0'
           cache: 'true'
           version: v0.74.0
+          trivy-config: /dev/null
       - if: ${{ !cancelled() && github.event_name == 'push' }}
         name: assert the license census ran
         run: |
