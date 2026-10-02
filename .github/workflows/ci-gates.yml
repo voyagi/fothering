@@ -65,11 +65,11 @@ jobs:
           # The report must list at least 9 in 10 of the packages package-lock.json locks, counted
           # as trivy counts them (one per name and version, an alias by the name its entry carries,
           # links left out), or a scan that saw part of the tree reads as clean.
-          locked=$(jq '[.packages // {} | to_entries[] | select(.key != "" and (.value.link | not)) | "\(.value.name // (.key | sub("^.*node_modules/"; "")))@\(.value.version)"] | unique | length' package-lock.json) || { echo 'package-lock.json is missing or did not parse - refusing to judge the report'; exit 1; }
+          locked=$(jq '[.packages // {} | to_entries[] | select(.key != "" and (.value.link | not)) | "\(.value.name // (.key | sub("^.*node_modules/"; "")))@\(.value.version)"] | unique | length' package-lock.json) || { echo 'package-lock.json is missing or did not parse - refusing to judge the report. On pnpm, yarn or bun, count that lockfile in this step instead'; exit 1; }
           [ "$locked" -gt 0 ] || { echo 'package-lock.json locks no packages in the form counted here (a v1 lockfile has none) - refusing to judge the report'; exit 1; }
           scanned=$(jq '[.Results[]? | select(.Class == "lang-pkgs" and .Target == "package-lock.json") | .Packages[]?] | length' trivy-vulns.json)
           echo "packages listed: $scanned of $locked locked in package-lock.json"
-          [ $((scanned * 10)) -ge $((locked * 9)) ] || { echo 'trivy listed too few of the locked packages - refusing to read that as clean'; exit 1; }
+          [ $((scanned * 10)) -ge $((locked * 9)) ] || { echo 'trivy listed too few of the locked packages - refusing to read that as clean. Causes seen so far: TRIVY_INCLUDE_DEV_DEPS missing from the scan step, or a trivy that cannot parse the lockfile (0.69.3 on a license list)'; exit 1; }
           count=$(jq '[.Results[]?.Vulnerabilities[]? | select(.Severity=="HIGH" or .Severity=="CRITICAL")] | length' trivy-vulns.json)
           echo "HIGH/CRITICAL vulnerabilities: $count"
           if [ "$count" -gt 0 ]; then
@@ -100,11 +100,11 @@ jobs:
           test -s trivy-licenses.json || { echo 'license census produced no report'; exit 1; }
           jq -se 'length == 1 and (.[0] | type) == "object"' trivy-licenses.json > /dev/null || { echo 'license census report did not parse as one JSON object'; exit 1; }
           # The same coverage floor as the vulnerability verdict above.
-          locked=$(jq '[.packages // {} | to_entries[] | select(.key != "" and (.value.link | not)) | "\(.value.name // (.key | sub("^.*node_modules/"; "")))@\(.value.version)"] | unique | length' package-lock.json) || { echo 'package-lock.json is missing or did not parse - refusing to judge the report'; exit 1; }
+          locked=$(jq '[.packages // {} | to_entries[] | select(.key != "" and (.value.link | not)) | "\(.value.name // (.key | sub("^.*node_modules/"; "")))@\(.value.version)"] | unique | length' package-lock.json) || { echo 'package-lock.json is missing or did not parse - refusing to judge the report. On pnpm, yarn or bun, count that lockfile in this step instead'; exit 1; }
           [ "$locked" -gt 0 ] || { echo 'package-lock.json locks no packages in the form counted here (a v1 lockfile has none) - refusing to judge the report'; exit 1; }
           scanned=$(jq '[.Results[]? | select(.Class == "lang-pkgs" and .Target == "package-lock.json") | .Packages[]?] | length' trivy-licenses.json)
           echo "packages listed: $scanned of $locked locked in package-lock.json"
-          [ $((scanned * 10)) -ge $((locked * 9)) ] || { echo 'trivy listed too few of the locked packages - refusing to read that as clean'; exit 1; }
+          [ $((scanned * 10)) -ge $((locked * 9)) ] || { echo 'trivy listed too few of the locked packages - refusing to read that as clean. Causes seen so far: TRIVY_INCLUDE_DEV_DEPS missing from the scan step, or a trivy that cannot parse the lockfile (0.69.3 on a license list)'; exit 1; }
       - if: ${{ !cancelled() && github.event_name == 'push' }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
