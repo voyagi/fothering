@@ -34,44 +34,75 @@ jobs:
             echo "client bundle secret scan: SKIPPED, no apps/web package in this revision"
           fi
       # Security floor on pushes to main only, so an unmerged pull request never prints open CVEs.
+      # Every package here is a devDependency, and trivy leaves those out unless told, so without
+      # the flag below this scan read 1 of the 444 locked packages. The action has no input for it;
+      # its README says such flags go in as TRIVY_* variables. list-all-pkgs makes the report list
+      # what it scanned, and `version` pins trivy itself: the action's default, 0.69.3, drops a
+      # lockfile whose license field is a list, which 0.74.0 reads (GHSA-69fq-xp46-6x23 names
+      # 0.69.4 as the one malicious release).
       - if: github.event_name == 'push'
         uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # v0.35.0
         env:
           TRIVY_DB_REPOSITORY: mirror.gcr.io/aquasec/trivy-db:2,ghcr.io/aquasecurity/trivy-db:2
+          TRIVY_INCLUDE_DEV_DEPS: 'true'
         with:
           scan-type: fs
           scan-ref: .
           scanners: vuln
+          list-all-pkgs: 'true'
           format: json
           output: trivy-vulns.json
           exit-code: '0'
           cache: 'true'
+          version: v0.74.0
       - if: github.event_name == 'push'
         name: fail on HIGH/CRITICAL vulnerabilities
         run: |
           test -s trivy-vulns.json || { echo 'trivy produced no report - refusing to read that as clean'; exit 1; }
-          jq -e . trivy-vulns.json > /dev/null || { echo 'trivy report did not parse - refusing to read that as clean'; exit 1; }
+          # Exactly one JSON object: with two, each count below prints two numbers, and bash skips a
+          # test whose arithmetic fails together with its refusal.
+          jq -se 'length == 1 and (.[0] | type) == "object"' trivy-vulns.json > /dev/null || { echo 'trivy report did not parse as one JSON object - refusing to read that as clean'; exit 1; }
+          # The report must list at least 9 in 10 of the packages package-lock.json locks, counted
+          # as trivy counts them (one per name and version, an alias by the name its entry carries,
+          # links left out), or a scan that saw part of the tree reads as clean.
+          locked=$(jq '[.packages // {} | to_entries[] | select(.key != "" and (.value.link | not)) | "\(.value.name // (.key | sub("^.*node_modules/"; "")))@\(.value.version)"] | unique | length' package-lock.json) || { echo 'package-lock.json is missing or did not parse - refusing to judge the report'; exit 1; }
+          [ "$locked" -gt 0 ] || { echo 'package-lock.json locks no packages in the form counted here (a v1 lockfile has none) - refusing to judge the report'; exit 1; }
+          scanned=$(jq '[.Results[]? | select(.Class == "lang-pkgs" and .Target == "package-lock.json") | .Packages[]?] | length' trivy-vulns.json)
+          echo "packages listed: $scanned of $locked locked in package-lock.json"
+          [ $((scanned * 10)) -ge $((locked * 9)) ] || { echo 'trivy listed too few of the locked packages - refusing to read that as clean'; exit 1; }
           count=$(jq '[.Results[]?.Vulnerabilities[]? | select(.Severity=="HIGH" or .Severity=="CRITICAL")] | length' trivy-vulns.json)
           echo "HIGH/CRITICAL vulnerabilities: $count"
           if [ "$count" -gt 0 ]; then
             jq -r '.Results[]? | .Target as $t | (.Vulnerabilities[]? | select(.Severity=="HIGH" or .Severity=="CRITICAL") | "\($t): \(.PkgName) \(.InstalledVersion) \(.VulnerabilityID) (\(.Severity))")' trivy-vulns.json
             exit 1
           fi
+      # The license census reports and never fails on a license, but it must exist, parse and
+      # cover the lockfile, dev dependencies included, for the reason above.
       - if: github.event_name == 'push'
         uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # v0.35.0
+        env:
+          TRIVY_INCLUDE_DEV_DEPS: 'true'
         with:
           scan-type: fs
           scan-ref: .
           scanners: license
+          list-all-pkgs: 'true'
           format: json
           output: trivy-licenses.json
           exit-code: '0'
           cache: 'true'
+          version: v0.74.0
       - if: github.event_name == 'push'
         name: assert the license census ran
         run: |
           test -s trivy-licenses.json || { echo 'license census produced no report'; exit 1; }
-          jq -e . trivy-licenses.json > /dev/null || { echo 'license census report did not parse'; exit 1; }
+          jq -se 'length == 1 and (.[0] | type) == "object"' trivy-licenses.json > /dev/null || { echo 'license census report did not parse as one JSON object'; exit 1; }
+          # The same coverage floor as the vulnerability verdict above.
+          locked=$(jq '[.packages // {} | to_entries[] | select(.key != "" and (.value.link | not)) | "\(.value.name // (.key | sub("^.*node_modules/"; "")))@\(.value.version)"] | unique | length' package-lock.json) || { echo 'package-lock.json is missing or did not parse - refusing to judge the report'; exit 1; }
+          [ "$locked" -gt 0 ] || { echo 'package-lock.json locks no packages in the form counted here (a v1 lockfile has none) - refusing to judge the report'; exit 1; }
+          scanned=$(jq '[.Results[]? | select(.Class == "lang-pkgs" and .Target == "package-lock.json") | .Packages[]?] | length' trivy-licenses.json)
+          echo "packages listed: $scanned of $locked locked in package-lock.json"
+          [ $((scanned * 10)) -ge $((locked * 9)) ] || { echo 'trivy listed too few of the locked packages - refusing to read that as clean'; exit 1; }
       - if: github.event_name == 'push'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
