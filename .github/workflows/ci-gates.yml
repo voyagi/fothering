@@ -77,8 +77,10 @@ jobs:
             exit 1
           fi
       # The license census reports and never fails on a license, but it must exist, parse and
-      # cover the lockfile, dev dependencies included, for the reason above.
-      - if: github.event_name == 'push'
+      # cover the lockfile, dev dependencies included, for the reason above. Its steps run on
+      # !cancelled() rather than the default success(), so a failing vulnerability verdict, which
+      # can stay red until an upstream fix ships, does not switch the census off with it.
+      - if: ${{ !cancelled() && github.event_name == 'push' }}
         uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # v0.35.0
         env:
           TRIVY_INCLUDE_DEV_DEPS: 'true'
@@ -92,7 +94,7 @@ jobs:
           exit-code: '0'
           cache: 'true'
           version: v0.74.0
-      - if: github.event_name == 'push'
+      - if: ${{ !cancelled() && github.event_name == 'push' }}
         name: assert the license census ran
         run: |
           test -s trivy-licenses.json || { echo 'license census produced no report'; exit 1; }
@@ -103,7 +105,7 @@ jobs:
           scanned=$(jq '[.Results[]? | select(.Class == "lang-pkgs" and .Target == "package-lock.json") | .Packages[]?] | length' trivy-licenses.json)
           echo "packages listed: $scanned of $locked locked in package-lock.json"
           [ $((scanned * 10)) -ge $((locked * 9)) ] || { echo 'trivy listed too few of the locked packages - refusing to read that as clean'; exit 1; }
-      - if: github.event_name == 'push'
+      - if: ${{ !cancelled() && github.event_name == 'push' }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: license-census
