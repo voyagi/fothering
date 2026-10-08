@@ -556,6 +556,30 @@ describe('createSecretsManagerAddressKey', () => {
     await expect(adapter.getKeySet()).rejects.toBeInstanceOf(AddressKeySecretError);
   });
 
+  // A binary secret, a SecretString that is not JSON and a secret naming no version leave nothing to
+  // hash under. Each is refused by its own rule; the JSON parser's own message can quote the text it
+  // read, so it never reaches the error the function logs.
+  it.each([
+    ['a secret with no SecretString', {}, 'has no SecretString'],
+    ['a SecretString that is not JSON', { SecretString: `{"current":"k1","k1":"${K1_SECRET}"` }, 'is not valid JSON'],
+    [
+      'an activeFrom naming no version',
+      { SecretString: JSON.stringify({ current: 'k1', activeFrom: {}, k1: K1_SECRET }) },
+      'activeFrom names no key version',
+    ],
+  ])('refuses %s with the rule it broke and no secret value', async (_label, response, rule) => {
+    const client = secretsManagerClient();
+    stubSend(client, () => response);
+    const adapter = createSecretsManagerAddressKey({ secretId: 'address-key', client: () => client, now: () => 0 });
+
+    const message = await adapter.getKeySet().then(
+      () => 'resolved, expected a rejection',
+      (error: unknown) => (error instanceof AddressKeySecretError ? error.message : `not an AddressKeySecretError: ${String(error)}`),
+    );
+    expect(message).toContain(rule);
+    expect(message).not.toContain(K1_SECRET);
+  });
+
   it('throws LiveConfigMissingError naming FOTHERING_ADDRESS_KEY_SECRET_ID on the first call, never at resolution', async () => {
     let constructed = 0;
     const adapter = createSecretsManagerAddressKey({
@@ -743,6 +767,24 @@ describe('createSesReads', () => {
       { name: 'eb', enabled: true, eventBridge: true, matchingEventTypes: ['SEND', 'BOUNCE'] },
       { name: 'sns', enabled: false, eventBridge: false, matchingEventTypes: ['COMPLAINT'] },
     ]);
+  });
+
+  // Every field of an SES event destination is optional in the API's types. One SES does not say is
+  // enabled reads as disabled and one with no event types matches none, so the closeability check
+  // refuses the set rather than trusting a destination nobody saw publish.
+  it('reads a destination with its fields left out as disabled and matching nothing, and a reply with no destinations as none', async () => {
+    const client = sesClient();
+    stubSend(client, (command) =>
+      (command.input as { ConfigurationSetName: string }).ConfigurationSetName === 'bare'
+        ? { EventDestinations: [{ EventBridgeDestination: { EventBusArn: 'arn:aws:events:eu-central-1:000000000000:event-bus/default' } }] }
+        : {},
+    );
+    const reads = createSesReads({ client: () => client });
+
+    await expect(reads.getConfigurationSetEventDestinations('bare')).resolves.toEqual([
+      { name: '', enabled: false, eventBridge: true, matchingEventTypes: [] },
+    ]);
+    await expect(reads.getConfigurationSetEventDestinations('empty')).resolves.toEqual([]);
   });
 
   // readSesFacts reads one lane-map set after another, a second apart: a set deleted from SES, or

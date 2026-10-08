@@ -149,6 +149,15 @@ describe('validHostname', () => {
     expect(validHostname(`${'a'.repeat(64)}.example.com`)).toBe(UNCLASSIFIED);
     expect(validHostname(`${'a'.repeat(63)}.example.com`)).toBe(`${'a'.repeat(63)}.example.com`);
   });
+
+  it('reads unclassified for a name longer than 253 characters whose every label is valid, and keeps one of exactly 253', () => {
+    const nameOf = (lastLabelLength: number) =>
+      `${'a'.repeat(63)}.${'b'.repeat(63)}.${'c'.repeat(63)}.${'d'.repeat(lastLabelLength)}.com`;
+    expect(nameOf(57)).toHaveLength(253);
+    expect(nameOf(58)).toHaveLength(254);
+    expect(validHostname(nameOf(57))).toBe(nameOf(57));
+    expect(validHostname(nameOf(58))).toBe(UNCLASSIFIED);
+  });
 });
 
 describe('reportingMta', () => {

@@ -108,6 +108,23 @@ describe('minimizeEvent: Send', () => {
     expect(record.fields.streamTagValue).toBe('myCustomTagValue1');
   });
 
+  // The batch, template and campaign tags are the causes attribution names, and no doc-derived
+  // example carries the lane's keys for them, so each is added here under its own key.
+  it('reads the batch, template and campaign tag values each from the lane’s own key for it', () => {
+    const tagged = structuredClone(loadSesEventFixture('send').event) as {
+      detail: { mail: { tags: Record<string, string[]> } };
+    };
+    tagged.detail.mail.tags.myCustomBatchTag1 = ['import-2026-10'];
+    tagged.detail.mail.tags.myCustomTemplateTag1 = ['welcome_v2'];
+    tagged.detail.mail.tags.myCustomCampaignTag1 = ['autumn'];
+    const [record] = minimizeEvent(mustParse(tagged), contextFor());
+    if (record === undefined) throw new Error('expected a record');
+    expect(record.fields.batchTagValue).toBe('import-2026-10');
+    expect(record.fields.templateTagValue).toBe('welcome_v2');
+    expect(record.fields.campaignTagValue).toBe('autumn');
+    expect(record.fields.streamTagValue).toBe('myCustomTagValue1');
+  });
+
   it('carries no delivery- or bounce-only field', () => {
     const [record] = minimizeFixture('send');
     if (record === undefined) throw new Error('expected a record');
