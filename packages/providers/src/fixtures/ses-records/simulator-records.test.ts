@@ -22,6 +22,13 @@ const FIXTURE_TEXT = readFileSync(new URL('./simulator-sends.json', import.meta.
 const DOCUMENTATION_PREFIXES = ['192.0.2.', '198.51.100.', '203.0.113.'];
 // The receiving and sending mail servers SES reported: AWS's own hosts, kept as captured.
 const AWS_SERVER_IP_FIELDS = ['remoteMtaIp', 'outgoingIp'] as const;
+// Every dotted name the file may hold besides the SES hosts: the placeholder domain, and the two
+// field paths the replaced notes name, which read like hostnames to the scan below.
+const ALLOWED_DOTTED_NAMES = new Set([SENDER_DOMAIN_PLACEHOLDER, 'fields.fromdomain', 'fields.sourceip']);
+const SES_HOST_SUFFIX = '.amazonses.com';
+const DOTTED_NAME_RE = /(?<![\w.-])(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,63}(?![\w.-])/gi;
+// Candidates only: isIP decides, so a colon in the JSON syntax never counts.
+const IPV6_CANDIDATE_RE = /[0-9a-f]*:[0-9a-f:]*:[0-9a-f]*/gi;
 
 function isDocumentationIpv4(value: string): boolean {
   return isIP(value) === 4 && DOCUMENTATION_PREFIXES.some((prefix) => value.startsWith(prefix));
@@ -44,8 +51,8 @@ function capturedSenderValues(records: readonly EventRecord[]): string[] {
   return problems;
 }
 
-// The whole file, not just the two fields: an address or an account id moved anywhere else (a
-// tag value, the source note) fails here too.
+// The whole file, not just the two fields: an address, an account id, a caller IP of either family
+// or the sending domain moved anywhere else (a tag value, the source note) fails here too.
 function strayIdentifiers(text: string, records: readonly EventRecord[]): string[] {
   const awsServerIps = new Set<string>();
   for (const record of records) {
@@ -62,6 +69,11 @@ function strayIdentifiers(text: string, records: readonly EventRecord[]): string
     if (!isDocumentationIpv4(ip) && !awsServerIps.has(ip)) {
       problems.push('the file holds an IPv4 address outside the documentation ranges and the SES server fields');
     }
+  }
+  if ([...text.matchAll(IPV6_CANDIDATE_RE)].some((match) => isIP(match[0]) === 6)) problems.push('the file holds an IPv6 address');
+  const dottedNames = [...text.matchAll(DOTTED_NAME_RE)].map((match) => match[0].toLowerCase());
+  if (dottedNames.some((name) => !ALLOWED_DOTTED_NAMES.has(name) && !name.endsWith(SES_HOST_SUFFIX))) {
+    problems.push('the file holds a dotted name other than the placeholder domain and the SES hosts');
   }
   return problems;
 }
@@ -153,7 +165,7 @@ describe('the simulator-captured stored records', () => {
       expect(capturedSenderValues([domain, address]).join(' ')).not.toMatch(/shop-mail|10\.20/);
     });
 
-    it('carries no address, account id or caller IP anywhere in the file, the SES server addresses aside', () => {
+    it('carries no address, account id, caller IP or outside domain anywhere in the file, the SES server addresses aside', () => {
       expect(strayIdentifiers(FIXTURE_TEXT, records)).toEqual([]);
       expect(strayIdentifiers(`${FIXTURE_TEXT} 10.20.30.40`, records)).toEqual([
         'the file holds an IPv4 address outside the documentation ranges and the SES server fields',
@@ -162,8 +174,10 @@ describe('the simulator-captured stored records', () => {
         'the file holds an @',
         'the file holds a twelve-digit number',
       ]);
-      const hostnames = records.flatMap((record) => [record.receivingDomain, record.fields.reportingMta]).filter((value) => value !== undefined);
-      expect(hostnames.filter((host) => host !== 'simulator.amazonses.com' && !host.endsWith('.amazonses.com'))).toEqual([]);
+      expect(strayIdentifiers(`${FIXTURE_TEXT} 2a02:a46:1234::5`, records)).toEqual(['the file holds an IPv6 address']);
+      expect(strayIdentifiers(FIXTURE_TEXT.replace('"l1-probe"', '"Shop-Mail.net launch"'), records)).toEqual([
+        'the file holds a dotted name other than the placeholder domain and the SES hosts',
+      ]);
     });
   });
 
