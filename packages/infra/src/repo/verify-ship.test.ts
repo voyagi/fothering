@@ -59,13 +59,20 @@ interface RunResult {
   hung: boolean;
 }
 
+// The script's two timer settings come from each test, never from the shell running the suite: a
+// grace exported for a slow machine's verify:ship run, whose tests step runs this file, would
+// otherwise stretch every wait on a step left draining. Windows reads environment names in any
+// letter case, so every spelling is dropped.
+const TIMER_SETTINGS = new Set(['VERIFY_SHIP_TIMEOUT_MS', 'VERIFY_SHIP_DRAIN_GRACE_MS']);
+const INHERITED_ENV = Object.fromEntries(Object.entries(process.env).filter(([name]) => !TIMER_SETTINGS.has(name.toUpperCase())));
+
 function run(dir: string, stepTimeoutMs = 60_000, watchdogMs = 55_000, extraEnv: Record<string, string> = {}): RunResult {
   try {
     const stdout = execFileSync(process.execPath, [VERIFY_SHIP], {
       cwd: dir,
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'pipe'],
-      env: { ...process.env, VERIFY_SHIP_TIMEOUT_MS: String(stepTimeoutMs), ...extraEnv },
+      env: { ...INHERITED_ENV, VERIFY_SHIP_TIMEOUT_MS: String(stepTimeoutMs), ...extraEnv },
       timeout: watchdogMs,
     });
     return { stdout, stderr: '', status: 0, hung: false };
@@ -125,6 +132,7 @@ describe('verify:ship selftest step and sub-gate reporting', () => {
       dirs.push(dir);
       const { stdout, status } = run(dir);
       expect(status).toBe(0);
+      expect(stdout, 'the run was handed a timer setting no test passed').not.toContain('ignored');
 
       const summaryStart = stdout.indexOf('verify:ship summary');
       expect(summaryStart).toBeGreaterThan(-1);
