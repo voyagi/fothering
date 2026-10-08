@@ -14,6 +14,7 @@ const STEP_ORDER = ['types', 'tests', 'lint', 'gate', 'repo', 'selftest', 'build
 const SUB_GATE_LINE = 'neutral-subgate: SKIPPED, nothing to check';
 const SELFTEST_PASS_LINE = 'selftest ok: an absent file is a loud SKIPPED, exit 0';
 const HANG_PID_FILE = 'hang.pid';
+const LINGER_EXIT_FILE = 'linger.exit';
 
 function makeProject(overrides: Record<string, string> = {}): string {
   const dir = mkdtempSync(join(tmpdir(), 'verify-ship-st-'));
@@ -28,10 +29,11 @@ function makeProject(overrides: Record<string, string> = {}): string {
     join(dir, 'hang.mjs'),
     `import { writeFileSync } from 'node:fs';\nwriteFileSync('${HANG_PID_FILE}', String(process.pid));\nconsole.log('hang: started');\nsetInterval(() => {}, 1000);\n`,
   );
-  // A step that finishes at once but leaves hang.mjs running on its inherited output pipes.
+  // A step that finishes at once but leaves hang.mjs running on its inherited output pipes, and
+  // records the moment it exits so a test can check that moment against the step timeout.
   writeFileSync(
     join(dir, 'linger.mjs'),
-    "import { spawn } from 'node:child_process';\nspawn(process.execPath, ['hang.mjs'], { stdio: 'inherit', detached: true }).unref();\nprocess.exit(0);\n",
+    `import { spawn } from 'node:child_process';\nimport { writeFileSync } from 'node:fs';\nspawn(process.execPath, ['hang.mjs'], { stdio: 'inherit', detached: true }).unref();\nwriteFileSync('${LINGER_EXIT_FILE}', String(Date.now()));\nprocess.exit(0);\n`,
   );
   const scripts = {
     'gate:types': 'node ok.mjs',
@@ -264,11 +266,31 @@ describe('verify:ship selftest step and sub-gate reporting', () => {
     'passes a step that exited while something it started still holds the output pipes, and never calls it TIMED OUT',
     { timeout: 60_000 },
     () => {
-      // The step timeout (4.5 s) falls inside the pipe grace that follows the step's own exit,
-      // so a timer that ignored the exit would wrongly report a finished step as timed out.
-      const dir = makeProject({ 'gate:types': 'node linger.mjs' });
+      // The step timeout must fire after the step's own exit and inside the pipe grace that
+      // follows it, so a timer that ignored the exit would wrongly report a finished step as timed
+      // out. At 4.5 s against the default 5 s grace, npm's start-up under parallel load outlasted
+      // the timeout (2 of 13 loaded runs failed TIMED OUT); 9 s inside a 10 s grace leaves room.
+      const stepTimeoutMs = 9_000;
+      const drainGraceMs = 10_000;
+      const dir = makeProject({ 'gate:types': 'node linger.mjs', test: 'node stamp.mjs' });
       dirs.push(dir);
-      const { stdout, stderr, status, hung } = run(dir, 4_500, 40_000);
+      // The step after the lingering one records when it starts: no sooner than one grace after
+      // the lingering step's exit, unless the grace override was ignored.
+      writeFileSync(join(dir, 'stamp.mjs'), "import { writeFileSync } from 'node:fs';\nwriteFileSync('tests.start', String(Date.now()));\n");
+      const startedAtMs = Date.now();
+      const { stdout, stderr, status, hung } = run(dir, stepTimeoutMs, 50_000, { VERIFY_SHIP_DRAIN_GRACE_MS: String(drainGraceMs) });
+      const exitFile = join(dir, LINGER_EXIT_FILE);
+      const nextStartFile = join(dir, 'tests.start');
+      expect(existsSync(exitFile), 'the lingering step never ran').toBe(true);
+      expect(existsSync(nextStartFile), 'the step after the lingering one never ran').toBe(true);
+      const exitedAtMs = Number(readFileSync(exitFile, 'utf8'));
+      // verify:ship starts the step timer after startedAtMs, so this bound is conservative.
+      expect(exitedAtMs - startedAtMs, 'the step exited after its own timeout, so the timer never fired inside the grace').toBeLessThan(
+        stepTimeoutMs,
+      );
+      expect(Number(readFileSync(nextStartFile, 'utf8')) - exitedAtMs, 'the grace override was ignored').toBeGreaterThanOrEqual(
+        drainGraceMs,
+      );
       expect(hung, 'verify:ship waited on a pipe the finished step left open').toBe(false);
       expect(stderr).not.toContain('TIMED OUT');
       expect(status).toBe(0);

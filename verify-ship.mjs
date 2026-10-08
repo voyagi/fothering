@@ -125,7 +125,12 @@ try { pkgScripts = JSON.parse(readFileSync('package.json', 'utf8')).scripts || {
 // the step left running (a timed-out step's surviving grandchild, a daemon a script started)
 // inherits those pipes, and `close` waits for every holder: without this bound the run would
 // hang with no verdict, the exact failure the step timeout exists to prevent.
-const DRAIN_GRACE_MS = 5000;
+// Overridable via VERIFY_SHIP_DRAIN_GRACE_MS for the same reason as the step timeout: proving that
+// a step timer firing inside the grace never blames a finished step needs a timer set after the
+// step's own exit and before the grace ends, and npm and node together have taken over 4.5 s to
+// start a step on a loaded machine. A non-numeric or non-positive value falls back to the default.
+const graceOverride = Number(process.env.VERIFY_SHIP_DRAIN_GRACE_MS);
+const DRAIN_GRACE_MS = Number.isFinite(graceOverride) && graceOverride > 0 ? graceOverride : 5000;
 
 // A gate script's --selftest prints `selftest ok: <control>` for each control that PASSED, and some
 // of those controls are about skipping (`selftest ok: an absent file is a loud SKIPPED, exit 0`).
