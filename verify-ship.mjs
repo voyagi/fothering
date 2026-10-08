@@ -57,9 +57,15 @@ import { StringDecoder } from 'node:string_decoder';
 // verify:ship` against a deliberately hung script shows it working in seconds.
 // A non-numeric or non-positive value falls back to the default rather than
 // disabling the guard - an env typo must not silently remove the backstop.
-const timeoutOverride = Number(process.env.VERIFY_SHIP_TIMEOUT_MS);
-const STEP_TIMEOUT_MS =
-  Number.isFinite(timeoutOverride) && timeoutOverride > 0 ? timeoutOverride : 30 * 60 * 1000;
+// So does a value past setTimeout's ceiling: Node turns any delay above
+// 2147483647 ms (about 24.8 days) into 1 ms, so an over-large override would
+// fire at once instead of never.
+const MAX_TIMER_MS = 2_147_483_647;
+function msOverride(name, fallbackMs) {
+  const value = Number(process.env[name]);
+  return Number.isFinite(value) && value > 0 && value <= MAX_TIMER_MS ? value : fallbackMs;
+}
+const STEP_TIMEOUT_MS = msOverride('VERIFY_SHIP_TIMEOUT_MS', 30 * 60 * 1000);
 
 // The CORE four are unconditional: a missing script exits non-zero, which is the correct
 // fail-closed behavior for surfaces every product has.
@@ -128,9 +134,8 @@ try { pkgScripts = JSON.parse(readFileSync('package.json', 'utf8')).scripts || {
 // Overridable via VERIFY_SHIP_DRAIN_GRACE_MS for the same reason as the step timeout: proving that
 // a step timer firing inside the grace never blames a finished step needs a timer set after the
 // step's own exit and before the grace ends, and npm and node together have taken over 4.5 s to
-// start a step on a loaded machine. A non-numeric or non-positive value falls back to the default.
-const graceOverride = Number(process.env.VERIFY_SHIP_DRAIN_GRACE_MS);
-const DRAIN_GRACE_MS = Number.isFinite(graceOverride) && graceOverride > 0 ? graceOverride : 5000;
+// start a step on a loaded machine. A value msOverride refuses falls back to the default.
+const DRAIN_GRACE_MS = msOverride('VERIFY_SHIP_DRAIN_GRACE_MS', 5000);
 
 // A gate script's --selftest prints `selftest ok: <control>` for each control that PASSED, and some
 // of those controls are about skipping (`selftest ok: an absent file is a loud SKIPPED, exit 0`).

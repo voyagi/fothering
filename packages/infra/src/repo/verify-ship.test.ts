@@ -15,6 +15,7 @@ const SUB_GATE_LINE = 'neutral-subgate: SKIPPED, nothing to check';
 const SELFTEST_PASS_LINE = 'selftest ok: an absent file is a loud SKIPPED, exit 0';
 const HANG_PID_FILE = 'hang.pid';
 const LINGER_EXIT_FILE = 'linger.exit';
+const NEXT_START_FILE = 'tests.start';
 
 function makeProject(overrides: Record<string, string> = {}): string {
   const dir = mkdtempSync(join(tmpdir(), 'verify-ship-st-'));
@@ -35,6 +36,8 @@ function makeProject(overrides: Record<string, string> = {}): string {
     join(dir, 'linger.mjs'),
     `import { spawn } from 'node:child_process';\nimport { writeFileSync } from 'node:fs';\nspawn(process.execPath, ['hang.mjs'], { stdio: 'inherit', detached: true }).unref();\nwriteFileSync('${LINGER_EXIT_FILE}', String(Date.now()));\nprocess.exit(0);\n`,
   );
+  // A step that records when it starts, run after linger.mjs to show how long the grace held.
+  writeFileSync(join(dir, 'stamp.mjs'), `import { writeFileSync } from 'node:fs';\nwriteFileSync('${NEXT_START_FILE}', String(Date.now()));\n`);
   const scripts = {
     'gate:types': 'node ok.mjs',
     test: 'node ok.mjs',
@@ -276,11 +279,10 @@ describe('verify:ship selftest step and sub-gate reporting', () => {
       dirs.push(dir);
       // The step after the lingering one records when it starts: no sooner than one grace after
       // the lingering step's exit, unless the grace override was ignored.
-      writeFileSync(join(dir, 'stamp.mjs'), "import { writeFileSync } from 'node:fs';\nwriteFileSync('tests.start', String(Date.now()));\n");
       const startedAtMs = Date.now();
       const { stdout, stderr, status, hung } = run(dir, stepTimeoutMs, 50_000, { VERIFY_SHIP_DRAIN_GRACE_MS: String(drainGraceMs) });
       const exitFile = join(dir, LINGER_EXIT_FILE);
-      const nextStartFile = join(dir, 'tests.start');
+      const nextStartFile = join(dir, NEXT_START_FILE);
       expect(existsSync(exitFile), 'the lingering step never ran').toBe(true);
       expect(existsSync(nextStartFile), 'the step after the lingering one never ran').toBe(true);
       const exitedAtMs = Number(readFileSync(exitFile, 'utf8'));
@@ -296,6 +298,25 @@ describe('verify:ship selftest step and sub-gate reporting', () => {
       expect(status).toBe(0);
       expect(stdout).toMatch(/types\s+PASS \(exit 0\)/);
       expect(hangPid(dir), 'the lingering process never started').toBeDefined();
+    },
+  );
+
+  it(
+    'falls back to the default step timeout and grace for an override past the timer ceiling, never to 1 ms',
+    { timeout: 60_000 },
+    () => {
+      // Node turns a delay above 2147483647 ms into 1 ms. Taken as given, the step timeout would
+      // fail every step as TIMED OUT, and the grace would end the lingering step's wait at once.
+      const pastCeilingMs = 3_000_000_000;
+      const dir = makeProject({ 'gate:types': 'node linger.mjs', test: 'node stamp.mjs' });
+      dirs.push(dir);
+      const { stderr, status, hung } = run(dir, pastCeilingMs, 50_000, { VERIFY_SHIP_DRAIN_GRACE_MS: String(pastCeilingMs) });
+      expect(hung, 'verify:ship waited on a pipe the finished step left open').toBe(false);
+      expect(stderr).not.toContain('TIMED OUT');
+      expect(status).toBe(0);
+      const exitedAtMs = Number(readFileSync(join(dir, LINGER_EXIT_FILE), 'utf8'));
+      const nextStartedAtMs = Number(readFileSync(join(dir, NEXT_START_FILE), 'utf8'));
+      expect(nextStartedAtMs - exitedAtMs, 'the grace was cut short instead of falling back to 5 s').toBeGreaterThanOrEqual(5_000);
     },
   );
 
