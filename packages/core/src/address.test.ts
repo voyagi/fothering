@@ -3,7 +3,6 @@ import { describe, expect, it } from 'vitest';
 import fc from 'fast-check';
 import { propertySeed } from './test/property-seed.js';
 import {
-  currentKeyVersion,
   hmacUnderEveryVersion,
   holdsOneMailbox,
   normalizeAddress,
@@ -330,13 +329,8 @@ describe('key version selection by send time (D-34)', () => {
     expect(selectKeyVersion(keySet, ROTATION_MS).id).toBe('k2');
   });
 
-  it('reports the newest retained version as current', () => {
-    expect(currentKeyVersion(keySet).id).toBe('k2');
-  });
-
-  it('names a future-dated version as current while a send inside the rotation margin still selects the active one', () => {
+  it('selects the active version for a send inside the rotation margin, not the future-dated newest one', () => {
     const sendInsideMarginMs = ROTATION_MS - 5 * 60 * 1000;
-    expect(currentKeyVersion(keySet).id).toBe('k2');
     expect(selectKeyVersion(keySet, sendInsideMarginMs).id).toBe('k1');
   });
 

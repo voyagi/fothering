@@ -179,9 +179,9 @@ function keyedHash(input: string, secret: string): string {
 
 // AC-E24: an unparseable address is never split or reduced to a domain; it is hashed whole, trimmed
 // and lowercased, exactly as it was handed in, so two spellings of an unparseable string that are
-// equal after that transform still collide on the same hash (never on the raw text itself).
-function hashInputFor(raw: string): string {
-  const normalized = normalizeAddress(raw);
+// equal after that transform still collide on the same hash (never on the raw text itself). The
+// caller passes raw's own normalizeAddress result, so an address is normalized once per call.
+function hashInputFor(raw: string, normalized: NormalizedAddress | undefined): string {
   return normalized === undefined ? raw.trim().toLowerCase() : `${normalized.local}@${normalized.domain}`;
 }
 
@@ -193,23 +193,8 @@ export function pseudonymizeRecipient(
   const version = selectKeyVersion(keySet, sendTimeMs);
   const normalized = normalizeAddress(raw);
   const receivingDomain = normalized === undefined ? 'unparseable' : normalized.domain;
-  const recipientHmac = keyedHash(hashInputFor(raw), version.secret);
+  const recipientHmac = keyedHash(hashInputFor(raw, normalized), version.secret);
   return { receivingDomain, recipientHmac, keyVersion: version.id };
-}
-
-// The version with the greatest activeFromMs: the newest one the key set holds, whether or not it
-// is active yet. During a rotation's margin (a new version is written at least 10 minutes before
-// its activeFrom) it is future-dated, so it is not what an event sent now is hashed under; that is
-// always selectKeyVersion's send-time lookup.
-export function currentKeyVersion(keySet: AddressKeySet): AddressKeyVersion {
-  let current: AddressKeyVersion | undefined;
-  for (const version of keySet.versions) {
-    if (current === undefined || version.activeFromMs > current.activeFromMs) current = version;
-  }
-  if (current === undefined) {
-    throw new Error('key set has no versions');
-  }
-  return current;
 }
 
 // The delete path (plan 01-07's forget command) does not know which key version wrote a given
@@ -219,7 +204,7 @@ export function hmacUnderEveryVersion(
   raw: string,
   keySet: AddressKeySet,
 ): { keyVersion: string; recipientHmac: string }[] {
-  const input = hashInputFor(raw);
+  const input = hashInputFor(raw, normalizeAddress(raw));
   const newestFirst = [...keySet.versions].sort((a, b) => b.activeFromMs - a.activeFromMs);
   return newestFirst.map((version) => ({ keyVersion: version.id, recipientHmac: keyedHash(input, version.secret) }));
 }
