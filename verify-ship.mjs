@@ -59,11 +59,17 @@ import { StringDecoder } from 'node:string_decoder';
 // disabling the guard - an env typo must not silently remove the backstop.
 // So does a value past setTimeout's ceiling: Node turns any delay above
 // 2147483647 ms (about 24.8 days) into 1 ms, so an over-large override would
-// fire at once instead of never.
+// fire at once instead of never. A refused value is named in one line, so a
+// typo (`4s`, or `4_000`, which Number() does not read) is never a silent
+// wait for the full default.
 const MAX_TIMER_MS = 2_147_483_647;
 function msOverride(name, fallbackMs) {
-  const value = Number(process.env[name]);
-  return Number.isFinite(value) && value > 0 && value <= MAX_TIMER_MS ? value : fallbackMs;
+  const raw = process.env[name];
+  if (raw === undefined || raw === '') return fallbackMs;
+  const value = Number(raw);
+  if (Number.isFinite(value) && value > 0 && value <= MAX_TIMER_MS) return value;
+  console.log(`[verify:ship] ${name}=${raw} ignored: not a number of ms above 0 and at most ${MAX_TIMER_MS}; using the default ${fallbackMs} ms.`);
+  return fallbackMs;
 }
 const STEP_TIMEOUT_MS = msOverride('VERIFY_SHIP_TIMEOUT_MS', 30 * 60 * 1000);
 

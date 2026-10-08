@@ -297,6 +297,7 @@ describe('verify:ship selftest step and sub-gate reporting', () => {
       expect(stderr).not.toContain('TIMED OUT');
       expect(status).toBe(0);
       expect(stdout).toMatch(/types\s+PASS \(exit 0\)/);
+      expect(stdout, 'an override it honoured was reported as ignored').not.toContain('ignored');
       expect(hangPid(dir), 'the lingering process never started').toBeDefined();
     },
   );
@@ -310,10 +311,13 @@ describe('verify:ship selftest step and sub-gate reporting', () => {
       const pastCeilingMs = 3_000_000_000;
       const dir = makeProject({ 'gate:types': 'node linger.mjs', test: 'node stamp.mjs' });
       dirs.push(dir);
-      const { stderr, status, hung } = run(dir, pastCeilingMs, 50_000, { VERIFY_SHIP_DRAIN_GRACE_MS: String(pastCeilingMs) });
+      const { stdout, stderr, status, hung } = run(dir, pastCeilingMs, 50_000, { VERIFY_SHIP_DRAIN_GRACE_MS: String(pastCeilingMs) });
       expect(hung, 'verify:ship waited on a pipe the finished step left open').toBe(false);
       expect(stderr).not.toContain('TIMED OUT');
       expect(status).toBe(0);
+      // A refused value is said out loud, never taken in silence.
+      expect(stdout).toContain(`[verify:ship] VERIFY_SHIP_TIMEOUT_MS=${pastCeilingMs} ignored`);
+      expect(stdout).toContain(`[verify:ship] VERIFY_SHIP_DRAIN_GRACE_MS=${pastCeilingMs} ignored`);
       const exitedAtMs = Number(readFileSync(join(dir, LINGER_EXIT_FILE), 'utf8'));
       const nextStartedAtMs = Number(readFileSync(join(dir, NEXT_START_FILE), 'utf8'));
       expect(nextStartedAtMs - exitedAtMs, 'the grace was cut short instead of falling back to 5 s').toBeGreaterThanOrEqual(5_000);
