@@ -20,8 +20,11 @@ const FIXTURE_TEXT = readFileSync(new URL('./simulator-sends.json', import.meta.
 
 // RFC 5737 sets these three /24 blocks aside for documentation, so no real host answers on them.
 const DOCUMENTATION_PREFIXES = ['192.0.2.', '198.51.100.', '203.0.113.'];
-// The receiving and sending mail servers SES reported: AWS's own hosts, kept as captured.
+// The receiving and sending mail servers SES reported: AWS's own hosts, kept as captured. Listed here
+// rather than read from the fixture, so an address placed in one of these fields never vouches for
+// itself; a recapture that reports other servers fails until this list is reviewed.
 const AWS_SERVER_IP_FIELDS = ['remoteMtaIp', 'outgoingIp'] as const;
+const AWS_SERVER_IPS = new Set(['34.242.155.198', '52.212.7.239', '69.169.224.13', '69.169.224.17']);
 // Every dotted name the file may hold besides the SES hosts: the placeholder domain, and the two
 // field paths the replaced notes name, which read like hostnames to the scan below.
 const ALLOWED_DOTTED_NAMES = new Set([SENDER_DOMAIN_PLACEHOLDER, 'fields.fromdomain', 'fields.sourceip']);
@@ -55,19 +58,16 @@ function capturedSenderValues(records: readonly EventRecord[]): string[] {
 // The whole file, not just the two fields: an address, an account id, a caller IP of either family
 // or the sending domain moved anywhere else (a tag value, the source note) fails here too.
 function strayIdentifiers(text: string, records: readonly EventRecord[]): string[] {
-  const awsServerIps = new Set<string>();
-  for (const record of records) {
-    for (const field of AWS_SERVER_IP_FIELDS) {
-      const value = record.fields[field];
-      if (value !== undefined) awsServerIps.add(value);
-    }
-  }
   const problems: string[] = [];
+  const serverValues = records.flatMap((record) => AWS_SERVER_IP_FIELDS.map((field) => record.fields[field]));
+  if (serverValues.some((value) => value !== undefined && !AWS_SERVER_IPS.has(value))) {
+    problems.push('a server field holds an address outside the captured SES servers');
+  }
   if (text.includes('@')) problems.push('the file holds an @');
   if (/(?<!\d)\d{12}(?!\d)/.test(text)) problems.push('the file holds a twelve-digit number');
   for (const match of text.matchAll(/(?<![\d.])(?:\d{1,3}\.){3}\d{1,3}(?![\d.])/g)) {
     const ip = match[0];
-    if (!isDocumentationIpv4(ip) && !awsServerIps.has(ip)) {
+    if (!isDocumentationIpv4(ip) && !AWS_SERVER_IPS.has(ip)) {
       problems.push('the file holds an IPv4 address outside the documentation ranges and the SES server fields');
     }
   }
@@ -79,7 +79,8 @@ function strayIdentifiers(text: string, records: readonly EventRecord[]): string
   if (dottedNames.some((name) => !ALLOWED_DOTTED_NAMES.has(name) && !name.endsWith(SES_HOST_SUFFIX))) {
     problems.push('the file holds a dotted name other than the placeholder domain and the SES hosts');
   }
-  return problems;
+  // One line per kind of problem, however many places show it.
+  return [...new Set(problems)];
 }
 
 function identityInputOf(record: EventRecord): IdentityInput {
@@ -187,6 +188,15 @@ describe('the simulator-captured stored records', () => {
         'the file holds a dotted name other than the placeholder domain and the SES hosts',
       ]);
       expect(strayIdentifiers(`${FIXTURE_TEXT} caller 2001:db8::5: replaced`, records)).toEqual(['the file holds an IPv6 address']);
+      // A caller address moved into a server field, and written a second time elsewhere, vouches for
+      // neither copy.
+      expect(FIXTURE_TEXT).toContain('"34.242.155.198"');
+      const plantedJson = FIXTURE_TEXT.replaceAll('"34.242.155.198"', '"10.20.30.40"');
+      const plantedRecords = (JSON.parse(plantedJson) as { records: EventRecord[] }).records;
+      expect(strayIdentifiers(`${plantedJson} note 10.20.30.40`, plantedRecords)).toEqual([
+        'a server field holds an address outside the captured SES servers',
+        'the file holds an IPv4 address outside the documentation ranges and the SES server fields',
+      ]);
     });
   });
 

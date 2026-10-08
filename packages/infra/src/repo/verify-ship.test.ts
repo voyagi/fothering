@@ -1,4 +1,4 @@
-import { execFileSync } from 'node:child_process';
+import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -66,20 +66,17 @@ interface RunResult {
 const TIMER_SETTINGS = new Set(['VERIFY_SHIP_TIMEOUT_MS', 'VERIFY_SHIP_DRAIN_GRACE_MS']);
 const INHERITED_ENV = Object.fromEntries(Object.entries(process.env).filter(([name]) => !TIMER_SETTINGS.has(name.toUpperCase())));
 
+// Both streams come back whatever the exit code, so a stderr check on a passing run can fail.
 function run(dir: string, stepTimeoutMs = 60_000, watchdogMs = 55_000, extraEnv: Record<string, string> = {}): RunResult {
-  try {
-    const stdout = execFileSync(process.execPath, [VERIFY_SHIP], {
-      cwd: dir,
-      encoding: 'utf8',
-      stdio: ['ignore', 'pipe', 'pipe'],
-      env: { ...INHERITED_ENV, VERIFY_SHIP_TIMEOUT_MS: String(stepTimeoutMs), ...extraEnv },
-      timeout: watchdogMs,
-    });
-    return { stdout, stderr: '', status: 0, hung: false };
-  } catch (e) {
-    const err = e as { stdout?: string; stderr?: string; status?: number | null; code?: string };
-    return { stdout: err.stdout ?? '', stderr: err.stderr ?? '', status: err.status ?? 1, hung: err.code === 'ETIMEDOUT' };
-  }
+  const result = spawnSync(process.execPath, [VERIFY_SHIP], {
+    cwd: dir,
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+    env: { ...INHERITED_ENV, VERIFY_SHIP_TIMEOUT_MS: String(stepTimeoutMs), ...extraEnv },
+    timeout: watchdogMs,
+  });
+  const hung = (result.error as NodeJS.ErrnoException | undefined)?.code === 'ETIMEDOUT';
+  return { stdout: result.stdout, stderr: result.stderr, status: result.status ?? 1, hung };
 }
 
 // process.kill with signal 0 sends nothing: it only asks whether the PID still exists.
@@ -232,6 +229,17 @@ describe('verify:ship selftest step and sub-gate reporting', () => {
     },
   );
 
+  // The control for every stderr check on a passing run: without it, a helper that dropped stderr
+  // on exit 0 would let each such check pass whatever the script printed.
+  it('hands back what a passing step wrote to stderr', { timeout: 60_000 }, () => {
+    const dir = makeProject({ lint: 'node warn.mjs' });
+    dirs.push(dir);
+    writeFileSync(join(dir, 'warn.mjs'), "console.error('lint: one warning, not an error');\nprocess.exit(0);\n");
+    const { stderr, status } = run(dir);
+    expect(status).toBe(0);
+    expect(stderr).toContain('lint: one warning, not an error');
+  });
+
   it(
     'fails at gate and reads every later step as NOT RUN',
     { timeout: 60_000 },
@@ -322,6 +330,7 @@ describe('verify:ship selftest step and sub-gate reporting', () => {
       const { stdout, stderr, status, hung } = run(dir, pastCeilingMs, 50_000, { VERIFY_SHIP_DRAIN_GRACE_MS: String(pastCeilingMs) });
       expect(hung, 'verify:ship waited on a pipe the finished step left open').toBe(false);
       expect(stderr).not.toContain('TIMED OUT');
+      expect(stderr, 'a delay past the ceiling reached a timer').not.toContain('TimeoutOverflowWarning');
       expect(status).toBe(0);
       // A refused value is said out loud, never taken in silence.
       expect(stdout).toContain(`[verify:ship] VERIFY_SHIP_TIMEOUT_MS=${pastCeilingMs} ignored`);
