@@ -135,6 +135,10 @@ export function holdsOneMailbox(raw: string): boolean {
   const opens = outside.split('<').length - 1;
   if (opens === 0) return !/\s/.test(bareWithoutSpaceAtTheAt(outside));
   if (opens > 1) return false;
+  // An unquoted display name is a phrase, and no word of a phrase holds an '@': text before the '<'
+  // that does is a second address ("jane@... <bob@...>"), and the bracketed one is a different person.
+  // A quoted display name was taken out of outside above, so '"jane@..." <jane@...>' still passes.
+  if (outside.slice(0, outside.indexOf('<')).includes('@')) return false;
   // With no '>' at all the slice is the whole field, which holds the '<', so it is refused too.
   return outside.slice(outside.lastIndexOf('>') + 1).trim() === '';
 }

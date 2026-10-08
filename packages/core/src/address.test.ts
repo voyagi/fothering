@@ -219,6 +219,8 @@ describe('holdsOneMailbox', () => {
     ['two bare addresses and a space', 'jane@example.com bob@example.org'],
     ['two bracketed addresses and no separator', '<jane@example.com> <bob@example.org>'],
     ['text after the closing bracket', 'Jane <jane@example.com> bob@example.org'],
+    ['an address as the display name before a bracketed one', 'jane@example.com <bob@example.org>'],
+    ['an address as the display name with no space before the bracket', 'jane@example.com<bob@example.org>'],
     ['a list behind a quote that never closes', '"Jane, <jane@example.com>, <bob@example.org>'],
     ['a second address after a comment', 'jane@example.com (Jane) bob@example.org'],
     ['a list whose first address carries a comment', 'jane@example.com (Jane), bob@example.org'],
