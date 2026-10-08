@@ -1,4 +1,4 @@
-import { bucketSortKeyPrefix, type EventRecord, type RecordKey } from '@fothering/core/records';
+import { bucketSortKeyPrefix, lanePartitionKey, type EventRecord, type RecordKey } from '@fothering/core/records';
 import type { AddressKeySet } from '@fothering/core/address';
 import type { AddressKeyPort, DeadLetterPort, EventStorePort, FixtureOptions } from '../port-types.js';
 import { brandPort } from '../port-types.js';
@@ -72,7 +72,7 @@ export function createFixtureEventStore(options: FixtureOptions = {}, dryRun?: D
           'Invalid KeyConditionExpression: The BETWEEN operator requires upper bound to be greater than or equal to lower bound',
         );
       }
-      const pk = `LANE#${configurationSet}`;
+      const pk = lanePartitionKey(configurationSet);
       const nowSeconds = Math.floor(nowMs / 1000);
       const result: EventRecord[] = [];
       for (const record of records.values()) {

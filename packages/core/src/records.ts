@@ -108,9 +108,15 @@ export function bucketSortKeyPrefix(bucketStartMs: number): string {
   return `B#${String(bucketStartMs).padStart(BUCKET_DIGITS, '0')}`;
 }
 
+// The one place a configuration set becomes partition-key text: every written key and every lane
+// query, live or fixture, is built here, so a write and a read cannot name a lane differently.
+export function lanePartitionKey(configurationSet: string): string {
+  return `LANE#${configurationSet}`;
+}
+
 export function recordKey(input: RecordKeyInput): RecordKey {
   return {
-    pk: `LANE#${input.configurationSet}`,
+    pk: lanePartitionKey(input.configurationSet),
     sk: `${bucketSortKeyPrefix(input.bucketStartMs)}#${input.eventType}#${input.identity}`,
   };
 }

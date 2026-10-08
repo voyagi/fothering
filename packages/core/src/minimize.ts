@@ -9,7 +9,7 @@ import {
   type SesEventType,
 } from './records.js';
 import { bucketStartMs } from './buckets.js';
-import { pseudonymizeRecipient, type AddressKeySet } from './address.js';
+import { pseudonymizeRecipient, type AddressKeySet, type PseudonymizedRecipient } from './address.js';
 import type { LaneEntry, LaneMap } from './lanes.js';
 import type { SesEnvelope, SesEvent } from './ses-events.js';
 import { identityFor } from './identity.js';
@@ -100,46 +100,59 @@ function diagnosticCodeFields(diagnosticCode: string | undefined): EventFields {
   };
 }
 
+// What every record of one event shares, worked out once in minimizeEvent: the bucket its
+// storability guard checks is the very bucket each record is filed under.
+interface EventHeader {
+  context: MinimizeContext;
+  mailTimestampMs: number;
+  bucket: number;
+  messageId: string;
+  baseFields: EventFields;
+  runId: string | undefined;
+}
+
 // Every record shares this shape (SPEC requirement 5's common timestamps, provenance, runId,
 // expiresAt); only the per-type fields and the presence of a recipient identity differ, so the
 // per-type functions below build a BuildRecordInput and hand it to this one place (jscpd: this
 // factoring is what keeps six near-identical object literals from becoming a duplication finding).
+// The key is built here too, so a record's event type is written once.
 interface BuildRecordInput {
-  pk: string;
-  sk: string;
   kind: RecordKind;
   eventType: SesEventType;
-  bucket: number;
-  mailTimestampMs: number;
+  identity: string;
   eventTimestampMs?: number;
-  messageId: string;
   feedbackId?: string;
   recipientHmac?: string;
   receivingDomain?: string;
   keyVersion?: string;
   recipientCount?: number;
   fields: EventFields;
-  context: MinimizeContext;
-  runId: string | undefined;
 }
 
-function buildRecord(input: BuildRecordInput): EventRecord {
+function buildRecord(header: EventHeader, input: BuildRecordInput): EventRecord {
+  const { context } = header;
+  const { pk, sk } = recordKey({
+    configurationSet: context.lane.configurationSet,
+    bucketStartMs: header.bucket,
+    eventType: input.eventType,
+    identity: input.identity,
+  });
   return {
-    pk: input.pk,
-    sk: input.sk,
+    pk,
+    sk,
     kind: input.kind,
     eventType: input.eventType,
-    configurationSet: input.context.lane.configurationSet,
-    bucketStartMs: input.bucket,
-    mailTimestampMs: input.mailTimestampMs,
+    configurationSet: context.lane.configurationSet,
+    bucketStartMs: header.bucket,
+    mailTimestampMs: header.mailTimestampMs,
     ...(input.eventTimestampMs !== undefined ? { eventTimestampMs: input.eventTimestampMs } : {}),
-    envelopeTimeMs: input.context.envelopeTimeMs,
-    arrivalTimeMs: input.context.arrivalTimeMs,
-    messageId: input.messageId,
+    envelopeTimeMs: context.envelopeTimeMs,
+    arrivalTimeMs: context.arrivalTimeMs,
+    messageId: header.messageId,
     ...(input.feedbackId !== undefined ? { feedbackId: input.feedbackId } : {}),
-    provenance: input.context.provenance,
-    ...(input.runId !== undefined ? { runId: input.runId } : {}),
-    expiresAt: expiresAtFor(input.mailTimestampMs),
+    provenance: context.provenance,
+    ...(header.runId !== undefined ? { runId: header.runId } : {}),
+    expiresAt: expiresAtFor(header.mailTimestampMs),
     ...(input.recipientHmac !== undefined ? { recipientHmac: input.recipientHmac } : {}),
     ...(input.receivingDomain !== undefined ? { receivingDomain: input.receivingDomain } : {}),
     ...(input.keyVersion !== undefined ? { keyVersion: input.keyVersion } : {}),
@@ -148,71 +161,46 @@ function buildRecord(input: BuildRecordInput): EventRecord {
   };
 }
 
-function minimizeSend(detail: Extract<SesEvent, { eventType: 'Send' }>, context: MinimizeContext): EventRecord[] {
-  const mailTimestampMs = Date.parse(detail.mail.timestamp);
-  const bucket = bucketStartMs(mailTimestampMs);
-  const fields = commonFields(detail.mail.tags, context.lane);
-  const runId = runIdFor(detail.mail.tags, context.laneMap);
+function pseudonymFor(raw: string, header: EventHeader): PseudonymizedRecipient {
+  return pseudonymizeRecipient(raw, header.context.keySet, header.mailTimestampMs);
+}
 
+function minimizeSend(detail: Extract<SesEvent, { eventType: 'Send' }>, header: EventHeader): EventRecord[] {
   const records: EventRecord[] = [];
   for (const destination of detail.mail.destination) {
-    const pseudonym = pseudonymizeRecipient(destination, context.keySet, mailTimestampMs);
-    const identity = identityFor({ kind: 'Send', messageId: detail.mail.messageId, recipientHmac: pseudonym.recipientHmac });
-    const { pk, sk } = recordKey({ configurationSet: context.lane.configurationSet, bucketStartMs: bucket, eventType: 'Send', identity });
+    const pseudonym = pseudonymFor(destination, header);
     records.push(
-      buildRecord({
-        pk,
-        sk,
+      buildRecord(header, {
         kind: 'send',
         eventType: 'Send',
-        bucket,
-        mailTimestampMs,
-        messageId: detail.mail.messageId,
+        identity: identityFor({ kind: 'Send', messageId: header.messageId, recipientHmac: pseudonym.recipientHmac }),
         recipientHmac: pseudonym.recipientHmac,
         receivingDomain: pseudonym.receivingDomain,
         keyVersion: pseudonym.keyVersion,
-        fields,
-        context,
-        runId,
+        fields: header.baseFields,
       }),
     );
   }
   return records;
 }
 
-function minimizeReject(detail: Extract<SesEvent, { eventType: 'Reject' }>, context: MinimizeContext): EventRecord[] {
-  const mailTimestampMs = Date.parse(detail.mail.timestamp);
-  const bucket = bucketStartMs(mailTimestampMs);
-  const fields = commonFields(detail.mail.tags, context.lane);
-  const runId = runIdFor(detail.mail.tags, context.laneMap);
-  const identity = identityFor({ kind: 'Reject', messageId: detail.mail.messageId });
-  const { pk, sk } = recordKey({ configurationSet: context.lane.configurationSet, bucketStartMs: bucket, eventType: 'Reject', identity });
-
+function minimizeReject(header: EventHeader): EventRecord[] {
   return [
-    buildRecord({
-      pk,
-      sk,
+    buildRecord(header, {
       kind: 'outcome',
       eventType: 'Reject',
-      bucket,
-      mailTimestampMs,
-      messageId: detail.mail.messageId,
-      fields,
-      context,
-      runId,
+      identity: identityFor({ kind: 'Reject', messageId: header.messageId }),
+      fields: header.baseFields,
     }),
   ];
 }
 
-function minimizeDelivery(detail: Extract<SesEvent, { eventType: 'Delivery' }>, context: MinimizeContext): EventRecord[] {
-  const mailTimestampMs = Date.parse(detail.mail.timestamp);
+function minimizeDelivery(detail: Extract<SesEvent, { eventType: 'Delivery' }>, header: EventHeader): EventRecord[] {
   const deliveryTimestampMs = Date.parse(detail.delivery.timestamp);
-  const bucket = bucketStartMs(mailTimestampMs);
-  const runId = runIdFor(detail.mail.tags, context.laneMap);
   const outgoingIp = firstTagValue(detail.mail.tags, 'ses:outgoing-ip');
 
   const fields: EventFields = {
-    ...commonFields(detail.mail.tags, context.lane),
+    ...header.baseFields,
     remoteMtaIp: validIp(detail.delivery.remoteMtaIp),
     ...diagnosticCodeFields(detail.delivery.smtpResponse),
     ...(outgoingIp !== undefined ? { outgoingIp: validIp(outgoingIp) } : {}),
@@ -221,46 +209,31 @@ function minimizeDelivery(detail: Extract<SesEvent, { eventType: 'Delivery' }>, 
 
   const records: EventRecord[] = [];
   for (const recipient of detail.delivery.recipients) {
-    const pseudonym = pseudonymizeRecipient(recipient, context.keySet, mailTimestampMs);
-    const identity = identityFor({ kind: 'Delivery', messageId: detail.mail.messageId, recipientHmac: pseudonym.recipientHmac });
-    const { pk, sk } = recordKey({ configurationSet: context.lane.configurationSet, bucketStartMs: bucket, eventType: 'Delivery', identity });
+    const pseudonym = pseudonymFor(recipient, header);
     records.push(
-      buildRecord({
-        pk,
-        sk,
+      buildRecord(header, {
         kind: 'outcome',
         eventType: 'Delivery',
-        bucket,
-        mailTimestampMs,
+        identity: identityFor({ kind: 'Delivery', messageId: header.messageId, recipientHmac: pseudonym.recipientHmac }),
         eventTimestampMs: deliveryTimestampMs,
-        messageId: detail.mail.messageId,
         recipientHmac: pseudonym.recipientHmac,
         receivingDomain: pseudonym.receivingDomain,
         keyVersion: pseudonym.keyVersion,
         fields,
-        context,
-        runId,
       }),
     );
   }
   return records;
 }
 
-function minimizeBounce(detail: Extract<SesEvent, { eventType: 'Bounce' }>, context: MinimizeContext): EventRecord[] {
-  const mailTimestampMs = Date.parse(detail.mail.timestamp);
+function minimizeBounce(detail: Extract<SesEvent, { eventType: 'Bounce' }>, header: EventHeader): EventRecord[] {
   const bounceTimestampMs = Date.parse(detail.bounce.timestamp);
-  const bucket = bucketStartMs(mailTimestampMs);
-  const baseFields = commonFields(detail.mail.tags, context.lane);
-  const runId = runIdFor(detail.mail.tags, context.laneMap);
 
   const records: EventRecord[] = [];
   for (const recipient of detail.bounce.bouncedRecipients) {
-    const pseudonym = pseudonymizeRecipient(recipient.emailAddress, context.keySet, mailTimestampMs);
-    const identity = identityFor({ kind: 'Bounce', feedbackId: detail.bounce.feedbackId, recipientHmac: pseudonym.recipientHmac });
-    const { pk, sk } = recordKey({ configurationSet: context.lane.configurationSet, bucketStartMs: bucket, eventType: 'Bounce', identity });
-
+    const pseudonym = pseudonymFor(recipient.emailAddress, header);
     const fields: EventFields = {
-      ...baseFields,
+      ...header.baseFields,
       bounceType: detail.bounce.bounceType,
       bounceSubType: detail.bounce.bounceSubType,
       ...(recipient.status !== undefined ? { recipientStatus: recipientStatus(recipient.status) } : {}),
@@ -270,22 +243,16 @@ function minimizeBounce(detail: Extract<SesEvent, { eventType: 'Bounce' }>, cont
     };
 
     records.push(
-      buildRecord({
-        pk,
-        sk,
+      buildRecord(header, {
         kind: 'outcome',
         eventType: 'Bounce',
-        bucket,
-        mailTimestampMs,
+        identity: identityFor({ kind: 'Bounce', feedbackId: detail.bounce.feedbackId, recipientHmac: pseudonym.recipientHmac }),
         eventTimestampMs: bounceTimestampMs,
-        messageId: detail.mail.messageId,
         feedbackId: detail.bounce.feedbackId,
         recipientHmac: pseudonym.recipientHmac,
         receivingDomain: pseudonym.receivingDomain,
         keyVersion: pseudonym.keyVersion,
         fields,
-        context,
-        runId,
       }),
     );
   }
@@ -296,15 +263,12 @@ function minimizeBounce(detail: Extract<SesEvent, { eventType: 'Bounce' }>, cont
 // plus one complaintRecipient item per complained recipient, all under the same feedbackId. The
 // counting record's identity is always a strict prefix of every recipient item's identity, so the
 // two shapes can never collide in the sort key.
-function minimizeComplaint(detail: Extract<SesEvent, { eventType: 'Complaint' }>, context: MinimizeContext): EventRecord[] {
-  const mailTimestampMs = Date.parse(detail.mail.timestamp);
+function minimizeComplaint(detail: Extract<SesEvent, { eventType: 'Complaint' }>, header: EventHeader): EventRecord[] {
   const complaintTimestampMs = Date.parse(detail.complaint.timestamp);
-  const bucket = bucketStartMs(mailTimestampMs);
-  const baseFields = commonFields(detail.mail.tags, context.lane);
-  const runId = runIdFor(detail.mail.tags, context.laneMap);
+  const { feedbackId } = detail.complaint;
 
   const countingFields: EventFields = {
-    ...baseFields,
+    ...header.baseFields,
     ...(detail.complaint.complaintFeedbackType !== undefined
       ? { complaintFeedbackType: detail.complaint.complaintFeedbackType }
       : {}),
@@ -313,88 +277,45 @@ function minimizeComplaint(detail: Extract<SesEvent, { eventType: 'Complaint' }>
       : {}),
   };
 
-  const countingIdentity = identityFor({ kind: 'Complaint', feedbackId: detail.complaint.feedbackId });
-  const { pk: countingPk, sk: countingSk } = recordKey({
-    configurationSet: context.lane.configurationSet,
-    bucketStartMs: bucket,
-    eventType: 'Complaint',
-    identity: countingIdentity,
-  });
-
   const records: EventRecord[] = [
-    buildRecord({
-      pk: countingPk,
-      sk: countingSk,
+    buildRecord(header, {
       kind: 'complaint',
       eventType: 'Complaint',
-      bucket,
-      mailTimestampMs,
+      identity: identityFor({ kind: 'Complaint', feedbackId }),
       eventTimestampMs: complaintTimestampMs,
-      messageId: detail.mail.messageId,
-      feedbackId: detail.complaint.feedbackId,
+      feedbackId,
       recipientCount: detail.complaint.complainedRecipients.length,
       fields: countingFields,
-      context,
-      runId,
     }),
   ];
 
   for (const recipient of detail.complaint.complainedRecipients) {
-    const pseudonym = pseudonymizeRecipient(recipient.emailAddress, context.keySet, mailTimestampMs);
-    const identity = identityFor({
-      kind: 'ComplaintRecipient',
-      feedbackId: detail.complaint.feedbackId,
-      recipientHmac: pseudonym.recipientHmac,
-    });
-    const { pk, sk } = recordKey({ configurationSet: context.lane.configurationSet, bucketStartMs: bucket, eventType: 'Complaint', identity });
+    const pseudonym = pseudonymFor(recipient.emailAddress, header);
     records.push(
-      buildRecord({
-        pk,
-        sk,
+      buildRecord(header, {
         kind: 'complaintRecipient',
         eventType: 'Complaint',
-        bucket,
-        mailTimestampMs,
+        identity: identityFor({ kind: 'ComplaintRecipient', feedbackId, recipientHmac: pseudonym.recipientHmac }),
         eventTimestampMs: complaintTimestampMs,
-        messageId: detail.mail.messageId,
-        feedbackId: detail.complaint.feedbackId,
+        feedbackId,
         recipientHmac: pseudonym.recipientHmac,
         receivingDomain: pseudonym.receivingDomain,
         keyVersion: pseudonym.keyVersion,
-        fields: baseFields,
-        context,
-        runId,
+        fields: header.baseFields,
       }),
     );
   }
   return records;
 }
 
-function minimizeDeliveryDelay(detail: Extract<SesEvent, { eventType: 'DeliveryDelay' }>, context: MinimizeContext): EventRecord[] {
-  const mailTimestampMs = Date.parse(detail.mail.timestamp);
+function minimizeDeliveryDelay(detail: Extract<SesEvent, { eventType: 'DeliveryDelay' }>, header: EventHeader): EventRecord[] {
   const delayTimestampMs = Date.parse(detail.deliveryDelay.timestamp);
-  const bucket = bucketStartMs(mailTimestampMs);
-  const baseFields = commonFields(detail.mail.tags, context.lane);
-  const runId = runIdFor(detail.mail.tags, context.laneMap);
 
   const records: EventRecord[] = [];
   for (const recipient of detail.deliveryDelay.delayedRecipients) {
-    const pseudonym = pseudonymizeRecipient(recipient.emailAddress, context.keySet, mailTimestampMs);
-    const identity = identityFor({
-      kind: 'DeliveryDelay',
-      messageId: detail.mail.messageId,
-      recipientHmac: pseudonym.recipientHmac,
-      delayTimestampMs,
-    });
-    const { pk, sk } = recordKey({
-      configurationSet: context.lane.configurationSet,
-      bucketStartMs: bucket,
-      eventType: 'DeliveryDelay',
-      identity,
-    });
-
+    const pseudonym = pseudonymFor(recipient.emailAddress, header);
     const fields: EventFields = {
-      ...baseFields,
+      ...header.baseFields,
       delayType: detail.deliveryDelay.delayType,
       delayTimestampMs,
       ...(recipient.status !== undefined ? { recipientStatus: recipientStatus(recipient.status) } : {}),
@@ -405,21 +326,20 @@ function minimizeDeliveryDelay(detail: Extract<SesEvent, { eventType: 'DeliveryD
     };
 
     records.push(
-      buildRecord({
-        pk,
-        sk,
+      buildRecord(header, {
         kind: 'outcome',
         eventType: 'DeliveryDelay',
-        bucket,
-        mailTimestampMs,
+        identity: identityFor({
+          kind: 'DeliveryDelay',
+          messageId: header.messageId,
+          recipientHmac: pseudonym.recipientHmac,
+          delayTimestampMs,
+        }),
         eventTimestampMs: delayTimestampMs,
-        messageId: detail.mail.messageId,
         recipientHmac: pseudonym.recipientHmac,
         receivingDomain: pseudonym.receivingDomain,
         keyVersion: pseudonym.keyVersion,
         fields,
-        context,
-        runId,
       }),
     );
   }
@@ -428,30 +348,41 @@ function minimizeDeliveryDelay(detail: Extract<SesEvent, { eventType: 'DeliveryD
 
 export function minimizeEvent(event: SesEnvelope, context: MinimizeContext): EventRecord[] {
   const { detail } = event;
+  const { tags } = detail.mail;
   // Every record is filed under the lane's partition, and a lane's counts decide whether that
   // lane is closed, so a caller's lane that is not this event's own configuration set is refused.
-  if (detail.mail.tags['ses:configuration-set']?.[0] !== context.lane.configurationSet) {
+  if (firstTagValue(tags, 'ses:configuration-set') !== context.lane.configurationSet) {
     throw new Error(`the event's configuration set does not match the lane ${context.lane.configurationSet}`);
   }
   // Checked before any key is read, so an event that can never be stored is never mistaken for a
   // key set gap, which the caller retries.
   const mailTimestampMs = Date.parse(detail.mail.timestamp);
-  if (!isStorableBucketStart(bucketStartMs(mailTimestampMs))) {
+  const bucket = bucketStartMs(mailTimestampMs);
+  if (!isStorableBucketStart(bucket)) {
     throw new UnstorableEventError(mailTimestampMs);
   }
 
+  const header: EventHeader = {
+    context,
+    mailTimestampMs,
+    bucket,
+    messageId: detail.mail.messageId,
+    baseFields: commonFields(tags, context.lane),
+    runId: runIdFor(tags, context.laneMap),
+  };
+
   switch (detail.eventType) {
     case 'Send':
-      return minimizeSend(detail, context);
+      return minimizeSend(detail, header);
     case 'Reject':
-      return minimizeReject(detail, context);
+      return minimizeReject(header);
     case 'Delivery':
-      return minimizeDelivery(detail, context);
+      return minimizeDelivery(detail, header);
     case 'Bounce':
-      return minimizeBounce(detail, context);
+      return minimizeBounce(detail, header);
     case 'Complaint':
-      return minimizeComplaint(detail, context);
+      return minimizeComplaint(detail, header);
     case 'DeliveryDelay':
-      return minimizeDeliveryDelay(detail, context);
+      return minimizeDeliveryDelay(detail, header);
   }
 }

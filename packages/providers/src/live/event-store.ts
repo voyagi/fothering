@@ -6,6 +6,7 @@ import {
   SORT_KEY,
   TTL_ATTRIBUTE,
   bucketSortKeyPrefix,
+  lanePartitionKey,
   type EventRecord,
   type RecordKey,
 } from '@fothering/core/records';
@@ -65,7 +66,7 @@ export function createDynamoEventStore(options: CreateDynamoEventStoreOptions): 
             TableName: tableName,
             KeyConditionExpression: `${PARTITION_KEY} = :pk AND ${SORT_KEY} BETWEEN :from AND :to`,
             FilterExpression: `${TTL_ATTRIBUTE} > :now`,
-            ExpressionAttributeValues: { ':pk': `LANE#${configurationSet}`, ':from': from, ':to': to, ':now': nowSeconds },
+            ExpressionAttributeValues: { ':pk': lanePartitionKey(configurationSet), ':from': from, ':to': to, ':now': nowSeconds },
             ...(exclusiveStartKey === undefined ? {} : { ExclusiveStartKey: exclusiveStartKey }),
           }),
         );
