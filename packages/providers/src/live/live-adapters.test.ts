@@ -769,9 +769,11 @@ describe('createSesReads', () => {
     ]);
   });
 
-  // Every field of an SES event destination is optional in the API's types. One SES does not say is
-  // enabled reads as disabled and one with no event types matches none, so the closeability check
-  // refuses the set rather than trusting a destination nobody saw publish.
+  // The SDK's types let every field of an SES event destination come back undefined: Enabled is
+  // optional, and even Name and MatchingEventTypes, which the API requires, are typed as possibly
+  // undefined. One SES does not say is enabled reads as disabled and one with no event types matches
+  // none, so the closeability check refuses the set rather than trusting a destination nobody saw
+  // publish.
   it('reads a destination with its fields left out as disabled and matching nothing, and a reply with no destinations as none', async () => {
     const client = sesClient();
     stubSend(client, (command) =>
