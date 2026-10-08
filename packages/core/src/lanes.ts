@@ -1,4 +1,4 @@
-import { z } from 'zod';
+import * as z from 'zod';
 import { UNCLASSIFIED } from './records.js';
 
 // The SES MessageTag rule, the same for a tag's name and its value: "ASCII letters (a-z, A-Z),

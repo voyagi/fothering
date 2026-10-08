@@ -1,4 +1,4 @@
-import { z } from 'zod';
+import * as z from 'zod';
 import { normalizeAddress, pseudonymizeRecipient, type AddressKeySet } from '@fothering/core/address';
 import { CONFIGURATION_SET_PATTERN } from '@fothering/core/lanes';
 import type {

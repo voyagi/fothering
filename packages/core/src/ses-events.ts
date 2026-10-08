@@ -1,4 +1,4 @@
-import { z } from 'zod';
+import * as z from 'zod';
 import { SES_ID_PATTERN, UNCLASSIFIED } from './records.js';
 import { SUPPRESSION_COMPLAINT_SUBTYPES } from './buckets.js';
 

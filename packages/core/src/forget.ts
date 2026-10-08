@@ -1,4 +1,4 @@
-import { z } from 'zod';
+import * as z from 'zod';
 import { hmacUnderEveryVersion, holdsOneMailbox, type AddressKeySet } from './address.js';
 import type { RecordKey } from './records.js';
 

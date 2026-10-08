@@ -1,5 +1,5 @@
 import { GetSecretValueCommand, type SecretsManagerClient } from '@aws-sdk/client-secrets-manager';
-import { z } from 'zod';
+import * as z from 'zod';
 import type { AddressKeySet } from '@fothering/core/address';
 import { isStorableBucketStart } from '@fothering/core/records';
 import { requireLiveConfig, type AddressKeyPort } from '../port-types.js';
