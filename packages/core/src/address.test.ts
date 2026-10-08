@@ -243,6 +243,37 @@ describe('holdsOneMailbox', () => {
   });
 });
 
+// Comment text with every character the readers treat specially except the three that end or
+// escape a comment, so a comment can never leak a separator, bracket, quote or @ into a reading.
+const commentText = fc.string({ unit: fc.constantFrom('a', 'Z', ' ', ',', ';', '@', '<', '>', '"', '.'), maxLength: 12 });
+
+describe('RFC 5322 comments on generated addresses (fixed seed)', () => {
+  it('reads a comment after the address or on either side of its @ as the bare address, and as one mailbox', () => {
+    fc.assert(
+      fc.property(fc.emailAddress(), commentText, (address, comment) => {
+        const atIndex = address.lastIndexOf('@');
+        const local = address.slice(0, atIndex);
+        const domain = address.slice(atIndex + 1);
+        for (const spelling of [`${address} (${comment})`, `${local}(${comment})@${domain}`, `${local}@(${comment})${domain}`]) {
+          expect(normalizeAddress(spelling)).toEqual(normalizeAddress(address));
+          expect(holdsOneMailbox(spelling)).toBe(true);
+        }
+      }),
+      { seed: propertySeed() },
+    );
+  });
+
+  it('refuses two addresses joined only by a comment, whatever the comment holds', () => {
+    fc.assert(
+      fc.property(fc.emailAddress(), fc.emailAddress(), commentText, (first, second, comment) => {
+        expect(holdsOneMailbox(`${first}(${comment})${second}`)).toBe(false);
+        expect(holdsOneMailbox(`${first} (${comment}) ${second}`)).toBe(false);
+      }),
+      { seed: propertySeed() },
+    );
+  });
+});
+
 describe('pseudonymizeRecipient (unchanged signature, completed normalization)', () => {
   it('gives the same HMAC for case variants and a different one for a plus-tagged address', () => {
     const keySet = oneVersionKeySet('secret-one');

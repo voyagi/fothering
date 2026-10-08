@@ -26,7 +26,8 @@ const AWS_SERVER_IP_FIELDS = ['remoteMtaIp', 'outgoingIp'] as const;
 // field paths the replaced notes name, which read like hostnames to the scan below.
 const ALLOWED_DOTTED_NAMES = new Set([SENDER_DOMAIN_PLACEHOLDER, 'fields.fromdomain', 'fields.sourceip']);
 const SES_HOST_SUFFIX = '.amazonses.com';
-const DOTTED_NAME_RE = /(?<![\w.-])(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,63}(?![\w.-])/gi;
+// A dot after the name ends it only when no label follows, so a domain closing a sentence counts.
+const DOTTED_NAME_RE = /(?<![\w.-])(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,63}(?![\w-]|\.[\w-])/gi;
 // Candidates only: isIP decides, so a colon in the JSON syntax never counts.
 const IPV6_CANDIDATE_RE = /[0-9a-f]*:[0-9a-f:]*:[0-9a-f]*/gi;
 
@@ -70,7 +71,10 @@ function strayIdentifiers(text: string, records: readonly EventRecord[]): string
       problems.push('the file holds an IPv4 address outside the documentation ranges and the SES server fields');
     }
   }
-  if ([...text.matchAll(IPV6_CANDIDATE_RE)].some((match) => isIP(match[0]) === 6)) problems.push('the file holds an IPv6 address');
+  // A colon after an address in prose joins the candidate, so it is tried without one trailing colon
+  // too; "2001:db8::" itself keeps its own, and passes as given.
+  const isIpv6 = (candidate: string) => isIP(candidate) === 6 || isIP(candidate.replace(/:$/, '')) === 6;
+  if ([...text.matchAll(IPV6_CANDIDATE_RE)].some((match) => isIpv6(match[0]))) problems.push('the file holds an IPv6 address');
   const dottedNames = [...text.matchAll(DOTTED_NAME_RE)].map((match) => match[0].toLowerCase());
   if (dottedNames.some((name) => !ALLOWED_DOTTED_NAMES.has(name) && !name.endsWith(SES_HOST_SUFFIX))) {
     problems.push('the file holds a dotted name other than the placeholder domain and the SES hosts');
@@ -178,6 +182,11 @@ describe('the simulator-captured stored records', () => {
       expect(strayIdentifiers(FIXTURE_TEXT.replace('"l1-probe"', '"Shop-Mail.net launch"'), records)).toEqual([
         'the file holds a dotted name other than the placeholder domain and the SES hosts',
       ]);
+      // Prose shapes: a domain that ends a sentence, and an address followed by a colon.
+      expect(strayIdentifiers(FIXTURE_TEXT.replace('"l1-probe"', '"sent from shop-mail.net."'), records)).toEqual([
+        'the file holds a dotted name other than the placeholder domain and the SES hosts',
+      ]);
+      expect(strayIdentifiers(`${FIXTURE_TEXT} caller 2001:db8::5: replaced`, records)).toEqual(['the file holds an IPv6 address']);
     });
   });
 
