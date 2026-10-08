@@ -7,6 +7,7 @@ import {
 } from '@aws-sdk/client-sesv2';
 import type { EventDestinationFact, SesReadPort } from '../port-types.js';
 import { SES_READ_SPACING_MS, sleep } from '../ses-facts.js';
+import { hasErrorName } from './error-name.js';
 
 const LIST_PAGE_SIZE = 1_000;
 
@@ -36,7 +37,7 @@ async function collectPages<Page extends { NextToken?: string | undefined }>(
 const NOT_FOUND = 'NotFoundException';
 
 function isNotFound(error: unknown): boolean {
-  return error instanceof Error && error.name === NOT_FOUND;
+  return hasErrorName(error, NOT_FOUND);
 }
 
 export interface CreateSesReadsOptions {

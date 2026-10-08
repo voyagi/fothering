@@ -1,4 +1,11 @@
-import { DeleteCommand, GetCommand, PutCommand, QueryCommand, type DynamoDBDocumentClient } from '@aws-sdk/lib-dynamodb';
+import {
+  DeleteCommand,
+  GetCommand,
+  PutCommand,
+  QueryCommand,
+  type DynamoDBDocumentClient,
+  type QueryCommandInput,
+} from '@aws-sdk/lib-dynamodb';
 import {
   PARTITION_KEY,
   RECIPIENT_INDEX_NAME,
@@ -11,6 +18,7 @@ import {
   type RecordKey,
 } from '@fothering/core/records';
 import { requireLiveConfig, type EventStorePort } from '../port-types.js';
+import { hasErrorName } from './error-name.js';
 
 const CONDITIONAL_CHECK_FAILED = 'ConditionalCheckFailedException';
 // A sort key range's upper bound must clear every key a bucket's own rows carry. recordKey always
@@ -30,6 +38,22 @@ function requireTableName(tableName: string | undefined): string {
   return requireLiveConfig(tableName, 'FOTHERING_TABLE_NAME');
 }
 
+// Runs one query to its last page and returns every item read. Each page sends the same input plus
+// the key the page before it stopped at. A page whose filter emptied it can still carry
+// LastEvaluatedKey: DynamoDB filters after paging, so an empty page is never the end by itself.
+async function queryAllPages<Item>(client: () => DynamoDBDocumentClient, input: QueryCommandInput): Promise<Item[]> {
+  const items: Item[] = [];
+  let exclusiveStartKey: Record<string, unknown> | undefined;
+  do {
+    const page = await client().send(
+      new QueryCommand({ ...input, ...(exclusiveStartKey === undefined ? {} : { ExclusiveStartKey: exclusiveStartKey }) }),
+    );
+    for (const item of page.Items ?? []) items.push(item as Item);
+    exclusiveStartKey = page.LastEvaluatedKey;
+  } while (exclusiveStartKey !== undefined);
+  return items;
+}
+
 export function createDynamoEventStore(options: CreateDynamoEventStoreOptions): EventStorePort {
   return {
     async putIfAbsent(record) {
@@ -44,7 +68,7 @@ export function createDynamoEventStore(options: CreateDynamoEventStoreOptions): 
         );
         return 'written';
       } catch (error) {
-        if (error instanceof Error && error.name === CONDITIONAL_CHECK_FAILED) return 'duplicate';
+        if (hasErrorName(error, CONDITIONAL_CHECK_FAILED)) return 'duplicate';
         throw error;
       }
     },
@@ -57,44 +81,22 @@ export function createDynamoEventStore(options: CreateDynamoEventStoreOptions): 
       const to = `${bucketSortKeyPrefix(toBucketMs)}${SORT_KEY_UPPER_SENTINEL}`;
       const nowSeconds = Math.floor(nowMs / 1000);
 
-      const records: EventRecord[] = [];
-      let exclusiveStartKey: Record<string, unknown> | undefined;
-      do {
-        const page = await options.client().send(
-          new QueryCommand({
-            TableName: tableName,
-            KeyConditionExpression: `${PARTITION_KEY} = :pk AND ${SORT_KEY} BETWEEN :from AND :to`,
-            FilterExpression: `${TTL_ATTRIBUTE} > :now`,
-            ExpressionAttributeValues: { ':pk': lanePartitionKey(configurationSet), ':from': from, ':to': to, ':now': nowSeconds },
-            ...(exclusiveStartKey === undefined ? {} : { ExclusiveStartKey: exclusiveStartKey }),
-          }),
-        );
-        for (const item of page.Items ?? []) records.push(item as EventRecord);
-        // A page whose filter emptied it can still carry LastEvaluatedKey: DynamoDB filters after
-        // paging, so an empty page is never the end by itself.
-        exclusiveStartKey = page.LastEvaluatedKey;
-      } while (exclusiveStartKey !== undefined);
-      return records;
+      return queryAllPages<EventRecord>(options.client, {
+        TableName: tableName,
+        KeyConditionExpression: `${PARTITION_KEY} = :pk AND ${SORT_KEY} BETWEEN :from AND :to`,
+        FilterExpression: `${TTL_ATTRIBUTE} > :now`,
+        ExpressionAttributeValues: { ':pk': lanePartitionKey(configurationSet), ':from': from, ':to': to, ':now': nowSeconds },
+      });
     },
 
     async queryByRecipient(recipientHmac) {
       const tableName = requireTableName(options.tableName);
-      const keys: RecordKey[] = [];
-      let exclusiveStartKey: Record<string, unknown> | undefined;
-      do {
-        const page = await options.client().send(
-          new QueryCommand({
-            TableName: tableName,
-            IndexName: RECIPIENT_INDEX_NAME,
-            KeyConditionExpression: `${RECIPIENT_KEY} = :hmac`,
-            ExpressionAttributeValues: { ':hmac': recipientHmac },
-            ...(exclusiveStartKey === undefined ? {} : { ExclusiveStartKey: exclusiveStartKey }),
-          }),
-        );
-        for (const item of page.Items ?? []) keys.push(item as RecordKey);
-        exclusiveStartKey = page.LastEvaluatedKey;
-      } while (exclusiveStartKey !== undefined);
-      return keys;
+      return queryAllPages<RecordKey>(options.client, {
+        TableName: tableName,
+        IndexName: RECIPIENT_INDEX_NAME,
+        KeyConditionExpression: `${RECIPIENT_KEY} = :hmac`,
+        ExpressionAttributeValues: { ':hmac': recipientHmac },
+      });
     },
 
     // The recipient index can still name a record for a moment after it is deleted, so the forget
@@ -112,7 +114,7 @@ export function createDynamoEventStore(options: CreateDynamoEventStoreOptions): 
         );
         return true;
       } catch (error) {
-        if (error instanceof Error && error.name === CONDITIONAL_CHECK_FAILED) return false;
+        if (hasErrorName(error, CONDITIONAL_CHECK_FAILED)) return false;
         throw error;
       }
     },

@@ -1,9 +1,9 @@
 import { readLiveSwitch } from '@fothering/providers/live-switch';
+import { sleep } from '@fothering/providers/ses-facts';
 import { forgetPayloadSchema, forgetRecipient, ForgetUsageError, type ForgetReport } from '@fothering/core/forget';
 import { memoPerContainer } from '../shared/container-memo.js';
+import { errorName } from '../shared/error-name.js';
 import { buildForgetRoot, readForgetLiveConfig, type ForgetDeps } from './root.js';
-
-const requeryDelay = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
 // The report and the one log line it writes carry counts only (T-01-32): never the address, and
 // never one of its hashes. A caller who wants to know if the deletion reached a given address
@@ -24,10 +24,10 @@ export async function forgetFromPayload(payload: unknown, deps: ForgetDeps): Pro
       address: parsed.data.address,
       keySet,
       store: deps.ports.eventStore,
-      sleep: requeryDelay,
+      sleep,
     });
   } catch (error) {
-    deps.log.error({ event: 'forget-failed', errorName: error instanceof Error ? error.name : 'Error' });
+    deps.log.error({ event: 'forget-failed', errorName: errorName(error) });
     throw error;
   }
 

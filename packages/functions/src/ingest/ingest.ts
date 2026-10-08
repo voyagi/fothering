@@ -3,6 +3,7 @@ import { NoActiveKeyVersionError } from '@fothering/core/address';
 import { findLane } from '@fothering/core/lanes';
 import { minimizeEvent, UnstorableEventError } from '@fothering/core/minimize';
 import type { Provenance } from '@fothering/core/records';
+import { errorName } from '../shared/error-name.js';
 import type { IngestDeps } from './root.js';
 
 export interface IngestResult {
@@ -13,10 +14,6 @@ export interface IngestResult {
 
 export interface IngestOptions {
   provenance: Provenance;
-}
-
-function errorName(error: unknown): string {
-  return error instanceof Error ? error.name : 'Error';
 }
 
 // Ordering per D-16: parse, drop without a configuration-set tag, drop an unmapped set, drop a
