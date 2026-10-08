@@ -158,6 +158,30 @@ describe('normalizeAddress with RFC 5322 comments', () => {
     expect(hmacUnderEveryVersion('jane@example.com', keySet).map((entry) => entry.recipientHmac)).toEqual([stored]);
     expect(hmacUnderEveryVersion('bob@example.com', keySet).map((entry) => entry.recipientHmac)).not.toContain(stored);
   });
+
+  // The forget payload must pass holdsOneMailbox before any hash is taken, so a destination stored
+  // under the bare hash is reachable by its own spelling too, not only by the bare address.
+  it.each([['a comment before the @', 'jane(x)@example.com'], ['a comment after the @', 'jane@(x)example.com']])(
+    'accepts a forget request spelled with %s and reaches the bare address record',
+    (_label, spelling) => {
+      const keySet = oneVersionKeySet('secret-one');
+      const stored = pseudonymizeRecipient('jane@example.com', keySet, 0).recipientHmac;
+      expect(holdsOneMailbox(spelling)).toBe(true);
+      expect(hmacUnderEveryVersion(spelling, keySet).map((entry) => entry.recipientHmac)).toEqual([stored]);
+    },
+  );
+
+  // A field that is only a comment holds no list, so a forget request may name it; with no @ left it
+  // is unparseable, and like any unparseable text it is hashed whole, comment included (AC-E24).
+  it('hashes a field holding only a comment whole, so a forget for that text reaches its record and the bare name does not', () => {
+    const keySet = oneVersionKeySet('secret-one');
+    expect(holdsOneMailbox('(Jane)')).toBe(true);
+    expect(normalizeAddress('(Jane)')).toBeUndefined();
+    const stored = pseudonymizeRecipient('(Jane)', keySet, 0);
+    expect(stored.receivingDomain).toBe('unparseable');
+    expect(hmacUnderEveryVersion('(jane)', keySet).map((entry) => entry.recipientHmac)).toEqual([stored.recipientHmac]);
+    expect(hmacUnderEveryVersion('Jane', keySet).map((entry) => entry.recipientHmac)).not.toContain(stored.recipientHmac);
+  });
 });
 
 // A forget request names one person, and normalizeAddress reads the LAST bracketed address of a
@@ -178,6 +202,9 @@ describe('holdsOneMailbox', () => {
     ['a comment holding a comma', 'jane@example.com (Doe, Jane)'],
     ['a comment holding a bracketed address', 'jane@example.com (Jane <bob@example.org>)'],
     ['a comment after a display name whose quote never closes', '"Jane <jane@example.com> (work)'],
+    ['a bare address with a comment before the @', 'jane(x)@example.com'],
+    ['a bare address with a comment after the @', 'jane@(x)example.com'],
+    ['a bare address with whitespace on either side of the @', 'jane @ example.com'],
   ])('accepts %s', (_label, raw) => {
     expect(holdsOneMailbox(raw)).toBe(true);
   });
@@ -197,6 +224,10 @@ describe('holdsOneMailbox', () => {
     ['a list whose first address carries a comment', 'jane@example.com (Jane), bob@example.org'],
     ['a comment that never closes', 'jane@example.com (Jane'],
     ['a comment that never closes behind a quote that never closes', '"Jane <jane@example.com> (work'],
+    ['a space beside the @ and another between two addresses', 'jane @example.com bob@example.org'],
+    ['a space inside the local part, away from the @', 'jane doe@example.com'],
+    ['a space inside the domain, away from the @', 'jane@example .com'],
+    ['two words and no @', 'Jane Doe'],
   ])('refuses %s', (_label, raw) => {
     expect(holdsOneMailbox(raw)).toBe(false);
   });

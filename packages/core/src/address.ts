@@ -112,10 +112,19 @@ function angleAddrStart(text: string): number {
   return unquotedPositions(text).findLast((index) => text[index] === '<') ?? -1;
 }
 
+// A bare field with the whitespace around its last '@' taken out, the same trim normalizeAddress
+// gives each side of the split.
+function bareWithoutSpaceAtTheAt(bare: string): string {
+  const atIndex = bare.lastIndexOf('@');
+  if (atIndex === -1) return bare;
+  return `${bare.slice(0, atIndex).trimEnd()}@${bare.slice(atIndex + 1).trimStart()}`;
+}
+
 // A forget request names one person, and normalizeAddress reads the LAST bracketed address of a
 // field, so "Jane <jane@...>, Bob <bob@...>" would reach Bob for a request about Jane. Outside
 // quoted strings and comments, one mailbox holds no comma or semicolon (the list separators), at
-// most one '<', nothing after the '>' that closes it, and, written bare, no whitespace.
+// most one '<', nothing after the '>' that closes it, and, written bare, no whitespace except beside
+// its last '@', which normalizeAddress trims from each side (so "jane(x)@..." reads as Jane).
 export function holdsOneMailbox(raw: string): boolean {
   const trimmed = withoutComments(raw).trim();
   const outside = unquotedPositions(trimmed)
@@ -123,7 +132,7 @@ export function holdsOneMailbox(raw: string): boolean {
     .join('');
   if (/[,;]/.test(outside)) return false;
   const opens = outside.split('<').length - 1;
-  if (opens === 0) return !/\s/.test(outside);
+  if (opens === 0) return !/\s/.test(bareWithoutSpaceAtTheAt(outside));
   if (opens > 1) return false;
   // With no '>' at all the slice is the whole field, which holds the '<', so it is refused too.
   return outside.slice(outside.lastIndexOf('>') + 1).trim() === '';
