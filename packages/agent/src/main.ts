@@ -31,5 +31,7 @@ const args = process.argv.slice(2);
 // AGT-11, D-03: buildAgentRoot builds no AWS client here (plan 01-03's lazy adapters), and
 // startNoModelRuntime is the only bedrock-agentcore import in the tree, reached through the
 // providers wrapper, never the package root.
+// The root is built only to fail fast: a malformed port table throws here, before the runtime
+// listens. The no-model handler reads no port, so its deps are not passed on yet.
 buildAgentRoot({ runtimeContext: 'deployed', switchValue: readLiveSwitch() });
 startNoModelRuntime({ port: resolvePort(args), host: resolveHost(process.env.FOTHERING_DEPLOYED_RUNTIME) });
