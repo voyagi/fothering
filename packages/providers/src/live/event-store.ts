@@ -24,7 +24,6 @@ const SORT_KEY_UPPER_SENTINEL = '\uFFFF';
 export interface CreateDynamoEventStoreOptions {
   tableName: string | undefined;
   client: () => DynamoDBDocumentClient;
-  now: () => number;
 }
 
 function requireTableName(tableName: string | undefined): string {

@@ -49,7 +49,6 @@ export type PortName = 'eventStore' | 'addressKey' | 'deadLetter' | 'ses' | 'bed
 interface LivePortContext {
   liveConfig: LiveConfig;
   liveClients: LiveClients;
-  dryRunSink: DryRunSink;
   now: () => number;
 }
 
@@ -102,12 +101,11 @@ export const PORT_TABLE = {
     mutatingOperations: ['putIfAbsent', 'deleteRecord'],
     gatedOperations: [],
     fixture: (fixtures: FixtureOptions, dryRun: DryRunLog) => createFixtureEventStore(fixtures, dryRun),
-    live: ({ liveConfig, liveClients, now }) =>
+    live: ({ liveConfig, liveClients }) =>
       brandPort(
         createDynamoEventStore({
           tableName: liveConfig.tableName,
           client: resolveLiveClient(liveClients.dynamoDb, () => DynamoDBDocumentClient.from(new DynamoDBClient({ region: LIVE_REGION }))),
-          now,
         }),
         'live',
       ),
@@ -187,16 +185,18 @@ export const PORT_TABLE = {
   },
 } satisfies Record<PortName, PortRow>;
 
+// Each optional field also takes an explicit undefined, so a composition root can hand over its own
+// options object as it is, an unset field and all, instead of copying only the fields it holds.
 interface ResolvePortTableOptions {
   runtimeContext: RuntimeContext;
   switchValue: string | undefined;
-  liveConfig?: LiveConfig;
-  liveClients?: LiveClients;
-  fixtures?: FixtureOptions;
-  dryRunSink?: DryRunSink;
-  now?: () => number;
+  liveConfig?: LiveConfig | undefined;
+  liveClients?: LiveClients | undefined;
+  fixtures?: FixtureOptions | undefined;
+  dryRunSink?: DryRunSink | undefined;
+  now?: (() => number) | undefined;
   /** Planted table for tests exercising a shape PORT_TABLE itself no longer holds (D-05). */
-  table?: Record<PortName, PortRow>;
+  table?: Record<PortName, PortRow> | undefined;
 }
 
 interface ResolvedRow {
@@ -204,9 +204,10 @@ interface ResolvedRow {
   kinds: Record<string, ResolvedKind>;
 }
 
-// A deployed function logs its dry-run lines to stdout for CloudWatch; a test writes nowhere, and
-// one that wants the lines passes its own sink.
-function defaultDryRunSink(runtimeContext: RuntimeContext): DryRunSink {
+// Where a line goes when the caller passes no sink of its own: a deployed process writes it to
+// stdout for CloudWatch, a test writes nowhere. The dry-run log and every root's logger use it, and
+// a test that wants the lines passes its own sink.
+export function defaultLineSink(runtimeContext: RuntimeContext): (line: string) => void {
   return runtimeContext === 'deployed'
     ? (line) => {
         process.stdout.write(`${line}\n`);
@@ -331,9 +332,9 @@ export function resolvePortTable(options: ResolvePortTableOptions): { ports: Res
   const table = options.table ?? PORT_TABLE;
   const mode = resolveProviderMode(options.switchValue);
   const fixtures = options.fixtures ?? {};
-  const dryRunSink = options.dryRunSink ?? defaultDryRunSink(options.runtimeContext);
+  const dryRunSink = options.dryRunSink ?? defaultLineSink(options.runtimeContext);
   const now = options.now ?? Date.now;
-  const liveContext: LivePortContext = { liveConfig: options.liveConfig ?? {}, liveClients: options.liveClients ?? {}, dryRunSink, now };
+  const liveContext: LivePortContext = { liveConfig: options.liveConfig ?? {}, liveClients: options.liveClients ?? {}, now };
 
   const ports: Record<string, unknown> = {};
   const kinds: Record<string, Record<string, ResolvedKind>> = {};

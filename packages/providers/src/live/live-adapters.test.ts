@@ -87,7 +87,7 @@ describe('createDynamoEventStore', () => {
       }
       return {};
     });
-    const store = createDynamoEventStore({ tableName: 'events', client: () => client, now: () => 0 });
+    const store = createDynamoEventStore({ tableName: 'events', client: () => client });
 
     await expect(store.putIfAbsent(record)).resolves.toBe('written');
     await expect(store.putIfAbsent(record)).resolves.toBe('duplicate');
@@ -100,7 +100,7 @@ describe('createDynamoEventStore', () => {
     stubSend(client, () => {
       throw new Error('network blip');
     });
-    const store = createDynamoEventStore({ tableName: 'events', client: () => client, now: () => 0 });
+    const store = createDynamoEventStore({ tableName: 'events', client: () => client });
     await expect(store.putIfAbsent({ pk: 'x', sk: 'y' } as unknown as EventRecord)).rejects.toThrow('network blip');
   });
 
@@ -122,7 +122,7 @@ describe('createDynamoEventStore', () => {
       return { Items: [record] };
     });
 
-    const store = createDynamoEventStore({ tableName: 'events', client: () => client, now: () => nowMs });
+    const store = createDynamoEventStore({ tableName: 'events', client: () => client });
     const results = await store.queryLane('x', fromBucketMs, toBucketMs, nowMs);
 
     expect(calls).toHaveLength(2);
@@ -146,7 +146,7 @@ describe('createDynamoEventStore', () => {
     const calls = stubSend(client, () => {
       throw new Error('must not be called');
     });
-    const store = createDynamoEventStore({ tableName: 'events', client: () => client, now: () => 0 });
+    const store = createDynamoEventStore({ tableName: 'events', client: () => client });
 
     for (const bad of [Number.NaN, -1, 0.5, 1e13]) {
       await expect(store.queryLane('x', bad, 300_000, 0)).rejects.toThrow(RangeError);
@@ -165,7 +165,7 @@ describe('createDynamoEventStore', () => {
       }
       return { Items: [{ pk: 'LANE#b', sk: 'B#0000000000002#Send#m2' }] };
     });
-    const store = createDynamoEventStore({ tableName: 'events', client: () => client, now: () => 0 });
+    const store = createDynamoEventStore({ tableName: 'events', client: () => client });
 
     const keys: RecordKey[] = await store.queryByRecipient('recipient-hash');
     expect(keys).toEqual([
@@ -183,7 +183,7 @@ describe('createDynamoEventStore', () => {
   it('deletes a record with a conditional DeleteCommand and resolves true', async () => {
     const client = dynamoClient();
     const calls = stubSend(client, () => ({}));
-    const store = createDynamoEventStore({ tableName: 'events', client: () => client, now: () => 0 });
+    const store = createDynamoEventStore({ tableName: 'events', client: () => client });
 
     await expect(store.deleteRecord({ pk: 'LANE#x', sk: 'B#0000000000001#Send#m1' })).resolves.toBe(true);
     expect(calls[0]?.name).toBe('DeleteCommand');
@@ -203,7 +203,7 @@ describe('createDynamoEventStore', () => {
       if (deletes === 1) error.name = 'ConditionalCheckFailedException';
       throw error;
     });
-    const store = createDynamoEventStore({ tableName: 'events', client: () => client, now: () => 0 });
+    const store = createDynamoEventStore({ tableName: 'events', client: () => client });
 
     await expect(store.deleteRecord({ pk: 'LANE#x', sk: 'gone' })).resolves.toBe(false);
     await expect(store.deleteRecord({ pk: 'LANE#x', sk: 'gone' })).rejects.toThrow('network blip');
@@ -213,7 +213,7 @@ describe('createDynamoEventStore', () => {
     const client = dynamoClient();
     const record = { pk: 'LANE#x', sk: 'B#0000000000001#Send#m1' } as unknown as EventRecord;
     const calls = stubSend(client, () => ({ Item: record }));
-    const store = createDynamoEventStore({ tableName: 'events', client: () => client, now: () => 0 });
+    const store = createDynamoEventStore({ tableName: 'events', client: () => client });
 
     await expect(store.getRecord({ pk: 'LANE#x', sk: 'B#0000000000001#Send#m1' })).resolves.toEqual(record);
     expect(calls[0]?.name).toBe('GetCommand');
@@ -232,7 +232,6 @@ describe('createDynamoEventStore', () => {
         constructed += 1;
         return dynamoClient();
       },
-      now: () => 0,
     });
     expect(constructed).toBe(0);
     await expect(store.putIfAbsent({} as EventRecord)).rejects.toMatchObject({
@@ -255,7 +254,7 @@ describe('createDynamoEventStore', () => {
     function laneRangeReader(): (bucketMs: number) => Promise<{ from: string; to: string }> {
       const client = dynamoClient();
       const calls = stubSend(client, () => ({ Items: [] }));
-      const store = createDynamoEventStore({ tableName: 'events', client: () => client, now: () => 0 });
+      const store = createDynamoEventStore({ tableName: 'events', client: () => client });
       return async (bucketMs) => {
         await store.queryLane('x', bucketMs, bucketMs, 0);
         const input = calls.at(-1)?.input as { ExpressionAttributeValues?: Record<string, unknown> } | undefined;
@@ -336,7 +335,7 @@ describe('the real document client marshals every record minimize writes', () =>
 
     const client = dynamoClient();
     const items = captureMarshalledItems(client);
-    const store = createDynamoEventStore({ tableName: 'events', client: () => client, now: () => 0 });
+    const store = createDynamoEventStore({ tableName: 'events', client: () => client });
     for (const record of records) await expect(store.putIfAbsent(record)).resolves.toBe('written');
 
     expect(items).toHaveLength(records.length);
@@ -346,7 +345,7 @@ describe('the real document client marshals every record minimize writes', () =>
   it('refuses a record holding an undefined field, so the capture above is the real marshaller', async () => {
     const client = dynamoClient();
     captureMarshalledItems(client);
-    const store = createDynamoEventStore({ tableName: 'events', client: () => client, now: () => 0 });
+    const store = createDynamoEventStore({ tableName: 'events', client: () => client });
     const record = { pk: 'LANE#x', sk: 'B#0000000000000#Send#m1', fields: { bounceType: undefined } } as unknown as EventRecord;
 
     await expect(store.putIfAbsent(record)).rejects.toThrow('removeUndefinedValues');
@@ -635,7 +634,7 @@ describe('an empty configuration value counts as missing', () => {
       constructed += 1;
       return build();
     };
-    const store = createDynamoEventStore({ tableName: '', client: count(dynamoClient), now: () => 0 });
+    const store = createDynamoEventStore({ tableName: '', client: count(dynamoClient) });
     const addressKey = createSecretsManagerAddressKey({ secretId: '', client: count(secretsManagerClient), now: () => 0 });
     const deadLetter = createSqsDeadLetter({
       queueUrl: '',
@@ -651,7 +650,7 @@ describe('an empty configuration value counts as missing', () => {
   // No table name, queue URL or secret id can hold a space, so a value of spaces is a
   // misconfiguration exactly like an empty one.
   it('treats a value of spaces as missing too', async () => {
-    const store = createDynamoEventStore({ tableName: '   ', client: dynamoClient, now: () => 0 });
+    const store = createDynamoEventStore({ tableName: '   ', client: dynamoClient });
     await expect(store.getRecord({ pk: 'LANE#x', sk: 'y' })).rejects.toMatchObject({ envVar: 'FOTHERING_TABLE_NAME' });
   });
 });

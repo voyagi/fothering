@@ -1,15 +1,8 @@
-import type { LogSink, Logger } from '@fothering/core/log';
+import type { Logger } from '@fothering/core/log';
 import { parseLaneMap, type LaneMap } from '@fothering/core/lanes';
-import type {
-  DryRunSink,
-  FixtureOptions,
-  KindTable,
-  LiveClients,
-  LiveConfig,
-  RuntimeContext,
-} from '@fothering/providers/port-types';
-import type { ResolvedPorts } from '@fothering/providers/ports';
-import { buildRootLogger, resolveRootPorts } from '../shared/root.js';
+import type { KindTable, LiveConfig } from '@fothering/providers/port-types';
+import { resolvePortTable, type ResolvedPorts } from '@fothering/providers/ports';
+import { buildRootLogger, type RootOptions } from '../shared/root.js';
 import lanesJson from '../../../../lanes.json' with { type: 'json' };
 
 // The committed demo lane map (D-24, D-38): esbuild bundles this file into the ingest function in
@@ -24,17 +17,9 @@ export interface IngestDeps {
   now: () => number;
 }
 
-export interface BuildIngestRootOptions {
-  runtimeContext: RuntimeContext;
-  switchValue: string | undefined;
+export interface BuildIngestRootOptions extends RootOptions {
   /** Accepted only in runtimeContext 'test' (D-24); a 'deployed' caller must use the committed lane map. */
   laneMap?: LaneMap;
-  liveConfig?: LiveConfig;
-  liveClients?: LiveClients;
-  fixtures?: FixtureOptions;
-  logSink?: LogSink;
-  dryRunSink?: DryRunSink;
-  now?: () => number;
 }
 
 // The three deployed table names, read as literals beside the switch (D-04's literal-read rule
@@ -60,7 +45,7 @@ export function buildIngestRoot(options: BuildIngestRootOptions): IngestDeps {
     throw new Error('a lane map override is accepted only in runtimeContext test');
   }
 
-  const { ports, kinds } = resolveRootPorts(options);
+  const { ports, kinds } = resolvePortTable(options);
 
   return {
     ports,

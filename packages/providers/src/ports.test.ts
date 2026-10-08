@@ -366,7 +366,7 @@ describe('the expected-kind comparison against resolvePortTable directly', () =>
       ...PORT_TABLE,
       eventStore: {
         ...PORT_TABLE.eventStore,
-        fixture: () => PORT_TABLE.eventStore.live({ liveConfig: {}, liveClients: {}, dryRunSink: NO_LINES, now: Date.now }),
+        fixture: () => PORT_TABLE.eventStore.live({ liveConfig: {}, liveClients: {}, now: Date.now }),
       },
     };
 

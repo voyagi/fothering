@@ -1,5 +1,5 @@
 import { createLogger, type LogSink, type Logger } from '@fothering/core/log';
-import { resolvePortTable, type ResolvedPorts } from '@fothering/providers/ports';
+import { defaultLineSink, resolvePortTable, type ResolvedPorts } from '@fothering/providers/ports';
 import type { DryRunSink, KindTable, LiveClients, RuntimeContext } from '@fothering/providers/port-types';
 
 export interface AgentDeps {
@@ -21,19 +21,6 @@ export interface BuildAgentRootOptions {
 // packages/providers/src/live/). It passes no liveConfig: a row needing configuration throws
 // LiveConfigMissingError only if a call reaches it, never at resolution.
 export function buildAgentRoot(options: BuildAgentRootOptions): AgentDeps {
-  const { ports, kinds } = resolvePortTable({
-    runtimeContext: options.runtimeContext,
-    switchValue: options.switchValue,
-    ...(options.liveClients !== undefined ? { liveClients: options.liveClients } : {}),
-    ...(options.dryRunSink !== undefined ? { dryRunSink: options.dryRunSink } : {}),
-  });
-
-  const defaultSink: LogSink =
-    options.runtimeContext === 'deployed'
-      ? (line) => {
-          process.stdout.write(`${line}\n`);
-        }
-      : () => {};
-
-  return { ports, kinds, log: createLogger(options.logSink ?? defaultSink) };
+  const { ports, kinds } = resolvePortTable(options);
+  return { ports, kinds, log: createLogger(options.logSink ?? defaultLineSink(options.runtimeContext)) };
 }
