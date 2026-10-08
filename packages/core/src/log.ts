@@ -3,6 +3,9 @@ import { SES_ID_PATTERN, UNCLASSIFIED } from './records.js';
 // A closed key set is the whole point (T-01-02): every line holds only what is listed below, plus
 // the level of the method that wrote it, whatever an entry carries beyond that. Building the output object field by field, rather than
 // spreading the entry, is what makes an unlisted key impossible to leak, not merely undocumented.
+// This logger is not the only channel into a function's log group: a rethrown error also reaches it
+// through the Node Lambda runtime's own error line, which carries the error's message and stack. So
+// an error message must never interpolate an address.
 
 export type LogSink = (line: string) => void;
 

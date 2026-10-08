@@ -88,9 +88,8 @@ already removed stays removed, and running it again removes the rest.
 - AgentCore Memory, only if the agent ever comes to store something there. Nothing here reads or
   writes it.
 - Minimized messages waiting in the dead-letter queue. Those hold the same keyed hash, never the
-  address, and the queue drops them on its own after four days. A message redriven from the queue
-  writes its records back, so after a redrive, run this command again for any address it was run
-  for in the four days before.
+  address. Nothing in this version reads the queue or writes its records back to the table: a
+  message waits there up to four days for the operator to read, then SQS drops it.
 - Complaint counting records. A complaint writes one record with no recipient field to count the
   complaint itself, kept separate from the per-recipient items this command does remove.
 - Log lines. With the live switch off, the line that records an email Fothering would have sent

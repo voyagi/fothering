@@ -22,6 +22,8 @@ export function sleep(ms: number): Promise<void> {
 
 // Typed over the read half of the SES port so this code can never reach a pause, a reopen or a
 // send. Reads run one at a time: two in flight would break the one-per-second spacing.
+// One identity read a second means N identities take about N seconds, so a deployed caller must
+// bound N to fit its own time limit.
 export async function readSesFacts(
   ses: SesReadPort,
   laneMap: LaneMap,
