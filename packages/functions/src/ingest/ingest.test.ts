@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { bucketStartMs, countLaneBuckets, countRecords } from '@fothering/core/buckets';
 import { parseSesEvent } from '@fothering/core/ses-events';
-import { createLogger, type LogEntry, type LogSink } from '@fothering/core/log';
+import { createLogger, type LogEntry } from '@fothering/core/log';
 import { parseLaneMap } from '@fothering/core/lanes';
 import { NoActiveKeyVersionError, type AddressKeySet } from '@fothering/core/address';
 import { DOC_EXAMPLE_LANE_MAP, loadSesEventFixture } from '@fothering/providers/fixtures/ses-events/index';
@@ -13,17 +13,7 @@ import {
   type FixtureDeadLetterPort,
 } from '@fothering/providers/fixtures/ingest-ports';
 import { PORT_TABLE, resolvePortTable, type PortName, type PortRow } from '@fothering/providers/ports';
-import {
-  NotBuiltError,
-  type DryRunSink,
-  type EventStorePort,
-  type KindTable,
-  type LiveClients,
-  type LiveConfig,
-  type ResolvedKind,
-  type RuntimeContext,
-  type SendClient,
-} from '@fothering/providers/port-types';
+import { NotBuiltError, type EventStorePort } from '@fothering/providers/port-types';
 import { buildIngestRoot, type IngestDeps } from './root.js';
 import { ingestEvent, type IngestResult } from './ingest.js';
 
@@ -496,6 +486,8 @@ describe('resolvePortTable in runtimeContext test', () => {
     'resolves every port operation to fixture for switch %j',
     (switchValue) => {
       const { kinds } = resolvePortTable({ runtimeContext: 'test', switchValue });
+      // A named operation first, so an empty kind table cannot pass the loop below by having no rows.
+      expect(kinds.eventStore?.putIfAbsent).toBe('fixture');
       for (const row of Object.values(kinds)) {
         for (const kind of Object.values(row)) {
           expect(kind).toBe('fixture');
@@ -657,30 +649,5 @@ describe('createLogger keeps free text out of every line', () => {
       field: 'detail.mail.tags',
       count: 3,
     });
-  });
-});
-
-describe('provider contract types stay referenced for later plans', () => {
-  it('type-checks a minimal SendClient implementation', async () => {
-    const client: SendClient = { send: async (command) => command };
-    await expect(client.send('ping')).resolves.toBe('ping');
-  });
-
-  it('type-checks the runtime context, resolved kind, kind table, live config and sink shapes', () => {
-    const context: RuntimeContext = 'test';
-    const kind: ResolvedKind = 'fixture';
-    const liveClients: LiveClients = {};
-    const liveConfig: LiveConfig = {};
-    const dryRunSink: DryRunSink = () => {};
-    const sink: LogSink = () => {};
-    const kinds: KindTable = resolvePortTable({ runtimeContext: 'test', switchValue: undefined }).kinds;
-
-    expect(context).toBe('test');
-    expect(kind).toBe('fixture');
-    expect(liveClients).toEqual({});
-    expect(liveConfig).toEqual({});
-    expect(typeof dryRunSink).toBe('function');
-    expect(typeof sink).toBe('function');
-    expect(kinds.eventStore?.putIfAbsent).toBe('fixture');
   });
 });

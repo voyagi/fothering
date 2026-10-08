@@ -50,11 +50,6 @@ export type ResolvedKind = 'fixture' | 'live' | 'dry-run' | `not-built-until-pha
 /** Port name to operation name to its resolved kind for this one composition-root build. */
 export type KindTable = Readonly<Record<string, Readonly<Record<string, ResolvedKind>>>>;
 
-/** The shape every AWS SDK v3 client shares; a live adapter wraps one of these, never the raw client type. */
-export interface SendClient {
-  send(command: unknown): Promise<unknown>;
-}
-
 /**
  * Each key holds one of three shapes: an already-built SDK client, a zero-argument factory that
  * returns one, or nothing (the adapter constructs its own client, lazily, on first use). Tests
