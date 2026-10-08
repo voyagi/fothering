@@ -540,6 +540,14 @@ describe('the fixtures leave one dry-run line per mutating call (AC-4 dry-run ha
     expect(lines[1]?.startsWith('(dry-run) WOULD ses.sendEmail example.org ')).toBe(true);
   });
 
+  // With no configuration set the line names the From domain, read the way every address is read,
+  // so a From carrying a comment names its domain rather than "unparseable".
+  it.each(['ops@example.org (alerts)', 'Ops (alerts) <ops(x)@example.org>'])('names the From domain of %s', async (from) => {
+    const { ses, lines } = sesWithLines();
+    await ses.sendEmail({ from, to: ['jane@example.com'], subject: 's', text: 't' });
+    expect(lines[0]?.startsWith('(dry-run) WOULD ses.sendEmail example.org ')).toBe(true);
+  });
+
   it('writes a line for an event store write and a dead-letter send, with a record partition key target', async () => {
     const lines: string[] = [];
     const dryRun = createDryRunLog({ sink: (line) => lines.push(line), addressKey: createFixtureAddressKey(), now: () => 1_000 });
