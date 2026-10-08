@@ -44,8 +44,8 @@ so one command is one run and `result.json` holds its counts.
 remaining count. It never holds the address or a hash.
 
 A deleted count of zero means no stored record matched the address as the command normalizes it:
-letter case, a display name and two Unicode spellings of one name are handled, and a plus-tag stays
-part of the address. A typo also reads zero, so check the spelling before taking a zero as the
+letter case, a display name, a comment in parentheses such as `jane@example.org (Jane)` and two
+Unicode spellings of one name are handled, and a plus-tag stays part of the address. A typo also reads zero, so check the spelling before taking a zero as the
 answer.
 
 A payload with no non-empty `address` field fails, and so does one carrying any other field beside

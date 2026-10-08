@@ -86,6 +86,80 @@ describe('normalizeAddress on name-addr edge forms', () => {
   });
 });
 
+// Only a '<' followed later by a '>' is a bracketed address. A lone '<', a lone '>', or a '>' that
+// comes before the '<' leaves the field as written, so it is split and checked whole rather than
+// cut down to a slice that happens to parse.
+describe('normalizeAddress when the angle brackets do not form a pair', () => {
+  it('reads a field with a "<" and no closing ">" whole', () => {
+    expect(normalizeAddress('Jane <jane@example.com')).toEqual({ local: 'jane <jane', domain: 'example.com' });
+  });
+
+  it('treats a field with a ">" and no "<" as unparseable, since the domain keeps the ">"', () => {
+    expect(normalizeAddress('jane@example.com>')).toBeUndefined();
+  });
+
+  it('reads a field whose ">" comes before its "<" whole', () => {
+    expect(normalizeAddress('x> Jane <jane@example.com')).toEqual({ local: 'x> jane <jane', domain: 'example.com' });
+  });
+});
+
+// RFC 5322 lets a comment in parentheses sit beside an address, and the old "addr (Name)" form puts
+// the name there. domainToASCII returns '' for "example.com (Jane)" and keeps the parentheses of
+// "example.com(Jane)", so unstripped, a commented destination is hashed apart from the bare address
+// a bounce names, and a forget request for that bare address never reaches its record.
+describe('normalizeAddress with RFC 5322 comments', () => {
+  it.each([
+    ['a trailing comment after a space', 'jane@example.com (Jane)'],
+    ['a trailing comment with no space', 'jane@Example.com(Jane)'],
+    ['a comment after the closing angle bracket', 'Jane <jane@example.com> (work)'],
+    ['a comment before the address', '(Jane) jane@example.com'],
+    ['a comment beside the @', 'jane(x)@example.com'],
+    ['a nested comment', 'jane@example.com (Jane (Sales))'],
+    ['a comment holding an escaped parenthesis', 'jane@example.com (Jane \\) Doe)'],
+    ['a comment holding a quote', 'jane@example.com (Jane "x)'],
+    ['a comment holding angle brackets', 'jane@example.com (Jane <bob@example.org>)'],
+  ])('reduces %s to the bare address', (_label, raw) => {
+    expect(normalizeAddress(raw)).toEqual({ local: 'jane', domain: 'example.com' });
+  });
+
+  it('keeps the parentheses of a quoted local part, which are text and not a comment', () => {
+    expect(normalizeAddress('"a(b)"@Example.com')).toEqual({ local: '"a(b)"', domain: 'example.com' });
+  });
+
+  it('keeps the parentheses of a quoted local part holding an escaped quote', () => {
+    expect(normalizeAddress('"a\\"(b)"@Example.com')).toEqual({ local: '"a\\"(b)"', domain: 'example.com' });
+  });
+
+  it('reads a comment as a space, so it never joins the two halves of a domain', () => {
+    expect(normalizeAddress('jane@exam(x)ple.com')).toBeUndefined();
+  });
+
+  it('reads a nested comment as one space, not one per level', () => {
+    expect(normalizeAddress('a(b(c))d@Example.com')).toEqual({ local: 'a d', domain: 'example.com' });
+  });
+
+  it('strips nothing from a comment that never closes, so the field stays unparseable', () => {
+    expect(normalizeAddress('jane@example.com (Jane')).toBeUndefined();
+  });
+
+  it('hashes a commented destination, with and without a space, and the bare bounce address to one HMAC, under the real receiving domain', () => {
+    const keySet = oneVersionKeySet('secret-one');
+    const bounce = pseudonymizeRecipient('jane@example.com', keySet, 0);
+    for (const destination of ['jane@example.com (Jane)', 'jane@example.com(Jane)']) {
+      const send = pseudonymizeRecipient(destination, keySet, 0);
+      expect(send.recipientHmac).toBe(bounce.recipientHmac);
+      expect(send.receivingDomain).toBe('example.com');
+    }
+  });
+
+  it('lets a forget request for the bare address reach a record stored from a commented destination, and no other', () => {
+    const keySet = oneVersionKeySet('secret-one');
+    const stored = pseudonymizeRecipient('jane@example.com(Jane)', keySet, 0).recipientHmac;
+    expect(hmacUnderEveryVersion('jane@example.com', keySet).map((entry) => entry.recipientHmac)).toEqual([stored]);
+    expect(hmacUnderEveryVersion('bob@example.com', keySet).map((entry) => entry.recipientHmac)).not.toContain(stored);
+  });
+});
+
 // A forget request names one person, and normalizeAddress reads the LAST bracketed address of a
 // field, so a list must be refused before any hash is taken: "Jane <jane@...>, Bob <bob@...>" would
 // otherwise reach Bob for a request about Jane.
@@ -98,6 +172,12 @@ describe('holdsOneMailbox', () => {
     ['a quoted local part holding an angle bracket', '<"a<b"@example.com>'],
     ['a display name whose quote never closes', '"Jane <jane@example.com>'],
     ['a quoted local part holding an escaped quote and a bracket', '<"a\\"<b"@example.com>'],
+    ['a bare address with a trailing comment', 'jane@example.com (Jane)'],
+    ['a bare address with a trailing comment and no space', 'jane@example.com(Jane)'],
+    ['a display-name form with a comment after the closing bracket', 'Jane <jane@example.com> (work)'],
+    ['a comment holding a comma', 'jane@example.com (Doe, Jane)'],
+    ['a comment holding a bracketed address', 'jane@example.com (Jane <bob@example.org>)'],
+    ['a comment after a display name whose quote never closes', '"Jane <jane@example.com> (work)'],
   ])('accepts %s', (_label, raw) => {
     expect(holdsOneMailbox(raw)).toBe(true);
   });
@@ -113,6 +193,10 @@ describe('holdsOneMailbox', () => {
     ['two bracketed addresses and no separator', '<jane@example.com> <bob@example.org>'],
     ['text after the closing bracket', 'Jane <jane@example.com> bob@example.org'],
     ['a list behind a quote that never closes', '"Jane, <jane@example.com>, <bob@example.org>'],
+    ['a second address after a comment', 'jane@example.com (Jane) bob@example.org'],
+    ['a list whose first address carries a comment', 'jane@example.com (Jane), bob@example.org'],
+    ['a comment that never closes', 'jane@example.com (Jane'],
+    ['a comment that never closes behind a quote that never closes', '"Jane <jane@example.com> (work'],
   ])('refuses %s', (_label, raw) => {
     expect(holdsOneMailbox(raw)).toBe(false);
   });

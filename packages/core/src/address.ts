@@ -61,6 +61,50 @@ function unquotedPositions(text: string): number[] {
   return inQuotes ? Array.from({ length: text.length }, (_, index) => index) : positions;
 }
 
+// text with its RFC 5322 comments taken out, or undefined when a comment never closes. A comment is
+// a parenthesis outside a quoted string up to the one that closes it; comments nest, and a
+// backslash inside one escapes the character after it. To the grammar a comment is folding
+// whitespace, so each becomes one space and never joins the text on either side of it. With
+// honourQuotes false a quote is an ordinary character.
+function stripComments(text: string, honourQuotes: boolean): { stripped: string; openQuote: boolean } | undefined {
+  let stripped = '';
+  let depth = 0;
+  let inQuotes = false;
+  for (let index = 0; index < text.length; index++) {
+    const char = text.charAt(index);
+    if (depth > 0) {
+      if (char === '\\') index += 1;
+      else if (char === '(') depth += 1;
+      else if (char === ')') {
+        depth -= 1;
+        if (depth === 0) stripped += ' ';
+      }
+    } else if (inQuotes) {
+      stripped += char;
+      if (char === '\\') {
+        index += 1;
+        stripped += text.charAt(index);
+      } else if (char === '"') inQuotes = false;
+    } else if (char === '(') depth = 1;
+    else {
+      stripped += char;
+      if (honourQuotes && char === '"') inQuotes = true;
+    }
+  }
+  return depth > 0 ? undefined : { stripped, openQuote: inQuotes };
+}
+
+// "jane@... (Jane)" is the bare address a bounce names, so every reading of an address starts here.
+// A quote that never closes leaves no quoted part, as in unquotedPositions, so its parentheses are
+// comments too. A comment that never closes strips nothing, as a '<' with no '>' leaves the field
+// whole.
+function withoutComments(text: string): string {
+  const honouringQuotes = stripComments(text, true);
+  if (honouringQuotes === undefined) return text;
+  if (!honouringQuotes.openQuote) return honouringQuotes.stripped;
+  return stripComments(text, false)?.stripped ?? text;
+}
+
 // The address in a display-name form sits in the last angle brackets outside a quoted string: a
 // display name may quote a '<' of its own ("Sales <EU>" followed by the bracketed address), and a
 // quoted local part may hold one inside the brackets. -1 when there is none.
@@ -70,10 +114,10 @@ function angleAddrStart(text: string): number {
 
 // A forget request names one person, and normalizeAddress reads the LAST bracketed address of a
 // field, so "Jane <jane@...>, Bob <bob@...>" would reach Bob for a request about Jane. Outside
-// quoted strings, one mailbox holds no comma or semicolon (the list separators), at most one '<',
-// nothing after the '>' that closes it, and, written bare, no whitespace.
+// quoted strings and comments, one mailbox holds no comma or semicolon (the list separators), at
+// most one '<', nothing after the '>' that closes it, and, written bare, no whitespace.
 export function holdsOneMailbox(raw: string): boolean {
-  const trimmed = raw.trim();
+  const trimmed = withoutComments(raw).trim();
   const outside = unquotedPositions(trimmed)
     .map((index) => trimmed[index])
     .join('');
@@ -85,16 +129,17 @@ export function holdsOneMailbox(raw: string): boolean {
   return outside.slice(outside.lastIndexOf('>') + 1).trim() === '';
 }
 
-// D-14: trim, take the address out of an angle-bracket display-name form if present, split at the
-// last @ (a local part is free to hold its own @), then trim each side. RFC 5322's grammar lets
-// whitespace sit inside the brackets, after the '<' and before the '>', and, though the RFC
+// D-14: take out comments, trim, take the address out of an angle-bracket display-name form if
+// present, split at the last @ (a local part is free to hold its own @), then trim each side.
+// Comments come out first so that a '<', '>' or '@' inside one is never read. RFC 5322's grammar
+// lets whitespace sit inside the brackets, after the '<' and before the '>', and, though the RFC
 // advises against it, on either side of the @. domainToASCII returns '' for a domain carrying a
 // space, so untrimmed, such an address would read as unparseable. Domain through
 // url.domainToASCII then lowercase (an empty result is unparseable), local part normalize('NFC')
 // then toLowerCase(), plus-tags kept as-is. undefined means unparseable (AC-E24): no @, a local
 // part or a domain that is empty once trimmed, or a domain domainToASCII rejects.
 export function normalizeAddress(raw: string): NormalizedAddress | undefined {
-  const trimmed = raw.trim();
+  const trimmed = withoutComments(raw).trim();
   const angleStart = angleAddrStart(trimmed);
   const angleEnd = trimmed.lastIndexOf('>');
   const unwrapped = angleStart !== -1 && angleEnd > angleStart ? trimmed.slice(angleStart + 1, angleEnd) : trimmed;
