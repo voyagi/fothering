@@ -5,7 +5,8 @@ import { join } from 'node:path';
 // The names AWS SDKs read to source credentials outside an explicit config: static keys, an
 // assumed profile, a role to assume, and every container or web-identity credential source.
 // Deleting only the static keys would leave a profile or a container endpoint still reachable.
-const AWS_CREDENTIAL_VARS = [
+// scripts/synth-env.mjs keeps the same list for cdk synth; guards.test.ts fails when the two differ.
+export const AWS_CREDENTIAL_VARS = [
   'AWS_ACCESS_KEY_ID',
   'AWS_SECRET_ACCESS_KEY',
   'AWS_SESSION_TOKEN',
@@ -16,6 +17,9 @@ const AWS_CREDENTIAL_VARS = [
   'AWS_CONTAINER_CREDENTIALS_RELATIVE_URI',
   'AWS_CONTAINER_CREDENTIALS_FULL_URI',
   'AWS_CONTAINER_AUTHORIZATION_TOKEN',
+  // The token's file form, and the older spelling beside AWS_SESSION_TOKEN.
+  'AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE',
+  'AWS_SECURITY_TOKEN',
 ] as const;
 
 // Never created. Pointing the SDK's file-based credential sources at a directory that does not

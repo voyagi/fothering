@@ -8,6 +8,7 @@ import * as dnsNamespace from 'node:dns';
 import { lookup as namedLookup, lookupService as namedLookupService, resolve4 as namedResolve4 } from 'node:dns';
 import { lookup as namedPromisesLookup } from 'node:dns/promises';
 import {
+  AWS_CREDENTIAL_VARS,
   NetworkGuardError,
   installNetworkGuard,
   isLoopbackHost,
@@ -39,6 +40,8 @@ const AWS_ENV_VARS = [
   'AWS_CONTAINER_CREDENTIALS_RELATIVE_URI',
   'AWS_CONTAINER_CREDENTIALS_FULL_URI',
   'AWS_CONTAINER_AUTHORIZATION_TOKEN',
+  'AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE',
+  'AWS_SECURITY_TOKEN',
 ] as const;
 
 interface FakeCallLog {
@@ -204,6 +207,15 @@ describe('stripAwsCredentials', () => {
     expect(env.AWS_CONFIG_FILE).toBeDefined();
     expect(existsSync(env.AWS_SHARED_CREDENTIALS_FILE as string)).toBe(false);
     expect(existsSync(env.AWS_CONFIG_FILE as string)).toBe(false);
+  });
+
+  // cdk synth strips its own copy of the list (scripts/synth-env.mjs). Two hand-kept copies drift,
+  // so a name added to one and not the other fails here, in either direction.
+  it('strips exactly the credential names the cdk synth environment strips', async () => {
+    // This file lives at packages/providers/src/test/, four levels below the repo root.
+    const synthEnvUrl = new URL('../../../../scripts/synth-env.mjs', import.meta.url);
+    const synthEnv = (await import(synthEnvUrl.href)) as { AWS_CREDENTIAL_VARS: readonly string[] };
+    expect([...AWS_CREDENTIAL_VARS].sort()).toEqual([...synthEnv.AWS_CREDENTIAL_VARS].sort());
   });
 });
 

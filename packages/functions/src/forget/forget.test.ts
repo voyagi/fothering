@@ -44,16 +44,18 @@ function seededRecord(targetAddress: string, identity = 'id-1'): { record: Event
 }
 
 describe('forgetFromPayload (AC-15)', () => {
+  // The record is stored under the address the documentation's own payload names, and that payload
+  // is passed unchanged, so the example an operator copies is the one proven to delete.
   it('forgets the recipient from the documentation payload example, deleting its record and logging a count only', async () => {
-    const targetAddress = 'jane@example.com';
+    const example = readDocPayloadExample();
+    const targetAddress = example.address;
     const deps = buildForgetRoot({ runtimeContext: 'test', switchValue: undefined });
     const { record, recipientHmac } = seededRecord(targetAddress);
     await deps.ports.eventStore.putIfAbsent(record);
     const lines: string[] = [];
     const loggedDeps: ForgetDeps = { ...deps, log: createLogger((line) => lines.push(line)) };
 
-    const example = readDocPayloadExample();
-    const report = await forgetFromPayload({ ...example, address: targetAddress }, loggedDeps);
+    const report = await forgetFromPayload(example, loggedDeps);
 
     expect(report.deleted).toBe(1);
     expect(report.remaining).toBe(0);
