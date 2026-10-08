@@ -135,6 +135,11 @@ Each container caches the key set for 5 minutes, so a rotation is one secret wri
 3. Remove a retired version's secret field and `activeFrom` entry only after 30 days plus the few
    days a TTL deletion can lag, so every record it could still be hashed under has expired first.
 
+Never change the key's generation settings in `packages/infra/src/ingest-stack.ts` (the template,
+the length or any character option) after the first deploy: CloudFormation writes a freshly
+generated value as a new secret version when they change, which replaces every rotated version and
+leaves every stored record under a key that no longer exists. A synth test pins them.
+
 ## Layout
 
 - `packages/core` - the decision core and the provider mode switch

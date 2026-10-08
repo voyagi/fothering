@@ -236,6 +236,22 @@ describe('IngestStack synth', () => {
     );
   });
 
+  // The AWS::SecretsManager::Secret page says "Updating the GenerateSecretString property triggers
+  // the creation of a new secret version." After a hand rotation the secret holds k2 and a moved
+  // current, so any change to this block, an added setting included, would make the next deploy write
+  // a fresh k1-only value over it and leave every stored hash under a key that no longer exists.
+  // Compared whole with toEqual, since the matcher above lets an added key through.
+  it('pins the address key generation settings exactly, so no deploy after the first replaces the key', () => {
+    const [secret] = Object.values(resourcesOfType(stacks.ingest, 'AWS::SecretsManager::Secret'));
+    expect(secret?.Properties?.GenerateSecretString).toEqual({
+      SecretStringTemplate: '{"current":"k1","activeFrom":{"k1":0}}',
+      GenerateStringKey: 'k1',
+      PasswordLength: 64,
+      ExcludePunctuation: true,
+      IncludeSpace: false,
+    });
+  });
+
   it('creates one 30-day log group per function, deleted with the stack, and points each function at its own', () => {
     stacks.ingest.resourceCountIs('AWS::Logs::LogGroup', 2);
     stacks.ingest.hasResource('AWS::Logs::LogGroup', { Properties: { RetentionInDays: 30 }, DeletionPolicy: 'Delete', UpdateReplacePolicy: 'Delete' });
