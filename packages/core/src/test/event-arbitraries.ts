@@ -1,6 +1,6 @@
 import fc from 'fast-check';
 import { BUCKET_MS, bucketStartMs } from '../buckets.js';
-import type { SesEnvelope, SesEvent } from '../ses-events.js';
+import { DETAIL_TYPE_BY_EVENT_TYPE, type SesEnvelope, type SesEvent } from '../ses-events.js';
 import { minimizeEvent, type MinimizeContext } from '../minimize.js';
 import type { EventRecord } from '../records.js';
 import type { LaneEntry, LaneMap } from '../lanes.js';
@@ -120,15 +120,6 @@ function mailBase(mc: MessageCase, configurationSet: string) {
     tags: { 'ses:configuration-set': [configurationSet] },
   };
 }
-
-const DETAIL_TYPE_BY_EVENT_TYPE: Record<SesEvent['eventType'], string> = {
-  Send: 'Email Sent',
-  Delivery: 'Email Delivered',
-  Bounce: 'Email Bounced',
-  Complaint: 'Email Complaint Received',
-  Reject: 'Email Rejected',
-  DeliveryDelay: 'Email Delivery Delayed',
-};
 
 // The EventBridge envelope id is never read by minimizeEvent (it never appears in an identity),
 // so a stable counter here is enough; nothing measured by the property suite depends on its value.

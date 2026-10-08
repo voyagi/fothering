@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { SES_ID_PATTERN, UNCLASSIFIED } from './records.js';
+import { SUPPRESSION_COMPLAINT_SUBTYPES } from './buckets.js';
 
 // D-12: zod objects strip unknown keys by default, so a new SES field or subtype this schema does
 // not name is dropped or mapped to unclassified rather than dropping the whole event. The schemas
@@ -54,14 +55,8 @@ const DELAY_TYPES = [
 ] as const;
 
 // complaintSubType is the one enum field the docs say may be null: that means no subtype, never
-// unclassified. Two suppression values are kept as themselves; anything else maps to unclassified.
-const complaintSubTypeSchema = z
-  .string()
-  .nullish()
-  .transform((value) => {
-    if (value === null || value === undefined) return value;
-    return value === 'OnAccountSuppressionList' || value === 'OnTenantSuppressionList' ? value : UNCLASSIFIED;
-  });
+// unclassified. The two suppression values are kept as themselves; anything else maps to unclassified.
+const complaintSubTypeSchema = unclassifiedEnum(SUPPRESSION_COMPLAINT_SUBTYPES).nullish();
 
 const mailSchema = z.object({
   timestamp: isoTimestamp,
@@ -157,7 +152,7 @@ export type SesEvent = z.infer<typeof detailSchema>;
 // The EventBridge detail-type and the SES-assigned eventType describe the same event through two
 // independent fields; a mismatch is not a shape problem any single field schema can catch on its
 // own, so it is checked here, after the rest of the envelope has already parsed successfully.
-const DETAIL_TYPE_BY_EVENT_TYPE: Record<SesEvent['eventType'], string> = {
+export const DETAIL_TYPE_BY_EVENT_TYPE: Record<SesEvent['eventType'], string> = {
   Send: 'Email Sent',
   Delivery: 'Email Delivered',
   Bounce: 'Email Bounced',

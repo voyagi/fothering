@@ -6,15 +6,17 @@ import { UNCLASSIFIED } from './records.js';
 // or stream outside it can never match a tag SES publishes, so its field would silently never be
 // stored. The rule also keeps out the tags SES sets itself (ses:configuration-set, ses:source-ip
 // and so on): their colon is outside the charset, so an operator key can never collide with one.
-const SES_TAG_PATTERN = /^[A-Za-z0-9_-]{1,256}$/;
+// The minimizer checks a stored tag value against this same pattern.
+export const SES_TAG_PATTERN = /^[A-Za-z0-9_-]{1,256}$/;
 const SES_TAG_NAME_MESSAGE =
   'a tag key must be 1 to 256 ASCII letters, digits, underscores or dashes, the SES message tag rule (so never an automatic "ses:" tag)';
 
 const tagKeySchema = z.string().regex(SES_TAG_PATTERN, SES_TAG_NAME_MESSAGE);
 
 // AWS's own configuration-set naming rule: "up to 64 alphanumeric characters, including
-// letters, numbers, hyphens (-) and underscores (_) only."
-const CONFIGURATION_SET_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
+// letters, numbers, hyphens (-) and underscores (_) only." The dry-run log accepts a configuration
+// set, and a lane's partition key, only in this shape.
+export const CONFIGURATION_SET_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
 
 // The closeability check reads a stream tag of unclassified, the word every validator stores for
 // an unknown value, as no stream at all, so a lane declaring it could never close.

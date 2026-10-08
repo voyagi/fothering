@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { normalizeAddress, pseudonymizeRecipient, type AddressKeySet } from '@fothering/core/address';
+import { CONFIGURATION_SET_PATTERN } from '@fothering/core/lanes';
 import type {
   AddressKeyPort,
   AgentCorePort,
@@ -26,9 +27,9 @@ export const DRY_RUN_MESSAGE_ID = 'dry-run-not-sent';
 // The line carries a target and a summary, never the request. A target is accepted only in a shape
 // that cannot hold an address or a sentence; a summary is built from the fields each operation
 // names below, so a field nobody listed can never reach a log line (AC-P9).
-const CONFIGURATION_SET = /^[A-Za-z0-9_-]{1,64}$/;
 const RECEIVING_DOMAIN = /^[a-z0-9._-]{1,253}$/;
-const RECORD_PARTITION_KEY = /^LANE#[A-Za-z0-9_-]{1,64}$/;
+// A lane's partition key: LANE# and then the configuration-set rule, its leading ^ moved in front.
+const RECORD_PARTITION_KEY = new RegExp(`^LANE#${CONFIGURATION_SET_PATTERN.source.replace(/^\^/, '')}`);
 // recordKey's sort key: B#, a 13-digit bucket start, then the event type and an identity made of
 // SES ids, HMAC hex and a timestamp, joined by #. A key built any other way is refused, not printed.
 const RECORD_SORT_KEY = /^B#\d{13}#[A-Za-z0-9._#-]{1,1024}$/;
@@ -37,7 +38,7 @@ const RUNTIME_ARN = /^arn:[A-Za-z0-9:/_.-]{1,512}$/;
 const DEAD_LETTER_TARGET = new RegExp(`^${DEAD_LETTER_QUEUE_TARGET}$`);
 
 const recordKeySchema = z.object({ pk: z.string().regex(RECORD_PARTITION_KEY), sk: z.string().regex(RECORD_SORT_KEY) });
-const configurationSetSchema = z.string().regex(CONFIGURATION_SET);
+const configurationSetSchema = z.string().regex(CONFIGURATION_SET_PATTERN);
 const sendEmailSchema = z.object({
   from: z.string(),
   to: z.array(z.string()),
@@ -83,7 +84,7 @@ function summarizeDeadLetter(request: unknown): Summary {
 
 const RECORD_KEY_SHAPE: DryRunShape = { targets: [RECORD_PARTITION_KEY], summarize: (request) => recordKeySchema.parse(request) };
 const CONFIGURATION_SET_SHAPE: DryRunShape = {
-  targets: [CONFIGURATION_SET],
+  targets: [CONFIGURATION_SET_PATTERN],
   summarize: (request) => ({ configurationSet: configurationSetSchema.parse(request) }),
 };
 
@@ -93,7 +94,7 @@ const SHAPES = new Map<string, DryRunShape>([
   ['deadLetter.send', { targets: [DEAD_LETTER_TARGET], summarize: summarizeDeadLetter }],
   ['ses.pauseConfigurationSet', CONFIGURATION_SET_SHAPE],
   ['ses.reopenConfigurationSet', CONFIGURATION_SET_SHAPE],
-  ['ses.sendEmail', { targets: [CONFIGURATION_SET, RECEIVING_DOMAIN], summarize: summarizeSend }],
+  ['ses.sendEmail', { targets: [CONFIGURATION_SET_PATTERN, RECEIVING_DOMAIN], summarize: summarizeSend }],
   [
     'bedrockModel.converse',
     {

@@ -11,20 +11,16 @@ import { Queue, QueueEncryption } from 'aws-cdk-lib/aws-sqs';
 import type { Construct } from 'constructs';
 import { PARTITION_KEY, RECIPIENT_INDEX_NAME, RECIPIENT_KEY, SORT_KEY, TTL_ATTRIBUTE } from '@fothering/core/records';
 import type { LaneMap } from '@fothering/core/lanes';
+import { DETAIL_TYPE_BY_EVENT_TYPE } from '@fothering/core/ses-events';
 import { liveSwitchEnvironment } from './live-switch.js';
 import { logWriteStatement } from './log-statements.js';
 
-// The six of the SES detail-types EventBridge carries that a lane's health is read from; opens,
-// clicks, rendering failures and subscriptions are never ingested. Email Sent stays in the list:
-// the ingest handler itself drops a Send with no destination, so the rule never filters Send out.
-const SES_DETAIL_TYPES = [
-  'Email Sent',
-  'Email Delivered',
-  'Email Bounced',
-  'Email Complaint Received',
-  'Email Rejected',
-  'Email Delivery Delayed',
-];
+// The six of the SES detail-types EventBridge carries that a lane's health is read from, taken from
+// the map the event parser checks each envelope against, so the rule forwards exactly the types the
+// parser accepts; opens, clicks, rendering failures and subscriptions are never ingested. Email Sent
+// stays in the list: the ingest handler itself drops a Send with no destination, so the rule never
+// filters Send out.
+const SES_DETAIL_TYPES = Object.values(DETAIL_TYPE_BY_EVENT_TYPE);
 
 // The address key is one JSON secret: CDK generates the first version's key into the k1 field of
 // this template, and the first version has been active since epoch 0.

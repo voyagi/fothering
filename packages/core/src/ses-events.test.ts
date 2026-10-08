@@ -130,6 +130,38 @@ describe('parseSesEvent: complaintSubType', () => {
     const parsed = narrow(result.event.detail, 'Complaint');
     expect(parsed.complaint.complaintSubType).toBe('unclassified');
   });
+
+  // The whole parsed complaint as ordered entries: a schema that keeps each value but adds the key
+  // where the input had none, drops it, or moves it fails here even though every check above passes.
+  const COMPLAINT_ENTRIES_BEFORE_SUBTYPE: [string, unknown][] = [
+    ['complainedRecipients', [{ emailAddress: 'recipient@example.com' }]],
+    ['timestamp', '2017-08-05T00:41:02.669Z'],
+    ['feedbackId', '01000157c44f053b-61b59c11-9236-11e6-8f96-7be8aexample-000000'],
+  ];
+  const FEEDBACK_TYPE_ENTRY: [string, unknown] = ['complaintFeedbackType', 'abuse'];
+
+  it.each([
+    ['missing', { set: false }, [...COMPLAINT_ENTRIES_BEFORE_SUBTYPE, FEEDBACK_TYPE_ENTRY]],
+    ['null', { set: true, value: null }, [...COMPLAINT_ENTRIES_BEFORE_SUBTYPE, ['complaintSubType', null], FEEDBACK_TYPE_ENTRY]],
+    [
+      'a listed value',
+      { set: true, value: 'OnTenantSuppressionList' },
+      [...COMPLAINT_ENTRIES_BEFORE_SUBTYPE, ['complaintSubType', 'OnTenantSuppressionList'], FEEDBACK_TYPE_ENTRY],
+    ],
+    [
+      'an unlisted value',
+      { set: true, value: 'SomethingElse' },
+      [...COMPLAINT_ENTRIES_BEFORE_SUBTYPE, ['complaintSubType', 'unclassified'], FEEDBACK_TYPE_ENTRY],
+    ],
+  ] as const)('parses a complaint whose complaintSubType is %s into exactly these entries', (_label, input, expected) => {
+    const event = fixtureEvent('complaint');
+    if (input.set) (detailOf(event).complaint as Record<string, unknown>).complaintSubType = input.value;
+    const result = parseSesEvent(event);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const parsed = narrow(result.event.detail, 'Complaint');
+    expect(Object.entries(parsed.complaint)).toStrictEqual(expected);
+  });
 });
 
 describe('parseSesEvent: unknown object keys are stripped', () => {

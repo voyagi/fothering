@@ -1,5 +1,6 @@
 import { isIP } from 'node:net';
 import { UNCLASSIFIED } from './records.js';
+import { SES_TAG_PATTERN } from './lanes.js';
 
 // D-15, D-37, T-01-52: every extractor below returns a code it matched, a value it validated, or
 // unclassified (undefined for a tag). None of them can return the text they were given, so a
@@ -26,7 +27,6 @@ const REPORTING_MTA_PREFIX_RE = /^[A-Za-z]+;\s*/;
 const HOSTNAME_LABEL_RE = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/;
 const TOP_LEVEL_LABEL_RE = /[a-z]/;
 const CALLER_IDENTITY_RE = /^[A-Za-z0-9+=,._-]{1,128}$/;
-const TAG_VALUE_RE = /^[A-Za-z0-9_-]{1,256}$/;
 const RECIPIENT_ACTIONS = ['failed', 'delayed', 'delivered', 'relayed', 'expanded'] as const;
 
 // A code in the status slot right after the reply code is the status, whatever its class: SES
@@ -83,6 +83,8 @@ export function recipientAction(value: string): string {
   return (RECIPIENT_ACTIONS as readonly string[]).includes(value) ? value : UNCLASSIFIED;
 }
 
+// The SES message tag rule is the same for a tag's name and its value, so a value is checked
+// against the pattern the lane map checks its tag keys with.
 export function tagValue(value: string): string | undefined {
-  return TAG_VALUE_RE.test(value) ? value : undefined;
+  return SES_TAG_PATTERN.test(value) ? value : undefined;
 }
