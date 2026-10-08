@@ -94,7 +94,8 @@ function stripComments(text: string, honourQuotes: boolean): { stripped: string;
   return depth > 0 ? undefined : { stripped, openQuote: inQuotes };
 }
 
-// "jane@... (Jane)" is the bare address a bounce names, so every reading of an address starts here.
+// A send may name "jane@... (Jane)" where its bounce names the bare "jane@...", so every reading of
+// an address starts here.
 // A quote that never closes leaves no quoted part, as in unquotedPositions, so its parentheses are
 // comments too. A comment that never closes strips nothing, as a '<' with no '>' leaves the field
 // whole.
