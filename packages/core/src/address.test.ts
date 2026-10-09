@@ -204,6 +204,7 @@ describe('holdsOneMailbox', () => {
     ['a bare address with a comment before the @', 'jane(x)@example.com'],
     ['a bare address with a comment after the @', 'jane@(x)example.com'],
     ['a bare address with whitespace on either side of the @', 'jane @ example.com'],
+    ['a quoted display name holding an @', '"jane@example.com" <jane@example.com>'],
   ])('accepts %s', (_label, raw) => {
     expect(holdsOneMailbox(raw)).toBe(true);
   });
