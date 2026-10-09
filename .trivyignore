@@ -1,0 +1,8 @@
+# brace-expansion 5.0.9 (CVE-2026-102276 and CVE-2026-102278, denial of service from a crafted
+# pattern) sits only inside aws-cdk-lib's own tarball (node_modules/aws-cdk-lib/node_modules, a
+# bundled dependency), so no lockfile change reaches it. aws-cdk-lib runs only at synth time on the
+# build machine and is in none of the Lambda or agent bundles. aws-cdk-lib 2.273.0 bundles 5.0.12,
+# which fixes both, and clears the three-day minimum release age on 2026-10-11. The entries expire on
+# 2026-10-12, so the scan fails again until packages/infra moves to that release.
+CVE-2026-102276 exp:2026-10-12
+CVE-2026-102278 exp:2026-10-12
