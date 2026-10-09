@@ -13,7 +13,7 @@ export interface ReadSesFactsOptions {
   wait?: (ms: number) => Promise<void>;
 }
 
-/** The real pause behind every SES read spacing; tests pass a recorder in its place. */
+/** The real pause behind every SES read spacing and the forget re-query delay; tests pass a recorder in its place. */
 export function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => {
     setTimeout(resolve, ms);
