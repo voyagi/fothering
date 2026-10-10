@@ -201,6 +201,15 @@ describe('repo hardening: every gate, config and document ships what it claims',
     expect(trivyLines.length).toBe(2);
     expect(verifyShipLine).toBeGreaterThan(-1);
     for (const idx of trivyLines) expect(idx).toBeLessThan(verifyShipLine);
+
+    // The vulnerability verdict can stay red until an upstream fix ships. Under the default
+    // success() every step after it would then be skipped, so the ship gate runs once the install
+    // succeeded, and the bundle scan once the ship gate did, whatever that verdict says.
+    const stepWith = (text: string): string => blockAt(stepStarts.findIndex((_, i) => blockAt(i).includes(text)));
+    expect(stepWith('npm rebuild esbuild')).toContain('id: rebuild');
+    expect(stepWith('npm run verify:ship')).toContain('id: ship');
+    expect(stepWith('npm run verify:ship')).toContain("if: ${{ !cancelled() && steps.rebuild.outcome == 'success' }}");
+    expect(stepWith('check-client-secrets.mjs')).toContain("if: ${{ !cancelled() && steps.ship.outcome == 'success' }}");
   });
 
   it('only the platform-native installers carry an install script in the lockfile', () => {

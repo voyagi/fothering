@@ -33,7 +33,8 @@ jobs:
       # downloads only when that package is missing. esbuild also runs without it (checked
       # 2026-09-28 with a scriptless install, build and agent tests all green).
       - run: npm ci --ignore-scripts
-      - run: npm rebuild esbuild
+      - id: rebuild
+        run: npm rebuild esbuild
       # This repo's tooling (vitest, stryker, esbuild, the CDK CLI) is entirely devDependencies,
       # and trivy leaves those out unless told: without the flag below, a scan of main's lockfile
       # read 1 of its 444 locked packages. Runs on pull requests and pushes, before anything is
@@ -130,7 +131,12 @@ jobs:
         with:
           name: license-census
           path: trivy-licenses.json
-      - run: npm run verify:ship
+      # The ship gate runs once the install above succeeded, whatever the vulnerability verdict says:
+      # that verdict can stay red until an upstream fix ships, and under the default success() no
+      # test, coverage or mutation result would be reported until then.
+      - id: ship
+        if: ${{ !cancelled() && steps.rebuild.outcome == 'success' }}
+        run: npm run verify:ship
       # Only a workspace that BUILDS can leak a secret into a client bundle, so the loop is keyed
       # on scripts.build rather than a fixed apps/web path, and it reads apps/* as well as
       # packages/*: the site does not exist yet, and this reaches it the day it does, without a
@@ -139,6 +145,8 @@ jobs:
       # own scan; the SKIPPED line names the reason only when none declares a build at all. The
       # repo root's dist/ holds server bundles only (Lambda handlers, the agent runtime).
       - name: client bundle secret scan
+        # It reads what the ship gate built, so it follows that step's outcome, not the verdict's.
+        if: ${{ !cancelled() && steps.ship.outcome == 'success' }}
         run: |
           found_build=0
           for manifest in packages/*/package.json apps/*/package.json; do
