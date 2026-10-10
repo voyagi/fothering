@@ -19,6 +19,10 @@ export interface RootOptions {
   logSink?: LogSink;
   dryRunSink?: DryRunSink;
   now?: () => number;
+  // resolvePortTable also reads a planted port table, a seam for tests that call it directly, and a
+  // root that passed one on could swap the gated live rows out of a deployed build. Since the whole
+  // object is passed on, the type is what keeps it out: an options object holding one fails to build.
+  table?: never;
 }
 
 // A deployed root writes JSON lines to stdout; a test root writes nowhere, since a test wanting to

@@ -14,6 +14,9 @@ export interface BuildAgentRootOptions {
   liveClients?: LiveClients;
   dryRunSink?: DryRunSink;
   logSink?: LogSink;
+  // Never set: buildAgentRoot passes this whole object to resolvePortTable, which also reads a
+  // planted port table (a test seam) that could swap the gated live rows out of a deployed build.
+  table?: never;
 }
 
 // The agent runtime's one composition root (D-01): plan 01-16's main.ts calls this in 'deployed'

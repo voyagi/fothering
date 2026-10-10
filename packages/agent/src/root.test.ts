@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { PORT_TABLE } from '@fothering/providers/ports';
 import { SWITCH_VALUES, assertRootMatrix } from '@fothering/providers/test/root-matrix';
 import { buildAgentRoot } from './root.js';
 
@@ -49,5 +50,13 @@ describe('buildAgentRoot', () => {
     expect(kinds.eventStore?.putIfAbsent).toBe('fixture');
     log.info({ event: 'probe', messageId: 'm-1' });
     expect(lines).toHaveLength(1);
+  });
+
+  // The type check is the assertion here (npm run gate:types): if the options type ever accepts a
+  // planted port table again, the directive below goes unused and the check fails.
+  it('takes no planted port table in its options', () => {
+    const withTable = { runtimeContext: 'test' as const, switchValue: undefined, table: PORT_TABLE };
+    // @ts-expect-error buildAgentRoot never passes a planted port table on to resolvePortTable
+    expect(buildAgentRoot(withTable).kinds.eventStore?.putIfAbsent).toBe('fixture');
   });
 });

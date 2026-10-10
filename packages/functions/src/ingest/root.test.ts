@@ -49,6 +49,14 @@ describe('buildIngestRoot against the expected-kind table', () => {
     expect(() => assertRootMatrix(buildIngestRoot)).not.toThrow();
   });
 
+  // The type check is the assertion here (npm run gate:types): if RootOptions ever accepts a planted
+  // port table again, the directive below goes unused and the check fails.
+  it('takes no planted port table in its options', () => {
+    const withTable = { runtimeContext: 'test' as const, switchValue: undefined, table: PORT_TABLE };
+    // @ts-expect-error a root never passes a planted port table on to resolvePortTable
+    expect(buildIngestRoot(withTable).kinds.eventStore?.putIfAbsent).toBe('fixture');
+  });
+
   it('reads the switch unset, empty and whitespace-only the same way (AC-E2)', () => {
     const unset = buildIngestRoot({ runtimeContext: 'deployed', switchValue: undefined }).kinds;
     expect(buildIngestRoot({ runtimeContext: 'deployed', switchValue: '' }).kinds).toEqual(unset);
