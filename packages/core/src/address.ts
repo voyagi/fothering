@@ -116,6 +116,22 @@ function angleAddrStart(text: string): number {
   return unquotedPositions(text).findLast((index) => text[index] === '<') ?? -1;
 }
 
+// text with each quoted string's quotes taken out and its escapes resolved, so '"jane@..."' reads as
+// jane@... A quote that never closes runs to the end of the text.
+function withoutQuotes(text: string): string {
+  let unquoted = '';
+  let inQuotes = false;
+  for (let index = 0; index < text.length; index++) {
+    const char = text.charAt(index);
+    if (inQuotes && char === '\\') {
+      index += 1;
+      unquoted += text.charAt(index);
+    } else if (char === '"') inQuotes = !inQuotes;
+    else unquoted += char;
+  }
+  return unquoted;
+}
+
 // A bare field with the whitespace around its last '@' taken out, the same trim normalizeAddress
 // gives each side of the split.
 function bareWithoutSpaceAtTheAt(bare: string): string {
@@ -127,8 +143,9 @@ function bareWithoutSpaceAtTheAt(bare: string): string {
 // A forget request names one person, and normalizeAddress reads the LAST bracketed address of a
 // field, so "Jane <jane@...>, Bob <bob@...>" would reach Bob for a request about Jane. Outside
 // quoted strings and comments, one mailbox holds no comma or semicolon (the list separators), at
-// most one '<', nothing after the '>' that closes it, and, written bare, no whitespace except beside
-// its last '@', which normalizeAddress trims from each side (so "jane(x)@..." reads as Jane).
+// most one '<', nothing after the '>' that closes it, no '@' in a display name unless it quotes the
+// bracketed address itself, and, written bare, no whitespace except beside its last '@', which
+// normalizeAddress trims from each side (so "jane(x)@..." reads as Jane).
 export function holdsOneMailbox(raw: string): boolean {
   const trimmed = withoutComments(raw).trim();
   const positions = unquotedPositions(trimmed);
@@ -139,14 +156,26 @@ export function holdsOneMailbox(raw: string): boolean {
   if (opens > 1) return false;
   // An unquoted display name is a phrase, and no word of a phrase holds an '@': text before the '<'
   // that does is a second address ("jane@... <bob@...>"), and the bracketed one is a different person.
-  // A quoted display name was taken out of outside above, so '"jane@..." <jane@...>' still passes.
+  // A quoted display name was taken out of outside above, so it is judged on its own just below.
   if (outside.slice(0, outside.indexOf('<')).includes('@')) return false;
+  const open = positions.find((index) => trimmed[index] === '<') ?? -1;
+  // A quoted display name may hold an '@' only as the bracketed address itself, as in
+  // '"jane@..." <jane@...>': a mail client shows the quoted text, so '"jane@..." <bob@...>' reads as
+  // Jane and would delete Bob's records.
+  const displayName = trimmed.slice(0, open);
+  if (displayName.includes('@') && !sameAddress(normalizeAddress(withoutQuotes(displayName)), normalizeAddress(trimmed.slice(open)))) {
+    return false;
+  }
   // The '>' that closes the '<' is the first unquoted one after it, and what follows it is read in
   // the whole field, quoted strings included: normalizeAddress takes the last '>' anywhere, so a
   // quoted '>' or a second '>' after the address would move the end it reads. No '>' refuses too.
-  const open = positions.find((index) => trimmed[index] === '<') ?? -1;
   const close = positions.find((index) => index > open && trimmed[index] === '>');
   return close !== undefined && trimmed.slice(close + 1).trim() === '';
+}
+
+// Two readings name the same address only when both parsed and agree on both halves.
+function sameAddress(first: NormalizedAddress | undefined, second: NormalizedAddress | undefined): boolean {
+  return first !== undefined && second !== undefined && first.local === second.local && first.domain === second.domain;
 }
 
 // D-14: take out comments, trim, take the address out of an angle-bracket display-name form if

@@ -206,6 +206,7 @@ describe('holdsOneMailbox', () => {
     ['a bare address with a comment after the @', 'jane@(x)example.com'],
     ['a bare address with whitespace on either side of the @', 'jane @ example.com'],
     ['a quoted display name holding an @', '"jane@example.com" <jane@example.com>'],
+    ['a quoted display name holding the same address in other letter case', '"JANE@Example.com" <jane@example.com>'],
   ] as const;
 
   it.each(accepted)('accepts %s', (_label, raw) => {
@@ -230,6 +231,10 @@ describe('holdsOneMailbox', () => {
     ['text after the closing bracket', 'Jane <jane@example.com> bob@example.org'],
     ['an address as the display name before a bracketed one', 'jane@example.com <bob@example.org>'],
     ['an address as the display name with no space before the bracket', 'jane@example.com<bob@example.org>'],
+    // A mail client shows the quoted name, so this reads as Jane and would delete Bob's records.
+    ['a quoted display name holding a different address', '"jane@example.com" <bob@example.org>'],
+    ['a quoted display name holding the same local part at another domain', '"jane@example.org" <jane@example.com>'],
+    ['a quoted display name holding an address and more text', '"jane@example.com, Bob" <bob@example.org>'],
     ['a list behind a quote that never closes', '"Jane, <jane@example.com>, <bob@example.org>'],
     ['a second address after a comment', 'jane@example.com (Jane) bob@example.org'],
     ['a list whose first address carries a comment', 'jane@example.com (Jane), bob@example.org'],

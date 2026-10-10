@@ -138,6 +138,7 @@ describe('forgetFromPayload (AC-15)', () => {
     'Nobody <nobody@example.org> jane@example.com',
     'jane@example.com <nobody@example.org>',
     'jane@example.com<nobody@example.org>',
+    '"jane@example.com" <nobody@example.org>',
   ])('refuses the address field %j with the usage error and deletes nobody, as the documentation warns', async (address) => {
     const deps = buildForgetRoot({ runtimeContext: 'test', switchValue: undefined });
     const jane = seededRecord('jane@example.com', 'id-1');
