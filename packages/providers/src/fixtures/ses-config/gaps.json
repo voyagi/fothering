@@ -1,0 +1,62 @@
+{
+  "provenance": "doc-derived",
+  "source": "https://docs.aws.amazon.com/ses/latest/APIReference-V2/API_GetEmailIdentity.html, https://docs.aws.amazon.com/ses/latest/APIReference-V2/API_ListConfigurationSets.html and https://docs.aws.amazon.com/ses/latest/APIReference-V2/API_GetConfigurationSetEventDestinations.html",
+  "note": "The same reads as complete.json with two gaps: the identity example.com defaults to fothering-bulk, and fothering-bulk's only destination leaves out DELIVERY_DELAY.",
+  "recordings": [
+    {
+      "operation": "ses.listEmailIdentities",
+      "request": null,
+      "response": ["example.com", "example.org"]
+    },
+    {
+      "operation": "ses.listConfigurationSets",
+      "request": null,
+      "response": ["fothering-transactional", "fothering-bulk", "fothering-alerts"]
+    },
+    {
+      "operation": "ses.getEmailIdentity",
+      "request": "example.com",
+      "response": "fothering-bulk"
+    },
+    {
+      "operation": "ses.getEmailIdentity",
+      "request": "example.org"
+    },
+    {
+      "operation": "ses.getConfigurationSetEventDestinations",
+      "request": "fothering-transactional",
+      "response": [
+        {
+          "name": "to-eventbridge",
+          "enabled": true,
+          "eventBridge": true,
+          "matchingEventTypes": ["SEND", "REJECT", "BOUNCE", "COMPLAINT", "DELIVERY", "DELIVERY_DELAY"]
+        }
+      ]
+    },
+    {
+      "operation": "ses.getConfigurationSetEventDestinations",
+      "request": "fothering-bulk",
+      "response": [
+        {
+          "name": "to-eventbridge",
+          "enabled": true,
+          "eventBridge": true,
+          "matchingEventTypes": ["SEND", "REJECT", "BOUNCE", "COMPLAINT", "DELIVERY"]
+        }
+      ]
+    },
+    {
+      "operation": "ses.getConfigurationSetEventDestinations",
+      "request": "fothering-alerts",
+      "response": [
+        {
+          "name": "to-eventbridge",
+          "enabled": true,
+          "eventBridge": true,
+          "matchingEventTypes": ["SEND", "REJECT", "BOUNCE", "COMPLAINT", "DELIVERY", "DELIVERY_DELAY"]
+        }
+      ]
+    }
+  ]
+}

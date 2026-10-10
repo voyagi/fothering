@@ -1,0 +1,19 @@
+{
+  "name": "@fothering/providers",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./*": "./src/*.ts"
+  },
+  "dependencies": {
+    "@aws-sdk/client-dynamodb": "3.1136.0",
+    "@aws-sdk/client-secrets-manager": "3.1136.0",
+    "@aws-sdk/client-sesv2": "3.1136.0",
+    "@aws-sdk/client-sqs": "3.1136.0",
+    "@aws-sdk/lib-dynamodb": "3.1136.0",
+    "@fothering/core": "0.0.0",
+    "bedrock-agentcore": "0.4.4",
+    "zod": "4.6.5"
+  }
+}

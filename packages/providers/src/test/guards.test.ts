@@ -1,0 +1,392 @@
+import { describe, expect, it } from 'vitest';
+import * as net from 'node:net';
+import http from 'node:http';
+import tls from 'node:tls';
+import dgram from 'node:dgram';
+import dns from 'node:dns';
+import * as dnsNamespace from 'node:dns';
+import { lookup as namedLookup, lookupService as namedLookupService, resolve4 as namedResolve4 } from 'node:dns';
+import { lookup as namedPromisesLookup } from 'node:dns/promises';
+import {
+  AWS_CREDENTIAL_VARS,
+  NetworkGuardError,
+  installNetworkGuard,
+  isLoopbackHost,
+  isNetworkGuarded,
+  stripAwsCredentials,
+  type NetworkGuardModules,
+} from './guards.js';
+
+// AC-E6: attempted at the top of this file's module scope, before any `describe`/`it` below runs.
+// guards.setup.ts (a setupFile) already installed the guard by the time this line executes, so a
+// real connection is refused synchronously here rather than left pending.
+let moduleScopeConnectError: unknown;
+try {
+  const socket = net.connect({ host: '192.0.2.1', port: 9 });
+  socket.on('error', () => {});
+  socket.destroy();
+} catch (error) {
+  moduleScopeConnectError = error;
+}
+
+const AWS_ENV_VARS = [
+  'AWS_ACCESS_KEY_ID',
+  'AWS_SECRET_ACCESS_KEY',
+  'AWS_SESSION_TOKEN',
+  'AWS_PROFILE',
+  'AWS_DEFAULT_PROFILE',
+  'AWS_ROLE_ARN',
+  'AWS_WEB_IDENTITY_TOKEN_FILE',
+  'AWS_CONTAINER_CREDENTIALS_RELATIVE_URI',
+  'AWS_CONTAINER_CREDENTIALS_FULL_URI',
+  'AWS_CONTAINER_AUTHORIZATION_TOKEN',
+  'AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE',
+  'AWS_SECURITY_TOKEN',
+] as const;
+
+interface FakeCallLog {
+  connect: unknown[][];
+  send: unknown[][];
+  dgramConnect: unknown[][];
+  lookup: unknown[][];
+}
+
+function fakeModules() {
+  const calls: FakeCallLog = { connect: [], send: [], dgramConnect: [], lookup: [] };
+
+  const netSocketPrototype = {
+    connect(this: unknown, ...args: unknown[]) {
+      calls.connect.push(args);
+      return this;
+    },
+  };
+  const dgramSocketPrototype = {
+    send(this: unknown, ...args: unknown[]) {
+      calls.send.push(args);
+      return this;
+    },
+    connect(this: unknown, ...args: unknown[]) {
+      calls.dgramConnect.push(args);
+      return this;
+    },
+  };
+  function recordingLookup(...args: unknown[]) {
+    calls.lookup.push(args);
+  }
+  function recordingResolve(..._args: unknown[]) {}
+  const resolverPrototype = { resolve4: recordingResolve, resolve6: recordingResolve };
+  const promisesResolverPrototype = { resolve4: recordingResolve, resolve6: recordingResolve };
+
+  return {
+    calls,
+    net: { Socket: { prototype: netSocketPrototype } },
+    dns: {
+      lookup: recordingLookup,
+      lookupService: recordingResolve,
+      resolve4: recordingResolve,
+      reverse: recordingResolve,
+      promises: {
+        lookup: recordingLookup,
+        lookupService: recordingResolve,
+        resolve4: recordingResolve,
+        Resolver: { prototype: promisesResolverPrototype },
+      },
+      Resolver: { prototype: resolverPrototype },
+    },
+    dgram: { Socket: { prototype: dgramSocketPrototype } },
+  };
+}
+
+// Shared between the real implementations and the no-op stand-ins below (AC-4), so a single
+// assertion proves both that the real guard fires and that the assertion itself can go red.
+function expectCredentialsStripped(strip: (env: Record<string, string | undefined>) => void): void {
+  const env: Record<string, string | undefined> = {};
+  for (const key of AWS_ENV_VARS) env[key] = 'planted-not-a-real-value';
+  strip(env);
+  for (const key of AWS_ENV_VARS) expect(env[key]).toBeUndefined();
+  expect(env.AWS_EC2_METADATA_DISABLED).toBe('true');
+  expect(env.AWS_SHARED_CREDENTIALS_FILE).toBeDefined();
+  expect(env.AWS_CONFIG_FILE).toBeDefined();
+}
+
+function expectConnectRefused(install: (modules: NetworkGuardModules) => void): void {
+  const modules = fakeModules();
+  install(modules);
+  expect(() => modules.net.Socket.prototype.connect({ host: '192.0.2.1', port: 9 })).toThrow(NetworkGuardError);
+}
+
+describe('module scope (AC-E6)', () => {
+  it('refused the connection before this file\'s own describe/it blocks ran', () => {
+    expect(moduleScopeConnectError).toBeInstanceOf(Error);
+    expect((moduleScopeConnectError as Error).name).toBe('NetworkGuardError');
+  });
+});
+
+describe('the worker environment guards.setup.ts already applied', () => {
+  it('has no AWS access key and reports IMDS disabled', () => {
+    expect(process.env.AWS_ACCESS_KEY_ID).toBeUndefined();
+    expect(process.env.AWS_EC2_METADATA_DISABLED).toBe('true');
+  });
+
+  // Identity checks only: calling these would reach the network if a wrap were missing.
+  it.each([
+    ['net Socket.prototype.connect', net.Socket.prototype.connect],
+    ['dns.lookup', dns.lookup],
+    ['dns.lookupService', dns.lookupService],
+    ['dns.resolve4', dns.resolve4],
+    ['dns.reverse', dns.reverse],
+    ['dns.promises.lookup', dns.promises.lookup],
+    ['dns.promises.lookupService', dns.promises.lookupService],
+    ['dns.Resolver.prototype.resolve4', dns.Resolver.prototype.resolve4],
+    ['dns.promises.Resolver.prototype.resolve4', dns.promises.Resolver.prototype.resolve4],
+    ['dgram Socket.prototype.send', dgram.Socket.prototype.send],
+    ['dgram Socket.prototype.connect', dgram.Socket.prototype.connect],
+  ])('wrapped the real %s', (_name, fn) => {
+    expect(isNetworkGuarded(fn)).toBe(true);
+  });
+
+  // A named or namespace import of a node: builtin is a separate ESM binding, which keeps the
+  // original function unless the setup re-syncs it after patching (measured 2026-09-25).
+  it.each([
+    ['named import lookup', namedLookup],
+    ['named import lookupService', namedLookupService],
+    ['named import resolve4', namedResolve4],
+    ['namespace import lookup', dnsNamespace.lookup],
+    ['node:dns/promises named import lookup', namedPromisesLookup],
+  ])('guards the %s too', (_name, fn) => {
+    expect(isNetworkGuarded(fn)).toBe(true);
+  });
+
+  it('reports an unwrapped function as unguarded', () => {
+    expect(isNetworkGuarded(() => undefined)).toBe(false);
+  });
+});
+
+describe('isLoopbackHost', () => {
+  it.each(['127.0.0.1', '127.1.2.3', '::1', '::ffff:127.0.0.1', 'localhost', 'LOCALHOST'])(
+    'treats %s as loopback',
+    (host) => {
+      expect(isLoopbackHost(host)).toBe(true);
+    },
+  );
+
+  it.each(['192.0.2.1', '2001:db8::1', 'example.com'])(
+    'refuses %s as non-loopback',
+    (host) => {
+      expect(isLoopbackHost(host)).toBe(false);
+    },
+  );
+});
+
+describe('stripAwsCredentials', () => {
+  it('deletes every AWS credential variable, hides the profile files and disables IMDS', () => {
+    expect(() => expectCredentialsStripped(stripAwsCredentials)).not.toThrow();
+  });
+
+  // A Bedrock API key is a bearer token read from AWS_BEARER_TOKEN_<SERVICE>, so the prefix is
+  // stripped whole: the service this project calls, and any service a later SDK adds.
+  it('deletes every AWS_BEARER_TOKEN_ variable, the Bedrock API key included', () => {
+    const env: Record<string, string | undefined> = {
+      AWS_BEARER_TOKEN_BEDROCK: 'planted-not-a-real-value',
+      AWS_BEARER_TOKEN_SOMEFUTURESERVICE: 'planted-not-a-real-value',
+      aws_bearer_token_lowercase: 'planted-not-a-real-value',
+      AWS_REGION: 'eu-central-1',
+    };
+    stripAwsCredentials(env);
+    expect(env.AWS_BEARER_TOKEN_BEDROCK).toBeUndefined();
+    expect(env.AWS_BEARER_TOKEN_SOMEFUTURESERVICE).toBeUndefined();
+    expect(env.aws_bearer_token_lowercase).toBeUndefined();
+    expect(env.AWS_REGION).toBe('eu-central-1');
+  });
+
+  it('points the profile files at a path that does not exist', async () => {
+    const { existsSync } = await import('node:fs');
+    const env: Record<string, string | undefined> = {};
+    stripAwsCredentials(env);
+    expect(env.AWS_SHARED_CREDENTIALS_FILE).toBeDefined();
+    expect(env.AWS_CONFIG_FILE).toBeDefined();
+    expect(existsSync(env.AWS_SHARED_CREDENTIALS_FILE as string)).toBe(false);
+    expect(existsSync(env.AWS_CONFIG_FILE as string)).toBe(false);
+  });
+
+  // cdk synth strips its own copy of the list (scripts/synth-env.mjs). Two hand-kept copies drift,
+  // so a name added to one and not the other fails here, in either direction.
+  it('strips exactly the credential names the cdk synth environment strips', async () => {
+    // This file lives at packages/providers/src/test/, four levels below the repo root.
+    const synthEnvUrl = new URL('../../../../scripts/synth-env.mjs', import.meta.url);
+    const synthEnv = (await import(synthEnvUrl.href)) as { AWS_CREDENTIAL_VARS: readonly string[] };
+    expect([...AWS_CREDENTIAL_VARS].sort()).toEqual([...synthEnv.AWS_CREDENTIAL_VARS].sort());
+  });
+});
+
+describe('installNetworkGuard', () => {
+  it('refuses a non-loopback net.connect, including the pre-normalized array form (Pitfall 6)', () => {
+    const modules = fakeModules();
+    installNetworkGuard(modules);
+    expect(() => modules.net.Socket.prototype.connect({ host: '192.0.2.1', port: 9 })).toThrow(NetworkGuardError);
+    expect(() =>
+      modules.net.Socket.prototype.connect([{ host: '192.0.2.1', port: 9 }, undefined]),
+    ).toThrow(NetworkGuardError);
+  });
+
+  it('allows a loopback host and a path (IPC) connect', () => {
+    const modules = fakeModules();
+    installNetworkGuard(modules);
+    expect(() => modules.net.Socket.prototype.connect({ host: '127.0.0.1', port: 9 })).not.toThrow();
+    expect(() => modules.net.Socket.prototype.connect({ path: '/tmp/fothering-test.sock' })).not.toThrow();
+    expect(() => modules.net.Socket.prototype.connect('/tmp/fothering-test.sock')).not.toThrow();
+    expect(() => modules.net.Socket.prototype.connect(String.raw`\\.\pipe\fothering-test`)).not.toThrow();
+    expect(modules.calls.connect).toHaveLength(4);
+  });
+
+  // Node reads a numeric string as a port, not a pipe name, and opens TCP whenever path is
+  // falsy, so these shapes reach the network exactly like { host, port } (measured on Node
+  // 22.22.3 and 24.21.0 against a loopback server).
+  it.each([
+    ['a port written as a string', ['9', '192.0.2.1']],
+    ['a port string with spaces', [' 9 ', '192.0.2.1']],
+    ['an empty path beside a host', [{ path: '', host: '192.0.2.1', port: 9 }]],
+    ['a null path beside a host', [{ path: null, host: '192.0.2.1', port: 9 }]],
+  ])('refuses %s, which Node connects over TCP', (_label, args) => {
+    const modules = fakeModules();
+    installNetworkGuard(modules);
+    expect(() => modules.net.Socket.prototype.connect(...args)).toThrow(NetworkGuardError);
+    expect(modules.calls.connect).toHaveLength(0);
+  });
+
+  it('refuses dns.lookup and dns.resolve4 for a non-loopback name', () => {
+    const modules = fakeModules();
+    installNetworkGuard(modules);
+    expect(() => modules.dns.lookup('example.com', () => {})).toThrow(NetworkGuardError);
+    expect(() => modules.dns.resolve4('example.com')).toThrow(NetworkGuardError);
+    expect(() => modules.dns.promises.lookup('example.com')).toThrow(NetworkGuardError);
+  });
+
+  // lookupService is a reverse lookup of an address and port (getnameinfo), so it queries DNS
+  // for a non-loopback address even though its name matches neither resolve nor reverse.
+  it('refuses dns.lookupService for a non-loopback address and allows loopback', () => {
+    const modules = fakeModules();
+    installNetworkGuard(modules);
+    expect(() => modules.dns.lookupService('192.0.2.1', 53, () => {})).toThrow(NetworkGuardError);
+    expect(() => modules.dns.promises.lookupService('192.0.2.1', 53)).toThrow(NetworkGuardError);
+    expect(() => modules.dns.lookupService('127.0.0.1', 53, () => {})).not.toThrow();
+  });
+
+  // Every dns function other than lookup sends its query to the configured DNS servers over the
+  // network and skips the hosts file (Node's dns docs), so even a loopback name leaves the machine.
+  it('refuses every resolve and reverse call, a loopback name included, and still allows a loopback lookup', () => {
+    const modules = fakeModules();
+    installNetworkGuard(modules);
+    expect(() => modules.dns.resolve4('localhost')).toThrow(NetworkGuardError);
+    expect(() => modules.dns.reverse('127.0.0.1', () => {})).toThrow(NetworkGuardError);
+    expect(() => modules.dns.promises.resolve4('localhost')).toThrow(NetworkGuardError);
+    expect(() => modules.dns.Resolver.prototype.resolve4('localhost')).toThrow(NetworkGuardError);
+    expect(() => modules.dns.promises.Resolver.prototype.resolve6('::1')).toThrow(NetworkGuardError);
+    expect(() => modules.dns.lookup('localhost', () => {})).not.toThrow();
+    expect(modules.calls.lookup).toHaveLength(1);
+  });
+
+  it('refuses the Resolver classes\' resolve methods for a non-loopback name', () => {
+    const modules = fakeModules();
+    installNetworkGuard(modules);
+    expect(() => modules.dns.Resolver.prototype.resolve4('example.com')).toThrow(NetworkGuardError);
+    expect(() => modules.dns.promises.Resolver.prototype.resolve4('example.com')).toThrow(NetworkGuardError);
+  });
+
+  it('refuses a dgram send and connect to a non-loopback address', () => {
+    const modules = fakeModules();
+    installNetworkGuard(modules);
+    expect(() => modules.dgram.Socket.prototype.send('payload', 9, '192.0.2.1')).toThrow(NetworkGuardError);
+    expect(() => modules.dgram.Socket.prototype.connect(9, '192.0.2.1')).toThrow(NetworkGuardError);
+  });
+
+  // A connected socket sends with no port and no address (Node's dgram docs), so its message is
+  // the only argument and must never be read as a destination; the offset form carries the
+  // address fifth, after the port.
+  it('reads the dgram destination from the argument Node uses, never from the message', () => {
+    const modules = fakeModules();
+    installNetworkGuard(modules);
+    expect(() => modules.dgram.Socket.prototype.send('a string payload')).not.toThrow();
+    expect(() => modules.dgram.Socket.prototype.send('a string payload', () => {})).not.toThrow();
+    expect(modules.calls.send).toHaveLength(2);
+    expect(() => modules.dgram.Socket.prototype.send('payload', 0, 7, 9, '192.0.2.1')).toThrow(NetworkGuardError);
+    expect(() => modules.dgram.Socket.prototype.send('payload', 0, 7, 9, '192.0.2.1', () => {})).toThrow(
+      NetworkGuardError,
+    );
+    expect(() => modules.dgram.Socket.prototype.send('payload', 9, '192.0.2.1', () => {})).toThrow(NetworkGuardError);
+    expect(modules.calls.send).toHaveLength(2);
+  });
+
+  it('is idempotent: installing twice wraps only once', () => {
+    const modules = fakeModules();
+    installNetworkGuard(modules);
+    const wrappedOnce = modules.net.Socket.prototype.connect;
+    installNetworkGuard(modules);
+    expect(modules.net.Socket.prototype.connect).toBe(wrappedOnce);
+  });
+
+  it('never lets a planted unit case reach a real connection (fakes only record calls)', () => {
+    const modules = fakeModules();
+    installNetworkGuard(modules);
+    modules.net.Socket.prototype.connect({ host: '127.0.0.1', port: 9 });
+    expect(modules.calls.connect).toHaveLength(1);
+  });
+});
+
+// The AWS SDK's Node handler sends through http and https, and undici's fetch through its own
+// connector; both end in the patched socket connect. Each case gives up after two seconds with an
+// error that is not a NetworkGuardError, so a missing guard fails the test instead of hanging it.
+describe('the real request stacks a later SDK call would take', () => {
+  function firstError(start: (settle: (error: unknown) => void) => void): Promise<unknown> {
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => resolve(new Error('no refusal within 2s: the request reached the network')), 2000);
+      const settle = (error: unknown) => {
+        clearTimeout(timer);
+        resolve(error);
+      };
+      try {
+        start(settle);
+      } catch (error) {
+        settle(error);
+      }
+    });
+  }
+
+  it('refuses an http request to a non-loopback address', async () => {
+    const error = await firstError((settle) => {
+      const request = http.get({ host: '192.0.2.1', port: 9, path: '/' });
+      request.on('error', settle);
+    });
+    expect((error as Error).name).toBe('NetworkGuardError');
+  });
+
+  it('refuses a tls connection to a non-loopback address', async () => {
+    const error = await firstError((settle) => {
+      const socket = tls.connect({ host: '192.0.2.1', port: 9, servername: 'example.com' });
+      socket.on('error', settle);
+    });
+    expect((error as Error).name).toBe('NetworkGuardError');
+  });
+
+  // Port 8080, not 9: the fetch standard's bad-port list blocks 9 before any socket opens, which
+  // would pass this case without the guard ever running.
+  it('refuses a fetch to a non-loopback address, with the guard error as the cause', async () => {
+    const error = await firstError((settle) => {
+      fetch('http://192.0.2.1:8080/', { signal: AbortSignal.timeout(2000) }).then(
+        () => settle(new Error('fetch resolved: the request reached the network')),
+        settle,
+      );
+    });
+    expect((error as { cause?: Error }).cause?.name).toBe('NetworkGuardError');
+  });
+});
+
+describe('planted failures (AC-4): the same assertion run against a no-op fails', () => {
+  it('a no-op credential strip leaves the credentials in place', () => {
+    expect(() => expectCredentialsStripped(() => {})).toThrow();
+  });
+
+  it('a no-op network guard never refuses the connection', () => {
+    expect(() => expectConnectRefused(() => {})).toThrow();
+  });
+});

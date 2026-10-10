@@ -1,0 +1,62 @@
+{
+  "provenance": "doc-derived",
+  "source": "https://docs.aws.amazon.com/ses/latest/APIReference-V2/API_GetEmailIdentity.html, https://docs.aws.amazon.com/ses/latest/APIReference-V2/API_ListConfigurationSets.html and https://docs.aws.amazon.com/ses/latest/APIReference-V2/API_GetConfigurationSetEventDestinations.html",
+  "note": "Port-level answers: the Region's configuration set names, an identity's default configuration set name (absent when it has none) and each set's destinations reduced to name, enabled, eventBridge and matchingEventTypes. The set list names the three lane-map sets, no identity defaults to a lane-map set, and fothering-bulk has one enabled EventBridge destination that covers all six event types.",
+  "recordings": [
+    {
+      "operation": "ses.listEmailIdentities",
+      "request": null,
+      "response": ["example.com", "example.org"]
+    },
+    {
+      "operation": "ses.listConfigurationSets",
+      "request": null,
+      "response": ["fothering-transactional", "fothering-bulk", "fothering-alerts"]
+    },
+    {
+      "operation": "ses.getEmailIdentity",
+      "request": "example.com",
+      "response": "fothering-default"
+    },
+    {
+      "operation": "ses.getEmailIdentity",
+      "request": "example.org"
+    },
+    {
+      "operation": "ses.getConfigurationSetEventDestinations",
+      "request": "fothering-transactional",
+      "response": [
+        {
+          "name": "to-eventbridge",
+          "enabled": true,
+          "eventBridge": true,
+          "matchingEventTypes": ["SEND", "REJECT", "BOUNCE", "COMPLAINT", "DELIVERY", "DELIVERY_DELAY"]
+        }
+      ]
+    },
+    {
+      "operation": "ses.getConfigurationSetEventDestinations",
+      "request": "fothering-bulk",
+      "response": [
+        {
+          "name": "to-eventbridge",
+          "enabled": true,
+          "eventBridge": true,
+          "matchingEventTypes": ["SEND", "REJECT", "BOUNCE", "COMPLAINT", "DELIVERY", "DELIVERY_DELAY", "RENDERING_FAILURE"]
+        }
+      ]
+    },
+    {
+      "operation": "ses.getConfigurationSetEventDestinations",
+      "request": "fothering-alerts",
+      "response": [
+        {
+          "name": "to-eventbridge",
+          "enabled": true,
+          "eventBridge": true,
+          "matchingEventTypes": ["SEND", "REJECT", "BOUNCE", "COMPLAINT", "DELIVERY", "DELIVERY_DELAY"]
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,21 @@
+# Every text file is stored and checked out with LF endings, whatever core.autocrlf a clone
+# carries. Without this a Windows checkout with autocrlf=true writes CRLF, and a script that
+# reads its own source or a fixture byte for byte sees a different file than CI does.
+* text=auto eol=lf
+
+# Binary formats the site and docs may add. Git never rewrites their line endings or diffs them
+# as text.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.avif binary
+*.ico binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.otf binary
+*.pdf binary
+*.zip binary
+*.gz binary

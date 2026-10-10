@@ -1,13 +1,26 @@
 {
   "$schema": "https://unpkg.com/knip@6/schema.json",
   "ignore": [".git/**"],
+  "includeEntryExports": true,
+  "ignoreExportsUsedInFile": true,
+  "ignoreIssues": { "*.config.{ts,mjs}": ["exports"], "packages/functions/src/*/handler.ts": ["exports"] },
   "workspaces": {
     ".": {
-      "entry": ["verify-ship.mjs", "scripts/*.mjs", "vitest.config.ts", "eslint.config.mjs", "design/mockups/shared/*.js"],
-      "ignoreDependencies": ["@types/node", "fast-check", "schema-dts", "size-limit", "@size-limit/file", "@stryker-mutator/core", "@stryker-mutator/vitest-runner"]
+      "entry": ["verify-ship.mjs", "scripts/*.mjs", "vitest.config.ts", "vitest.stryker.config.ts", "eslint.config.mjs", "eslint.complexity.config.mjs", "design/mockups/shared/*.js"],
+      "ignoreDependencies": ["@types/node", "fast-check", "schema-dts", "size-limit", "@size-limit/file", "@stryker-mutator/core", "@stryker-mutator/vitest-runner", "aws-cdk"]
     },
     "packages/core": {
       "entry": ["src/mode.ts"]
+    },
+    "packages/providers": {},
+    "packages/functions": {
+      "entry": ["src/*/handler.ts"]
+    },
+    "packages/infra": {
+      "entry": ["src/app.ts", "src/*-cli.ts"]
+    },
+    "packages/agent": {
+      "entry": ["src/main.ts"]
     }
   }
 }
