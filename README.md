@@ -139,8 +139,11 @@ Each container caches the key set for 5 minutes, so a rotation is one secret wri
 
 Never change the key's generation settings in `packages/infra/src/ingest-stack.ts` (the template,
 the length or any character option) after the first deploy: CloudFormation writes a freshly
-generated value as a new secret version when they change, which replaces every rotated version and
-leaves every stored record under a key that no longer exists. A synth test pins them.
+generated value as a new secret version when they change. That version holds only a new `k1` and
+becomes the current one, so forget can no longer reach any stored record. The replaced key set
+survives as the secret's `AWSPREVIOUS` version until the secret changes again, and moving the
+`AWSCURRENT` label back to it (`aws secretsmanager update-secret-version-stage`) restores it. A
+synth test pins the settings.
 
 ## Layout
 

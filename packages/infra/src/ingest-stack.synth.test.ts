@@ -264,7 +264,8 @@ describe('IngestStack synth', () => {
   // The AWS::SecretsManager::Secret page says "Updating the GenerateSecretString property triggers
   // the creation of a new secret version." After a hand rotation the secret holds k2 and a moved
   // current, so any change to this block, an added setting included, would make the next deploy write
-  // a fresh k1-only value over it and leave every stored hash under a key that no longer exists.
+  // a fresh k1-only value as the current version, and every stored hash would sit under a key the
+  // functions no longer read (the old value survives only as AWSPREVIOUS, until the next change).
   // Compared whole with toEqual, since the matcher above lets an added key through.
   it('pins the address key generation settings exactly, so no deploy after the first replaces the key', () => {
     const [secret] = Object.values(resourcesOfType(stacks.ingest, 'AWS::SecretsManager::Secret'));
