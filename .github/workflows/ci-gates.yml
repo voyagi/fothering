@@ -11,7 +11,9 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
   gate:
-    runs-on: ubuntu-latest
+    # Pinned rather than ubuntu-latest, which moves to Ubuntu 26 from 2026-10-19: an image change
+    # then would alter the toolchain this gate measures nine days before the submission deadline.
+    runs-on: ubuntu-24.04
     steps:
       # Actions are pinned to commit SHAs because tags can be moved; the comment names the tag.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
