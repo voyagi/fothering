@@ -140,12 +140,17 @@ function bareWithoutSpaceAtTheAt(bare: string): string {
   return `${bare.slice(0, atIndex).trimEnd()}@${bare.slice(atIndex + 1).trimStart()}`;
 }
 
+// What a mail client may show as an at sign in a display name without a plain '@' being there: an
+// RFC 2047 encoded word, which it decodes and this module never does, or a full-width or small '@'.
+const AT_SIGN_LOOKALIKE = /=\?[^?\s]*\?[BbQq]\?|[＠﹫]/;
+
 // A forget request names one person, and normalizeAddress reads the LAST bracketed address of a
 // field, so "Jane <jane@...>, Bob <bob@...>" would reach Bob for a request about Jane. Outside
 // quoted strings and comments, one mailbox holds no comma or semicolon (the list separators), at
 // most one '<', nothing after the '>' that closes it, no '@' in a display name unless it quotes the
-// bracketed address itself, and, written bare, no whitespace except beside its last '@', which
-// normalizeAddress trims from each side (so "jane(x)@..." reads as Jane).
+// bracketed address itself, nothing there that may show as one, and, written bare, no whitespace
+// except beside its last '@', which normalizeAddress trims from each side (so "jane(x)@..." reads as
+// Jane).
 export function holdsOneMailbox(raw: string): boolean {
   const trimmed = withoutComments(raw).trim();
   const positions = unquotedPositions(trimmed);
@@ -166,6 +171,9 @@ export function holdsOneMailbox(raw: string): boolean {
   if (displayName.includes('@') && !sameAddress(normalizeAddress(withoutQuotes(displayName)), normalizeAddress(trimmed.slice(open)))) {
     return false;
   }
+  // '=?utf-8?Q?bob=40...?= <jane@...>' shows Bob's address as the name and would delete Jane's records,
+  // and what an encoded word decodes to is never compared here, so it is refused whatever it holds.
+  if (AT_SIGN_LOOKALIKE.test(displayName)) return false;
   // The '>' that closes the '<' is the first unquoted one after it, and what follows it is read in
   // the whole field, quoted strings included: normalizeAddress takes the last '>' anywhere, so a
   // quoted '>' or a second '>' after the address would move the end it reads. No '>' refuses too.

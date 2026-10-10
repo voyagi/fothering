@@ -53,7 +53,9 @@ it, or an `address` holding more than one address: a list separated by commas, s
 spaces, or a second address beside a bracketed one. Read as one address, such a list would reach
 the last bracketed address in it, a different person. A display name that holds an `@` counts as
 that second address too, and is refused even when it repeats the bracketed one, unless it is that
-same address in quotes. Pass one address per run; the bare address alone, such as
+same address in quotes. So is a display name holding an encoded word (text between `=?` and `?=`,
+as a raw mail header carries a non-ASCII name) or a full-width or small at sign, since a mail
+client can show either as an address. Pass one address per run; the bare address alone, such as
 `jane@example.org`, always reads as itself. The command's own
 output then shows a `FunctionError` field, and `result.json` holds the error, whose message reads:
 

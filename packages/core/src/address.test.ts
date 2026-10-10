@@ -237,6 +237,12 @@ describe('holdsOneMailbox', () => {
     ['a quoted display name holding a different address', '"jane@example.com" <bob@example.org>'],
     ['a quoted display name holding the same local part at another domain', '"jane@example.org" <jane@example.com>'],
     ['a quoted display name holding an address and more text', '"jane@example.com, Bob" <bob@example.org>'],
+    // A mail client decodes an encoded word and draws a full-width or small @ as an at sign, so each of
+    // these shows bob@example.org as the name while the bracketed address is Jane's.
+    ['an encoded word as the display name', '=?utf-8?Q?bob=40example.org?= <jane@example.com>'],
+    ['a quoted encoded word as the display name', '"=?utf-8?B?Ym9iQGV4YW1wbGUub3Jn?=" <jane@example.com>'],
+    ['a display name holding a full-width @', 'bob＠example.org <jane@example.com>'],
+    ['a quoted display name holding a small @', '"bob﹫example.org" <jane@example.com>'],
     ['a list behind a quote that never closes', '"Jane, <jane@example.com>, <bob@example.org>'],
     ['a second address after a comment', 'jane@example.com (Jane) bob@example.org'],
     ['a list whose first address carries a comment', 'jane@example.com (Jane), bob@example.org'],
