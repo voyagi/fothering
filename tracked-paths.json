@@ -2,6 +2,7 @@
   "exact": [
     ".dependency-cruiser.cjs",
     ".env.example",
+    ".gitattributes",
     ".gitignore",
     ".jscpd.json",
     ".trivyignore",
