@@ -5,6 +5,7 @@ import { propertySeed } from './test/property-seed.js';
 import {
   hmacUnderEveryVersion,
   holdsOneMailbox,
+  NoActiveKeyVersionError,
   normalizeAddress,
   pseudonymizeRecipient,
   selectKeyVersion,
@@ -346,6 +347,13 @@ describe('key version selection by send time (D-34)', () => {
     const sendInsideMarginMs = ROTATION_MS - 5 * 60 * 1000;
     expect(selectKeyVersion(keySet, sendInsideMarginMs).id).toBe('k1');
   });
+
+  it.each([Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY])(
+    'refuses the send time %s instead of picking the newest version',
+    (sendTimeMs) => {
+      expect(() => selectKeyVersion(keySet, sendTimeMs)).toThrow(NoActiveKeyVersionError);
+    },
+  );
 
   it('hashes under every retained version, newest first, matching what pseudonymizeRecipient gives at the send time of each version', () => {
     const every = hmacUnderEveryVersion('jane@example.com', keySet);

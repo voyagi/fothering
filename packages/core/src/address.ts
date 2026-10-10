@@ -30,6 +30,9 @@ export class NoActiveKeyVersionError extends Error {
 // D-34: the key version is chosen by send time, not processing time, so a retry after a
 // rotation recomputes the same HMAC and the same record key.
 export function selectKeyVersion(keySet: AddressKeySet, sendTimeMs: number): AddressKeyVersion {
+  // Every comparison with NaN is false, so the loop below would skip no version and pick the
+  // newest, one possibly not active yet: no send time means no version can be called active.
+  if (!Number.isFinite(sendTimeMs)) throw new NoActiveKeyVersionError(sendTimeMs);
   let selected: AddressKeyVersion | undefined;
   for (const version of keySet.versions) {
     if (version.activeFromMs > sendTimeMs) continue;
