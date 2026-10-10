@@ -231,6 +231,8 @@ describe('holdsOneMailbox', () => {
     ['text after the closing bracket', 'Jane <jane@example.com> bob@example.org'],
     ['an address as the display name before a bracketed one', 'jane@example.com <bob@example.org>'],
     ['an address as the display name with no space before the bracket', 'jane@example.com<bob@example.org>'],
+    // docs/forget-one-recipient.md tells the operator so: only a quoted repeat is accepted.
+    ['an unquoted display name repeating the bracketed address', 'jane@example.com <jane@example.com>'],
     // A mail client shows the quoted name, so this reads as Jane and would delete Bob's records.
     ['a quoted display name holding a different address', '"jane@example.com" <bob@example.org>'],
     ['a quoted display name holding the same local part at another domain', '"jane@example.org" <jane@example.com>'],

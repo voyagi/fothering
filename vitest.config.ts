@@ -18,9 +18,11 @@ export default defineConfig({
       include: ['packages/*/src/**/*.ts'],
       exclude: ['**/*.test.ts', 'packages/*/src/test/**', '**/*.d.ts'],
       reporter: ['text-summary', 'json-summary'],
-      // Floors two points under the 2026-10-10 measurement (statements 96.91, branches 93.71,
-      // functions 95.68, lines 97.05 on Windows), so a real drop fails the gate while the
-      // platform-specific skips between Windows and CI do not.
+      // Floors about two points under the 2026-10-10 measurement at ac13b87 (1.91 to 2.71 points:
+      // statements 96.91, branches 93.71, functions 95.68, lines 97.05; Windows, Node 24), so a real
+      // drop fails the gate. CI runs Node 22, measured the same day at 19ffc0b on Windows: 96.79,
+      // 93.69, 95.70, 96.90. The suite's one platform skip runs a test only on Linux, and that test
+      // exercises scripts/, which coverage does not count.
       thresholds: {
         statements: 95,
         branches: 91,

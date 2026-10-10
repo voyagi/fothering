@@ -51,7 +51,10 @@ reads zero, so check the spelling before taking a zero as the answer.
 A payload with no non-empty `address` field fails, and so does one carrying any other field beside
 it, or an `address` holding more than one address: a list separated by commas, semicolons or
 spaces, or a second address beside a bracketed one. Read as one address, such a list would reach
-the last bracketed address in it, a different person. Pass one address per run. The command's own
+the last bracketed address in it, a different person. A display name that holds an `@` counts as
+that second address too, and is refused even when it repeats the bracketed one, unless it is that
+same address in quotes. Pass one address per run; the bare address alone, such as
+`jane@example.org`, always reads as itself. The command's own
 output then shows a `FunctionError` field, and `result.json` holds the error, whose message reads:
 
 ```text
