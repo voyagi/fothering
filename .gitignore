@@ -18,3 +18,6 @@ cdk.out/
 /reports/
 /.knip-report.json
 /trivy-*.json
+# Folder metadata macOS and Windows Explorer write into any folder they open, at any depth.
+.DS_Store
+Thumbs.db
