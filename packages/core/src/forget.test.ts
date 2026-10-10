@@ -3,7 +3,7 @@ import { createFixtureEventStore } from '@fothering/providers/fixtures/ingest-po
 import type { EventStorePort } from '@fothering/providers/port-types';
 import { hmacUnderEveryVersion, pseudonymizeRecipient, type AddressKeySet } from './address.js';
 import { expiresAtFor, recordKey, type EventRecord, type RecordKey, type SesEventType } from './records.js';
-import { forgetRecipient } from './forget.js';
+import { forgetRecipient, ForgetUsageError } from './forget.js';
 
 const T_ROTATION = 1_700_000_000_000;
 const KEY_SET: AddressKeySet = {
@@ -345,4 +345,42 @@ describe('forgetRecipient key handling', () => {
     expect(report.remaining).toBe(0);
     expect(calls.length).toBeLessThanOrEqual(1);
   });
+});
+
+describe('forgetRecipient address guard', () => {
+  // The handler's schema refuses these too, but a caller that skips the handler must not get past
+  // forgetRecipient with them: a list is read as its LAST bracketed address, so a request about Jane
+  // would delete Bob's records, and a blank address hashes to whatever records carry the empty input.
+  it.each(['Jane <jane@example.com>, Bob <bob@example.com>', 'jane@example.com; bob@example.com', '', '   '])(
+    'refuses %j before any record is searched or deleted',
+    async (address) => {
+      const store = createFixtureEventStore();
+      await seedTarget(store, 'jane@example.com');
+      const bob = pseudonymizeRecipient('bob@example.com', KEY_SET, 0);
+      await store.putIfAbsent(buildRecord({ configurationSet: 'fothering-bulk', eventType: 'Bounce', bucketStartMs: 0, kind: 'outcome', pseudonym: bob }));
+      let queries = 0;
+      let deletes = 0;
+      const countingStore: EventStorePort = {
+        ...store,
+        queryByRecipient: async (hmac) => {
+          queries += 1;
+          return store.queryByRecipient(hmac);
+        },
+        deleteRecord: async (key) => {
+          deletes += 1;
+          return store.deleteRecord(key);
+        },
+      };
+      const { sleep } = fakeSleep();
+
+      await expect(forgetRecipient({ address, keySet: KEY_SET, store: countingStore, sleep })).rejects.toBeInstanceOf(ForgetUsageError);
+
+      expect(queries).toBe(0);
+      expect(deletes).toBe(0);
+      await expect(store.queryByRecipient(bob.recipientHmac)).resolves.toHaveLength(1);
+      for (const { recipientHmac } of hmacUnderEveryVersion('jane@example.com', KEY_SET)) {
+        await expect(store.queryByRecipient(recipientHmac)).resolves.not.toHaveLength(0);
+      }
+    },
+  );
 });

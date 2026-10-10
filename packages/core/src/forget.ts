@@ -43,7 +43,8 @@ export const FORGET_USAGE = 'usage: pass a JSON payload holding one non-empty "a
 // command does not read is a request it would silently not carry out: a second address field would
 // be dropped while the report reads like a run that covered both. One mailbox, because a list in
 // the one field would be read as its last bracketed address and delete someone else's records.
-export const forgetPayloadSchema = z.strictObject({ address: z.string().trim().min(1).refine(holdsOneMailbox) });
+const forgetAddressSchema = z.string().trim().min(1).refine(holdsOneMailbox);
+export const forgetPayloadSchema = z.strictObject({ address: forgetAddressSchema });
 
 export class ForgetUsageError extends Error {
   constructor() {
@@ -94,6 +95,9 @@ async function deleteMatches(
 // eventually consistent fashion (Pitfall 10), so `remaining` is a read at the last re-query, never
 // proof that nothing is left; a record written for an event still in flight needs a second run.
 export async function forgetRecipient(options: ForgetRecipientOptions): Promise<ForgetReport> {
+  // The handler's payload schema applies this rule too, but a caller that skips the handler (a
+  // console, a script) must meet it here: a list would reach its last bracketed address.
+  if (!forgetAddressSchema.safeParse(options.address).success) throw new ForgetUsageError();
   // No version means no hash and no search, so 0 deleted would be a report of nothing looked at.
   if (options.keySet.versions.length === 0) {
     throw new Error('the key set holds no key version, so no record could be searched');
