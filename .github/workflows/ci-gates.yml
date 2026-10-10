@@ -14,14 +14,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       # Actions are pinned to commit SHAs because tags can be moved; the comment names the tag.
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # The identity check reads every commit and refuses a shallow clone.
           fetch-depth: 0
           # No step after this one can push with the checkout token, so a compromised install
           # script has nothing to steal that reaches the repository.
           persist-credentials: false
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 22
           cache: npm
@@ -38,14 +38,14 @@ jobs:
       # built, so an unmerged pull request never lands a new HIGH or CRITICAL finding unnoticed and
       # nothing this step reads was produced by a later step. The action has no input for that
       # flag; its README says such flags go in as TRIVY_* variables. list-all-pkgs makes the report
-      # list what it scanned, and `version` pins trivy itself: the action's default, 0.69.3, drops a
-      # lockfile whose license field is a list, which 0.74.0 reads (GHSA-69fq-xp46-6x23 names
-      # 0.69.4 as the one malicious release). `trivy-config: /dev/null` keeps a trivy.yaml in this
+      # list what it scanned, and `version` pins trivy itself rather than the action's default
+      # (v0.70.0 in v0.36.0): 0.69.3, the default before it, dropped a lockfile whose license field
+      # is a list, which 0.74.0 reads (GHSA-69fq-xp46-6x23 names 0.69.4 as the one malicious release). `trivy-config: /dev/null` keeps a trivy.yaml in this
       # repository out of the verdict: trivy reads that file from the folder it runs in, and the
       # action passes on only the inputs that differ from its defaults, so a `severity: [LOW]`
       # there would turn this verdict green over HIGH findings. .trivyignore still applies, one
       # advisory per line.
-      - uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # v0.35.0
+      - uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         env:
           TRIVY_DB_REPOSITORY: mirror.gcr.io/aquasec/trivy-db:2,ghcr.io/aquasecurity/trivy-db:2
           TRIVY_INCLUDE_DEV_DEPS: 'true'
@@ -98,7 +98,7 @@ jobs:
       # vulnerability verdict, which can stay red until an upstream fix ships, does not switch the
       # census off with it.
       - if: ${{ !cancelled() && github.event_name == 'push' }}
-        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # v0.35.0
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         env:
           TRIVY_INCLUDE_DEV_DEPS: 'true'
         with:
@@ -124,7 +124,7 @@ jobs:
           echo "packages listed: $scanned of $locked locked in package-lock.json"
           [ $((scanned * 10)) -ge $((locked * 9)) ] || { echo 'trivy listed too few of the locked packages - refusing to read that as clean. Causes seen so far: TRIVY_INCLUDE_DEV_DEPS missing from the scan step, or a trivy that cannot parse the lockfile (0.69.3 on a license list)'; exit 1; }
       - if: ${{ !cancelled() && github.event_name == 'push' }}
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: license-census
           path: trivy-licenses.json
