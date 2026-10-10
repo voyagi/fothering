@@ -14,6 +14,7 @@
   ],
   "scripts": {
     "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
     "lint": "eslint .",
     "gate:types": "tsc --noEmit",
     "gate:complexity": "eslint --config eslint.complexity.config.mjs .",
@@ -38,6 +39,7 @@
     "@stryker-mutator/core": "10.0.0",
     "@stryker-mutator/vitest-runner": "10.0.0",
     "@types/node": "22.20.2",
+    "@vitest/coverage-v8": "4.1.11",
     "@vitest/eslint-plugin": "1.6.27",
     "aws-cdk": "2.1142.0",
     "dependency-cruiser": "18.2.0",
