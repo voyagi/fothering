@@ -5,7 +5,7 @@ import { Rule } from 'aws-cdk-lib/aws-events';
 import { LambdaFunction as LambdaFunctionTarget } from 'aws-cdk-lib/aws-events-targets';
 import { Effect, PolicyStatement, Role, ServicePrincipal } from 'aws-cdk-lib/aws-iam';
 import { Architecture, Code, Function as LambdaFunction, Runtime } from 'aws-cdk-lib/aws-lambda';
-import { LogGroup, RetentionDays } from 'aws-cdk-lib/aws-logs';
+import { FilterPattern, LogGroup, MetricFilter, RetentionDays } from 'aws-cdk-lib/aws-logs';
 import { Secret } from 'aws-cdk-lib/aws-secretsmanager';
 import { Queue, QueueEncryption } from 'aws-cdk-lib/aws-sqs';
 import type { Construct } from 'constructs';
@@ -150,6 +150,20 @@ export class IngestStack extends Stack {
       'DeadLetterDepthAlarm',
       queue.metricApproximateNumberOfMessagesVisible({ period: ALARM_PERIOD, statistic: 'Maximum' }),
     );
+    // A schema failure or an unstorable send time is logged at error level and the handler returns
+    // without throwing, so none of the three alarms above counts it and the event is gone: an SES
+    // format change that failed every event would leave them all green. This one counts every
+    // error-level line, so a failure that also throws shows here and under the errors alarm. The
+    // handler writes its JSON lines straight to stdout, which Lambda's Node.js logging page leaves
+    // unprefixed (it prefixes console output), so the filter reads each line's own level field.
+    const errorLines = new MetricFilter(this, 'IngestErrorLines', {
+      logGroup: ingestRole.logGroup,
+      filterPattern: FilterPattern.stringValue('$.level', '=', 'error'),
+      metricNamespace: 'Fothering',
+      metricName: 'IngestErrorLines',
+      metricValue: '1',
+    });
+    this.alarmOnAny('IngestErrorLinesAlarm', errorLines.metric({ period: ALARM_PERIOD, statistic: 'Sum' }));
 
     new CfnOutput(this, 'ForgetFunctionName', { value: forgetFunction.functionName });
   }

@@ -112,9 +112,11 @@ answers with the set's settings only when SES holds it in `eu-central-1`:
 aws sesv2 get-configuration-set --region eu-central-1 --configuration-set-name <a set from lanes.json>
 ```
 
-The ingest stack holds three CloudWatch alarms: ingest function errors, ingest events Lambda
-dropped, and messages waiting in the dead-letter queue. None of them notifies anyone yet, so check
-their state in the CloudWatch console in `eu-central-1` after sending.
+The ingest stack holds four CloudWatch alarms: ingest function errors, ingest events Lambda
+dropped, messages waiting in the dead-letter queue, and error lines in the ingest log (an event that
+fails the SES schema is logged and dropped without a function error, so only this one sees it).
+None of them notifies anyone yet, so check their state in the CloudWatch console in `eu-central-1`
+after sending.
 
 ## Forget one recipient
 

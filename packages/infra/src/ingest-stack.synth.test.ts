@@ -205,8 +205,33 @@ describe('IngestStack synth', () => {
     });
   });
 
-  it('holds exactly three alarms and none of them acts on anything', () => {
-    stacks.ingest.resourceCountIs('AWS::CloudWatch::Alarm', 3);
+  // A schema failure returns without throwing, so the three alarms above never see it: only a
+  // filter on the ingest log group's error-level lines does. Compared whole, like the alarms.
+  it('counts every error-level line in the ingest log group, where a dropped unparseable event is logged', () => {
+    const filters = Object.values(resourcesOfType(stacks.ingest, 'AWS::Logs::MetricFilter'));
+    expect(filters).toHaveLength(1);
+    expect(filters[0]?.Properties).toEqual({
+      LogGroupName: { Ref: ingestFunction().properties.LoggingConfig.LogGroup.Ref },
+      FilterPattern: '{ $.level = "error" }',
+      MetricTransformations: [{ MetricNamespace: 'Fothering', MetricName: 'IngestErrorLines', MetricValue: '1' }],
+    });
+  });
+
+  it('alarms on any ingest error-level line in a 5-minute period, since a dropped unparseable event throws no error', () => {
+    expect(alarmProperties('IngestErrorLines')).toEqual({
+      Namespace: 'Fothering',
+      MetricName: 'IngestErrorLines',
+      Statistic: 'Sum',
+      Period: 300,
+      EvaluationPeriods: 1,
+      Threshold: 1,
+      ComparisonOperator: 'GreaterThanOrEqualToThreshold',
+      TreatMissingData: 'notBreaching',
+    });
+  });
+
+  it('holds exactly four alarms and none of them acts on anything', () => {
+    stacks.ingest.resourceCountIs('AWS::CloudWatch::Alarm', 4);
     for (const alarm of Object.values(resourcesOfType(stacks.ingest, 'AWS::CloudWatch::Alarm'))) {
       expect(alarm.Properties?.AlarmActions).toBeUndefined();
       expect(alarm.Properties?.OKActions).toBeUndefined();
@@ -276,6 +301,7 @@ describe('IngestStack synth', () => {
       'AWS::CloudWatch::Alarm',
       'AWS::CloudWatch::Alarm',
       'AWS::CloudWatch::Alarm',
+      'AWS::CloudWatch::Alarm',
       'AWS::DynamoDB::Table',
       'AWS::Events::Rule',
       'AWS::IAM::Policy',
@@ -288,6 +314,7 @@ describe('IngestStack synth', () => {
       'AWS::Lambda::Permission',
       'AWS::Logs::LogGroup',
       'AWS::Logs::LogGroup',
+      'AWS::Logs::MetricFilter',
       'AWS::SQS::Queue',
       'AWS::SecretsManager::Secret',
     ]);
