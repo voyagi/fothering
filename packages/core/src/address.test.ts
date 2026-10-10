@@ -187,7 +187,7 @@ describe('normalizeAddress with RFC 5322 comments', () => {
 // field, so a list must be refused before any hash is taken: "Jane <jane@...>, Bob <bob@...>" would
 // otherwise reach Bob for a request about Jane.
 describe('holdsOneMailbox', () => {
-  it.each([
+  const accepted = [
     ['a bare address', 'jane@example.com'],
     ['a display-name form', 'Jane Doe <jane@example.com>'],
     ['a display name quoting a comma', '"Doe, Jane" <jane@example.com>'],
@@ -205,8 +205,16 @@ describe('holdsOneMailbox', () => {
     ['a bare address with a comment after the @', 'jane@(x)example.com'],
     ['a bare address with whitespace on either side of the @', 'jane @ example.com'],
     ['a quoted display name holding an @', '"jane@example.com" <jane@example.com>'],
-  ])('accepts %s', (_label, raw) => {
+  ] as const;
+
+  it.each(accepted)('accepts %s', (_label, raw) => {
     expect(holdsOneMailbox(raw)).toBe(true);
+  });
+
+  // What the gate lets through is what forget hashes, so normalizeAddress must read each accepted
+  // field as the address the gate judged, not an end moved by text after it.
+  it.each(accepted)('reads %s as an address at example.com', (_label, raw) => {
+    expect(normalizeAddress(raw)?.domain).toBe('example.com');
   });
 
   it.each([
@@ -230,6 +238,10 @@ describe('holdsOneMailbox', () => {
     ['a space inside the local part, away from the @', 'jane doe@example.com'],
     ['a space inside the domain, away from the @', 'jane@example .com'],
     ['two words and no @', 'Jane Doe'],
+    ['a quoted string holding a > after the closing bracket', '<jane@example.com> "x>"'],
+    ['a quoted string after the closing bracket', '<jane@example.com> "x"'],
+    ['a second > after the closing bracket', '<jane@example.com>>'],
+    ['a quote that never closes after the closing bracket', '<jane@example.com> "x>'],
   ])('refuses %s', (_label, raw) => {
     expect(holdsOneMailbox(raw)).toBe(false);
   });

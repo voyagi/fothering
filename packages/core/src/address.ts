@@ -128,9 +128,8 @@ function bareWithoutSpaceAtTheAt(bare: string): string {
 // its last '@', which normalizeAddress trims from each side (so "jane(x)@..." reads as Jane).
 export function holdsOneMailbox(raw: string): boolean {
   const trimmed = withoutComments(raw).trim();
-  const outside = unquotedPositions(trimmed)
-    .map((index) => trimmed[index])
-    .join('');
+  const positions = unquotedPositions(trimmed);
+  const outside = positions.map((index) => trimmed[index]).join('');
   if (/[,;]/.test(outside)) return false;
   const opens = outside.split('<').length - 1;
   if (opens === 0) return !/\s/.test(bareWithoutSpaceAtTheAt(outside));
@@ -139,8 +138,12 @@ export function holdsOneMailbox(raw: string): boolean {
   // that does is a second address ("jane@... <bob@...>"), and the bracketed one is a different person.
   // A quoted display name was taken out of outside above, so '"jane@..." <jane@...>' still passes.
   if (outside.slice(0, outside.indexOf('<')).includes('@')) return false;
-  // With no '>' at all the slice is the whole field, which holds the '<', so it is refused too.
-  return outside.slice(outside.lastIndexOf('>') + 1).trim() === '';
+  // The '>' that closes the '<' is the first unquoted one after it, and what follows it is read in
+  // the whole field, quoted strings included: normalizeAddress takes the last '>' anywhere, so a
+  // quoted '>' or a second '>' after the address would move the end it reads. No '>' refuses too.
+  const open = positions.find((index) => trimmed[index] === '<') ?? -1;
+  const close = positions.find((index) => index > open && trimmed[index] === '>');
+  return close !== undefined && trimmed.slice(close + 1).trim() === '';
 }
 
 // D-14: take out comments, trim, take the address out of an angle-bracket display-name form if
