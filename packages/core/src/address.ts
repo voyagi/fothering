@@ -168,9 +168,7 @@ export function holdsOneMailbox(raw: string): boolean {
   // '"jane@..." <jane@...>': a mail client shows the quoted text, so '"jane@..." <bob@...>' reads as
   // Jane and would delete Bob's records.
   const displayName = trimmed.slice(0, open);
-  if (displayName.includes('@') && !sameAddress(normalizeAddress(withoutQuotes(displayName)), normalizeAddress(trimmed.slice(open)))) {
-    return false;
-  }
+  if (displayName.includes('@') && !namesOnlyTheAddress(displayName, trimmed.slice(open))) return false;
   // '=?utf-8?Q?bob=40...?= <jane@...>' shows Bob's address as the name and would delete Jane's records,
   // and what an encoded word decodes to is never compared here, so it is refused whatever it holds.
   if (AT_SIGN_LOOKALIKE.test(displayName)) return false;
@@ -179,6 +177,15 @@ export function holdsOneMailbox(raw: string): boolean {
   // quoted '>' or a second '>' after the address would move the end it reads. No '>' refuses too.
   const close = positions.find((index) => index > open && trimmed[index] === '>');
   return close !== undefined && trimmed.slice(close + 1).trim() === '';
+}
+
+// A display name holding an '@' passes only when, unquoted and read on its own, it is one bare
+// address and the bracketed one: normalizeAddress reads the last bracketed form inside the name, so
+// '"bob@... <jane@...>" <jane@...>' would compare as Jane while a mail client shows Bob's address
+// first. A name holding no '<' or '>' is read by the bare branch, so this never recurses further.
+function namesOnlyTheAddress(displayName: string, angleAddr: string): boolean {
+  const name = withoutQuotes(displayName);
+  return !/[<>]/.test(name) && holdsOneMailbox(name) && sameAddress(normalizeAddress(name), normalizeAddress(angleAddr));
 }
 
 // Two readings name the same address only when both parsed and agree on both halves.

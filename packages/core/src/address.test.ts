@@ -243,6 +243,9 @@ describe('holdsOneMailbox', () => {
     ['a quoted encoded word as the display name', '"=?utf-8?B?Ym9iQGV4YW1wbGUub3Jn?=" <jane@example.com>'],
     ['a display name holding a full-width @', 'bob＠example.org <jane@example.com>'],
     ['a quoted display name holding a small @', '"bob﹫example.org" <jane@example.com>'],
+    // The name holds the bracketed address too, but a mail client shows Bob's address first.
+    ['a quoted display name holding a different address before the bracketed one', '"bob@example.org <jane@example.com>" <jane@example.com>'],
+    ['a quoted display name holding the bracketed address before a different one', '"<jane@example.com> bob@example.org" <jane@example.com>'],
     ['a list behind a quote that never closes', '"Jane, <jane@example.com>, <bob@example.org>'],
     ['a second address after a comment', 'jane@example.com (Jane) bob@example.org'],
     ['a list whose first address carries a comment', 'jane@example.com (Jane), bob@example.org'],
@@ -265,6 +268,15 @@ describe('holdsOneMailbox', () => {
       fc.property(fc.emailAddress(), (address) => {
         expect(holdsOneMailbox(address)).toBe(true);
         expect(holdsOneMailbox(`Some Name <${address}>`)).toBe(true);
+      }),
+      { seed: propertySeed() },
+    );
+  });
+
+  it('refuses a quoted display name holding a bracketed form, whichever two addresses it names (fixed seed)', () => {
+    fc.assert(
+      fc.property(fc.emailAddress(), fc.emailAddress(), (shown, bracketed) => {
+        expect(holdsOneMailbox(`"${shown} <${bracketed}>" <${bracketed}>`)).toBe(false);
       }),
       { seed: propertySeed() },
     );
