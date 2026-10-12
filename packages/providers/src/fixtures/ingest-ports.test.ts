@@ -9,17 +9,34 @@ import {
   expiresAtFor,
   type EventRecord,
 } from '@fothering/core/records';
-import { BUCKET_MS, bucketStartMs, countRecords } from '@fothering/core/buckets';
-import { findLane } from '@fothering/core/lanes';
+import { BUCKET_MS, bucketStartMs, countRecords, isCountedRecord } from '@fothering/core/buckets';
+import { REQUIRED_EVENT_TYPES, checkCloseability, type SesConfigurationFacts } from '@fothering/core/closeability';
+import { decideLane } from '@fothering/core/decision';
+import {
+  buildEvidenceRecord,
+  evidenceRecordSchema,
+  incidentIdFor,
+  incidentItemKey,
+  recordHash,
+  type EvidenceRecord,
+} from '@fothering/core/evidence-record';
+import { buildTagRows } from '@fothering/core/evidence-rows';
+import { findLane, parseLaneMap } from '@fothering/core/lanes';
 import { minimizeEvent } from '@fothering/core/minimize';
 import { parseSesEvent } from '@fothering/core/ses-events';
 import { selectKeyVersion, type AddressKeySet } from '@fothering/core/address';
+import { scenarioRecords, type LaneScenario } from '@fothering/core/test/event-arbitraries';
+import { LANE_RATIO_LABELS, LANE_SHARE_LABEL, laneSpikeVerdict, renderPercent } from '@fothering/core/verdicts';
+import { createWindowFold, spikeWindowFor, summarizeWindow } from '@fothering/core/window-fold';
+import lanesJson from '../../../../lanes.json' with { type: 'json' };
 import { DOC_EXAMPLE_LANE_MAP, loadSesEventFixture } from './ses-events/index.js';
 import {
   FixtureWriteError,
   createFixtureAddressKey,
   createFixtureDeadLetter,
+  createFixtureDecisionStore,
   createFixtureEventStore,
+  createFixtureTableState,
   TEST_ADDRESS_KEY_SET,
 } from './ingest-ports.js';
 
@@ -472,5 +489,117 @@ describe('the fixture ports behave like the conditional-write store and queue th
     };
     expect(selectKeyVersion(keySet, rotationMs - 1).id).toBe('k1');
     expect(selectKeyVersion(keySet, rotationMs).id).toBe('k2');
+  });
+});
+
+const LANES = parseLaneMap(lanesJson);
+const BULK = 'fothering-bulk';
+const TRACER_NOW_MS = Date.UTC(2026, 9, 11, 12, 2, 0);
+
+const ONE_BAD_BATCH: LaneScenario = {
+  configurationSet: BULK,
+  streamTag: 'newsletter',
+  callerIdentity: 'bulk-sender',
+  fromDomain: 'news.example.com',
+  groups: [
+    { bucketOffset: 0, count: 40, batch: 'import-0915', permanentBounces: 15 },
+    { bucketOffset: 1, count: 160, batch: 'import-0901' },
+  ],
+};
+
+const BULK_SES_FACTS: SesConfigurationFacts = {
+  configurationSets: new Set(LANES.lanes.map((lane) => lane.configurationSet)),
+  defaultConfigurationSets: new Set(),
+  eventDestinations: new Map([[BULK, [{ enabled: true, eventBridge: true, matchingEventTypes: [...REQUIRED_EVENT_TYPES] }]]]),
+};
+
+async function tracerRecord() {
+  const records = scenarioRecords(ONE_BAD_BATCH, TRACER_NOW_MS, LANES, TEST_ADDRESS_KEY_SET);
+  const table = createFixtureTableState();
+  const events = createFixtureEventStore({ pageSize: 2, store: table });
+  for (const record of records) expect(await events.putIfAbsent(record)).toBe('written');
+
+  const window = spikeWindowFor(TRACER_NOW_MS);
+  const fold = createWindowFold({ lane: BULK, window, nowMs: TRACER_NOW_MS });
+  const summary = summarizeWindow(await events.foldLane(BULK, window.fromBucketMs, window.toBucketMs, TRACER_NOW_MS, fold));
+  const spike = laneSpikeVerdict(summary.totals);
+  const rows = buildTagRows('batch', summary, spike);
+  const closeability = checkCloseability(BULK, { laneMap: LANES, observed: new Map([[BULK, summary.observed]]), ses: BULK_SES_FACTS });
+  const decision = decideLane({ spike, rows, configurationRows: [], closeability, coverageNoData: false, bound: null, otherSpikingLanes: [] });
+  const countable = records.filter(isCountedRecord).length;
+
+  const record = buildEvidenceRecord({
+    incidentId: incidentIdFor(BULK, bucketStartMs(TRACER_NOW_MS)),
+    lane: { configurationSet: BULK, lane: BULK },
+    window,
+    laneTotals: {
+      recipientSends: summary.totals.recipientSends,
+      permanentBounces: summary.totals.permanentBounces,
+      complaints: summary.totals.complaints,
+      hardBounceRatio: spike.hardBounceRatio,
+      complaintRatio: spike.complaintRatio,
+      verdict: spike.verdict,
+      triggers: [...spike.triggers],
+      label: { hardBounceRatio: LANE_RATIO_LABELS.hardBounce, complaintRatio: LANE_RATIO_LABELS.complaint },
+    },
+    share: { laneCountableEvents: countable, storedCountableEvents: countable, percent: renderPercent(countable, countable), label: LANE_SHARE_LABEL },
+    rows,
+    configurationRows: [],
+    isolation: 'confined',
+    decision: { ...decision, noData: false, bound: null, otherSpikingLanes: [], sharedCause: null },
+    question: null,
+    fix: null,
+    expiresAt: Math.floor(TRACER_NOW_MS / 1000) + RETENTION_SECONDS,
+  });
+  return { records, table, summary, spike, rows, closeability, decision, record };
+}
+
+describe('tracer: one bad import batch on fothering-bulk becomes an evidence record with one approved option', () => {
+  it('folds the stored batch page by page into a spike, a cause row, a closeable lane, an approval and a hashed record', async () => {
+    const { table, summary, spike, rows, closeability, decision, record } = await tracerRecord();
+
+    expect(spike.verdict).toBe('spike');
+    expect(spike.hardBounceRatio).toBe('7.50%');
+    expect(summary.totals.recipientSends).toBe(200);
+    expect(summary.totals.permanentBounces).toBe(15);
+    expect(Object.fromEntries(rows.map((row) => [row.value, row.verdict]))).toEqual({
+      'import-0915': 'cause',
+      'import-0901': 'ruled-out',
+    });
+    expect(closeability.state).toBe('closeable');
+    expect(decision.outcome).toBe('approved');
+
+    expect(record.approvedOptions).toHaveLength(1);
+    const [option] = record.approvedOptions;
+    expect(option?.optionId).toMatch(/^opt-[0-9a-f]{24}$/);
+    expect(option?.optionId).not.toContain(BULK);
+    expect(recordHash(record)).toBe(record.hash);
+
+    const decisions = createFixtureDecisionStore({ store: table });
+    const key = incidentItemKey(record.incidentId, 'EVIDENCE');
+    const item = { ...key, expiresAt: record.expiresAt, record };
+    expect(await decisions.putIfAbsent(item)).toBe('written');
+    expect(await decisions.putIfAbsent(item)).toBe('duplicate');
+    const stored = await decisions.getItem(key, TRACER_NOW_MS);
+    const storedRecord = evidenceRecordSchema.parse(stored?.record);
+    expect(recordHash(storedRecord)).toBe(record.hash);
+  });
+
+  it('puts no recipient hash, address or receiving domain into the record', async () => {
+    const { records, record } = await tracerRecord();
+    const serialized = JSON.stringify(record);
+    expect(serialized).not.toContain('@');
+    for (const stored of records) {
+      if (stored.recipientHmac !== undefined) expect(serialized).not.toContain(stored.recipientHmac);
+      if (stored.receivingDomain !== undefined) expect(serialized).not.toContain(stored.receivingDomain);
+    }
+  });
+
+  it('refuses a record with an extra key and a record holding a non-integer count', async () => {
+    const { record } = await tracerRecord();
+    expect(evidenceRecordSchema.safeParse(record).success).toBe(true);
+    expect(evidenceRecordSchema.safeParse({ ...record, note: 'extra' }).success).toBe(false);
+    const fractional: EvidenceRecord = { ...record, laneTotals: { ...record.laneTotals, recipientSends: 200.5 } };
+    expect(evidenceRecordSchema.safeParse(fractional).success).toBe(false);
   });
 });

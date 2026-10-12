@@ -1,6 +1,16 @@
 import { bucketSortKeyPrefix, lanePartitionKey, type EventRecord, type RecordKey } from '@fothering/core/records';
 import type { AddressKeySet } from '@fothering/core/address';
-import type { AddressKeyPort, DeadLetterPort, EventStorePort, FixtureOptions } from '../port-types.js';
+import { assertFoldWindow } from '@fothering/core/window-fold';
+import type {
+  AddressKeyPort,
+  DeadLetterPort,
+  DecisionStoreItem,
+  DecisionStorePort,
+  EventStorePort,
+  FixtureOptions,
+  FixtureTableState,
+  LaneFoldReader,
+} from '../port-types.js';
 import { brandPort } from '../port-types.js';
 import { DEAD_LETTER_QUEUE_TARGET, type DryRunLog } from '../dry-run.js';
 
@@ -37,14 +47,77 @@ function rejectUnmarshallable(value: unknown): void {
   for (const nested of Object.values(value)) rejectUnmarshallable(nested);
 }
 
+const LANE_KEY_PREFIX = lanePartitionKey('');
+const DEFAULT_PAGE_SIZE = 100;
+
+export function createFixtureTableState(): FixtureTableState {
+  return { items: new Map() };
+}
+
+// The event store and the decision store share one table, so every event read skips an item that
+// is not under a LANE# key, as a lane query and the recipient index never reach one live (D-65).
+function isLaneRecord(item: unknown): item is EventRecord {
+  if (typeof item !== 'object' || item === null) return false;
+  const { pk } = item as { pk?: unknown };
+  return typeof pk === 'string' && pk.startsWith(LANE_KEY_PREFIX);
+}
+
+function bySortKeyBytes(left: EventRecord, right: EventRecord): number {
+  return Buffer.compare(Buffer.from(left.sk, 'utf8'), Buffer.from(right.sk, 'utf8'));
+}
+
+function pageSizeOf(options: FixtureOptions): number {
+  const pageSize = options.pageSize ?? DEFAULT_PAGE_SIZE;
+  if (!Number.isInteger(pageSize) || pageSize < 1) {
+    throw new RangeError(`a fixture page size must be a whole number of records from 1 up, not ${String(pageSize)}`);
+  }
+  return pageSize;
+}
+
+// Copies of the lane's unexpired records in the window, taken in one pass, in the UTF-8 byte order
+// of the sort key that DynamoDB guarantees for a query (D-43). Map insertion order would follow the
+// order a test wrote its records in and hide an ordering bug.
+function laneSnapshot(
+  items: ReadonlyMap<string, unknown>,
+  configurationSet: string,
+  fromBucketMs: number,
+  toBucketMs: number,
+  nowMs: number,
+): EventRecord[] {
+  // The clock reaches the marshaller as :now. The bucket bounds do not: the live adapter pads
+  // them into sort-key strings with bucketSortKeyPrefix, which refuses a bound no key could
+  // hold, so the fixture passes them through the same function before comparing numbers.
+  bucketSortKeyPrefix(fromBucketMs);
+  bucketSortKeyPrefix(toBucketMs);
+  rejectUnmarshallable(nowMs);
+  // DynamoDB rejects an inverted BETWEEN key condition with a ValidationException instead of
+  // returning an empty page, so a window computed backwards fails here as it would live.
+  if (fromBucketMs > toBucketMs) {
+    throw new Error(
+      'Invalid KeyConditionExpression: The BETWEEN operator requires upper bound to be greater than or equal to lower bound',
+    );
+  }
+  const pk = lanePartitionKey(configurationSet);
+  const nowSeconds = Math.floor(nowMs / 1000);
+  const result: EventRecord[] = [];
+  for (const item of items.values()) {
+    if (!isLaneRecord(item) || item.pk !== pk) continue;
+    if (item.bucketStartMs < fromBucketMs || item.bucketStartMs > toBucketMs) continue;
+    if (item.expiresAt <= nowSeconds) continue;
+    result.push(structuredClone(item));
+  }
+  return result.sort(bySortKeyBytes);
+}
+
 // Models the table's conditional put (attribute_not_exists(pk), D-08): the check and the set
 // happen with no await between them, so two calls issued together under Promise.all resolve
 // exactly like DynamoDB's conditional write, one written and one duplicate. Records go in and
 // come out as copies, as they do through the real table, so a caller's later mutation of its
 // own object can never change what is stored. A write leaves one dry-run line when the caller
 // passes a log, and the line comes first, so the intent is on record even for a write that fails.
-export function createFixtureEventStore(options: FixtureOptions = {}, dryRun?: DryRunLog): EventStorePort {
-  const records = new Map<string, EventRecord>();
+export function createFixtureEventStore(options: FixtureOptions = {}, dryRun?: DryRunLog): EventStorePort & LaneFoldReader {
+  const { items } = options.store ?? createFixtureTableState();
+  const pageSize = pageSizeOf(options);
 
   return brandPort({
     async putIfAbsent(record) {
@@ -54,49 +127,75 @@ export function createFixtureEventStore(options: FixtureOptions = {}, dryRun?: D
       }
       rejectUnmarshallable(record);
       const key = keyOf(record);
-      if (records.has(key)) return 'duplicate';
-      records.set(key, structuredClone(record));
+      if (items.has(key)) return 'duplicate';
+      items.set(key, structuredClone(record));
       return 'written';
     },
     async queryLane(configurationSet, fromBucketMs, toBucketMs, nowMs) {
-      // The clock reaches the marshaller as :now. The bucket bounds do not: the live adapter pads
-      // them into sort-key strings with bucketSortKeyPrefix, which refuses a bound no key could
-      // hold, so the fixture passes them through the same function before comparing numbers.
-      bucketSortKeyPrefix(fromBucketMs);
-      bucketSortKeyPrefix(toBucketMs);
-      rejectUnmarshallable(nowMs);
-      // DynamoDB rejects an inverted BETWEEN key condition with a ValidationException instead of
-      // returning an empty page, so a window computed backwards fails here as it would live.
-      if (fromBucketMs > toBucketMs) {
-        throw new Error(
-          'Invalid KeyConditionExpression: The BETWEEN operator requires upper bound to be greater than or equal to lower bound',
-        );
-      }
-      const pk = lanePartitionKey(configurationSet);
-      const nowSeconds = Math.floor(nowMs / 1000);
-      const result: EventRecord[] = [];
-      for (const record of records.values()) {
-        if (record.pk !== pk) continue;
-        if (record.bucketStartMs < fromBucketMs || record.bucketStartMs > toBucketMs) continue;
-        if (record.expiresAt <= nowSeconds) continue;
-        result.push(structuredClone(record));
-      }
-      return result;
+      return laneSnapshot(items, configurationSet, fromBucketMs, toBucketMs, nowMs);
+    },
+    // The snapshot is taken before the first page and every page yields to the event loop, so a
+    // write landing while the fold runs is never in it: counted at most once (the R1 concurrency
+    // backstop). An empty window still delivers one empty page, as a DynamoDB query answers one.
+    async foldLane(configurationSet, fromBucketMs, toBucketMs, nowMs, fold) {
+      assertFoldWindow(fromBucketMs, toBucketMs);
+      const snapshot = laneSnapshot(items, configurationSet, fromBucketMs, toBucketMs, nowMs);
+      let state = fold.initial;
+      let start = 0;
+      do {
+        state = fold.step(state, snapshot.slice(start, start + pageSize));
+        start += pageSize;
+        await Promise.resolve();
+      } while (start < snapshot.length);
+      return state;
     },
     async queryByRecipient(recipientHmac) {
       const result: RecordKey[] = [];
-      for (const record of records.values()) {
-        if (record.recipientHmac === recipientHmac) result.push({ pk: record.pk, sk: record.sk });
+      for (const item of items.values()) {
+        if (isLaneRecord(item) && item.recipientHmac === recipientHmac) result.push({ pk: item.pk, sk: item.sk });
       }
       return result;
     },
     async deleteRecord(key) {
       await dryRun?.would('eventStore.deleteRecord', key.pk, key);
-      return records.delete(keyOf(key));
+      return items.delete(keyOf(key));
     },
     async getRecord(key) {
-      const record = records.get(keyOf(key));
-      return record === undefined ? undefined : structuredClone(record);
+      const item = items.get(keyOf(key));
+      return isLaneRecord(item) ? structuredClone(item) : undefined;
+    },
+  }, 'fixture');
+}
+
+function isDecisionItem(item: unknown): item is DecisionStoreItem {
+  if (typeof item !== 'object' || item === null || isLaneRecord(item)) return false;
+  const { pk, expiresAt } = item as { pk?: unknown; expiresAt?: unknown };
+  return typeof pk === 'string' && typeof expiresAt === 'number';
+}
+
+// The same conditional put as the event store, on the same table. GetItem applies no TTL filter, so
+// an expired item DynamoDB has not deleted yet would still come back; the read checks expiresAt in
+// code instead (D-65, research Pitfall 4).
+export function createFixtureDecisionStore(options: FixtureOptions = {}, dryRun?: DryRunLog): DecisionStorePort {
+  const { items } = options.store ?? createFixtureTableState();
+
+  return brandPort({
+    async putIfAbsent(item) {
+      await dryRun?.would('decisionStore.putIfAbsent', item.pk, item);
+      rejectUnmarshallable(item);
+      if (isLaneRecord(item)) {
+        throw new RangeError('a decision store item never takes a LANE# partition key, which belongs to event records');
+      }
+      const key = keyOf(item);
+      if (items.has(key)) return 'duplicate';
+      items.set(key, structuredClone(item));
+      return 'written';
+    },
+    async getItem(key, nowMs) {
+      rejectUnmarshallable(nowMs);
+      const item = items.get(keyOf(key));
+      if (!isDecisionItem(item) || item.expiresAt <= Math.floor(nowMs / 1000)) return undefined;
+      return structuredClone(item);
     },
   }, 'fixture');
 }

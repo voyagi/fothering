@@ -9,7 +9,7 @@ import type {
   SendEmailRequest,
   SesPort,
 } from './port-types.js';
-import { canonicalJson } from './fixtures/recorded.js';
+import { canonicalJson } from '@fothering/core/evidence-record';
 
 export interface DryRunLog {
   would(operation: string, target: string, request: unknown): Promise<void>;

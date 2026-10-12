@@ -1,5 +1,6 @@
 import type { EventRecord, RecordKey } from '@fothering/core/records';
 import type { AddressKeySet } from '@fothering/core/address';
+import type { LaneFold } from '@fothering/core/window-fold';
 
 export interface EventStorePort {
   putIfAbsent(record: EventRecord): Promise<'written' | 'duplicate'>;
@@ -13,6 +14,30 @@ export interface EventStorePort {
   /** Resolves true when a record was removed, false when none was stored under that key. */
   deleteRecord(key: RecordKey): Promise<boolean>;
   getRecord(key: RecordKey): Promise<EventRecord | undefined>;
+}
+
+/** Reads one lane window page by page into a fold and returns only the fold's final state (D-43). */
+export interface LaneFoldReader {
+  foldLane<S>(configurationSet: string, fromBucketMs: number, toBucketMs: number, nowMs: number, fold: LaneFold<S>): Promise<S>;
+}
+
+/** An incident, evidence, decision or counter item: never under a LANE# partition key (D-65). */
+export interface DecisionStoreItem {
+  pk: string;
+  sk: string;
+  expiresAt: number;
+  [attribute: string]: unknown;
+}
+
+export interface DecisionStorePort {
+  putIfAbsent(item: DecisionStoreItem): Promise<'written' | 'duplicate'>;
+  /** Answers undefined for an item whose expiresAt has passed, since GetItem applies no TTL filter. */
+  getItem(key: RecordKey, nowMs: number): Promise<DecisionStoreItem | undefined>;
+}
+
+/** One fixture table that the event store and the decision store share, as the live table is shared. */
+export interface FixtureTableState {
+  items: Map<string, unknown>;
 }
 
 export interface AddressKeyPort {
@@ -36,6 +61,9 @@ export interface FixtureOptions {
   deadLetterFailure?: 'send';
   /** A call with no matching recording throws instead of answering, so a test cannot pass on an invented reply. */
   recordings?: Partial<Record<'ses' | 'bedrockModel' | 'agentCore' | 'replyBucket', readonly Recording[]>>;
+  /** Records per page a fixture lane fold delivers; DynamoDB's own page is up to 1 MB. */
+  pageSize?: number;
+  store?: FixtureTableState;
 }
 
 // The composition-root contracts (D-05, D-06): a runtimeContext picks fixture over live wholesale,
