@@ -27,7 +27,14 @@ import { parseSesEvent } from '@fothering/core/ses-events';
 import { selectKeyVersion, type AddressKeySet } from '@fothering/core/address';
 import { scenarioRecords, type LaneScenario } from '@fothering/core/test/event-arbitraries';
 import { LANE_RATIO_LABELS, LANE_SHARE_LABEL, laneSpikeVerdict, renderPercent } from '@fothering/core/verdicts';
-import { createWindowFold, spikeWindowFor, summarizeWindow } from '@fothering/core/window-fold';
+import {
+  MAX_WINDOW_BUCKETS,
+  WindowTooLongError,
+  createWindowFold,
+  spikeWindowFor,
+  summarizeWindow,
+  type LaneFold,
+} from '@fothering/core/window-fold';
 import lanesJson from '../../../../lanes.json' with { type: 'json' };
 import { DOC_EXAMPLE_LANE_MAP, loadSesEventFixture } from './ses-events/index.js';
 import {
@@ -601,5 +608,201 @@ describe('tracer: one bad import batch on fothering-bulk becomes an evidence rec
     expect(evidenceRecordSchema.safeParse({ ...record, note: 'extra' }).success).toBe(false);
     const fractional: EvidenceRecord = { ...record, laneTotals: { ...record.laneTotals, recipientSends: 200.5 } };
     expect(evidenceRecordSchema.safeParse(fractional).success).toBe(false);
+  });
+});
+
+function bulkRecords(groups: LaneScenario['groups'], nowMs: number = TRACER_NOW_MS): EventRecord[] {
+  return scenarioRecords({ ...ONE_BAD_BATCH, groups }, nowMs, LANES, TEST_ADDRESS_KEY_SET);
+}
+
+function bulkFold(window = spikeWindowFor(TRACER_NOW_MS), nowMs: number = TRACER_NOW_MS) {
+  return createWindowFold({ lane: BULK, window, nowMs });
+}
+
+// Wraps a fold so a test sees every page the store delivers, in order, without changing the result.
+function watched<S>(fold: LaneFold<S>, onPage: (page: readonly EventRecord[], index: number) => void): LaneFold<S> {
+  let index = 0;
+  return {
+    initial: fold.initial,
+    step(state, page) {
+      onPage(page, index);
+      index += 1;
+      return fold.step(state, page);
+    },
+  };
+}
+
+async function storeHolding(records: readonly EventRecord[], pageSize = 2) {
+  const table = createFixtureTableState();
+  const events = createFixtureEventStore({ pageSize, store: table });
+  for (const record of records) await events.putIfAbsent(record);
+  return { table, events };
+}
+
+describe('the fixture store reads a lane window page by page into a fold (R1)', () => {
+  it('delivers 1,000 records of one lane in exactly 500 pages at page size 2 (AC-1)', async () => {
+    const records = bulkRecords([{ bucketOffset: 0, count: 500 }]);
+    expect(records).toHaveLength(1_000);
+    const { events } = await storeHolding(records);
+    const window = spikeWindowFor(TRACER_NOW_MS);
+    const pageSizes: number[] = [];
+    const state = await events.foldLane(
+      BULK,
+      window.fromBucketMs,
+      window.toBucketMs,
+      TRACER_NOW_MS,
+      watched(bulkFold(), (page) => pageSizes.push(page.length)),
+    );
+    expect(state.pages).toBe(500);
+    expect(pageSizes.every((size) => size === 2)).toBe(true);
+    expect(summarizeWindow(state).totals.recipientSends).toBe(500);
+  });
+
+  it('counts nowhere a record stored already expired inside the window, and counts it inside its retention (AC-2)', async () => {
+    const oldNowMs = TRACER_NOW_MS - 31 * 24 * 60 * 60 * 1000;
+    const oldWindow = spikeWindowFor(oldNowMs);
+    const records = bulkRecords([{ bucketOffset: 0, count: 4, batch: 'stale', permanentBounces: 1 }], oldNowMs);
+    const { events } = await storeHolding(records);
+    const fold = () => bulkFold(oldWindow, TRACER_NOW_MS);
+    const delivered: EventRecord[] = [];
+    const expired = summarizeWindow(
+      await events.foldLane(BULK, oldWindow.fromBucketMs, oldWindow.toBucketMs, TRACER_NOW_MS, watched(fold(), (page) => delivered.push(...page))),
+    );
+    expect(delivered).toHaveLength(0);
+    expect(expired.totals).toMatchObject({ recipientSends: 0, permanentBounces: 0 });
+    expect(expired.dimensions.batch.size).toBe(0);
+    expect(expired.observed.recordCount).toBe(0);
+
+    const live = summarizeWindow(
+      await events.foldLane(BULK, oldWindow.fromBucketMs, oldWindow.toBucketMs, oldNowMs, bulkFold(oldWindow, oldNowMs)),
+    );
+    expect(live.totals).toMatchObject({ recipientSends: 4, permanentBounces: 1 });
+  });
+
+  it('folds a window of exactly MAX_WINDOW_BUCKETS buckets and refuses one more before any page reaches the fold (AC-E1)', async () => {
+    const { events } = await storeHolding(bulkRecords([{ bucketOffset: 0, count: 3 }]));
+    const toBucketMs = bucketStartMs(TRACER_NOW_MS);
+    const longest = { fromBucketMs: toBucketMs - (MAX_WINDOW_BUCKETS - 1) * BUCKET_MS, toBucketMs };
+    const folded = await events.foldLane(BULK, longest.fromBucketMs, longest.toBucketMs, TRACER_NOW_MS, bulkFold(longest));
+    expect(summarizeWindow(folded).buckets).toHaveLength(MAX_WINDOW_BUCKETS);
+
+    let steps = 0;
+    const counting = watched(bulkFold(), () => {
+      steps += 1;
+    });
+    await expect(
+      events.foldLane(BULK, toBucketMs - MAX_WINDOW_BUCKETS * BUCKET_MS, toBucketMs, TRACER_NOW_MS, counting),
+    ).rejects.toThrow(WindowTooLongError);
+    expect(steps).toBe(0);
+  });
+
+  it('skips a stored record whose expiresAt equals now in seconds and counts it one second earlier (AC-E2)', async () => {
+    const [send] = bulkRecords([{ bucketOffset: 0, count: 1, deliverRest: false }]);
+    if (send === undefined) throw new Error('expected one send');
+    send.expiresAt = Math.floor(TRACER_NOW_MS / 1000);
+    const { events } = await storeHolding([send]);
+    const window = spikeWindowFor(TRACER_NOW_MS);
+    const at = await events.foldLane(BULK, window.fromBucketMs, window.toBucketMs, TRACER_NOW_MS, bulkFold());
+    expect(summarizeWindow(at).totals.recipientSends).toBe(0);
+    const before = await events.foldLane(BULK, window.fromBucketMs, window.toBucketMs, TRACER_NOW_MS - 1000, bulkFold(window, TRACER_NOW_MS - 1000));
+    expect(summarizeWindow(before).totals.recipientSends).toBe(1);
+  });
+
+  it('delivers one empty page for an empty window, as a DynamoDB query answers one (AC-E3)', async () => {
+    const { events } = await storeHolding([]);
+    const window = spikeWindowFor(TRACER_NOW_MS);
+    const pages: number[] = [];
+    const state = await events.foldLane(
+      BULK,
+      window.fromBucketMs,
+      window.toBucketMs,
+      TRACER_NOW_MS,
+      watched(bulkFold(), (page) => pages.push(page.length)),
+    );
+    expect(pages).toEqual([0]);
+    expect(summarizeWindow(state).buckets.every((bucket) => bucket.send === 0)).toBe(true);
+  });
+
+  it('returns records in the UTF-8 byte order of the sort key, whatever order they were written in (D-43)', async () => {
+    const records = bulkRecords([{ bucketOffset: 3, count: 5, permanentBounces: 2 }]);
+    const [send] = records.filter((record) => record.kind === 'send');
+    if (send === undefined) throw new Error('expected a send');
+    // U+FF5E sorts after U+10000 by UTF-16 code unit (0xFF5E against the surrogate 0xD800) and before
+    // it by UTF-8 byte (0xEF against 0xF0), so only a byte comparison puts the first one first.
+    const bmp = { ...structuredClone(send), sk: `${send.sk}#～` };
+    const astral = { ...structuredClone(send), sk: `${send.sk}#\u{10000}` };
+    expect([bmp.sk, astral.sk].sort()).toEqual([astral.sk, bmp.sk]);
+    const written = [...records, bmp, astral].sort((left, right) => (left.sk < right.sk ? 1 : -1));
+    const { events } = await storeHolding(written, 3);
+    const window = spikeWindowFor(TRACER_NOW_MS);
+    const order: string[] = [];
+    await events.foldLane(BULK, window.fromBucketMs, window.toBucketMs, TRACER_NOW_MS, watched(bulkFold(), (page) => order.push(...page.map((record) => record.sk))));
+    const byBytes = written.map((record) => record.sk).sort((left, right) => Buffer.compare(Buffer.from(left), Buffer.from(right)));
+    expect(order).toEqual(byBytes);
+    expect(order.indexOf(bmp.sk)).toBeLessThan(order.indexOf(astral.sk));
+  });
+
+  it('counts at most once a record written to the shared table while a fold runs (R1 concurrency backstop)', async () => {
+    const records = bulkRecords([{ bucketOffset: 0, count: 6 }]);
+    const { events } = await storeHolding(records);
+    const [extra] = bulkRecords([{ bucketOffset: 1, count: 1, deliverRest: false }]);
+    if (extra === undefined) throw new Error('expected one send');
+    const window = spikeWindowFor(TRACER_NOW_MS);
+    let pending: Promise<'written' | 'duplicate'> | undefined;
+    const delivered: string[] = [];
+    const during = await events.foldLane(
+      BULK,
+      window.fromBucketMs,
+      window.toBucketMs,
+      TRACER_NOW_MS,
+      watched(bulkFold(), (page, index) => {
+        if (index === 0) pending = events.putIfAbsent(extra);
+        delivered.push(...page.map((record) => record.sk));
+      }),
+    );
+    expect(await pending).toBe('written');
+    expect(new Set(delivered).size).toBe(delivered.length);
+    expect([6, 7]).toContain(summarizeWindow(during).totals.recipientSends);
+    const after = await events.foldLane(BULK, window.fromBucketMs, window.toBucketMs, TRACER_NOW_MS, bulkFold());
+    expect(summarizeWindow(after).totals.recipientSends).toBe(7);
+  });
+});
+
+describe('the fixture decision store shares the table without touching event reads (D-65)', () => {
+  it('keeps decision items out of every event read and refuses a decision item under a LANE# key', async () => {
+    const records = bulkRecords([{ bucketOffset: 0, count: 2 }]);
+    const { table, events } = await storeHolding(records);
+    const decisions = createFixtureDecisionStore({ store: table });
+    const key = incidentItemKey('0'.repeat(32), 'STATE');
+    expect(await decisions.putIfAbsent({ ...key, expiresAt: Math.floor(TRACER_NOW_MS / 1000) + 60 })).toBe('written');
+
+    const window = spikeWindowFor(TRACER_NOW_MS);
+    expect(await events.queryLane(BULK, window.fromBucketMs, window.toBucketMs, TRACER_NOW_MS)).toHaveLength(records.length);
+    expect(await events.getRecord(key)).toBeUndefined();
+    const folded = await events.foldLane(BULK, window.fromBucketMs, window.toBucketMs, TRACER_NOW_MS, bulkFold());
+    expect(summarizeWindow(folded).totals.recipientSends).toBe(2);
+
+    const [record] = records;
+    if (record === undefined) throw new Error('expected a record');
+    await expect(decisions.putIfAbsent({ pk: record.pk, sk: 'X', expiresAt: 1 })).rejects.toThrow(RangeError);
+    expect(await decisions.getItem({ pk: record.pk, sk: record.sk }, TRACER_NOW_MS)).toBeUndefined();
+  });
+
+  it('answers an item only while its expiresAt is after now, and as a copy', async () => {
+    const decisions = createFixtureDecisionStore();
+    const nowSeconds = Math.floor(TRACER_NOW_MS / 1000);
+    const key = incidentItemKey('1'.repeat(32), 'DECISION');
+    await decisions.putIfAbsent({ ...key, expiresAt: nowSeconds, note: 'kept' });
+    expect(await decisions.getItem(key, TRACER_NOW_MS)).toBeUndefined();
+    const before = await decisions.getItem(key, TRACER_NOW_MS - 1000);
+    expect(before).toEqual({ ...key, expiresAt: nowSeconds, note: 'kept' });
+    if (before !== undefined) before.note = 'changed';
+    expect((await decisions.getItem(key, TRACER_NOW_MS - 1000))?.note).toBe('kept');
+  });
+
+  it('refuses a fixture page size that is not a whole number from 1 up', () => {
+    for (const pageSize of [0, -1, 1.5, Number.NaN]) {
+      expect(() => createFixtureEventStore({ pageSize })).toThrow(RangeError);
+    }
   });
 });
