@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { afterAll, describe, expect, it } from 'vitest';
+import { DETECTION_STACK_ID, INGEST_STACK_ID, RUNTIME_STACK_ID } from '../create-app.js';
 
 // This file lives at packages/infra/src/repo/, four levels below the repo root every path here
 // is read relative to.
@@ -30,6 +31,15 @@ interface StrykerConfig {
 
 interface LockFile {
   packages?: Record<string, { hasInstallScript?: boolean }>;
+}
+
+// The words after `cdk deploy` or `cdk destroy` up to the first option: none means the line must
+// select with --all, and each one given must be a stack the app builds.
+function namesOnlyBuiltStacks(line: string, builtStacks: ReadonlySet<string>): boolean {
+  const words = (/\bcdk (?:deploy|destroy)((?:[ \t]+[^\s`]+)*)/.exec(line)?.[1] ?? '').trim().split(/\s+/).filter((word) => word !== '');
+  const firstOption = words.findIndex((word) => word.startsWith('-'));
+  const names = firstOption === -1 ? words : words.slice(0, firstOption);
+  return names.length === 0 ? words[0] === '--all' : names.every((name) => builtStacks.has(name));
 }
 
 // Every spelling the CDK CLI takes a context pair in: -c k=v, --context k=v, the = forms, quoted.
@@ -282,13 +292,22 @@ describe('repo hardening: every gate, config and document ships what it claims',
 
   // The CDK CLI fails a stack list only when NO name matches (aws-cdk 2.1142.0: deploy's selector
   // goes through mustMatch, which throws only below one match), so a README naming one real stack
-  // and one the app lacks deploys the real one, skips the other and exits 0. --all cannot drift.
-  it('the README deploys and destroys with --all, never a list of stack names', () => {
+  // and one the app lacks deploys the real one, skips the other and exits 0. --all cannot drift, and
+  // every name a line does give must be a stack the app builds.
+  it('the README deploys and destroys with --all, or names only stacks the app builds', () => {
+    const builtStacks = new Set([INGEST_STACK_ID, RUNTIME_STACK_ID, DETECTION_STACK_ID]);
     const cdkLines = readText('README.md')
       .split('\n')
       .filter((line) => /\bcdk (deploy|destroy)\b/.test(line));
-    expect(cdkLines.length, 'expected the README to show a deploy and a destroy').toBeGreaterThanOrEqual(2);
-    for (const line of cdkLines) expect(line).toMatch(/\bcdk (deploy|destroy) --all(\s|$)/);
+    expect(cdkLines.some((line) => /\bcdk deploy --all(\s|`|$)/.test(line)), 'expected the README to deploy with --all').toBe(true);
+    expect(cdkLines.some((line) => /\bcdk destroy --all(\s|`|$)/.test(line)), 'expected the README to destroy with --all').toBe(true);
+    for (const line of cdkLines) expect(namesOnlyBuiltStacks(line, builtStacks), line.trim()).toBe(true);
+
+    // Controls: a missing name beside a real one, a prefix of a real name and a bare deploy are refused.
+    expect(namesOnlyBuiltStacks('npx cdk deploy FotheringRuntime FotheringMissing', builtStacks)).toBe(false);
+    expect(namesOnlyBuiltStacks('npx cdk deploy Fothering -c fothering:live=live', builtStacks)).toBe(false);
+    expect(namesOnlyBuiltStacks('npx cdk deploy', builtStacks)).toBe(false);
+    expect(namesOnlyBuiltStacks('`npx cdk destroy FotheringRuntime`', builtStacks)).toBe(true);
   });
 
   it('every CDK context key the README passes is read by the CDK app', () => {
