@@ -57,7 +57,7 @@ export function createSesReads(options: CreateSesReadsOptions): SesReadPort {
     async getEmailIdentity(emailIdentity) {
       try {
         const response = await options.client().send(new GetEmailIdentityCommand({ EmailIdentity: emailIdentity }));
-        return response.ConfigurationSetName;
+        return response.ConfigurationSetName === undefined ? {} : { defaultConfigurationSet: response.ConfigurationSetName };
       } catch (error) {
         if (isNotFound(error)) return undefined;
         throw error;

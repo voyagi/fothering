@@ -1,4 +1,5 @@
 import type { SesConfigurationFacts } from '@fothering/core/closeability';
+import type { IdentityAuthFacts } from '@fothering/core/evidence-rows';
 import type { LaneMap } from '@fothering/core/lanes';
 import type { EventDestinationFact, SesReadPort } from './port-types.js';
 
@@ -8,10 +9,16 @@ import type { EventDestinationFact, SesReadPort } from './port-types.js';
 // together. The identity list is one request per 1,000 identities, and the live adapter spaces the
 // pages of both lists by the same second, so no two requests ever fall inside one second.
 export const SES_READ_SPACING_MS = 1_000;
+export const MAX_IDENTITY_READS = 50;
 
 export interface ReadSesFactsOptions {
   wait?: (ms: number) => Promise<void>;
+  maxIdentityReads?: number;
 }
+
+export type SesFactsResult =
+  | { ok: true; facts: SesConfigurationFacts; identities: IdentityAuthFacts[] }
+  | { ok: false; reason: 'ses-facts-bound'; identityCount: number };
 
 /** The real pause behind every SES read spacing and the forget re-query delay; tests pass a recorder in its place. */
 export function sleep(ms: number): Promise<void> {
@@ -28,7 +35,7 @@ export async function readSesFacts(
   ses: SesReadPort,
   laneMap: LaneMap,
   options: ReadSesFactsOptions = {},
-): Promise<SesConfigurationFacts> {
+): Promise<SesFactsResult> {
   const wait = options.wait ?? sleep;
   let readsStarted = 0;
   async function spaced<T>(read: () => Promise<T>): Promise<T> {
@@ -42,7 +49,8 @@ export async function readSesFacts(
 
   const defaultConfigurationSets = new Set<string>();
   for (const identity of identities) {
-    const defaultSet = await spaced(() => ses.getEmailIdentity(identity));
+    const facts = await spaced(() => ses.getEmailIdentity(identity));
+    const defaultSet = facts?.defaultConfigurationSet;
     if (defaultSet !== undefined && defaultSet !== '') defaultConfigurationSets.add(defaultSet);
   }
 
@@ -54,5 +62,5 @@ export async function readSesFacts(
     );
   }
 
-  return { configurationSets, defaultConfigurationSets, eventDestinations };
+  return { ok: true, facts: { configurationSets, defaultConfigurationSets, eventDestinations }, identities: [] };
 }

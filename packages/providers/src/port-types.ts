@@ -1,7 +1,7 @@
 import type { Message, ModelStreamEvent, StreamOptions } from '@strands-agents/sdk';
 import { lanePartitionKey, type EventRecord, type RecordKey } from '@fothering/core/records';
 import type { AddressKeySet } from '@fothering/core/address';
-import type { DnsMxOutcome, DnsTxtOutcome } from '@fothering/core/evidence-rows';
+import type { DnsMxOutcome, DnsTxtOutcome, IdentityAuthFacts } from '@fothering/core/evidence-rows';
 import type { LaneFold } from '@fothering/core/window-fold';
 
 export interface EventStorePort {
@@ -261,10 +261,17 @@ export interface EventDestinationFact {
   matchingEventTypes: readonly string[];
 }
 
-/** The four SESv2 reads the closeability check needs. */
+/**
+ * One GetEmailIdentity answer: the default configuration set the identity sends through when none
+ * is set on the call itself, and its DKIM and MAIL FROM facts, so no identity is read twice in a
+ * cycle (D-59). A key is present only when SES returned it.
+ */
+export type EmailIdentityFacts = Omit<IdentityAuthFacts, 'identity'>;
+
+/** The four SESv2 reads the closeability check and the configuration rows need. */
 export interface SesReadPort {
-  /** The default configuration set the identity sends through when none is set on the call itself. */
-  getEmailIdentity(emailIdentity: string): Promise<string | undefined>;
+  /** Undefined for an identity SES no longer holds. */
+  getEmailIdentity(emailIdentity: string): Promise<EmailIdentityFacts | undefined>;
   listEmailIdentities(): Promise<string[]>;
   /** Every configuration set SES holds in the Region, so the check can see one lanes.json leaves out. */
   listConfigurationSets(): Promise<string[]>;

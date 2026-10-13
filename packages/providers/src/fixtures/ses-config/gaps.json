@@ -1,7 +1,7 @@
 {
   "provenance": "doc-derived",
   "source": "https://docs.aws.amazon.com/ses/latest/APIReference-V2/API_GetEmailIdentity.html, https://docs.aws.amazon.com/ses/latest/APIReference-V2/API_ListConfigurationSets.html and https://docs.aws.amazon.com/ses/latest/APIReference-V2/API_GetConfigurationSetEventDestinations.html",
-  "note": "The same reads as complete.json with two gaps: the identity example.com defaults to fothering-bulk, and fothering-bulk's only destination leaves out DELIVERY_DELAY.",
+  "note": "The same reads as complete.json with two closeability gaps: the identity example.com defaults to fothering-bulk, and fothering-bulk's only destination leaves out DELIVERY_DELAY. example.org also reads DKIM FAILED and a MAIL FROM domain FAILED, so the configuration rows have a failure to show.",
   "recordings": [
     {
       "operation": "ses.listEmailIdentities",
@@ -16,11 +16,23 @@
     {
       "operation": "ses.getEmailIdentity",
       "request": "example.com",
-      "response": "fothering-bulk"
+      "response": {
+        "defaultConfigurationSet": "fothering-bulk",
+        "dkimStatus": "SUCCESS",
+        "dkimSigningEnabled": true,
+        "identityType": "DOMAIN"
+      }
     },
     {
       "operation": "ses.getEmailIdentity",
-      "request": "example.org"
+      "request": "example.org",
+      "response": {
+        "dkimStatus": "FAILED",
+        "dkimSigningEnabled": true,
+        "mailFromDomain": "bounce.example.org",
+        "mailFromStatus": "FAILED",
+        "identityType": "DOMAIN"
+      }
     },
     {
       "operation": "ses.getConfigurationSetEventDestinations",

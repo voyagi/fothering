@@ -813,12 +813,12 @@ describe('recorded fixtures (AC-E5)', () => {
     const dryRun = createDryRunLog({ sink: NO_LINES, addressKey: createFixtureAddressKey(), now: () => 1 });
     const ses = createFixtureSes({
       recordings: [
-        { operation: 'ses.getEmailIdentity', request: 'example.org', response: 'fothering-default' },
+        { operation: 'ses.getEmailIdentity', request: 'example.org', response: { defaultConfigurationSet: 'fothering-default' } },
         { operation: 'ses.getEmailIdentity', request: 'example.net', response: undefined },
       ],
       dryRun,
     });
-    await expect(ses.getEmailIdentity('example.org')).resolves.toBe('fothering-default');
+    await expect(ses.getEmailIdentity('example.org')).resolves.toEqual({ defaultConfigurationSet: 'fothering-default' });
     await expect(ses.getEmailIdentity('example.net')).resolves.toBeUndefined();
     await expect(ses.getEmailIdentity('example.com')).rejects.toThrow(FixtureMissError);
   });

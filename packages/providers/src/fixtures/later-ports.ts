@@ -4,6 +4,7 @@ import type {
   AgentRuntimeRequest,
   BedrockModelPort,
   DnsPort,
+  EmailIdentityFacts,
   EventDestinationFact,
   Recording,
   ReplyBucketPort,
@@ -28,7 +29,7 @@ export function createFixtureSes(options: FixtureMutatingOptions): SesPort {
   return brandPort(
     {
       async getEmailIdentity(emailIdentity: string) {
-        return recorded.respond<string | undefined>('ses.getEmailIdentity', emailIdentity);
+        return recorded.respond<EmailIdentityFacts | undefined>('ses.getEmailIdentity', emailIdentity);
       },
       async listEmailIdentities() {
         return recorded.respond<string[]>('ses.listEmailIdentities', undefined);

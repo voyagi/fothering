@@ -1018,12 +1018,36 @@ describe('createSesReads', () => {
     vi.useRealTimers();
   });
 
-  it("getEmailIdentity returns the identity's ConfigurationSetName", async () => {
+  // D-59: one GetEmailIdentity read answers both the closeability check and the configuration rows.
+  it('getEmailIdentity returns the default set, the DKIM and MAIL FROM facts and the identity type from one read', async () => {
     const client = sesClient();
-    stubSend(client, () => ({ ConfigurationSetName: 'fothering-transactional' }));
+    const calls = stubSend(client, () => ({
+      ConfigurationSetName: 'fothering-transactional',
+      IdentityType: 'DOMAIN',
+      VerifiedForSendingStatus: true,
+      DkimAttributes: { Status: 'SUCCESS', SigningEnabled: true, Tokens: ['token1'] },
+      MailFromAttributes: { MailFromDomain: 'bounce.example.com', MailFromDomainStatus: 'PENDING', BehaviorOnMxFailure: 'USE_DEFAULT_VALUE' },
+      Tags: [{ Key: 'team', Value: 'ops' }],
+    }));
     const reads = createSesReads({ client: () => client });
 
-    await expect(reads.getEmailIdentity('sender@example.com')).resolves.toBe('fothering-transactional');
+    const facts = await reads.getEmailIdentity('example.com');
+    expect(JSON.stringify(facts)).toBe(
+      '{"defaultConfigurationSet":"fothering-transactional","dkimStatus":"SUCCESS","dkimSigningEnabled":true,"mailFromDomain":"bounce.example.com","mailFromStatus":"PENDING","identityType":"DOMAIN"}',
+    );
+    expect(calls.map((call) => call.name).join(' ')).toBe('GetEmailIdentityCommand');
+  });
+
+  // exactOptionalPropertyTypes: a fact SES did not return is an absent key, never a key holding undefined.
+  it('getEmailIdentity leaves out every key SES did not return', async () => {
+    const client = sesClient();
+    stubSend(client, (command) =>
+      (command.input as { EmailIdentity: string }).EmailIdentity === 'bare.example.com' ? {} : { DkimAttributes: { SigningEnabled: false } },
+    );
+    const reads = createSesReads({ client: () => client });
+
+    expect(JSON.stringify(await reads.getEmailIdentity('bare.example.com'))).toBe('{}');
+    expect(JSON.stringify(await reads.getEmailIdentity('partial.example.com'))).toBe('{"dkimSigningEnabled":false}');
   });
 
   // SES allows one request a second for every action but sending, so a second page waits a second
