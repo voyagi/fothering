@@ -1,5 +1,6 @@
 import {
   LANE_MIN_RECIPIENT_SENDS,
+  LANE_SHARE_LABEL,
   MIN_RATIO_EVENTS,
   ROW_MIN_RECIPIENT_SENDS,
   THRESHOLD_BY_TRIGGER,
@@ -126,4 +127,57 @@ export function buildTagRows(dimension: TagDimension, summary: WindowSummary, sp
       fromBucketMs: summary.window.fromBucketMs,
       toBucketMs: summary.window.toBucketMs,
     }));
+}
+
+export const ROW_LIMIT = 10;
+export const SIMULATOR_DOMAIN = 'simulator.amazonses.com';
+
+export type DnsMxOutcome = { kind: 'records'; exchanges: string[] } | { kind: 'missing' } | { kind: 'unknown' };
+
+export interface ProviderMappingEntry {
+  name: string;
+  mxSuffixes: readonly string[];
+  receivingDomains: readonly string[];
+}
+
+export const PROVIDER_MAPPING: readonly ProviderMappingEntry[] = [];
+
+export function providerOf(receivingDomain: string, mx?: DnsMxOutcome): string | null {
+  void receivingDomain;
+  void mx;
+  return 'other';
+}
+
+export function receivingDomainsNeedingMx(summary: WindowSummary): string[] {
+  void summary;
+  return [];
+}
+
+export function buildProviderRows(
+  summary: WindowSummary,
+  spike: LaneSpikeVerdict,
+  mxAnswers: ReadonlyMap<string, DnsMxOutcome>,
+): EvidenceRow[] {
+  void summary;
+  void spike;
+  void mxAnswers;
+  return [];
+}
+
+export interface ShareRow {
+  laneCountableEvents: number;
+  storedCountableEvents: number;
+  percent: string | null;
+  label: typeof LANE_SHARE_LABEL;
+}
+
+export function countableEventsOf(summary: WindowSummary): number {
+  void summary;
+  return 0;
+}
+
+export function buildShareRow(laneSummary: WindowSummary, allLaneSummaries: readonly WindowSummary[]): ShareRow {
+  void laneSummary;
+  void allLaneSummaries;
+  return { laneCountableEvents: 0, storedCountableEvents: 0, percent: null, label: LANE_SHARE_LABEL };
 }
