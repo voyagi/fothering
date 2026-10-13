@@ -1,3 +1,4 @@
+import { BedrockAgentCoreClient } from '@aws-sdk/client-bedrock-agentcore';
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocumentClient } from '@aws-sdk/lib-dynamodb';
 import { SecretsManagerClient } from '@aws-sdk/client-secrets-manager';
@@ -26,6 +27,7 @@ import {
 import { createFixtureAddressKey, createFixtureDeadLetter, createFixtureEventStore } from './fixtures/ingest-ports.js';
 import { createFixtureAgentCore, createFixtureBedrockModel, createFixtureReplyBucket, createFixtureSes } from './fixtures/later-ports.js';
 import { lazyClient } from './live/lazy-client.js';
+import { createLiveAgentCore, createLiveBedrockModel } from './live/agent-adapters.js';
 import { createDynamoEventStore } from './live/event-store.js';
 import { createSecretsManagerAddressKey } from './live/address-key.js';
 import { createSqsDeadLetter } from './live/dead-letter.js';
@@ -163,7 +165,7 @@ export const PORT_TABLE = {
     mutatingOperations: ['stream'],
     gatedOperations: ['stream'],
     fixture: (fixtures: FixtureOptions, dryRun: DryRunLog) => createFixtureBedrockModel({ model: fixtures.model, dryRun }),
-    live: { notBuiltUntil: 2 },
+    live: () => brandPort(createLiveBedrockModel(), 'live'),
     dryRun: (log: DryRunLog) => createBedrockModelDryRun(log),
   },
   agentCore: {
@@ -172,7 +174,13 @@ export const PORT_TABLE = {
     gatedOperations: ['invokeAgentRuntime'],
     fixture: (fixtures: FixtureOptions, dryRun: DryRunLog) =>
       createFixtureAgentCore({ recordings: fixtures.recordings?.agentCore ?? [], agentRuntime: fixtures.agentRuntime, dryRun }),
-    live: { notBuiltUntil: 2 },
+    live: ({ liveClients }) =>
+      brandPort(
+        createLiveAgentCore({
+          client: resolveLiveClient(liveClients.bedrockAgentCore, () => new BedrockAgentCoreClient({ region: LIVE_REGION })),
+        }),
+        'live',
+      ),
     dryRun: (log: DryRunLog) => createAgentCoreDryRun(log),
   },
   replyBucket: {

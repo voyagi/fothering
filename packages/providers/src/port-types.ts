@@ -88,12 +88,14 @@ export type KindTable = Readonly<Record<string, Readonly<Record<string, Resolved
  * returns one, or nothing (the adapter constructs its own client, lazily, on first use). Tests
  * pass a counting factory here to prove a client is built once and only when a port method runs.
  */
-export type LiveClients = Partial<Record<'dynamoDb' | 'secretsManager' | 'sqs' | 'sesv2', unknown>>;
+export type LiveClients = Partial<Record<'dynamoDb' | 'secretsManager' | 'sqs' | 'sesv2' | 'bedrockAgentCore', unknown>>;
 
 export interface LiveConfig {
   tableName?: string;
   deadLetterQueueUrl?: string;
   addressKeySecretId?: string;
+  /** The runtime detection invokes; the detection root reads it and puts it in each invocation request. */
+  agentRuntimeArn?: string;
 }
 
 /** A dry-run recorder never resolves to a device; it only ever writes one line naming what it would have sent. */
