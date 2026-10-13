@@ -14,6 +14,8 @@ import {
 } from './evidence-record.js';
 import {
   buildShareRow,
+  configurationVerdict,
+  kindRowVerdict,
   rowVerdict,
   type ConfigurationRow,
   type EvidenceRow,
@@ -82,7 +84,7 @@ interface PrecedenceFacts {
   bound: ReadBound | null;
   settled: boolean;
   sharedCause: SharedCause | null;
-  otherSpikingLanes: readonly string[];
+  spread: boolean;
 }
 
 /** D-62: the first matching rule decides, NO DATA first as phase 1 locked. A shared cause outranks
@@ -92,7 +94,7 @@ function precedence(facts: PrecedenceFacts): { outcome: DecisionOutcome; reason:
   if (facts.bound !== null) return { outcome: 'unknown', reason: facts.bound };
   if (!facts.settled) return { outcome: 'unknown', reason: 'not-settled' };
   if (facts.sharedCause !== null) return { outcome: 'refused', reason: 'not-lane-scoped' };
-  if (facts.otherSpikingLanes.length > 0) return { outcome: 'unknown', reason: 'spread' };
+  if (facts.spread) return { outcome: 'unknown', reason: 'spread' };
   if (facts.closeabilityState !== 'closeable') return { outcome: 'unknown', reason: 'not-closeable' };
   return { outcome: 'approved', reason: 'approved' };
 }
@@ -104,7 +106,7 @@ export function decideLane(input: DecideLaneInput): LaneDecision {
     bound: input.bound,
     settled: causeIsSettled(input.rows, input.configurationRows),
     sharedCause: input.sharedCause ?? null,
-    otherSpikingLanes: input.otherSpikingLanes,
+    spread: input.otherSpikingLanes.length > 0,
   });
   return { ...decided, closeability: closeabilityOf(input.closeability) };
 }
@@ -454,8 +456,30 @@ function recordInput(input: AssembleInput, decision: CycleDecision): EvidenceRec
   };
 }
 
-export function decideFromEvidence(_record: EvidenceRecord): { outcome: DecisionOutcome; reason: DecisionReason } {
-  return { outcome: 'unknown', reason: 'not-settled' };
+/**
+ * The decision a record's own fields support, for the action gate (plan 02-10): every row verdict is
+ * recomputed from its counts and the stored lane totals and triggers, and the precedence runs over
+ * those verdicts and the stored NO DATA, bound, shared-cause, spread and closeability fields, so an
+ * edited row or decision field no longer reproduces the stored outcome. Pure: it reads nothing else.
+ */
+export function decideFromEvidence(record: EvidenceRecord): { outcome: DecisionOutcome; reason: DecisionReason } {
+  // Both checks only ever downgrade, so trusting a stored record-too-large cannot open a closure.
+  if (record.decision.reason === 'record-too-large' || serializedRecordBytes(record) > RECORD_BYTE_CEILING) {
+    return { outcome: 'unknown', reason: 'record-too-large' };
+  }
+  const { laneTotals, decision } = record;
+  const rows = record.rows.map((row) => ({ ...row, verdict: kindRowVerdict(row.kind, row, laneTotals, laneTotals.triggers) }));
+  const configurationRows = record.configurationRows.map((row) => ({ ...row, verdict: configurationVerdict(row.state, row.corroboration) }));
+  return precedence({
+    noData: decision.noData,
+    closeabilityState: decision.closeability.state,
+    bound: decision.bound,
+    settled: causeIsSettled(rows, configurationRows),
+    sharedCause: decision.sharedCause,
+    // An honest record that is not confined always carries a shared cause or another spiking lane,
+    // so reading its isolation here changes no stored decision and refuses an edited one.
+    spread: decision.otherSpikingLanes.length > 0 || record.isolation !== 'confined',
+  });
 }
 
 /** D-70: assembled once; a record past RECORD_BYTE_CEILING is assembled again as unknown

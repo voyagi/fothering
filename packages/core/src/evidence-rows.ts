@@ -132,9 +132,14 @@ function atMostElevated(verdict: RowVerdict): RowVerdict {
   return verdict === 'cause' ? 'elevated' : verdict;
 }
 
+/** The verdict a row of this kind reads, the one rule the row builders and decideFromEvidence share. */
+export function kindRowVerdict(kind: RowKind, tally: DimensionTally, laneTotals: LaneTotals, triggers: readonly LaneTrigger[]): RowVerdict {
+  const verdict = rowVerdict(tally, laneTotals, triggers);
+  return kind === 'value' ? verdict : atMostElevated(verdict);
+}
+
 function rowOf(context: RowContext, kind: RowKind, value: string | null, tally: DimensionTally): EvidenceRow {
   const lane: LaneTotals = context.summary.totals;
-  const verdict = rowVerdict(tally, lane, context.spike.triggers);
   return {
     dimension: context.dimension,
     kind,
@@ -145,7 +150,7 @@ function rowOf(context: RowContext, kind: RowKind, value: string | null, tally: 
     hardBounceRatio: renderPercent(tally.permanentBounces, tally.sends),
     complaintRatio: renderPercent(tally.complaints, tally.sends),
     sharePercent: renderPercent(tally.sends, lane.recipientSends),
-    verdict: kind === 'value' ? verdict : atMostElevated(verdict),
+    verdict: kindRowVerdict(kind, tally, lane, context.spike.triggers),
     thresholds: context.thresholds.map((threshold) => ({ ...threshold })),
     fromBucketMs: context.summary.window.fromBucketMs,
     toBucketMs: context.summary.window.toBucketMs,
@@ -489,7 +494,7 @@ function corroborationOf(record: ConfigurationRecord, totals: WindowSummary['tot
   return { corroboratingBounces, permanentBounces: totals.permanentBounces };
 }
 
-function configurationVerdict(state: ConfigurationState, corroboration: ConfigurationRow['corroboration']): ConfigurationVerdict {
+export function configurationVerdict(state: ConfigurationState, corroboration: ConfigurationRow['corroboration']): ConfigurationVerdict {
   switch (state) {
     case 'present':
       return 'ruled-out';
