@@ -1,7 +1,24 @@
 import { createHash } from 'node:crypto';
-import { PINNED_MODEL_VALUES } from '@fothering/core/model-values';
-import type { RuntimeResult } from '@fothering/core/agent-answer';
+import {
+  Agent,
+  ConstantBackoff,
+  DefaultModelRetryStrategy,
+  Message,
+  StructuredOutputError,
+  TextBlock,
+  configureLogging,
+} from '@strands-agents/sdk';
+import { agentAnswerSchema, type RuntimeResult } from '@fothering/core/agent-answer';
+import { RECORD_BYTE_CEILING, canonicalJson, evidenceRecordSchema, recordHash } from '@fothering/core/evidence-record';
+import { MODEL_VALUES, PINNED_MODEL_VALUES } from '@fothering/core/model-values';
+import { PortBackedModel } from '@fothering/providers/port-backed-model';
 import type { AgentDeps } from './root.js';
+
+// D-73: the SDK's default logger forwards warn and error to the console, and it logs a malformed
+// tool-input parse failure with the text it failed on, which is model output. In the runtime the
+// console is CloudWatch, so the logger is replaced as this module loads, before any invocation.
+const silent = (): void => {};
+configureLogging({ debug: silent, info: silent, warn: silent, error: silent });
 
 // Budget: at most 2,048 UTF-8 bytes, and at most 3,072 together with the tool spec (handler.test.ts
 // measures both). The field names are the evidence record's own.
@@ -28,14 +45,111 @@ export const SYSTEM_PROMPT = [
 
 export const SYSTEM_PROMPT_SHA256 = createHash('sha256').update(SYSTEM_PROMPT, 'utf8').digest('hex');
 
+type RefusalReason = Extract<RuntimeResult, { status: 'refused' }>['reason'];
+type FailureReason = Extract<RuntimeResult, { status: 'failed' }>['reason'];
+
+const NO_USAGE = { inputTokens: 0, outputTokens: 0, totalTokens: 0 } as const;
+
+function refused(reason: RefusalReason): RuntimeResult {
+  return { status: 'refused', reason, pinned: PINNED_MODEL_VALUES, promptSha256: SYSTEM_PROMPT_SHA256, usage: NO_USAGE, modelCalls: 0 };
+}
+
+function failedBeforeModel(reason: FailureReason): RuntimeResult {
+  return { status: 'failed', reason, pinned: PINNED_MODEL_VALUES, promptSha256: SYSTEM_PROMPT_SHA256, usage: NO_USAGE, modelCalls: 0 };
+}
+
+// The payload is the evidence record and nothing else. It is checked here, not through
+// bedrock-agentcore's requestSchema option, so one zod version types it (D-72).
+function admit(payload: unknown): { userText: string } | { refusal: RefusalReason } {
+  const parsed = evidenceRecordSchema.safeParse(payload);
+  if (!parsed.success) return { refusal: 'payload-invalid' };
+  if (recordHash(parsed.data) !== parsed.data.hash) return { refusal: 'hash-mismatch' };
+  const userText = canonicalJson(parsed.data);
+  if (Buffer.byteLength(userText, 'utf8') > RECORD_BYTE_CEILING) return { refusal: 'record-too-large' };
+  return { userText };
+}
+
+// Deployed with the switch unset, the row is the dry-run recorder: one pass over its stream writes
+// the line and yields nothing, so no loop runs and nothing is metered.
+async function recordDryRun(deps: AgentDeps, userText: string): Promise<RuntimeResult> {
+  const message = new Message({ role: 'user', content: [new TextBlock(userText)] });
+  for await (const event of deps.ports.bedrockModel.stream([message], { systemPrompt: SYSTEM_PROMPT })) void event;
+  return { status: 'dry-run', pinned: PINNED_MODEL_VALUES, promptSha256: SYSTEM_PROMPT_SHA256 };
+}
+
+// Classified by the wrapper's own flags, because the SDK wraps a model-side error before it reaches
+// here. The error itself is never read into the result: an SDK or zod message can quote model text.
+function failureReason(model: PortBackedModel, error: unknown): FailureReason {
+  if (model.ceilingReached) return 'model-call-ceiling';
+  if (model.inputCeilingReached) return 'input-ceiling';
+  if (error instanceof StructuredOutputError) return 'structured-output';
+  return 'model-error';
+}
+
 export function createInvocationHandler(deps: AgentDeps): (payload: unknown) => Promise<RuntimeResult> {
-  void deps;
-  return async () => ({
-    status: 'refused',
-    reason: 'payload-invalid',
-    pinned: PINNED_MODEL_VALUES,
-    promptSha256: SYSTEM_PROMPT_SHA256,
-    usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
-    modelCalls: 0,
-  });
+  return async (payload) => {
+    const admitted = admit(payload);
+    if ('refusal' in admitted) return refused(admitted.refusal);
+    const { userText } = admitted;
+    if (deps.kinds.bedrockModel?.stream === 'dry-run') {
+      try {
+        return await recordDryRun(deps, userText);
+      } catch {
+        return failedBeforeModel('model-error');
+      }
+    }
+
+    // One wrapper and one Agent per invocation (D-71, AI-SPEC pitfall 7): an Agent keeps its messages
+    // across invoke() calls and refuses a concurrent one, so a shared Agent would carry one incident's
+    // record into the next prompt and fail the second of two invocations in flight.
+    const model = new PortBackedModel({
+      port: deps.ports.bedrockModel,
+      config: { modelId: MODEL_VALUES.inferenceProfileId, maxTokens: MODEL_VALUES.maxTokens },
+      ceiling: MODEL_VALUES.modelCallCeiling,
+      inputByteCeiling: MODEL_VALUES.inputTokenCeiling,
+    });
+    const agent = new Agent({
+      model,
+      tools: [],
+      systemPrompt: SYSTEM_PROMPT,
+      structuredOutputSchema: agentAnswerSchema,
+      // The default printer writes the model's stream to stdout, which is CloudWatch here (D-73).
+      printer: false,
+      // The SDK default retries a throttle six times with backoff up to 240 s, past both the call
+      // ceiling and detection's timeout; one retry after 2 s fits inside both.
+      retryStrategy: new DefaultModelRetryStrategy({
+        maxAttempts: MODEL_VALUES.throttleAttempts,
+        backoff: new ConstantBackoff({ delayMs: MODEL_VALUES.throttleBackoffMs }),
+      }),
+    });
+    const failed = (reason: FailureReason): RuntimeResult => ({
+      status: 'failed',
+      reason,
+      pinned: PINNED_MODEL_VALUES,
+      promptSha256: SYSTEM_PROMPT_SHA256,
+      usage: model.usage,
+      modelCalls: model.calls,
+    });
+
+    try {
+      const result = await agent.invoke(userText, {
+        limits: { turns: MODEL_VALUES.loopTurns },
+        cancelSignal: AbortSignal.timeout(MODEL_VALUES.runtimeDeadlineMs),
+      });
+      // A turn limit or a cancel returns a result with no structured output; it does not throw.
+      if (result.structuredOutput === undefined) return failed(result.stopReason === 'cancelled' ? 'deadline' : 'loop-limit');
+      // The raw answer: detection re-validates it before anything is stored (D-74).
+      return {
+        status: 'answered',
+        answer: result.structuredOutput,
+        pinned: PINNED_MODEL_VALUES,
+        promptSha256: SYSTEM_PROMPT_SHA256,
+        usage: model.usage,
+        modelCalls: model.calls,
+      };
+    } catch (error) {
+      // Never rethrown: BedrockAgentCoreApp's Fastify logger would record the message (D-73).
+      return failed(failureReason(model, error));
+    }
+  };
 }
