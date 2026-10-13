@@ -1,5 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import fc from 'fast-check';
+import { BedrockAgentCoreClient } from '@aws-sdk/client-bedrock-agentcore';
+import { BedrockModel, Message, TextBlock, type BedrockModelOptions, type ModelStreamEvent } from '@strands-agents/sdk';
+import { MODEL_VALUES } from '@fothering/core/model-values';
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocumentClient } from '@aws-sdk/lib-dynamodb';
 import { SecretsManagerClient } from '@aws-sdk/client-secrets-manager';
@@ -27,6 +30,7 @@ import { createDynamoEventStore } from './event-store.js';
 import { AddressKeySecretError, createSecretsManagerAddressKey } from './address-key.js';
 import { createSqsDeadLetter } from './dead-letter.js';
 import { createSesReads } from './ses-reads.js';
+import { createLiveAgentCore, createLiveBedrockModel } from './agent-adapters.js';
 
 // Region is fixed for every live adapter (SPEC constraint); the static credentials keep client
 // construction from touching the real default provider chain (env, files, IMDS), which this
@@ -879,5 +883,218 @@ describe('resolving the real port table with counting client factories', () => {
     // A second operation on an already-resolved port never rebuilds its client.
     await ports.eventStore.getRecord({ pk: 'LANE#x', sk: 'B#0000000000000#Send#m1' });
     expect(dynamo.count()).toBe(1);
+  });
+});
+
+const RUNTIME_ARN = 'arn:aws:bedrock-agentcore:eu-central-1:000000000000:runtime/fothering';
+const FORCED_TOOL = { name: 'strands_structured_output', description: 'answer', inputSchema: { type: 'object' as const } };
+// A Converse answer in the shape the API documents (API_runtime_Converse): one assistant text block,
+// the stop reason and the token usage.
+const CONVERSE_RESPONSE = {
+  output: { message: { role: 'assistant', content: [{ text: 'the explanation' }] } },
+  stopReason: 'end_turn',
+  usage: { inputTokens: 1_200, outputTokens: 80, totalTokens: 1_280 },
+};
+
+function userMessage(text: string): Message {
+  return new Message({ role: 'user', content: [new TextBlock(text)] });
+}
+
+async function drainEvents(iterable: AsyncIterable<ModelStreamEvent>): Promise<ModelStreamEvent[]> {
+  const events: ModelStreamEvent[] = [];
+  for await (const event of iterable) events.push(event);
+  return events;
+}
+
+interface CapturedBedrockSend {
+  name: string;
+  input: Record<string, unknown>;
+  client: { config: { region: () => Promise<string>; maxAttempts: () => Promise<number> } };
+}
+
+// BedrockModel builds its own runtime client and takes no prebuilt one (bedrock.d.ts 1.20.0), so the
+// capture replaces send on that client class's prototype, reached through a probe model's client
+// rather than an import of a package providers does not list. Nothing is signed or sent: the
+// replacement answers before any middleware runs.
+function captureBedrockRuntimeSends(): { sends: CapturedBedrockSend[]; restore: () => void } {
+  const probe = new BedrockModel({ region: REGION, modelId: MODEL_VALUES.inferenceProfileId, clientConfig: { credentials: FAKE_CREDENTIALS } });
+  const prototype = Object.getPrototypeOf((probe as unknown as { _client: object })._client) as Record<string, unknown>;
+  const ownSend = Object.getOwnPropertyDescriptor(prototype, 'send');
+  const sends: CapturedBedrockSend[] = [];
+  prototype.send = async function send(
+    this: CapturedBedrockSend['client'],
+    command: { constructor: { name: string }; input: Record<string, unknown> },
+  ): Promise<unknown> {
+    sends.push({ name: command.constructor.name, input: command.input, client: this });
+    return structuredClone(CONVERSE_RESPONSE);
+  };
+  return {
+    sends,
+    restore: () => {
+      if (ownSend === undefined) delete prototype.send;
+      else Object.defineProperty(prototype, 'send', ownSend);
+    },
+  };
+}
+
+describe('createLiveBedrockModel', () => {
+  let restoreSend: (() => void) | undefined;
+  afterEach(() => {
+    restoreSend?.();
+    restoreSend = undefined;
+  });
+
+  function capture(): CapturedBedrockSend[] {
+    const { sends, restore } = captureBedrockRuntimeSends();
+    restoreSend = restore;
+    return sends;
+  }
+
+  it('builds one BedrockModel on the first stream call, every option read from MODEL_VALUES', async () => {
+    const sends = capture();
+    const built: BedrockModelOptions[] = [];
+    const port = createLiveBedrockModel((options) => {
+      built.push(options);
+      return new BedrockModel(options);
+    });
+    expect(built).toHaveLength(0);
+
+    await drainEvents(port.stream([userMessage('first')]));
+    await drainEvents(port.stream([userMessage('second')]));
+
+    expect(built).toHaveLength(1);
+    expect(built[0]).toEqual({
+      region: 'eu-central-1',
+      modelId: 'eu.anthropic.claude-sonnet-5',
+      maxTokens: 1_024,
+      stream: false,
+      additionalArgs: { additionalModelRequestFields: { thinking: { type: 'disabled' } } },
+      clientConfig: { maxAttempts: 1 },
+      requestTimeout: 60_000,
+    });
+    expect(sends).toHaveLength(2);
+    expect(sends[1]?.client).toBe(sends[0]?.client);
+    await expect(sends[0]?.client.config.region()).resolves.toBe('eu-central-1');
+    await expect(sends[0]?.client.config.maxAttempts()).resolves.toBe(1);
+  });
+
+  it('sends Converse with maxTokens alone in inferenceConfig and thinking disabled, on a forced tool call too', async () => {
+    const sends = capture();
+    const port = createLiveBedrockModel();
+
+    const events = await drainEvents(port.stream([userMessage('p')], { systemPrompt: 's' }));
+    await drainEvents(port.stream([userMessage('p')], { systemPrompt: 's', toolSpecs: [FORCED_TOOL], toolChoice: { tool: { name: FORCED_TOOL.name } } }));
+
+    expect(sends.map((send) => send.name)).toEqual(['ConverseCommand', 'ConverseCommand']);
+    for (const send of sends) {
+      expect(send.input.modelId).toBe('eu.anthropic.claude-sonnet-5');
+      expect(send.input.inferenceConfig).toEqual({ maxTokens: 1_024 });
+      expect(send.input.additionalModelRequestFields).toEqual({ thinking: { type: 'disabled' } });
+      expect(JSON.stringify(send.input)).not.toMatch(/temperature|topP|topK|top_p|top_k/);
+    }
+    expect(sends[1]?.input.toolConfig).toMatchObject({ toolChoice: { tool: { name: FORCED_TOOL.name } } });
+    expect(events.at(-1)).toMatchObject({ type: 'modelMetadataEvent', usage: { inputTokens: 1_200, outputTokens: 80, totalTokens: 1_280 } });
+  });
+
+  // The control for the case above: the SDK's own request-fields route loses thinking on a forced
+  // tool call (Pitfall 1), so the capture can see the drop the additionalArgs route prevents.
+  it('drops thinking on a forced tool call when it is sent through additionalRequestFields instead', async () => {
+    const sends = capture();
+    const model = new BedrockModel({
+      region: REGION,
+      modelId: MODEL_VALUES.inferenceProfileId,
+      stream: false,
+      additionalRequestFields: { thinking: { type: 'disabled' } },
+      clientConfig: { credentials: FAKE_CREDENTIALS },
+    });
+
+    await drainEvents(model.stream([userMessage('p')], { toolSpecs: [FORCED_TOOL], toolChoice: { tool: { name: FORCED_TOOL.name } } }));
+    expect(sends[0]?.input.additionalModelRequestFields).toBeUndefined();
+  });
+});
+
+interface CapturedAgentCoreSend {
+  name: string;
+  input: { payload?: unknown } & Record<string, unknown>;
+  options: unknown;
+}
+
+function stubAgentCoreSend(client: BedrockAgentCoreClient, body: string | undefined): CapturedAgentCoreSend[] {
+  const calls: CapturedAgentCoreSend[] = [];
+  (client as unknown as { send: unknown }).send = async (
+    command: { constructor: { name: string }; input: CapturedAgentCoreSend['input'] },
+    options?: unknown,
+  ): Promise<unknown> => {
+    calls.push({ name: command.constructor.name, input: command.input, options });
+    return {
+      contentType: 'application/json',
+      response: body === undefined ? undefined : { transformToString: async () => body },
+    };
+  };
+  return calls;
+}
+
+function agentCoreClient(): BedrockAgentCoreClient {
+  return new BedrockAgentCoreClient({ region: REGION, credentials: FAKE_CREDENTIALS });
+}
+
+describe('createLiveAgentCore', () => {
+  it('sends InvokeAgentRuntimeCommand with the ARN, the session, JSON content types and payload bytes, and parses the body', async () => {
+    const client = agentCoreClient();
+    const calls = stubAgentCoreSend(client, '{"status":"answered","modelCalls":1}');
+    const controller = new AbortController();
+    const payload = { record: { rows: [1, 2] }, note: 'café' };
+
+    const answer = await createLiveAgentCore({ client: () => client }).invokeAgentRuntime({
+      runtimeArn: RUNTIME_ARN,
+      sessionId: 'fothering-incident-a1',
+      payload,
+      abortSignal: controller.signal,
+    });
+
+    expect(answer).toEqual({ status: 'answered', modelCalls: 1 });
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.name).toBe('InvokeAgentRuntimeCommand');
+    expect(calls[0]?.input).toMatchObject({
+      agentRuntimeArn: RUNTIME_ARN,
+      runtimeSessionId: 'fothering-incident-a1',
+      contentType: 'application/json',
+      accept: 'application/json',
+    });
+    expect(calls[0]?.input.payload).toBeInstanceOf(Uint8Array);
+    expect(Buffer.from(calls[0]?.input.payload as Uint8Array).toString('utf8')).toBe(JSON.stringify(payload));
+    expect((calls[0]?.options as { abortSignal?: unknown } | undefined)?.abortSignal).toBe(controller.signal);
+  });
+
+  it('refuses a response with no body, naming nothing of the payload', async () => {
+    const client = agentCoreClient();
+    stubAgentCoreSend(client, undefined);
+    const refusal = await createLiveAgentCore({ client: () => client })
+      .invokeAgentRuntime({ runtimeArn: RUNTIME_ARN, sessionId: 's', payload: { note: 'Jane' } })
+      .catch((error: unknown) => error);
+    expect((refusal as Error).message).toBe('the agent runtime returned no response body');
+  });
+
+  it('builds no client before the first call through the port table, and one after two calls', async () => {
+    const client = agentCoreClient();
+    stubAgentCoreSend(client, '{}');
+    let built = 0;
+    const { ports, kinds } = resolvePortTable({
+      runtimeContext: 'deployed',
+      switchValue: 'live',
+      liveClients: {
+        bedrockAgentCore: () => {
+          built += 1;
+          return client;
+        },
+      },
+      dryRunSink: () => {},
+    });
+
+    expect(kinds.agentCore?.invokeAgentRuntime).toBe('live');
+    expect(built).toBe(0);
+    await ports.agentCore.invokeAgentRuntime({ runtimeArn: RUNTIME_ARN, sessionId: 's', payload: {} });
+    await ports.agentCore.invokeAgentRuntime({ runtimeArn: RUNTIME_ARN, sessionId: 's', payload: {} });
+    expect(built).toBe(1);
   });
 });

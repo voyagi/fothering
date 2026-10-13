@@ -320,8 +320,8 @@ describe('the real port table', () => {
     ['ses', 'pauseConfigurationSet', 'dry-run', 'not-built-until-phase-3'],
     ['ses', 'reopenConfigurationSet', 'dry-run', 'not-built-until-phase-3'],
     ['ses', 'sendEmail', 'dry-run', 'not-built-until-phase-4'],
-    ['bedrockModel', 'stream', 'dry-run', 'not-built-until-phase-2'],
-    ['agentCore', 'invokeAgentRuntime', 'dry-run', 'not-built-until-phase-2'],
+    ['bedrockModel', 'stream', 'dry-run', 'live'],
+    ['agentCore', 'invokeAgentRuntime', 'dry-run', 'live'],
     ['replyBucket', 'getReplyObject', 'not-built-until-phase-4', 'not-built-until-phase-4'],
   ])('resolves %s.%s to %s without the switch and %s with it', (portName, operation, withoutSwitch, withSwitch) => {
     const unset = resolvePortTable({ runtimeContext: 'deployed', switchValue: undefined, dryRunSink: NO_LINES });
@@ -330,12 +330,12 @@ describe('the real port table', () => {
     expect(live.kinds[portName]?.[operation]).toBe(withSwitch);
   });
 
-  it('never reports phase 1 for any operation, in either context, for any switch value', () => {
+  it.each(['not-built-until-phase-1', 'not-built-until-phase-2'])('never reports %s for any operation, in either context, for any switch value', (phase) => {
     for (const runtimeContext of ['test', 'deployed'] as const) {
       for (const switchValue of SWITCH_VALUES) {
         const { kinds } = resolvePortTable({ runtimeContext, switchValue, dryRunSink: NO_LINES });
-        for (const row of Object.values(kinds)) {
-          for (const kind of Object.values(row)) expect(kind).not.toBe('not-built-until-phase-1');
+        for (const [portName, row] of Object.entries(kinds)) {
+          for (const [operation, kind] of Object.entries(row)) expect(`${portName}.${operation} ${kind}`).not.toBe(`${portName}.${operation} ${phase}`);
         }
       }
     }
@@ -345,8 +345,6 @@ describe('the real port table', () => {
     ['ses', 'pauseConfigurationSet', 'phase 3', ['fothering-bulk']],
     ['ses', 'reopenConfigurationSet', 'phase 3', ['fothering-bulk']],
     ['ses', 'sendEmail', 'phase 4', [{ from: 'ops@example.org', to: [], subject: 's', text: 't' }]],
-    ['bedrockModel', 'stream', 'phase 2', [[], {}]],
-    ['agentCore', 'invokeAgentRuntime', 'phase 2', [{ runtimeArn: 'arn:aws:x', sessionId: 's', payload: {} }]],
     ['replyBucket', 'getReplyObject', 'phase 4', ['key']],
   ])('rejects %s.%s with a NotBuiltError naming %s once the switch is live', async (portName, operation, phase, args) => {
     const { ports } = resolvePortTable({ runtimeContext: 'deployed', switchValue: 'live', dryRunSink: NO_LINES });

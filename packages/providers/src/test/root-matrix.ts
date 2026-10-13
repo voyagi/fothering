@@ -37,10 +37,10 @@ export const EXPECTED_KINDS: Readonly<Record<string, Readonly<Record<string, Kin
     sendEmail: ['fixture', 'dry-run', 'not-built-until-phase-4'],
   },
   bedrockModel: {
-    stream: ['fixture', 'dry-run', 'not-built-until-phase-2'],
+    stream: ['fixture', 'dry-run', 'live'],
   },
   agentCore: {
-    invokeAgentRuntime: ['fixture', 'dry-run', 'not-built-until-phase-2'],
+    invokeAgentRuntime: ['fixture', 'dry-run', 'live'],
   },
   replyBucket: {
     getReplyObject: ['fixture', 'not-built-until-phase-4', 'not-built-until-phase-4'],
