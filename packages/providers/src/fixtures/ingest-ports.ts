@@ -197,6 +197,13 @@ export function createFixtureDecisionStore(options: FixtureOptions = {}, dryRun?
       if (!isDecisionItem(item) || item.expiresAt <= Math.floor(nowMs / 1000)) return undefined;
       return structuredClone(item);
     },
+    async updateIfVersion() {
+      return 'conflict';
+    },
+    async reserveInvocation() {
+      return { ok: false, reason: 'conflict' };
+    },
+    async recordUsage() {},
   }, 'fixture');
 }
 

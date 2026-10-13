@@ -30,10 +30,112 @@ export interface DecisionStoreItem {
   [attribute: string]: unknown;
 }
 
+/**
+ * One invocation's claim on the incident counter and the UTC-day counter (D-67). The caps and the
+ * token reservation are computed by the caller; the store enforces exactly what it is given.
+ */
+export interface ReservationRequest {
+  incidentKey: RecordKey;
+  dayKey: RecordKey;
+  incidentCap: number;
+  dayInvocationCap: number;
+  dayTokenCap: number;
+  tokenReservation: number;
+  /** Written on a counter's first reservation and kept after, so a day counter is never extended into a reset. */
+  expiresAt: number;
+}
+
+export type ReservationItem = 'incident' | 'day';
+
+/** A cap refusal names every counter whose condition failed; a conflict is two writers racing, and retryable. */
+export type ReservationResult =
+  | { ok: true }
+  | { ok: false; reason: 'cap'; items: ReservationItem[] }
+  | { ok: false; reason: 'conflict' };
+
+/** Reporting totals added to both counters after an invocation; no cap reads them (D-67, D-68). */
+export interface UsageRecord {
+  incidentKey: RecordKey;
+  dayKey: RecordKey;
+  inputTokens: number;
+  outputTokens: number;
+  modelCalls: number;
+}
+
+/** No operation here deletes an item or lowers a counter: the caps hold only if nothing can (AC-P6). */
 export interface DecisionStorePort {
   putIfAbsent(item: DecisionStoreItem): Promise<'written' | 'duplicate'>;
   /** Answers undefined for an item whose expiresAt has passed, since GetItem applies no TTL filter. */
   getItem(key: RecordKey, nowMs: number): Promise<DecisionStoreItem | undefined>;
+  /** Sets the attributes, version + 1 and a fresh 30-day expiresAt, only while the stored version is expectedVersion. */
+  updateIfVersion(
+    key: RecordKey,
+    expectedVersion: number,
+    attributes: Readonly<Record<string, unknown>>,
+    nowMs: number,
+  ): Promise<'updated' | 'conflict'>;
+  /** Adds one invocation to both counters and the token reservation to the day, all or nothing. */
+  reserveInvocation(request: ReservationRequest): Promise<ReservationResult>;
+  recordUsage(usage: UsageRecord): Promise<void>;
+}
+
+const INCIDENT_PARTITION_PREFIX = 'INCIDENT#';
+const COUNTER_DAY_PARTITION_PREFIX = 'COUNTER_DAY#';
+const COUNTER_SORT_KEY = 'COUNTER';
+/** The attributes updateIfVersion writes itself; a caller naming one would fight the version check or the key. */
+const MANAGED_ATTRIBUTES: ReadonlySet<string> = new Set(['pk', 'sk', 'version', 'expiresAt']);
+
+function requireWholeNumber(name: string, value: number, minimum: number): void {
+  if (!Number.isSafeInteger(value) || value < minimum) {
+    throw new RangeError(`${name} must be a whole number from ${minimum} up`);
+  }
+}
+
+// The fixture and the live adapter both run these checks before anything is sent or stored, so the
+// two can never disagree about which request reaches the table.
+
+/** A counter moves only through reserveInvocation and recordUsage, which only add; a put or a versioned
+ * update could otherwise write one back to zero. */
+export function assertNotCounterItem(key: RecordKey): void {
+  if (key.sk === COUNTER_SORT_KEY) {
+    throw new RangeError('a counter item changes only through reserveInvocation and recordUsage, which only add');
+  }
+}
+
+function assertCounterKeys(incidentKey: RecordKey, dayKey: RecordKey): void {
+  if (!incidentKey.pk.startsWith(INCIDENT_PARTITION_PREFIX) || incidentKey.sk !== COUNTER_SORT_KEY) {
+    throw new RangeError('incidentKey must be an incident COUNTER key');
+  }
+  if (!dayKey.pk.startsWith(COUNTER_DAY_PARTITION_PREFIX) || dayKey.sk !== COUNTER_SORT_KEY) {
+    throw new RangeError('dayKey must be a COUNTER_DAY key');
+  }
+}
+
+export function assertVersionedUpdate(key: RecordKey, expectedVersion: number, attributes: Readonly<Record<string, unknown>>): void {
+  assertNotCounterItem(key);
+  requireWholeNumber('expectedVersion', expectedVersion, 0);
+  for (const name of Object.keys(attributes)) {
+    if (MANAGED_ATTRIBUTES.has(name)) throw new RangeError(`updateIfVersion writes ${name} itself, so it is not an attribute to pass`);
+  }
+}
+
+export function assertReservation(request: ReservationRequest): void {
+  assertCounterKeys(request.incidentKey, request.dayKey);
+  requireWholeNumber('incidentCap', request.incidentCap, 1);
+  requireWholeNumber('dayInvocationCap', request.dayInvocationCap, 1);
+  requireWholeNumber('dayTokenCap', request.dayTokenCap, 0);
+  requireWholeNumber('tokenReservation', request.tokenReservation, 0);
+  requireWholeNumber('expiresAt', request.expiresAt, 0);
+  // The day condition accepts a missing counter, so a reservation larger than the whole day cap would
+  // pass on the first call of a day and leave the counter over its cap.
+  if (request.tokenReservation > request.dayTokenCap) throw new RangeError('tokenReservation is larger than dayTokenCap');
+}
+
+export function assertUsage(usage: UsageRecord): void {
+  assertCounterKeys(usage.incidentKey, usage.dayKey);
+  requireWholeNumber('inputTokens', usage.inputTokens, 0);
+  requireWholeNumber('outputTokens', usage.outputTokens, 0);
+  requireWholeNumber('modelCalls', usage.modelCalls, 0);
 }
 
 /** One fixture table that the event store and the decision store share, as the live table is shared. */
@@ -69,6 +171,8 @@ export interface FixtureOptions {
   /** Records per page a fixture lane fold delivers; DynamoDB's own page is up to 1 MB. */
   pageSize?: number;
   store?: FixtureTableState;
+  /** The next N reservations cancel as a transaction conflict and change nothing, so a test can show the retry. */
+  transactionConflicts?: number;
 }
 
 // The composition-root contracts (D-05, D-06): a runtimeContext picks fixture over live wholesale,

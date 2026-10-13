@@ -17,7 +17,7 @@ import {
   type EventRecord,
   type RecordKey,
 } from '@fothering/core/records';
-import { requireLiveConfig, type EventStorePort } from '../port-types.js';
+import { NotBuiltError, requireLiveConfig, type DecisionStorePort, type EventStorePort } from '../port-types.js';
 import { hasErrorName } from './error-name.js';
 
 const CONDITIONAL_CHECK_FAILED = 'ConditionalCheckFailedException';
@@ -127,4 +127,11 @@ export function createDynamoEventStore(options: CreateDynamoEventStoreOptions): 
       return result.Item as EventRecord | undefined;
     },
   };
+}
+
+export function createDynamoDecisionStore(_options: CreateDynamoEventStoreOptions): DecisionStorePort {
+  const notBuilt = async (): Promise<never> => {
+    throw new NotBuiltError(2);
+  };
+  return { putIfAbsent: notBuilt, getItem: notBuilt, updateIfVersion: notBuilt, reserveInvocation: notBuilt, recordUsage: notBuilt };
 }

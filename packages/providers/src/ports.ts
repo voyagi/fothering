@@ -10,6 +10,7 @@ import type {
   AgentCorePort,
   BedrockModelPort,
   DeadLetterPort,
+  DecisionStorePort,
   EventStorePort,
   FixtureOptions,
   ReplyBucketPort,
@@ -24,11 +25,16 @@ import {
   createSesDryRun,
   type DryRunLog,
 } from './dry-run.js';
-import { createFixtureAddressKey, createFixtureDeadLetter, createFixtureEventStore } from './fixtures/ingest-ports.js';
+import {
+  createFixtureAddressKey,
+  createFixtureDeadLetter,
+  createFixtureDecisionStore,
+  createFixtureEventStore,
+} from './fixtures/ingest-ports.js';
 import { createFixtureAgentCore, createFixtureBedrockModel, createFixtureReplyBucket, createFixtureSes } from './fixtures/later-ports.js';
 import { lazyClient } from './live/lazy-client.js';
 import { createLiveAgentCore, createLiveBedrockModel } from './live/agent-adapters.js';
-import { createDynamoEventStore } from './live/event-store.js';
+import { createDynamoDecisionStore, createDynamoEventStore } from './live/event-store.js';
 import { createSecretsManagerAddressKey } from './live/address-key.js';
 import { createSqsDeadLetter } from './live/dead-letter.js';
 import { createSesReads } from './live/ses-reads.js';
@@ -46,7 +52,15 @@ function resolveLiveClient<T>(provided: unknown, construct: () => T): () => T {
   });
 }
 
-export type PortName = 'eventStore' | 'addressKey' | 'deadLetter' | 'ses' | 'bedrockModel' | 'agentCore' | 'replyBucket';
+export type PortName =
+  | 'eventStore'
+  | 'decisionStore'
+  | 'addressKey'
+  | 'deadLetter'
+  | 'ses'
+  | 'bedrockModel'
+  | 'agentCore'
+  | 'replyBucket';
 
 interface LivePortContext {
   liveConfig: LiveConfig;
@@ -86,6 +100,7 @@ export interface PortRow {
 
 export interface ResolvedPorts {
   eventStore: EventStorePort;
+  decisionStore: DecisionStorePort;
   addressKey: AddressKeyPort;
   deadLetter: DeadLetterPort;
   ses: SesPort;
@@ -106,6 +121,22 @@ export const PORT_TABLE = {
     live: ({ liveConfig, liveClients }) =>
       brandPort(
         createDynamoEventStore({
+          tableName: liveConfig.tableName,
+          client: resolveLiveClient(liveClients.dynamoDb, () => DynamoDBDocumentClient.from(new DynamoDBClient({ region: LIVE_REGION }))),
+        }),
+        'live',
+      ),
+  },
+  // Incident, evidence, decision and counter items in the event table (D-65, D-66). Like the event
+  // store, Fothering's own table: its writes mutate but never wait for the switch.
+  decisionStore: {
+    operations: ['putIfAbsent', 'getItem', 'updateIfVersion', 'reserveInvocation', 'recordUsage'],
+    mutatingOperations: ['putIfAbsent', 'updateIfVersion', 'reserveInvocation', 'recordUsage'],
+    gatedOperations: [],
+    fixture: (fixtures: FixtureOptions, dryRun: DryRunLog) => createFixtureDecisionStore(fixtures, dryRun),
+    live: ({ liveConfig, liveClients }) =>
+      brandPort(
+        createDynamoDecisionStore({
           tableName: liveConfig.tableName,
           client: resolveLiveClient(liveClients.dynamoDb, () => DynamoDBDocumentClient.from(new DynamoDBClient({ region: LIVE_REGION }))),
         }),

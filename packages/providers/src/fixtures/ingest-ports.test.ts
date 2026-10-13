@@ -14,6 +14,7 @@ import { REQUIRED_EVENT_TYPES, checkCloseability, type SesConfigurationFacts } f
 import { decideLane } from '@fothering/core/decision';
 import {
   buildEvidenceRecord,
+  counterDayKey,
   evidenceRecordSchema,
   incidentIdFor,
   incidentItemKey,
@@ -36,6 +37,8 @@ import {
   type LaneFold,
 } from '@fothering/core/window-fold';
 import lanesJson from '../../../../lanes.json' with { type: 'json' };
+import { createDryRunLog } from '../dry-run.js';
+import type { ReservationRequest, UsageRecord } from '../port-types.js';
 import { DOC_EXAMPLE_LANE_MAP, loadSesEventFixture } from './ses-events/index.js';
 import {
   FixtureWriteError,
@@ -804,5 +807,174 @@ describe('the fixture decision store shares the table without touching event rea
     for (const pageSize of [0, -1, 1.5, Number.NaN]) {
       expect(() => createFixtureEventStore({ pageSize })).toThrow(RangeError);
     }
+  });
+});
+
+const NOW_SECONDS = Math.floor(TRACER_NOW_MS / 1000);
+const STATE_KEY = incidentItemKey('2'.repeat(32), 'STATE');
+const INCIDENT_COUNTER = incidentItemKey('3'.repeat(32), 'COUNTER');
+const DAY_COUNTER = counterDayKey('2026-10-11');
+
+function reservation(overrides: Partial<ReservationRequest> = {}): ReservationRequest {
+  return {
+    incidentKey: INCIDENT_COUNTER,
+    dayKey: DAY_COUNTER,
+    incidentCap: 3,
+    dayInvocationCap: 10,
+    dayTokenCap: 1_000,
+    tokenReservation: 100,
+    expiresAt: NOW_SECONDS + RETENTION_SECONDS,
+    ...overrides,
+  };
+}
+
+function usage(overrides: Partial<UsageRecord> = {}): UsageRecord {
+  return { incidentKey: INCIDENT_COUNTER, dayKey: DAY_COUNTER, inputTokens: 1_200, outputTokens: 80, modelCalls: 2, ...overrides };
+}
+
+describe('the fixture decision store writes once and updates by version (D-66, AC-E33)', () => {
+  it('keeps the first item when a second put names the same key', async () => {
+    const decisions = createFixtureDecisionStore();
+    expect(await decisions.putIfAbsent({ ...STATE_KEY, expiresAt: NOW_SECONDS + 60, note: 'first' })).toBe('written');
+    expect(await decisions.putIfAbsent({ ...STATE_KEY, expiresAt: NOW_SECONDS + 60, note: 'second' })).toBe('duplicate');
+    expect((await decisions.getItem(STATE_KEY, TRACER_NOW_MS))?.note).toBe('first');
+  });
+
+  it('updates an item whose stored version is the expected one, bumping the version and refreshing expiresAt', async () => {
+    const decisions = createFixtureDecisionStore();
+    await decisions.putIfAbsent({ ...STATE_KEY, expiresAt: NOW_SECONDS + 60, version: 1, state: 'open' });
+    expect(await decisions.updateIfVersion(STATE_KEY, 1, { state: 'closed' }, TRACER_NOW_MS)).toBe('updated');
+    expect(await decisions.getItem(STATE_KEY, TRACER_NOW_MS)).toEqual({
+      ...STATE_KEY,
+      expiresAt: NOW_SECONDS + RETENTION_SECONDS,
+      version: 2,
+      state: 'closed',
+    });
+  });
+
+  it('answers conflict and changes nothing for a stale version or an item that is not stored', async () => {
+    const decisions = createFixtureDecisionStore();
+    await decisions.putIfAbsent({ ...STATE_KEY, expiresAt: NOW_SECONDS + 60, version: 1, state: 'open' });
+    await decisions.updateIfVersion(STATE_KEY, 1, { state: 'closed' }, TRACER_NOW_MS);
+    expect(await decisions.updateIfVersion(STATE_KEY, 1, { state: 'open' }, TRACER_NOW_MS)).toBe('conflict');
+    expect((await decisions.getItem(STATE_KEY, TRACER_NOW_MS))?.state).toBe('closed');
+
+    const missing = incidentItemKey('4'.repeat(32), 'STATE');
+    expect(await decisions.updateIfVersion(missing, 0, { state: 'open' }, TRACER_NOW_MS)).toBe('conflict');
+    expect(await decisions.getItem(missing, TRACER_NOW_MS)).toBeUndefined();
+  });
+
+  it('refuses an update naming an attribute it writes itself, and any put or update of a counter item', async () => {
+    const decisions = createFixtureDecisionStore();
+    await decisions.putIfAbsent({ ...STATE_KEY, expiresAt: NOW_SECONDS + 60, version: 1 });
+    for (const attribute of ['pk', 'sk', 'version', 'expiresAt']) {
+      await expect(decisions.updateIfVersion(STATE_KEY, 1, { [attribute]: 0 }, TRACER_NOW_MS)).rejects.toThrow(RangeError);
+    }
+    await expect(decisions.updateIfVersion(STATE_KEY, 1.5, {}, TRACER_NOW_MS)).rejects.toThrow(RangeError);
+    await expect(decisions.putIfAbsent({ ...DAY_COUNTER, expiresAt: NOW_SECONDS + 60, invocations: -5 })).rejects.toThrow(RangeError);
+    await expect(decisions.updateIfVersion(INCIDENT_COUNTER, 0, { invocations: 0 }, TRACER_NOW_MS)).rejects.toThrow(RangeError);
+    expect(await decisions.getItem(DAY_COUNTER, TRACER_NOW_MS)).toBeUndefined();
+    expect((await decisions.getItem(STATE_KEY, TRACER_NOW_MS))?.version).toBe(1);
+  });
+});
+
+describe('the fixture decision store reserves both counters all or nothing (D-67)', () => {
+  it('creates the day counter at one invocation on the first reservation of a UTC day (AC-E46)', async () => {
+    const decisions = createFixtureDecisionStore();
+    expect(await decisions.reserveInvocation(reservation())).toEqual({ ok: true });
+    expect(await decisions.getItem(DAY_COUNTER, TRACER_NOW_MS)).toEqual({
+      ...DAY_COUNTER,
+      invocations: 1,
+      tokenReservations: 100,
+      expiresAt: NOW_SECONDS + RETENTION_SECONDS,
+    });
+    expect((await decisions.getItem(INCIDENT_COUNTER, TRACER_NOW_MS))?.invocations).toBe(1);
+  });
+
+  it('keeps the expiresAt of the first reservation, so a later one never extends a counter', async () => {
+    const decisions = createFixtureDecisionStore();
+    await decisions.reserveInvocation(reservation());
+    await decisions.reserveInvocation(reservation({ expiresAt: NOW_SECONDS + 2 * RETENTION_SECONDS }));
+    expect((await decisions.getItem(DAY_COUNTER, TRACER_NOW_MS))?.expiresAt).toBe(NOW_SECONDS + RETENTION_SECONDS);
+    expect((await decisions.getItem(INCIDENT_COUNTER, TRACER_NOW_MS))?.expiresAt).toBe(NOW_SECONDS + RETENTION_SECONDS);
+  });
+
+  it('allows one reservation one below the incident cap and refuses at the cap, naming the incident (AC-E48)', async () => {
+    const decisions = createFixtureDecisionStore();
+    await decisions.reserveInvocation(reservation());
+    await decisions.reserveInvocation(reservation());
+    expect((await decisions.reserveInvocation(reservation())).ok).toBe(true);
+    expect(await decisions.reserveInvocation(reservation())).toEqual({ ok: false, reason: 'cap', items: ['incident'] });
+    expect((await decisions.getItem(INCIDENT_COUNTER, TRACER_NOW_MS))?.invocations).toBe(3);
+    expect((await decisions.getItem(DAY_COUNTER, TRACER_NOW_MS))?.invocations).toBe(3);
+  });
+
+  it('refuses the day when its invocations or its token reservations are at their cap (AC-E48)', async () => {
+    const byInvocations = createFixtureDecisionStore();
+    await byInvocations.reserveInvocation(reservation({ dayInvocationCap: 1 }));
+    const second = reservation({ incidentKey: incidentItemKey('5'.repeat(32), 'COUNTER'), dayInvocationCap: 1 });
+    expect(await byInvocations.reserveInvocation(second)).toEqual({ ok: false, reason: 'cap', items: ['day'] });
+
+    const byTokens = createFixtureDecisionStore();
+    const tokens = { incidentCap: 10, dayTokenCap: 1_000, tokenReservation: 400 };
+    expect((await byTokens.reserveInvocation(reservation(tokens))).ok).toBe(true);
+    expect((await byTokens.reserveInvocation(reservation(tokens))).ok).toBe(true);
+    expect(await byTokens.reserveInvocation(reservation(tokens))).toEqual({ ok: false, reason: 'cap', items: ['day'] });
+    expect((await byTokens.getItem(DAY_COUNTER, TRACER_NOW_MS))?.tokenReservations).toBe(800);
+  });
+
+  it('lets exactly one of ten racing reservations through at one below the incident cap (AC-E49)', async () => {
+    const decisions = createFixtureDecisionStore({}, createDryRunLog({ sink: () => {}, addressKey: createFixtureAddressKey(), now: () => TRACER_NOW_MS }));
+    await decisions.reserveInvocation(reservation());
+    await decisions.reserveInvocation(reservation());
+    const results = await Promise.all(Array.from({ length: 10 }, () => decisions.reserveInvocation(reservation())));
+    expect(results.filter((result) => result.ok).length).toBe(1);
+    expect((await decisions.getItem(INCIDENT_COUNTER, TRACER_NOW_MS))?.invocations).toBe(3);
+  });
+
+  it('refuses once, naming both items, a reservation past the incident cap and the day cap together (AC-E45)', async () => {
+    const decisions = createFixtureDecisionStore();
+    const tight = reservation({ incidentCap: 1, dayInvocationCap: 1 });
+    await decisions.reserveInvocation(tight);
+    expect(await decisions.reserveInvocation(tight)).toEqual({ ok: false, reason: 'cap', items: ['incident', 'day'] });
+    expect((await decisions.getItem(DAY_COUNTER, TRACER_NOW_MS))?.invocations).toBe(1);
+  });
+
+  it('answers conflict for each injected transaction conflict, changing nothing, and then reserves (Pitfall 6)', async () => {
+    const decisions = createFixtureDecisionStore({ transactionConflicts: 2 });
+    expect(await decisions.reserveInvocation(reservation())).toEqual({ ok: false, reason: 'conflict' });
+    expect(await decisions.reserveInvocation(reservation())).toEqual({ ok: false, reason: 'conflict' });
+    expect(await decisions.getItem(DAY_COUNTER, TRACER_NOW_MS)).toBeUndefined();
+    expect(await decisions.reserveInvocation(reservation())).toEqual({ ok: true });
+    expect((await decisions.getItem(DAY_COUNTER, TRACER_NOW_MS))?.invocations).toBe(1);
+  });
+
+  it('refuses a reservation whose caps are not whole numbers or whose token reservation exceeds the day cap', async () => {
+    const decisions = createFixtureDecisionStore();
+    for (const overrides of [{ incidentCap: 0 }, { dayInvocationCap: 1.5 }, { tokenReservation: -1 }, { tokenReservation: 1_001 }, { dayKey: STATE_KEY }]) {
+      await expect(decisions.reserveInvocation(reservation(overrides))).rejects.toThrow(RangeError);
+    }
+    expect(await decisions.getItem(DAY_COUNTER, TRACER_NOW_MS)).toBeUndefined();
+  });
+});
+
+describe('the fixture decision store records usage by adding only (AC-P6 store half)', () => {
+  it('adds each amount to both counter items, call after call', async () => {
+    const decisions = createFixtureDecisionStore();
+    await decisions.reserveInvocation(reservation());
+    await decisions.recordUsage(usage());
+    await decisions.recordUsage(usage({ inputTokens: 300, outputTokens: 20, modelCalls: 1 }));
+    for (const key of [INCIDENT_COUNTER, DAY_COUNTER]) {
+      expect(await decisions.getItem(key, TRACER_NOW_MS)).toMatchObject({ inputTokens: 1_500, outputTokens: 100, modelCalls: 3, invocations: 1 });
+    }
+  });
+
+  it('throws a RangeError for a negative or fractional amount before anything is written', async () => {
+    const decisions = createFixtureDecisionStore();
+    await decisions.reserveInvocation(reservation());
+    for (const overrides of [{ inputTokens: -1 }, { outputTokens: 0.5 }, { modelCalls: Number.NaN }]) {
+      await expect(decisions.recordUsage(usage(overrides))).rejects.toThrow(RangeError);
+    }
+    expect((await decisions.getItem(DAY_COUNTER, TRACER_NOW_MS))?.inputTokens).toBeUndefined();
   });
 });

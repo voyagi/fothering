@@ -5,7 +5,15 @@ import { RECORD_BYTE_CEILING } from '@fothering/core/evidence-record';
 import { MODEL_VALUES, PINNED_MODEL_VALUES, TOKEN_RESERVATION_PER_INVOCATION } from '@fothering/core/model-values';
 import type { EventRecord, RecordKey } from '@fothering/core/records';
 import { PORT_TABLE, resolvePortTable, type PortName, type PortRow, type ResolvedPorts } from './ports.js';
-import { NotBuiltError, brandPort, kindOf, type ResolvedKind, type SendEmailRequest } from './port-types.js';
+import {
+  NotBuiltError,
+  brandPort,
+  kindOf,
+  type ReservationRequest,
+  type ResolvedKind,
+  type SendEmailRequest,
+  type UsageRecord,
+} from './port-types.js';
 import { createBedrockModelDryRun, createDryRunLog, type DryRunLog } from './dry-run.js';
 import {
   TEST_ADDRESS_KEY_SET,
@@ -30,6 +38,19 @@ const NO_LINES = (): void => {};
 const RUNTIME_ARN = 'arn:aws:bedrock-agentcore:eu-central-1:000000000000:runtime/x';
 const USAGE = { inputTokens: 10, outputTokens: 2, totalTokens: 12 };
 const PLANTED_SENTENCE = 'Jane said the mailbox at her house is full';
+const INCIDENT_PK = `INCIDENT#${'a'.repeat(32)}`;
+const INCIDENT_STATE_KEY = { pk: INCIDENT_PK, sk: 'STATE' };
+const DAY_KEY = { pk: 'COUNTER_DAY#2026-10-11', sk: 'COUNTER' };
+const RESERVATION: ReservationRequest = {
+  incidentKey: { pk: INCIDENT_PK, sk: 'COUNTER' },
+  dayKey: DAY_KEY,
+  incidentCap: 3,
+  dayInvocationCap: 10,
+  dayTokenCap: 1_000,
+  tokenReservation: 100,
+  expiresAt: 1_800_000_000,
+};
+const TOKEN_USAGE: UsageRecord = { incidentKey: RESERVATION.incidentKey, dayKey: DAY_KEY, inputTokens: 1_200, outputTokens: 80, modelCalls: 2 };
 
 function userMessage(text: string): Message {
   return new Message({ role: 'user', content: [new TextBlock(text)] });
@@ -239,16 +260,27 @@ describe('resolvePortTable with live adapters written as classes', () => {
 });
 
 describe('the real port table', () => {
-  it('names the seven rows', () => {
+  it('names the eight rows', () => {
     expect(Object.keys(PORT_TABLE).sort()).toEqual([
       'addressKey',
       'agentCore',
       'bedrockModel',
       'deadLetter',
+      'decisionStore',
       'eventStore',
       'replyBucket',
       'ses',
     ]);
+  });
+
+  // AC-P6, store half: the caps hold only if no process can take a counter back down, so the row
+  // offers no operation that could.
+  it('gives the decisionStore row exactly five operations, four mutating, none gated, none that deletes or lowers', () => {
+    const row = PORT_TABLE.decisionStore;
+    expect(row.operations.join(' ')).toBe('putIfAbsent getItem updateIfVersion reserveInvocation recordUsage');
+    expect(row.mutatingOperations.join(' ')).toBe('putIfAbsent updateIfVersion reserveInvocation recordUsage');
+    expect(row.gatedOperations.join(' ')).toBe('');
+    expect(row.operations.filter((operation) => /delete|remove|decrement|reset|subtract/i.test(operation)).join(' ')).toBe('');
   });
 
   // The type contract (D-05): a table missing a row is an error at gate:types, not a runtime surprise.
@@ -305,9 +337,9 @@ describe('the real port table', () => {
     expect(lines).toEqual([]);
   });
 
-  it.each(SWITCH_VALUES)('resolves all seven rows to fixture in test for switch %j', (switchValue) => {
+  it.each(SWITCH_VALUES)('resolves all eight rows to fixture in test for switch %j', (switchValue) => {
     const { kinds } = resolvePortTable({ runtimeContext: 'test', switchValue });
-    expect(Object.keys(kinds)).toHaveLength(7);
+    expect(Object.keys(kinds)).toHaveLength(8);
     for (const row of Object.values(kinds)) {
       for (const kind of Object.values(row)) expect(kind).toBe('fixture');
     }
@@ -480,6 +512,58 @@ describe('createDryRunLog targets (AC-P9)', () => {
   });
 });
 
+describe('decisionStore dry-run lines (D-66, AC-P9)', () => {
+  function decisionLines(): { log: DryRunLog; lines: string[] } {
+    const lines: string[] = [];
+    const log = createDryRunLog({ sink: (line) => lines.push(line), addressKey: createFixtureAddressKey(), now: () => 1_000 });
+    return { log, lines };
+  }
+
+  it('records a put under each of the three decision key prefixes with a key-only summary', async () => {
+    const { log, lines } = decisionLines();
+    await log.would('decisionStore.putIfAbsent', 'INCIDENT_LANE#fothering-bulk', { pk: 'INCIDENT_LANE#fothering-bulk', sk: 'MARKER', expiresAt: 1, note: PLANTED_SENTENCE });
+    await log.would('decisionStore.putIfAbsent', INCIDENT_PK, { ...INCIDENT_STATE_KEY, expiresAt: 1, version: 1 });
+    await log.would('decisionStore.putIfAbsent', 'COUNTER_DAY#2026-10-11', { ...DAY_KEY, expiresAt: 1 });
+    expect(lines.join('\n')).toBe(
+      [
+        '(dry-run) WOULD decisionStore.putIfAbsent INCIDENT_LANE#fothering-bulk {"pk":"INCIDENT_LANE#fothering-bulk","sk":"MARKER"}',
+        `(dry-run) WOULD decisionStore.putIfAbsent ${INCIDENT_PK} {"pk":"${INCIDENT_PK}","sk":"STATE"}`,
+        '(dry-run) WOULD decisionStore.putIfAbsent COUNTER_DAY#2026-10-11 {"pk":"COUNTER_DAY#2026-10-11","sk":"COUNTER"}',
+      ].join('\n'),
+    );
+  });
+
+  it('records a versioned update with its expected version, and the reservation and usage as integers only', async () => {
+    const { log, lines } = decisionLines();
+    await log.would('decisionStore.updateIfVersion', INCIDENT_PK, { ...INCIDENT_STATE_KEY, expectedVersion: 2 });
+    await log.would('decisionStore.reserveInvocation', INCIDENT_PK, RESERVATION);
+    await log.would('decisionStore.recordUsage', INCIDENT_PK, TOKEN_USAGE);
+    expect(lines.join('\n')).toBe(
+      [
+        `(dry-run) WOULD decisionStore.updateIfVersion ${INCIDENT_PK} {"expectedVersion":2,"pk":"${INCIDENT_PK}","sk":"STATE"}`,
+        `(dry-run) WOULD decisionStore.reserveInvocation ${INCIDENT_PK} {"dayInvocationCap":10,"dayTokenCap":1000,"expiresAt":1800000000,"incidentCap":3,"tokenReservation":100}`,
+        `(dry-run) WOULD decisionStore.recordUsage ${INCIDENT_PK} {"inputTokens":1200,"modelCalls":2,"outputTokens":80}`,
+      ].join('\n'),
+    );
+  });
+
+  it.each<[string, string, string, unknown]>([
+    ['an event record key as a put target', 'decisionStore.putIfAbsent', 'LANE#fothering-bulk', { pk: 'LANE#fothering-bulk', sk: 'STATE', expiresAt: 1 }],
+    ['an address as a put target', 'decisionStore.putIfAbsent', 'jane@example.com', INCIDENT_STATE_KEY],
+    ['a sentence as a sort key', 'decisionStore.putIfAbsent', INCIDENT_PK, { pk: INCIDENT_PK, sk: PLANTED_SENTENCE }],
+    ['an incident id that is not 32 hex characters', 'decisionStore.updateIfVersion', 'INCIDENT#jane', { pk: 'INCIDENT#jane', sk: 'STATE', expectedVersion: 1 }],
+    ['a day key as a reservation target', 'decisionStore.reserveInvocation', DAY_KEY.pk, RESERVATION],
+    ['a fractional usage amount', 'decisionStore.recordUsage', INCIDENT_PK, { ...TOKEN_USAGE, inputTokens: 0.5 }],
+  ])('refuses %s, writes no line and never echoes it', async (_label, operation, target, request) => {
+    const { log, lines } = decisionLines();
+    const refusal = await log.would(operation, target, request).catch((error: unknown) => error);
+    expect(refusal).toBeInstanceOf(TypeError);
+    expect((refusal as Error).message).toContain(`refusing to record ${operation}`);
+    for (const text of ['jane', 'mailbox']) expect((refusal as Error).message).not.toContain(text);
+    expect(lines).toEqual([]);
+  });
+});
+
 describe('a sendEmail dry-run line (AC-P9)', () => {
   const REQUEST: SendEmailRequest = {
     from: 'ops@example.org',
@@ -614,6 +698,10 @@ describe('the fixtures leave one dry-run line per mutating call (AC-4 dry-run ha
 const MUTATION_CALLS: Record<string, (ports: ResolvedPorts) => Promise<unknown>> = {
   'eventStore.putIfAbsent': (ports) => ports.eventStore.putIfAbsent({ ...RECORD_KEY, fields: {} } as unknown as EventRecord),
   'eventStore.deleteRecord': (ports) => ports.eventStore.deleteRecord(RECORD_KEY),
+  'decisionStore.putIfAbsent': (ports) => ports.decisionStore.putIfAbsent({ ...INCIDENT_STATE_KEY, expiresAt: 1, version: 1 }),
+  'decisionStore.updateIfVersion': (ports) => ports.decisionStore.updateIfVersion(INCIDENT_STATE_KEY, 1, { state: 'closed' }, 1_000),
+  'decisionStore.reserveInvocation': (ports) => ports.decisionStore.reserveInvocation(RESERVATION),
+  'decisionStore.recordUsage': (ports) => ports.decisionStore.recordUsage(TOKEN_USAGE),
   'deadLetter.send': (ports) => ports.deadLetter.send([]),
   'ses.pauseConfigurationSet': (ports) => ports.ses.pauseConfigurationSet('fothering-bulk'),
   'ses.reopenConfigurationSet': (ports) => ports.ses.reopenConfigurationSet('fothering-bulk'),

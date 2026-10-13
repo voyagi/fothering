@@ -21,6 +21,13 @@ export const EXPECTED_KINDS: Readonly<Record<string, Readonly<Record<string, Kin
     deleteRecord: ['fixture', 'live', 'live'],
     getRecord: ['fixture', 'live', 'live'],
   },
+  decisionStore: {
+    putIfAbsent: ['fixture', 'live', 'live'],
+    getItem: ['fixture', 'live', 'live'],
+    updateIfVersion: ['fixture', 'live', 'live'],
+    reserveInvocation: ['fixture', 'live', 'live'],
+    recordUsage: ['fixture', 'live', 'live'],
+  },
   addressKey: {
     getKeySet: ['fixture', 'live', 'live'],
   },
