@@ -44,10 +44,13 @@ interface FunctionRole {
 // Nothing here needs a context lookup or a literal account id, so `cdk synth` runs with no
 // credentials, and no resource sets a physical name.
 export class IngestStack extends Stack {
+  readonly table: Table;
+
   constructor(scope: Construct, id: string, props: IngestStackProps) {
     super(scope, id, props);
 
     const table = this.createTable();
+    this.table = table;
     const queue = new Queue(this, 'DeadLetterQueue', {
       encryption: QueueEncryption.SQS_MANAGED,
       retentionPeriod: Duration.days(4),

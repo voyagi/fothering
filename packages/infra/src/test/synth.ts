@@ -11,6 +11,7 @@ export interface SynthesizedStacks {
   readonly laneMap: LaneMap;
   readonly ingest: Template;
   readonly runtime: Template;
+  readonly detection: Template;
   /** The folder the synth wrote its assembly to. */
   readonly outdir: string;
   dispose(): void;
@@ -19,19 +20,21 @@ export interface SynthesizedStacks {
 type Resources = Record<string, { Type: string; Properties?: Record<string, unknown>; [key: string]: unknown }>;
 
 // The deployed context plus whatever a test adds, over stub bundles, so a synth loads aws-cdk-lib
-// and hashes two small folders and nothing more. The assembly goes inside the stub folder: an App
-// with no outdir writes to a new temp folder of its own, which nothing ever removes. A synth that
+// and hashes a few small folders and nothing more. The detection function reuses the ingest stub
+// folder: a stub bundle only has to exist to be hashed. The assembly goes inside the stub folder: an
+// App with no outdir writes to a new temp folder of its own, which nothing ever removes. A synth that
 // throws returns no dispose to its caller, so the folder is removed here before the error goes on.
 export function synthStacks(extraContext: Record<string, unknown> = {}): SynthesizedStacks {
   const assets = createStubAssets();
   try {
     const laneMap = parseLaneMap(lanesJson);
     const app = new App({ context: { ...cdkJsonContext, ...extraContext }, outdir: assets.outdir });
-    const { ingest, runtime } = addFotheringStacks(app, { laneMap, ...assets });
+    const { ingest, runtime, detection } = addFotheringStacks(app, { laneMap, ...assets, detectAssetDir: assets.ingestAssetDir });
     return {
       laneMap,
       ingest: Template.fromStack(ingest),
       runtime: Template.fromStack(runtime),
+      detection: Template.fromStack(detection),
       outdir: app.outdir,
       dispose: assets.remove,
     };

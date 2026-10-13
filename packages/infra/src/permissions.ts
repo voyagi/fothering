@@ -42,7 +42,7 @@ export function synthesizePermissionTemplates(): StackTemplates {
   const assets = createStubAssets();
   try {
     const app = new App({ context: { ...cdkJsonContext }, outdir: assets.outdir });
-    addFotheringStacks(app, { laneMap: parseLaneMap(lanesJson), ...assets });
+    addFotheringStacks(app, { laneMap: parseLaneMap(lanesJson), ...assets, detectAssetDir: assets.ingestAssetDir });
     const assembly = app.synth();
     return Object.fromEntries(
       [INGEST_STACK_ID, RUNTIME_STACK_ID].map((id) => [id, assembly.getStackByName(id).template as CfnTemplate]),
