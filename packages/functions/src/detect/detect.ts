@@ -7,7 +7,15 @@ import {
   type RuntimeResult,
 } from '@fothering/core/agent-answer';
 import { bucketStartMs } from '@fothering/core/buckets';
-import { checkCloseability, type SesConfigurationFacts } from '@fothering/core/closeability';
+import {
+  REQUIRED_EVENT_TYPES,
+  checkCloseability,
+  mergeObserveTallies,
+  observedFactsOf,
+  type CloseabilityResult,
+  type ObservedLaneFacts,
+  type SesConfigurationFacts,
+} from '@fothering/core/closeability';
 import { reserveInvocation } from '@fothering/core/counters';
 import { assembleEvidenceRecord, decideCycle, type CycleDecision, type LaneAnalysis } from '@fothering/core/decision';
 import {
@@ -17,14 +25,27 @@ import {
   incidentLaneKey,
   type EvidenceRecord,
 } from '@fothering/core/evidence-record';
-import { buildProviderRows, buildTagRows } from '@fothering/core/evidence-rows';
+import {
+  DNS_LOOKUP_CONCURRENCY,
+  buildLaneConfigurationRows,
+  buildProviderRows,
+  buildTagRows,
+  configurationFromDomains,
+  planDnsLookups,
+  receivingDomainsNeedingMx,
+  type DnsMxOutcome,
+  type DnsTxtOutcome,
+  type IdentityAuthFacts,
+  type PlannedLookup,
+} from '@fothering/core/evidence-rows';
 import { openIncident, stepIncident, windowsNeedingFinalVerdict, type FinalVerdict, type IncidentState } from '@fothering/core/incident';
-import type { LaneEntry } from '@fothering/core/lanes';
+import type { LaneEntry, LaneMap } from '@fothering/core/lanes';
 import type { LogEntry } from '@fothering/core/log';
 import { MODEL_VALUES } from '@fothering/core/model-values';
 import { RETENTION_SECONDS } from '@fothering/core/records';
-import { laneSpikeVerdict, type LaneSpikeVerdict, type LaneVerdict } from '@fothering/core/verdicts';
+import { coverageVerdict, laneSpikeVerdict, type CoverageVerdict, type LaneSpikeVerdict, type LaneVerdict } from '@fothering/core/verdicts';
 import {
+  coverageWindowFor,
   createWindowFold,
   spikeWindowFor,
   summarizeWindow,
@@ -58,8 +79,12 @@ export interface DetectionCycleSummary {
 
 interface FoldedLane {
   lane: LaneEntry;
+  /** The spike window's summary: the rows, the totals and the window the record names. */
   summary: WindowSummary;
   spike: LaneSpikeVerdict;
+  coverage: CoverageVerdict;
+  /** Observe facts from both windows: only the coverage window holds complete buckets (D-44). */
+  observed: ObservedLaneFacts;
 }
 
 interface Marker {
@@ -123,11 +148,21 @@ function foldWindow(deps: DetectDeps, configurationSet: string, window: BucketWi
 // Every lane read goes through foldLane, so a window's memory is the fold's state and never the
 // window's records (D-43); queryLane is not a detection read.
 async function foldLanes(deps: DetectDeps, nowMs: number): Promise<FoldedLane[]> {
-  const window = spikeWindowFor(nowMs);
+  const spikeWindow = spikeWindowFor(nowMs);
+  const coverageWindow = coverageWindowFor(nowMs);
   const folded: FoldedLane[] = [];
   for (const lane of deps.laneMap.lanes) {
-    const summary = summarizeWindow(await foldWindow(deps, lane.configurationSet, window, nowMs));
-    folded.push({ lane, summary, spike: laneSpikeVerdict(summary.totals) });
+    const spikeState = await foldWindow(deps, lane.configurationSet, spikeWindow, nowMs);
+    const coverageState = await foldWindow(deps, lane.configurationSet, coverageWindow, nowMs);
+    const summary = summarizeWindow(spikeState);
+    const coverageSummary = summarizeWindow(coverageState);
+    folded.push({
+      lane,
+      summary,
+      spike: laneSpikeVerdict(summary.totals),
+      coverage: coverageVerdict({ coverage: coverageSummary.coverage, orderBroken: coverageSummary.orderBroken }),
+      observed: observedFactsOf(mergeObserveTallies(spikeState.observe, coverageState.observe)),
+    });
   }
   return folded;
 }
@@ -306,9 +341,38 @@ function countedSesReads(ses: SesReadPort, counts: CycleCounts): SesReadPort {
   };
 }
 
-function analysesOf(folded: readonly FoldedLane[], deps: DetectDeps, ses: SesConfigurationFacts): LaneAnalysis[] {
-  const observed = new Map(folded.map(({ lane, summary }) => [lane.configurationSet, summary.observed]));
-  return folded.map(({ lane, summary, spike }): LaneAnalysis => ({
+interface DnsAnswers {
+  mx: ReadonlyMap<string, DnsMxOutcome>;
+  txt: ReadonlyMap<string, DnsTxtOutcome>;
+}
+
+/** What the opening reads found; `ses` is undefined past the identity bound, where nothing was read. */
+interface OpeningFacts extends DnsAnswers {
+  ses: SesConfigurationFacts | undefined;
+  identities: readonly IdentityAuthFacts[];
+  bound: 'ses-facts-bound' | 'dns-bound' | null;
+}
+
+const NO_ANSWERS: DnsAnswers = { mx: new Map(), txt: new Map() };
+
+// SES facts that refuse nothing, so the lane map and the events alone decide what is refused.
+function factsRefusingNothing(laneMap: LaneMap): SesConfigurationFacts {
+  const sets = laneMap.lanes.map((lane) => lane.configurationSet);
+  const everyType = [{ enabled: true, eventBridge: true, matchingEventTypes: REQUIRED_EVENT_TYPES }];
+  return { configurationSets: new Set(sets), defaultConfigurationSets: new Set(), eventDestinations: new Map(sets.map((set) => [set, everyType])) };
+}
+
+// Past the identity bound no SES fact was read (D-59): a lane the lane map and the events would let
+// close still reads refused, with no reason named, since closing needs facts this cycle never read.
+function closeabilityWithoutSes(configurationSet: string, laneMap: LaneMap, observed: ReadonlyMap<string, ObservedLaneFacts>): CloseabilityResult {
+  const result = checkCloseability(configurationSet, { laneMap, observed, ses: factsRefusingNothing(laneMap) });
+  return result.state === 'closeable' ? { state: 'refused', reasons: [] } : result;
+}
+
+function analysisOf(deps: DetectDeps, folded: FoldedLane, observed: ReadonlyMap<string, ObservedLaneFacts>, facts: OpeningFacts): LaneAnalysis {
+  const { lane, summary, spike } = folded;
+  const configurationSet = lane.configurationSet;
+  return {
     lane,
     summary,
     spike,
@@ -316,23 +380,73 @@ function analysesOf(folded: readonly FoldedLane[], deps: DetectDeps, ses: SesCon
       ...buildTagRows('batch', summary, spike),
       ...buildTagRows('template', summary, spike),
       ...buildTagRows('campaign', summary, spike),
-      ...buildProviderRows(summary, spike, new Map()),
+      ...buildProviderRows(summary, spike, facts.mx),
     ],
-    configurationRows: [],
-    closeability: checkCloseability(lane.configurationSet, { laneMap: deps.laneMap, observed, ses }),
-    coverage: 'not-judged',
-    bound: summary.dimensionBound ? 'dimension-bound' : null,
-  }));
+    configurationRows:
+      spike.verdict === 'spike' && facts.ses !== undefined
+        ? buildLaneConfigurationRows({ summary, identities: facts.identities, txtAnswers: facts.txt })
+        : [],
+    closeability:
+      facts.ses === undefined
+        ? closeabilityWithoutSes(configurationSet, deps.laneMap, observed)
+        : checkCloseability(configurationSet, { laneMap: deps.laneMap, observed, ses: facts.ses }),
+    coverage: folded.coverage,
+    bound: facts.bound ?? (summary.dimensionBound ? 'dimension-bound' : null),
+  };
 }
 
-/** D-42 step 4's reads: SES once, in a cycle with an incident to open; undefined defers the opening. */
-async function openingAnalyses(deps: DetectDeps, folded: readonly FoldedLane[], counts: CycleCounts): Promise<LaneAnalysis[] | undefined> {
-  const facts = await readSesFacts(countedSesReads(deps.ports.ses, counts), deps.laneMap, { wait: deps.wait });
-  if (!facts.ok) {
-    deps.log.info({ event: 'opening-deferred', reason: facts.reason });
-    return undefined;
-  }
-  return analysesOf(folded, deps, facts.facts);
+// Provider rows of every lane, the spiking lane's and the others', come from the same MX answers,
+// so a provider shared across lanes is judged on both sides alike (D-63).
+function analysesOf(deps: DetectDeps, folded: readonly FoldedLane[], facts: OpeningFacts): LaneAnalysis[] {
+  const observed = new Map(folded.map((lane) => [lane.lane.configurationSet, lane.observed]));
+  return folded.map((lane) => analysisOf(deps, lane, observed, facts));
+}
+
+async function resolveLookup(deps: DetectDeps, lookup: PlannedLookup, answers: { mx: Map<string, DnsMxOutcome>; txt: Map<string, DnsTxtOutcome> }): Promise<void> {
+  if (lookup.recordType === 'MX') answers.mx.set(lookup.name, await deps.ports.dns.resolveMx(lookup.name));
+  else answers.txt.set(lookup.name, await deps.ports.dns.resolveTxt(lookup.name));
+}
+
+// D-58: at most DNS_LOOKUP_CONCURRENCY lookups in flight. The live adapter answers every failure as
+// an outcome, so a thrown lookup is a fault: no new lookup starts, and the opening fails whole.
+async function runLookups(deps: DetectDeps, lookups: readonly PlannedLookup[], counts: CycleCounts): Promise<DnsAnswers> {
+  const answers = { mx: new Map<string, DnsMxOutcome>(), txt: new Map<string, DnsTxtOutcome>() };
+  let next = 0;
+  let stopped = false;
+  const worker = async (): Promise<void> => {
+    while (!stopped && next < lookups.length) {
+      const lookup = lookups[next];
+      next += 1;
+      if (lookup === undefined) return;
+      counts.dnsLookups += 1;
+      try {
+        await resolveLookup(deps, lookup, answers);
+      } catch (error) {
+        stopped = true;
+        throw error;
+      }
+    }
+  };
+  const settled = await Promise.allSettled(Array.from({ length: Math.min(DNS_LOOKUP_CONCURRENCY, lookups.length) }, worker));
+  const failed = settled.find((result) => result.status === 'rejected');
+  if (failed !== undefined) throw failed.reason;
+  return answers;
+}
+
+/**
+ * D-42 step 4's reads, in a cycle with an incident to open: the SES facts once, then the DNS plan
+ * over the spiking lanes' from-domains and every lane's unlisted receiving domains. Each bound is
+ * checked before the reads it limits, so past it nothing it limits is read at all (D-58, D-59).
+ */
+async function openingAnalyses(deps: DetectDeps, folded: readonly FoldedLane[], counts: CycleCounts): Promise<LaneAnalysis[]> {
+  const read = await readSesFacts(countedSesReads(deps.ports.ses, counts), deps.laneMap, { wait: deps.wait });
+  if (!read.ok) return analysesOf(deps, folded, { ...NO_ANSWERS, ses: undefined, identities: [], bound: 'ses-facts-bound' });
+  const fromDomains = folded.filter(({ spike }) => spike.verdict === 'spike').flatMap(({ summary }) => configurationFromDomains(summary));
+  const receivingDomains = [...new Set(folded.flatMap(({ summary }) => receivingDomainsNeedingMx(summary)))];
+  const plan = planDnsLookups(fromDomains, read.identities, receivingDomains);
+  const known = { ses: read.facts, identities: read.identities };
+  if (plan.bound !== null) return analysesOf(deps, folded, { ...NO_ANSWERS, ...known, bound: plan.bound });
+  return analysesOf(deps, folded, { ...(await runLookups(deps, plan.lookups, counts)), ...known, bound: null });
 }
 
 interface OpeningDecisions {
@@ -361,7 +475,6 @@ async function writeEvidence(deps: DetectDeps, views: readonly LaneView[], nowMs
   let opening: OpeningDecisions;
   try {
     const analyses = await openingAnalyses(deps, views.map((view) => view.folded), counts);
-    if (analyses === undefined) return 0;
     opening = { analyses, decisions: decideCycle(analyses, deps.laneMap) };
   } catch (error) {
     for (const view of needing) logFailure(deps, counts, 'opening-failed', refOf(view), error);
