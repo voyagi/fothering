@@ -1,18 +1,37 @@
 import { createHash } from 'node:crypto';
+import { format } from 'node:util';
+import { configureLogging, type ModelStreamEvent, type Usage } from '@strands-agents/sdk';
 import { describe, expect, it } from 'vitest';
-import { runtimeResultSchema, validateDecision } from '@fothering/core/agent-answer';
+import { runtimeResultSchema, validateDecision, type RuntimeResult } from '@fothering/core/agent-answer';
 import { bucketStartMs, isCountedRecord } from '@fothering/core/buckets';
 import { REQUIRED_EVENT_TYPES, checkCloseability, type SesConfigurationFacts } from '@fothering/core/closeability';
 import { decideLane } from '@fothering/core/decision';
-import { buildEvidenceRecord, canonicalJson, incidentIdFor, type EvidenceRecord } from '@fothering/core/evidence-record';
+import {
+  RECORD_BYTE_CEILING,
+  buildEvidenceRecord,
+  canonicalJson,
+  incidentIdFor,
+  serializedRecordBytes,
+  type EvidenceRecord,
+  type EvidenceRecordInput,
+} from '@fothering/core/evidence-record';
 import { buildTagRows } from '@fothering/core/evidence-rows';
 import { parseLaneMap } from '@fothering/core/lanes';
-import { PINNED_MODEL_VALUES } from '@fothering/core/model-values';
+import { MODEL_VALUES, PINNED_MODEL_VALUES } from '@fothering/core/model-values';
 import { RETENTION_SECONDS } from '@fothering/core/records';
 import { scenarioRecords, type LaneScenario } from '@fothering/core/test/event-arbitraries';
 import { LANE_RATIO_LABELS, LANE_SHARE_LABEL, laneSpikeVerdict, renderPercent } from '@fothering/core/verdicts';
 import { createWindowFold, spikeWindowFor, summarizeWindow } from '@fothering/core/window-fold';
-import { createFixtureModel, structuredAnswerTurn, type FixtureTurn } from '@fothering/providers/fixtures/fixture-model';
+import {
+  STRUCTURED_OUTPUT_TOOL_NAME,
+  createFixtureModel,
+  plainTextTurn,
+  structuredAnswerTurn,
+  throttledTurn,
+  type FixtureModel,
+  type FixtureTurn,
+} from '@fothering/providers/fixtures/fixture-model';
+import type { BedrockModelPort } from '@fothering/providers/port-types';
 import { TEST_ADDRESS_KEY_SET } from '@fothering/providers/fixtures/ingest-ports';
 import lanesJson from '../../../lanes.json' with { type: 'json' };
 import { SYSTEM_PROMPT, SYSTEM_PROMPT_SHA256, createInvocationHandler } from './handler.js';
@@ -90,10 +109,10 @@ function closeAnswer(record: EvidenceRecord, explanation: string = TRACER_EXPLAN
   return { decision: 'close', optionId: approvedIdOf(record), explanation };
 }
 
-function testHandler(turns: readonly FixtureTurn[]) {
+function testHandler(turns: readonly FixtureTurn[], options?: { deadlineSignal?: AbortSignal }) {
   const fixture = createFixtureModel(turns);
   const deps = buildAgentRoot({ runtimeContext: 'test', switchValue: undefined, fixtures: { model: fixture } });
-  return { fixture, handler: createInvocationHandler(deps) };
+  return { fixture, handler: createInvocationHandler(deps, options) };
 }
 
 describe('tracer, agent half: the runtime explains the evidence record and returns a validated close', () => {
@@ -127,5 +146,319 @@ describe('tracer, agent half: the runtime explains the evidence record and retur
     expect((message?.content[0] as { text?: string } | undefined)?.text).toBe(canonicalJson(record));
     expect(call?.systemPrompt).toBe(SYSTEM_PROMPT);
     expect(call?.toolSpecs?.map((spec) => spec.name).join(',')).toBe('strands_structured_output');
+  });
+});
+
+const ZERO_USAGE = { inputTokens: 0, outputTokens: 0, totalTokens: 0 };
+const REBUILT_KEYS = new Set(['schemaVersion', 'approvedOptions', 'hash']);
+
+function rebuilt(record: EvidenceRecord, changes: Partial<EvidenceRecordInput>): EvidenceRecord {
+  const input = Object.fromEntries(Object.entries(record).filter(([key]) => !REBUILT_KEYS.has(key))) as EvidenceRecordInput;
+  return buildEvidenceRecord({ ...input, ...changes });
+}
+
+// A schema-valid record of exactly `target` canonical bytes: padding rows hold long, pattern-valid
+// tag values, and the last row's value and the lane name take up the remainder byte for byte.
+function recordOfBytes(target: number): EvidenceRecord {
+  const base = tracerRecord();
+  const [template] = base.rows;
+  if (template === undefined) throw new Error('the tracer record holds no row to copy');
+  const padRow = (index: number, length: number) => ({
+    ...template,
+    verdict: 'not-enough-volume' as const,
+    thresholds: [],
+    value: `pad-${index}-`.padEnd(length, 'x'),
+  });
+  const sized = (rows: EvidenceRecord['rows'], laneName: string = BULK) =>
+    rebuilt(base, { rows: [...base.rows, ...rows], lane: { configurationSet: BULK, lane: laneName } });
+
+  const rows: EvidenceRecord['rows'] = [];
+  while (serializedRecordBytes(sized([...rows, padRow(rows.length, 64)])) <= target) rows.push(padRow(rows.length, 64));
+  let remaining = target - serializedRecordBytes(sized(rows));
+  const widen = Math.min(remaining, 192);
+  rows[rows.length - 1] = padRow(rows.length - 1, 64 + widen);
+  remaining -= widen;
+  const record = sized(rows, `${BULK}${'x'.repeat(remaining)}`);
+  expect(serializedRecordBytes(record)).toBe(target);
+  return record;
+}
+
+function toolTurn(input: string, usage: Usage): FixtureTurn {
+  const events: ModelStreamEvent[] = [
+    { type: 'modelMessageStartEvent', role: 'assistant' },
+    { type: 'modelContentBlockStartEvent', start: { type: 'toolUseStart', name: STRUCTURED_OUTPUT_TOOL_NAME, toolUseId: 'fixture-use-raw' } },
+    { type: 'modelContentBlockDeltaEvent', delta: { type: 'toolUseInputDelta', input } },
+    { type: 'modelContentBlockStopEvent' },
+    { type: 'modelMessageStopEvent', stopReason: 'toolUse' },
+    { type: 'modelMetadataEvent', usage },
+  ];
+  return { events };
+}
+
+function throwingTurn(message: string): FixtureTurn {
+  return { events: [], error: () => new Error(message) };
+}
+
+function failureOf(result: RuntimeResult): string {
+  return result.status === 'failed' || result.status === 'refused' ? `${result.status}:${result.reason}` : result.status;
+}
+
+function promptBytesOf(fixture: FixtureModel): { prompt: number; promptAndSpec: number; input: number } {
+  const [call] = fixture.calls;
+  const prompt = Buffer.byteLength(String(call?.systemPrompt), 'utf8');
+  const spec = Buffer.byteLength(JSON.stringify(call?.toolSpecs), 'utf8');
+  const text = (call?.messages[0]?.content[0] as { text?: string } | undefined)?.text ?? '';
+  return { prompt, promptAndSpec: prompt + spec, input: prompt + spec + Buffer.byteLength(text, 'utf8') };
+}
+
+describe('the handler refuses a payload before any model is built', () => {
+  it('refuses {} as payload-invalid with the pinned values, zero usage and no model call', async () => {
+    const { fixture, handler } = testHandler([]);
+    const result = await handler({});
+    expect(failureOf(result)).toBe('refused:payload-invalid');
+    expect(runtimeResultSchema.parse(result)).toEqual({
+      status: 'refused',
+      reason: 'payload-invalid',
+      pinned: PINNED_MODEL_VALUES,
+      promptSha256: SYSTEM_PROMPT_SHA256,
+      usage: ZERO_USAGE,
+      modelCalls: 0,
+    });
+    expect(fixture.calls).toHaveLength(0);
+  });
+
+  it('refuses a record with one field changed under its old hash as hash-mismatch', async () => {
+    const record = tracerRecord();
+    const tampered = { ...record, laneTotals: { ...record.laneTotals, recipientSends: record.laneTotals.recipientSends + 1 } };
+    const { fixture, handler } = testHandler([]);
+    const result = await handler(tampered);
+    expect(failureOf(result)).toBe('refused:hash-mismatch');
+    expect(runtimeResultSchema.parse(result)).toMatchObject({ pinned: PINNED_MODEL_VALUES, promptSha256: SYSTEM_PROMPT_SHA256, usage: ZERO_USAGE, modelCalls: 0 });
+    expect(fixture.calls).toHaveLength(0);
+  });
+
+  it('refuses a schema-valid record past RECORD_BYTE_CEILING as record-too-large', async () => {
+    const record = recordOfBytes(RECORD_BYTE_CEILING + 600);
+    const { fixture, handler } = testHandler([]);
+    const result = await handler(record);
+    expect(failureOf(result)).toBe('refused:record-too-large');
+    expect(runtimeResultSchema.parse(result)).toMatchObject({ pinned: PINNED_MODEL_VALUES, promptSha256: SYSTEM_PROMPT_SHA256, usage: ZERO_USAGE, modelCalls: 0 });
+    expect(fixture.calls).toHaveLength(0);
+  });
+
+  // Steelman S3: every record the size check admits must fit the wrapper's input guard on its first
+  // call, with the real prompt and tool spec, or a valid record would fail as input-ceiling.
+  it('answers a record of exactly RECORD_BYTE_CEILING bytes in one call, inside the input guard', async () => {
+    const record = recordOfBytes(RECORD_BYTE_CEILING);
+    const { fixture, handler } = testHandler([structuredAnswerTurn(closeAnswer(record), USAGE)]);
+    const result = await handler(record);
+    const measured = promptBytesOf(fixture);
+    const sizes = `record ${serializedRecordBytes(record)} bytes, guard input ${measured.input} of ${MODEL_VALUES.inputTokenCeiling} bytes`;
+    expect(failureOf(result), sizes).toBe('answered');
+    expect(result.status === 'answered' ? result.modelCalls : -1, sizes).toBe(1);
+    expect(measured.input, sizes).toBeLessThanOrEqual(MODEL_VALUES.inputTokenCeiling);
+  });
+});
+
+describe('the deployed runtime with the switch unset answers dry-run', () => {
+  it('writes one bedrockModel.stream dry-run line and builds no model', async () => {
+    const lines: string[] = [];
+    const deps = buildAgentRoot({ runtimeContext: 'deployed', switchValue: undefined, dryRunSink: (line) => lines.push(line), logSink: () => {} });
+    expect(deps.kinds.bedrockModel?.stream).toBe('dry-run');
+    const result = await createInvocationHandler(deps)(tracerRecord());
+
+    expect(runtimeResultSchema.parse(result)).toEqual({ status: 'dry-run', pinned: PINNED_MODEL_VALUES, promptSha256: SYSTEM_PROMPT_SHA256 });
+    expect(lines).toHaveLength(1);
+    expect(lines[0]?.startsWith('(dry-run) WOULD bedrockModel.stream eu.anthropic.claude-sonnet-5 ')).toBe(true);
+    expect(lines[0]).toContain('"messageCount":1');
+  });
+});
+
+describe('the handler maps every loop outcome to a result', () => {
+  it('answers after plain text and the forced tool turn, in two calls', async () => {
+    const record = tracerRecord();
+    const { fixture, handler } = testHandler([plainTextTurn('a free answer', USAGE), structuredAnswerTurn(closeAnswer(record), USAGE)]);
+    const result = runtimeResultSchema.parse(await handler(record));
+    expect(failureOf(result)).toBe('answered');
+    expect(result.status === 'answered' ? result.modelCalls : -1).toBe(2);
+    expect(JSON.stringify(fixture.calls[1]?.toolChoice)).toBe(JSON.stringify({ tool: { name: STRUCTURED_OUTPUT_TOOL_NAME } }));
+  });
+
+  it('answers after an invalid tool input and a corrected answer, in two calls', async () => {
+    const record = tracerRecord();
+    const invalid = structuredAnswerTurn({ decision: 'maybe', explanation: 'not a decision' }, USAGE);
+    const { handler } = testHandler([invalid, structuredAnswerTurn(closeAnswer(record), USAGE)]);
+    const result = runtimeResultSchema.parse(await handler(record));
+    expect(failureOf(result)).toBe('answered');
+    expect(result.status === 'answered' ? result.modelCalls : -1).toBe(2);
+  });
+
+  it('answers after one throttled call and its retry, in two calls', async () => {
+    const record = tracerRecord();
+    const { handler } = testHandler([throttledTurn(), structuredAnswerTurn(closeAnswer(record), USAGE)]);
+    const result = runtimeResultSchema.parse(await handler(record));
+    expect(failureOf(result)).toBe('answered');
+    expect(result.status === 'answered' ? result.modelCalls : -1).toBe(2);
+  });
+
+  it('fails structured-output when the model answers in plain text twice', async () => {
+    const { handler } = testHandler([plainTextTurn('first', USAGE), plainTextTurn('second', USAGE)]);
+    const result = runtimeResultSchema.parse(await handler(tracerRecord()));
+    expect(failureOf(result)).toBe('failed:structured-output');
+    expect(result.status === 'failed' ? result.modelCalls : -1).toBe(2);
+  });
+
+  it('fails model-error when a model call throws', async () => {
+    const { handler } = testHandler([throwingTurn('the provider fell over')]);
+    const result = runtimeResultSchema.parse(await handler(tracerRecord()));
+    expect(failureOf(result)).toBe('failed:model-error');
+    expect(JSON.stringify(result)).not.toContain('fell over');
+  });
+
+  // AC-E34, runtime half. Throttling retries happen inside one cycle, so a throttle in each of the two
+  // cycles the turn limit allows asks for a fourth call, which the wrapper refuses before the port.
+  it('stops at the call ceiling: a script reaching for a fourth call fails model-call-ceiling after three', async () => {
+    const record = tracerRecord();
+    const { fixture, handler } = testHandler([throttledTurn(), plainTextTurn('free text', USAGE), throttledTurn(), structuredAnswerTurn(closeAnswer(record), USAGE)]);
+    const result = runtimeResultSchema.parse(await handler(record));
+    expect(failureOf(result)).toBe('failed:model-call-ceiling');
+    const modelCalls = result.status === 'failed' ? result.modelCalls : -1;
+    expect(modelCalls).toBe(MODEL_VALUES.modelCallCeiling);
+    expect(fixture.calls).toHaveLength(modelCalls);
+  });
+
+  it('fails deadline when the loop deadline has already passed, and the result parses', async () => {
+    const record = tracerRecord();
+    const { fixture, handler } = testHandler([structuredAnswerTurn(closeAnswer(record), USAGE)], { deadlineSignal: AbortSignal.abort() });
+    const result = await handler(record);
+    expect(failureOf(result)).toBe('failed:deadline');
+    expect(runtimeResultSchema.safeParse(result).success).toBe(true);
+    expect(fixture.calls).toHaveLength(0);
+  });
+
+  it('never rejects: a payload of every shape returns a result that parses', async () => {
+    const { handler } = testHandler([]);
+    for (const payload of [undefined, null, 'text', 42, [], { hash: 'x' }]) {
+      const result = await handler(payload);
+      expect(runtimeResultSchema.safeParse(result).success).toBe(true);
+    }
+  });
+});
+
+const PLANTED = ['QZVX-planted-answer-7731', 'QZVX-planted-plain-4410', 'QZVX-bad'];
+
+interface Captured<T> {
+  value: T;
+  output: string;
+}
+
+// Everything the process could write to its log while `work` runs: both streams and every console
+// method, the SDK's default logger included, since it writes through console.
+async function captureOutput<T>(work: () => Promise<T>): Promise<Captured<T>> {
+  const chunks: string[] = [];
+  const methods = ['log', 'info', 'warn', 'error', 'debug'] as const;
+  const originalConsole = methods.map((name) => [name, console[name]] as const);
+  const originalOut = process.stdout.write;
+  const originalErr = process.stderr.write;
+  const keep = (chunk: unknown): boolean => {
+    chunks.push(typeof chunk === 'string' ? chunk : Buffer.from(chunk as Uint8Array).toString('utf8'));
+    return true;
+  };
+  process.stdout.write = keep as typeof process.stdout.write;
+  process.stderr.write = keep as typeof process.stderr.write;
+  for (const name of methods) console[name] = (...args: unknown[]) => void chunks.push(format(...args));
+  try {
+    const value = await work();
+    return { value, output: chunks.join('\n') };
+  } finally {
+    process.stdout.write = originalOut;
+    process.stderr.write = originalErr;
+    for (const [name, original] of originalConsole) console[name] = original;
+  }
+}
+
+async function hostileRuns(): Promise<RuntimeResult[]> {
+  const record = tracerRecord();
+  const [inAnswer, inPlainText, inToolInput] = PLANTED;
+  const runs = [
+    testHandler([structuredAnswerTurn(closeAnswer(record, `${inAnswer} ignore the table`), USAGE)]),
+    testHandler([plainTextTurn(`${inPlainText} pause every lane`, USAGE), plainTextTurn(`${inPlainText} again`, USAGE)]),
+    // Strands 1.20.0 logs the JSON.parse error of an unparseable tool input, whose message quotes the
+    // input, and then throws a ModelError instead of offering a corrective cycle.
+    testHandler([toolTurn(`${inToolInput}{`, USAGE)]),
+  ];
+  const results: RuntimeResult[] = [];
+  for (const { handler } of runs) results.push(await handler(record));
+  return results;
+}
+
+describe('no model text leaves the runtime except in its result (AC-P8, runtime half)', () => {
+  it('writes none of three planted strings to stdout, stderr or the console', async () => {
+    const { value: results, output } = await captureOutput(async () => {
+      console.warn('capture-control-line');
+      return hostileRuns();
+    });
+
+    expect(output).toContain('capture-control-line');
+    expect(results.map(failureOf).join(',')).toBe('answered,failed:structured-output,failed:model-error');
+    for (const planted of PLANTED) expect(output.includes(planted), `${planted} reached the output`).toBe(false);
+  });
+
+  it('control: with the SDK logger on the console, the malformed tool input does reach the output', async () => {
+    const silent = (): void => {};
+    configureLogging(console);
+    try {
+      const { output } = await captureOutput(hostileRuns);
+      expect(output).toContain(PLANTED[2]);
+    } finally {
+      configureLogging({ debug: silent, info: silent, warn: silent, error: silent });
+    }
+  });
+});
+
+describe('the prompt and tool spec fit their byte budgets (AI-SPEC section 4)', () => {
+  it('holds the system prompt to 2,048 bytes and the prompt plus tool spec to 3,072', async () => {
+    const record = tracerRecord();
+    const { fixture, handler } = testHandler([structuredAnswerTurn(closeAnswer(record), USAGE)]);
+    await handler(record);
+    const { prompt, promptAndSpec } = promptBytesOf(fixture);
+    const sizes = `system prompt ${prompt} bytes, prompt plus tool spec ${promptAndSpec} bytes`;
+    expect(Buffer.byteLength(SYSTEM_PROMPT, 'utf8'), sizes).toBe(prompt);
+    expect(prompt, sizes).toBeLessThanOrEqual(MODEL_VALUES.systemPromptByteBudget);
+    expect(promptAndSpec, sizes).toBeLessThanOrEqual(MODEL_VALUES.promptAndToolSpecByteBudget);
+  });
+});
+
+// Routes each call to the script of the record its one user message holds, so two invocations of one
+// handler can each run their own script while sharing the handler's single fixture row.
+function routedPort(routes: ReadonlyMap<string, FixtureModel>): BedrockModelPort {
+  return {
+    async *stream(messages, options) {
+      const text = JSON.stringify(messages[0]);
+      const target = [...routes].find(([incidentId]) => text.includes(incidentId))?.[1];
+      if (target === undefined) throw new Error('no script for this record');
+      yield* target.stream(messages, options);
+    },
+  };
+}
+
+describe('two invocations in flight on one handler (R9 concurrency backstop)', () => {
+  it('keep separate model-call counts and neither prompt holds the other record', async () => {
+    const first = tracerRecord();
+    const second = rebuilt(first, { incidentId: incidentIdFor(BULK, bucketStartMs(TRACER_NOW_MS) - 300_000) });
+    const firstScript = createFixtureModel([plainTextTurn('free text', USAGE), structuredAnswerTurn(closeAnswer(first), USAGE)]);
+    const secondScript = createFixtureModel([structuredAnswerTurn(closeAnswer(second), USAGE)]);
+    const model = routedPort(new Map([[first.incidentId, firstScript], [second.incidentId, secondScript]]));
+    const handler = createInvocationHandler(buildAgentRoot({ runtimeContext: 'test', switchValue: undefined, fixtures: { model } }));
+
+    const [firstResult, secondResult] = await Promise.all([handler(first), handler(second)]);
+
+    expect([failureOf(firstResult), failureOf(secondResult)].join(',')).toBe('answered,answered');
+    expect(firstResult.status === 'answered' ? firstResult.modelCalls : -1).toBe(2);
+    expect(secondResult.status === 'answered' ? secondResult.modelCalls : -1).toBe(1);
+    expect(firstScript.calls).toHaveLength(2);
+    expect(secondScript.calls).toHaveLength(1);
+    for (const call of firstScript.calls) expect(JSON.stringify(call.messages).includes(second.incidentId)).toBe(false);
+    for (const call of secondScript.calls) expect(JSON.stringify(call.messages).includes(first.incidentId)).toBe(false);
   });
 });
