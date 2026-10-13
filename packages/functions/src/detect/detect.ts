@@ -30,6 +30,8 @@ export interface DetectionCycleSummary {
   invocations: number;
   sesReads: number;
   dnsLookups: number;
+  incidents: { configurationSet: string; incidentId: string }[];
+  failures: number;
   outcomes: { incidentId: string; result: CycleResult }[];
 }
 
@@ -258,6 +260,8 @@ export async function runDetectionCycle(deps: DetectDeps): Promise<DetectionCycl
     invocations: counts.invocations,
     sesReads: counts.sesReads,
     dnsLookups: 0,
+    incidents: [],
+    failures: 0,
     outcomes,
   };
 }
