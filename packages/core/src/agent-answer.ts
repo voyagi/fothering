@@ -1,5 +1,6 @@
 import * as z from 'zod';
 import type { EvidenceRecord } from './evidence-record.js';
+import type { LaneMap } from './lanes.js';
 import { MODEL_VALUES, PINNED_MODEL_VALUES } from './model-values.js';
 
 export const AGENT_DECISIONS = ['close', 'unknown'] as const;
@@ -328,4 +329,41 @@ export function classifyRuntimeOutcome(outcome: RuntimeOutcome, context: Outcome
     case 'dry-run':
       return unavailable('agent-dry-run');
   }
+}
+
+export const GATE_REFUSALS = [
+  'no-close',
+  'record-missing',
+  'record-invalid',
+  'incident-mismatch',
+  'hash-mismatch',
+  'option-set-tampered',
+  'option-not-approved',
+  'decision-differs',
+  'lane-not-in-map',
+] as const;
+export type GateRefusal = (typeof GATE_REFUSALS)[number];
+
+export interface GateDecision {
+  decision: AgentAnswer['decision'];
+  optionId?: string | undefined;
+}
+
+export interface ClosureIntent {
+  configurationSet: string;
+  incidentId: string;
+  optionId: string;
+}
+
+export interface ActionGateInput {
+  decision: GateDecision;
+  incidentId: string;
+  loadRecord: (incidentId: string) => Promise<EvidenceRecord | undefined>;
+  laneMap: LaneMap;
+}
+
+export type GateResult = { ok: true; intent: ClosureIntent } | { ok: false; refusal: GateRefusal };
+
+export async function actionGate(_input: ActionGateInput): Promise<GateResult> {
+  return Promise.resolve({ ok: false, refusal: 'no-close' });
 }

@@ -1,9 +1,11 @@
 import fc from 'fast-check';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import lanesJson from '../../../lanes.json' with { type: 'json' };
 import {
   AGENT_UNAVAILABLE_REASONS,
   EXPLANATION_CHECKS,
+  actionGate,
+  type GateDecision,
   INVALID_CHECKS,
   RETRYABLE_UNAVAILABLE_REASONS,
   agentAnswerSchema,
@@ -14,7 +16,7 @@ import {
   type RuntimeOutcome,
   type RuntimeResult,
 } from './agent-answer.js';
-import { canonicalJson, optionIdFor, type EvidenceRecord } from './evidence-record.js';
+import { buildEvidenceRecord, canonicalJson, incidentIdFor, optionIdFor, recordHash, type EvidenceRecord } from './evidence-record.js';
 import { parseLaneMap } from './lanes.js';
 import { PINNED_MODEL_VALUES } from './model-values.js';
 import { recordFor, type CycleStory } from './test/decision-cycle.js';
@@ -226,6 +228,9 @@ describe('validateExplanation (D-78, R12)', () => {
 
 type DecisionValidator = (raw: unknown, approvedOptionIds: readonly string[]) => { ok: boolean };
 
+// Every scenario record opens on the same lane in the same bucket, so they share one incident id;
+// another incident's ids come from an incident opened on the same lane a day earlier.
+const OTHER_INCIDENT = incidentIdFor(BULK, APPROVED.window.fromBucketMs - 86_400_000);
 const APPROVED_IDS = APPROVED.approvedOptions.map((option) => option.optionId);
 const APPROVED_ID = APPROVED_IDS[0] ?? '';
 const COMBINING_ACUTE = String.fromCharCode(0x301);
@@ -252,8 +257,8 @@ const FIXED_VARIANTS = [
   `${APPROVED_ID}${COMBINING_ACUTE}`,
   `${APPROVED_ID}${COMBINING_ACUTE}`.normalize('NFC'),
   `${APPROVED_ID}${COMBINING_ACUTE}`.normalize('NFD'),
-  optionIdFor(UNSETTLED.incidentId, 0),
-  optionIdFor(DIGIT_BATCH.incidentId, 0),
+  optionIdFor(OTHER_INCIDENT, 0),
+  optionIdFor(incidentIdFor(TRANSACTIONAL, 0), 0),
   optionIdFor(APPROVED.incidentId, 1),
   '',
   '   ',
@@ -461,4 +466,107 @@ describe('classifyRuntimeOutcome (D-77)', () => {
       expect(JSON.stringify(result)).not.toContain('QZVX');
     });
   }
+});
+
+function rehashed(record: EvidenceRecord, edit: Partial<EvidenceRecord>): EvidenceRecord {
+  const edited = { ...record, ...edit };
+  return { ...edited, hash: recordHash(edited) };
+}
+
+function otherIncidentRecord(): EvidenceRecord {
+  const { schemaVersion, approvedOptions, hash, ...input } = APPROVED;
+  void schemaVersion;
+  void approvedOptions;
+  void hash;
+  return buildEvidenceRecord({ ...input, incidentId: OTHER_INCIDENT });
+}
+
+const WITHOUT_BULK = parseLaneMap({ ...COMMITTED, lanes: COMMITTED.lanes.filter((lane) => lane.configurationSet !== BULK) });
+const CLOSE: GateDecision = { decision: 'close', optionId: APPROVED_ID };
+
+async function refusalOf(stored: EvidenceRecord | undefined, decision: GateDecision = CLOSE, laneMap = COMMITTED): Promise<string> {
+  const result = await actionGate({ decision, incidentId: APPROVED.incidentId, loadRecord: () => Promise.resolve(stored), laneMap });
+  return result.ok ? 'intent' : result.refusal;
+}
+
+describe('actionGate (D-79, R10)', () => {
+  it('returns an intent naming the lane map set string for a validated close the record still proves (AC-16)', async () => {
+    const result = await actionGate({ decision: CLOSE, incidentId: APPROVED.incidentId, loadRecord: () => Promise.resolve(APPROVED), laneMap: COMMITTED });
+    expect(result).toEqual({ ok: true, intent: { configurationSet: BULK, incidentId: APPROVED.incidentId, optionId: APPROVED_ID } });
+    const committedSet = lanesJson.lanes.find((lane) => lane.configurationSet === BULK)?.configurationSet;
+    expect(result.ok && result.intent.configurationSet === committedSet).toBe(true);
+  });
+
+  it('refuses an unknown decision before loading anything (AC-P5, gate half)', async () => {
+    const loadRecord = vi.fn(() => Promise.resolve<EvidenceRecord | undefined>(APPROVED));
+    const result = await actionGate({ decision: { decision: 'unknown' }, incidentId: APPROVED.incidentId, loadRecord, laneMap: COMMITTED });
+    expect(result).toEqual({ ok: false, refusal: 'no-close' });
+    expect(loadRecord).not.toHaveBeenCalled();
+  });
+
+  it('refuses a missing record', async () => {
+    expect(await refusalOf(undefined)).toBe('record-missing');
+  });
+
+  it('refuses a record that fails the schema', async () => {
+    expect(await refusalOf({ ...APPROVED, hash: 'not-a-hash' })).toBe('record-invalid');
+    expect(await refusalOf({ ...APPROVED, approvedOptions: [] })).toBe('record-invalid');
+  });
+
+  it("refuses another incident's record", async () => {
+    expect(await refusalOf(otherIncidentRecord())).toBe('incident-mismatch');
+  });
+
+  it('refuses a record whose hash no longer recomputes', async () => {
+    expect(await refusalOf({ ...APPROVED, expiresAt: APPROVED.expiresAt + 1 })).toBe('hash-mismatch');
+  });
+
+  it('refuses a tampered approved-option set even when the hash was recomputed', async () => {
+    const tampered = rehashed(APPROVED, { approvedOptions: [{ optionId: optionIdFor(APPROVED.incidentId, 1) }] });
+    expect(await refusalOf(tampered, { decision: 'close', optionId: optionIdFor(APPROVED.incidentId, 1) })).toBe('option-set-tampered');
+  });
+
+  it('refuses an option id that is not byte-equal to the approved one, another incident included', async () => {
+    for (const optionId of [optionIdFor(OTHER_INCIDENT, 0), APPROVED_ID.toUpperCase(), ` ${APPROVED_ID}`, '']) {
+      expect(await refusalOf(APPROVED, { decision: 'close', optionId })).toBe('option-not-approved');
+    }
+    expect(await refusalOf(APPROVED, { decision: 'close' })).toBe('option-not-approved');
+    expect(await refusalOf(UNSETTLED, { decision: 'close', optionId: APPROVED_ID })).toBe('option-not-approved');
+  });
+
+  it('refuses a stored approval that decideFromEvidence does not reproduce', async () => {
+    const edited = rehashed(APPROVED, { decision: { ...APPROVED.decision, otherSpikingLanes: [TRANSACTIONAL] } });
+    expect(await refusalOf(edited)).toBe('decision-differs');
+  });
+
+  it('refuses a lane missing from the lane map', async () => {
+    expect(await refusalOf(APPROVED, CLOSE, WITHOUT_BULK)).toBe('lane-not-in-map');
+  });
+
+  it('returns deep-equal results twice, calling only its read-only loader once each time (AC-E38)', async () => {
+    const loadRecord = vi.fn((incidentId: string) => Promise.resolve<EvidenceRecord | undefined>(incidentId === APPROVED.incidentId ? APPROVED : undefined));
+    const before = canonicalJson(APPROVED);
+    const first = await actionGate({ decision: CLOSE, incidentId: APPROVED.incidentId, loadRecord, laneMap: COMMITTED });
+    expect(loadRecord.mock.calls).toEqual([[APPROVED.incidentId]]);
+    const second = await actionGate({ decision: CLOSE, incidentId: APPROVED.incidentId, loadRecord, laneMap: COMMITTED });
+    expect(loadRecord.mock.calls).toEqual([[APPROVED.incidentId], [APPROVED.incidentId]]);
+    expect(second).toEqual(first);
+    expect(first.ok).toBe(true);
+    expect(canonicalJson(APPROVED)).toBe(before);
+  });
+
+  it('returns no intent for any unavailable reason, which leaves only an unknown to store (AC-P5, AC-17 gate half)', async () => {
+    const unavailable = [
+      returned({ status: 'dry-run', pinned: { ...PINNED_MODEL_VALUES }, promptSha256: PROMPT_SHA }),
+      returned({ status: 'failed', reason: 'deadline', pinned: { ...PINNED_MODEL_VALUES }, promptSha256: PROMPT_SHA, usage: USAGE, modelCalls: 1 }),
+      returned(answered({ decision: 'close', optionId: APPROVED_ID, explanation: 'see https://example.com' })),
+      { kind: 'threw', callerAborted: false } as const,
+    ];
+    for (const outcome of unavailable) {
+      const classified = classifyRuntimeOutcome(outcome, OUTCOME_CONTEXT);
+      expect(classified.kind).toBe('unavailable');
+      const decision: GateDecision = classified.kind === 'validated' ? classified.answer : { decision: 'unknown' };
+      expect(await refusalOf(APPROVED, decision)).toBe('no-close');
+    }
+  });
 });
