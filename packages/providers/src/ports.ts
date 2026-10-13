@@ -159,11 +159,10 @@ export const PORT_TABLE = {
     dryRun: (log: DryRunLog) => createSesDryRun(log),
   },
   bedrockModel: {
-    operations: ['converse'],
-    mutatingOperations: ['converse'],
-    gatedOperations: ['converse'],
-    fixture: (fixtures: FixtureOptions, dryRun: DryRunLog) =>
-      createFixtureBedrockModel({ recordings: fixtures.recordings?.bedrockModel ?? [], dryRun }),
+    operations: ['stream'],
+    mutatingOperations: ['stream'],
+    gatedOperations: ['stream'],
+    fixture: (fixtures: FixtureOptions, dryRun: DryRunLog) => createFixtureBedrockModel({ model: fixtures.model, dryRun }),
     live: { notBuiltUntil: 2 },
     dryRun: (log: DryRunLog) => createBedrockModelDryRun(log),
   },
@@ -172,7 +171,7 @@ export const PORT_TABLE = {
     mutatingOperations: ['invokeAgentRuntime'],
     gatedOperations: ['invokeAgentRuntime'],
     fixture: (fixtures: FixtureOptions, dryRun: DryRunLog) =>
-      createFixtureAgentCore({ recordings: fixtures.recordings?.agentCore ?? [], dryRun }),
+      createFixtureAgentCore({ recordings: fixtures.recordings?.agentCore ?? [], agentRuntime: fixtures.agentRuntime, dryRun }),
     live: { notBuiltUntil: 2 },
     dryRun: (log: DryRunLog) => createAgentCoreDryRun(log),
   },

@@ -1,3 +1,4 @@
+import type { Message, ModelStreamEvent, StreamOptions } from '@strands-agents/sdk';
 import type { EventRecord, RecordKey } from '@fothering/core/records';
 import type { AddressKeySet } from '@fothering/core/address';
 import type { LaneFold } from '@fothering/core/window-fold';
@@ -60,7 +61,11 @@ export interface FixtureOptions {
   eventStoreFailure?: 'put';
   deadLetterFailure?: 'send';
   /** A call with no matching recording throws instead of answering, so a test cannot pass on an invented reply. */
-  recordings?: Partial<Record<'ses' | 'bedrockModel' | 'agentCore' | 'replyBucket', readonly Recording[]>>;
+  recordings?: Partial<Record<'ses' | 'agentCore' | 'replyBucket', readonly Recording[]>>;
+  /** The scripted model the bedrockModel row streams from in 'test'; without one every call misses. */
+  model?: BedrockModelPort;
+  /** An in-process runtime handler the agentCore row hands each payload to in 'test', in place of a recording (D-80). */
+  agentRuntime?: (payload: unknown) => Promise<unknown>;
   /** Records per page a fixture lane fold delivers; DynamoDB's own page is up to 1 MB. */
   pageSize?: number;
   store?: FixtureTableState;
@@ -157,12 +162,20 @@ export interface SesPort extends SesReadPort {
   sendEmail(request: SendEmailRequest): Promise<{ messageId: string }>;
 }
 
+/** The SDK's own Model.stream contract (D-71), so whatever the row resolves to can sit behind a Strands Model. */
 export interface BedrockModelPort {
-  converse(request: { modelId: string; prompt: string }): Promise<{ text: string }>;
+  stream(messages: Message[], options?: StreamOptions): AsyncIterable<ModelStreamEvent>;
+}
+
+export interface AgentRuntimeRequest {
+  runtimeArn: string;
+  sessionId: string;
+  payload: unknown;
+  abortSignal?: AbortSignal;
 }
 
 export interface AgentCorePort {
-  invokeAgentRuntime(request: { runtimeArn: string; sessionId: string; payload: unknown }): Promise<unknown>;
+  invokeAgentRuntime(request: AgentRuntimeRequest): Promise<unknown>;
 }
 
 export interface ReplyBucketPort {
