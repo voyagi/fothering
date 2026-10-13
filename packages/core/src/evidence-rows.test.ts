@@ -1,19 +1,33 @@
+import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
-import { canonicalJson } from './evidence-record.js';
+import { canonicalJson, evidenceRecordSchema } from './evidence-record.js';
 import {
+  DNS_LOOKUP_CONCURRENCY,
+  MAX_DNS_LOOKUPS_PER_CYCLE,
   PROVIDER_MAPPING,
   ROW_LIMIT,
   SIMULATOR_DOMAIN,
+  buildConfigurationRows,
+  buildLaneConfigurationRows,
   buildProviderRows,
   buildShareRow,
   buildTagRows,
+  configurationFromDomains,
   countableEventsOf,
+  identityFor,
+  organizationalDomain,
+  planDnsLookups,
   providerOf,
   receivingDomainsNeedingMx,
+  type ConfigurationRow,
   type DnsMxOutcome,
+  type DnsTxtOutcome,
   type EvidenceRow,
+  type IdentityAuthFacts,
   type TagDimension,
 } from './evidence-rows.js';
+import { propertySeed } from './test/property-seed.js';
+import type { ConfigurationRecord } from './window-fold.js';
 import { SES_TAG_PATTERN, type LaneEntry, type LaneMap } from './lanes.js';
 import type { EventFields, EventRecord } from './records.js';
 import { TEST_CONFIGURATION_SET, TEST_KEY_SET, TEST_LANE, TEST_LANE_MAP, scenarioRecords, type ScenarioGroup } from './test/event-arbitraries.js';
@@ -375,5 +389,350 @@ describe('the lane share of stored events (AC-8)', () => {
   it('refuses a lane summary that is not among the lane-map summaries', () => {
     const lane = laneOf([{ bucketOffset: 1, count: 10 }]);
     expect(() => buildShareRow(lane.summary, [])).toThrow(RangeError);
+  });
+});
+
+const records = (...values: string[]): DnsTxtOutcome => ({ kind: 'records', records: values });
+const MISSING: DnsTxtOutcome = { kind: 'missing' };
+const UNKNOWN: DnsTxtOutcome = { kind: 'unknown' };
+const DMARC = 'v=DMARC1; p=none';
+const SPF = 'v=spf1 include:amazonses.com ~all';
+
+const HEALTHY: IdentityAuthFacts = {
+  identity: 'example.com',
+  dkimStatus: 'SUCCESS',
+  dkimSigningEnabled: true,
+  mailFromDomain: 'bounce.example.com',
+  mailFromStatus: 'SUCCESS',
+  identityType: 'DOMAIN',
+};
+const BROKEN: IdentityAuthFacts = { ...HEALTHY, dkimStatus: 'FAILED', mailFromStatus: 'FAILED' };
+const BROKEN_ANSWERS = new Map<string, DnsTxtOutcome>([
+  ['_dmarc.news.example.com', MISSING],
+  ['_dmarc.example.com', MISSING],
+  ['bounce.example.com', records('google-site-verification=abc')],
+]);
+const NO_BOUNCES = laneOf([{ bucketOffset: 1, count: 40 }]).summary.totals;
+
+interface RowsCase {
+  fromDomain?: string;
+  identities?: readonly IdentityAuthFacts[];
+  answers?: ReadonlyMap<string, DnsTxtOutcome> | Record<string, DnsTxtOutcome>;
+  totals?: WindowSummary['totals'];
+}
+
+function configurationRows(input: RowsCase = {}): Partial<Record<ConfigurationRecord, ConfigurationRow>> {
+  const answers = input.answers instanceof Map ? input.answers : new Map(Object.entries(input.answers ?? {}));
+  const rows = buildConfigurationRows({
+    fromDomain: input.fromDomain ?? 'news.example.com',
+    identities: input.identities ?? [HEALTHY],
+    txtAnswers: answers,
+    totals: input.totals ?? NO_BOUNCES,
+  });
+  return Object.fromEntries(rows.map((row) => [row.record, row]));
+}
+
+function bouncesCarrying(...groups: [count: number, diagnosticCode: string][]): WindowSummary['totals'] {
+  return laneOf([
+    { bucketOffset: 2, count: 60 },
+    ...groups.map(([count, diagnosticCode]): ScenarioGroup => ({ bucketOffset: 1, count, permanentBounces: count, diagnosticCode })),
+  ]).summary.totals;
+}
+
+describe('the organizational domain (D-60, AC-E25)', () => {
+  it('returns the registrable domain under an ICANN suffix', () => {
+    expect(organizationalDomain('news.example.com')).toBe('example.com');
+    expect(organizationalDomain('example.com')).toBe('example.com');
+    expect(organizationalDomain('mail.example.co.uk')).toBe('example.co.uk');
+  });
+
+  it('reads an unknown TLD, a private suffix, an IP and a bare suffix as undetermined', () => {
+    expect(organizationalDomain('a.example.unknowntld')).toBeUndefined();
+    expect(organizationalDomain('news.github.io')).toBeUndefined();
+    expect(organizationalDomain('192.0.2.1')).toBeUndefined();
+    expect(organizationalDomain('co.uk')).toBeUndefined();
+  });
+});
+
+describe('the identity of a from-domain (D-60)', () => {
+  const identities: IdentityAuthFacts[] = [
+    { identity: 'example.com' },
+    { identity: 'news.example.com' },
+    { identity: 'ops@example.org' },
+  ];
+
+  it('picks the exact domain identity, else the longest listed parent, label-aligned', () => {
+    expect(identityFor('news.example.com', identities)?.identity).toBe('news.example.com');
+    expect(identityFor('deep.news.example.com', identities)?.identity).toBe('news.example.com');
+    expect(identityFor('shop.example.com', identities)?.identity).toBe('example.com');
+    expect(identityFor('notexample.com', identities)).toBeUndefined();
+  });
+
+  it('considers domain identities only, never an email address identity', () => {
+    expect(identityFor('example.org', identities)).toBeUndefined();
+  });
+
+  it('reads every row unknown when no identity covers the from-domain', () => {
+    const rows = configurationRows({ fromDomain: 'example.org', identities, answers: { '_dmarc.example.org': records(DMARC) } });
+    expect(Object.values(rows).map((row) => row.state)).toEqual(['unknown', 'unknown', 'unknown', 'unknown']);
+    expect(rows.dmarc?.lookups).toEqual([{ kind: 'ses', operation: 'GetEmailIdentity', identity: null }]);
+  });
+});
+
+describe('the DKIM row', () => {
+  it.each([
+    ['SUCCESS', true, 'present'],
+    ['FAILED', true, 'missing'],
+    ['SUCCESS', false, 'missing'],
+    ['NOT_STARTED', true, 'unknown'],
+    ['PENDING', true, 'unknown'],
+    ['TEMPORARY_FAILURE', true, 'unknown'],
+    [undefined, true, 'unknown'],
+  ] as const)('reads status %s with signing %s as %s', (dkimStatus, dkimSigningEnabled, state) => {
+    const identity: IdentityAuthFacts = { identity: 'example.com', dkimSigningEnabled, ...(dkimStatus === undefined ? {} : { dkimStatus }) };
+    expect(configurationRows({ identities: [identity] }).dkim?.state).toBe(state);
+  });
+
+  it('names its lookup as GetEmailIdentity with the identity (AC-9)', () => {
+    expect(configurationRows().dkim?.lookups).toEqual([{ kind: 'ses', operation: 'GetEmailIdentity', identity: 'example.com' }]);
+  });
+});
+
+describe('the MAIL FROM row', () => {
+  it.each([
+    ['SUCCESS', 'present'],
+    ['FAILED', 'missing'],
+    ['PENDING', 'unknown'],
+    ['TEMPORARY_FAILURE', 'unknown'],
+  ] as const)('reads a custom MAIL FROM with status %s as %s', (mailFromStatus, state) => {
+    expect(configurationRows({ identities: [{ ...HEALTHY, mailFromStatus }] })['mail-from']?.state).toBe(state);
+  });
+
+  it('reads not applicable, never a cause, without a custom MAIL FROM domain', () => {
+    const { mailFromDomain: _omitted, mailFromStatus: _status, ...withoutMailFrom } = BROKEN;
+    const row = configurationRows({ identities: [withoutMailFrom], totals: bouncesCarrying([10, 'smtp; 550 5.7.26 multiple failed']) })['mail-from'];
+    expect(row?.state).toBe('not-applicable');
+    expect(row?.verdict).toBe('not-applicable');
+    expect(row?.lookups).toEqual([{ kind: 'ses', operation: 'GetEmailIdentity', identity: 'example.com' }]);
+  });
+});
+
+describe('the DMARC row (D-60, AC-E25, AC-E26)', () => {
+  const dmarcOf = (fromDomain: string, answers: Record<string, DnsTxtOutcome>) => configurationRows({ fromDomain, answers }).dmarc;
+
+  it('reads one record at the from-domain as present, with its lookup', () => {
+    const row = dmarcOf('news.example.com', { '_dmarc.news.example.com': records(DMARC) });
+    expect(row?.state).toBe('present');
+    expect(row?.lookups).toEqual([{ kind: 'dns', name: '_dmarc.news.example.com', recordType: 'TXT', outcome: 'records' }]);
+  });
+
+  it('reads a subdomain with no record of its own under an organizational domain that has one as present', () => {
+    const row = dmarcOf('news.example.com', { '_dmarc.news.example.com': MISSING, '_dmarc.example.com': records(DMARC) });
+    expect(row?.state).toBe('present');
+    expect(row?.lookups.map((lookup) => (lookup.kind === 'dns' ? `${lookup.name}:${lookup.outcome}` : lookup.kind))).toEqual([
+      '_dmarc.news.example.com:missing',
+      '_dmarc.example.com:records',
+    ]);
+  });
+
+  it('reads missing at the organizational domain itself and one label below it', () => {
+    expect(dmarcOf('example.com', { '_dmarc.example.com': MISSING })?.state).toBe('missing');
+    expect(dmarcOf('news.example.com', { '_dmarc.news.example.com': records('unrelated'), '_dmarc.example.com': MISSING })?.state).toBe('missing');
+  });
+
+  it('reads a deep subdomain unknown when neither lookup finds a record (AI-SPEC 1b-1)', () => {
+    expect(dmarcOf('a.b.example.com', { '_dmarc.a.b.example.com': MISSING, '_dmarc.example.com': MISSING })?.state).toBe('unknown');
+  });
+
+  it('reads two DMARC records at one name as unknown', () => {
+    expect(dmarcOf('news.example.com', { '_dmarc.news.example.com': records(DMARC, 'v=DMARC1; p=reject') })?.state).toBe('unknown');
+    expect(dmarcOf('news.example.com', { '_dmarc.news.example.com': MISSING, '_dmarc.example.com': records(DMARC, DMARC) })?.state).toBe('unknown');
+  });
+
+  it('reads an unknown DNS outcome as unknown, never missing (AC-E26)', () => {
+    expect(dmarcOf('news.example.com', { '_dmarc.news.example.com': UNKNOWN })?.state).toBe('unknown');
+    expect(dmarcOf('news.example.com', { '_dmarc.news.example.com': MISSING, '_dmarc.example.com': UNKNOWN })?.state).toBe('unknown');
+    expect(dmarcOf('news.example.com', {})?.state).toBe('unknown');
+  });
+
+  it('reads an organizational domain tldts cannot determine as unknown (AC-E25)', () => {
+    expect(dmarcOf('news.example.unknowntld', { '_dmarc.news.example.unknowntld': MISSING })?.state).toBe('unknown');
+  });
+});
+
+describe('the SPF row', () => {
+  const spfOf = (answer: DnsTxtOutcome | undefined) =>
+    configurationRows({ answers: answer === undefined ? {} : { 'bounce.example.com': answer } }).spf;
+
+  it('reads one v=spf1 record on the MAIL FROM domain as present, with its lookup', () => {
+    const row = spfOf(records(SPF, 'unrelated'));
+    expect(row?.state).toBe('present');
+    expect(row?.lookups).toEqual([{ kind: 'dns', name: 'bounce.example.com', recordType: 'TXT', outcome: 'records' }]);
+  });
+
+  it('reads none as missing, two as unknown and an unknown outcome as unknown', () => {
+    expect(spfOf(MISSING)?.state).toBe('missing');
+    expect(spfOf(records('unrelated'))?.state).toBe('missing');
+    expect(spfOf(records(SPF, 'v=spf1 -all'))?.state).toBe('unknown');
+    expect(spfOf(UNKNOWN)?.state).toBe('unknown');
+    expect(spfOf(undefined)?.state).toBe('unknown');
+  });
+
+  it('reads not applicable without a custom MAIL FROM domain', () => {
+    const { mailFromDomain: _omitted, ...withoutMailFrom } = HEALTHY;
+    expect(configurationRows({ identities: [withoutMailFrom] }).spf?.state).toBe('not-applicable');
+  });
+});
+
+describe('configuration verdicts (D-61 as amended 2026-10-12)', () => {
+  const verdictsWith = (totals: WindowSummary['totals']) =>
+    Object.fromEntries(Object.entries(configurationRows({ identities: [BROKEN], answers: BROKEN_ANSWERS, totals })).map(([record, row]) => [record, row.verdict]));
+
+  it('reads present as ruled out and a missing record without corroboration as elevated', () => {
+    expect(configurationRows({ answers: { '_dmarc.news.example.com': records(DMARC) } }).dmarc?.verdict).toBe('ruled-out');
+    expect(verdictsWith(NO_BOUNCES)).toEqual({ dkim: 'elevated', 'mail-from': 'elevated', dmarc: 'elevated', spf: 'elevated' });
+  });
+
+  it('reads the missing DMARC row elevated when every bounce is a 5.7.1 spam block (AI-SPEC 1b-2)', () => {
+    expect(verdictsWith(bouncesCarrying([10, 'smtp; 550 5.7.1 message blocked as spam'])).dmarc).toBe('elevated');
+  });
+
+  it('reads the same missing DMARC row as cause when every bounce is a 5.7.26', () => {
+    expect(verdictsWith(bouncesCarrying([10, 'smtp; 550 5.7.26 multiple authentication checks failed'])).dmarc).toBe('cause');
+  });
+
+  it('corroborates no row with 5.7.25 bounces', () => {
+    expect(verdictsWith(bouncesCarrying([10, 'smtp; 550 5.7.25 reverse DNS validation failed']))).toEqual({
+      dkim: 'elevated',
+      'mail-from': 'elevated',
+      dmarc: 'elevated',
+      spf: 'elevated',
+    });
+  });
+
+  it('lets a 5.7.23 majority corroborate SPF and MAIL FROM only', () => {
+    expect(verdictsWith(bouncesCarrying([10, 'smtp; 550 5.7.23 SPF validation failed']))).toEqual({
+      dkim: 'elevated',
+      'mail-from': 'cause',
+      dmarc: 'elevated',
+      spf: 'cause',
+    });
+  });
+
+  it('lets a 5.7.22 majority corroborate DKIM and DMARC only', () => {
+    expect(verdictsWith(bouncesCarrying([10, 'smtp; 550 5.7.22 no author-matched DKIM signature']))).toEqual({
+      dkim: 'cause',
+      'mail-from': 'elevated',
+      dmarc: 'cause',
+      spf: 'elevated',
+    });
+  });
+
+  it('needs half of the counted permanent bounces and at least 3 of them', () => {
+    const auth = 'smtp; 550 5.7.26 multiple authentication checks failed';
+    const other = 'smtp; 550 5.1.1 user unknown';
+    expect(verdictsWith(bouncesCarrying([3, auth], [3, other])).dmarc).toBe('cause');
+    expect(verdictsWith(bouncesCarrying([2, auth], [4, other])).dmarc).toBe('elevated');
+    expect(verdictsWith(bouncesCarrying([2, auth])).dmarc).toBe('elevated');
+    expect(configurationRows({ identities: [BROKEN], answers: BROKEN_ANSWERS, totals: bouncesCarrying([3, auth], [3, other]) }).dmarc?.corroboration).toEqual({
+      corroboratingBounces: 3,
+      permanentBounces: 6,
+    });
+  });
+
+  it('never lets complaints corroborate an authentication cause', () => {
+    const complaints = laneOf([{ bucketOffset: 1, count: 100, complaints: 20 }]).summary.totals;
+    expect(verdictsWith(complaints)).toEqual({ dkim: 'elevated', 'mail-from': 'elevated', dmarc: 'elevated', spf: 'elevated' });
+  });
+
+  it('builds rows the evidence record schema accepts', () => {
+    const rows = buildConfigurationRows({ fromDomain: 'news.example.com', identities: [BROKEN], txtAnswers: BROKEN_ANSWERS, totals: NO_BOUNCES });
+    expect(rows).toHaveLength(4);
+    expect(evidenceRecordSchema.shape.configurationRows.safeParse(rows).success).toBe(true);
+  });
+});
+
+describe('no unknown DNS outcome ever reads missing (T-02-16)', () => {
+  const outcomeArb = fc.oneof(
+    fc.constant(MISSING),
+    fc.constant(UNKNOWN),
+    fc.subarray([DMARC, SPF, 'v=DMARC1; p=reject', 'unrelated']).map((values) => records(...values)),
+  );
+
+  it('keeps every row stating missing free of unknown DNS lookups', () => {
+    fc.assert(
+      fc.property(
+        fc.constantFrom('example.com', 'news.example.com', 'a.b.example.com', 'news.example.unknowntld'),
+        fc.dictionary(fc.constantFrom('_dmarc.example.com', '_dmarc.news.example.com', '_dmarc.a.b.example.com', 'bounce.example.com'), outcomeArb),
+        fc.option(fc.constantFrom('SUCCESS', 'FAILED', 'PENDING'), { nil: undefined }),
+        (fromDomain, answers, mailFromStatus) => {
+          const identity: IdentityAuthFacts = { ...HEALTHY, ...(mailFromStatus === undefined ? {} : { mailFromStatus }) };
+          const rows = buildConfigurationRows({ fromDomain, identities: [identity], txtAnswers: new Map(Object.entries(answers)), totals: NO_BOUNCES });
+          for (const row of rows) {
+            if (row.state !== 'missing') continue;
+            for (const lookup of row.lookups) if (lookup.kind === 'dns') expect(lookup.outcome).not.toBe('unknown');
+          }
+        },
+      ),
+      { seed: propertySeed() },
+    );
+  });
+});
+
+describe('a lane with no usable from-domain (AC-E24)', () => {
+  it('yields no configuration rows and plans no TXT lookup when the from-domain is absent or unclassified', () => {
+    const tagged = recordsOf([{ bucketOffset: 1, count: 120, permanentBounces: 10, diagnosticCode: 'smtp; 550 5.7.26 failed' }]);
+    const absent = tagged.map((record) => {
+      const { fromDomain: _dropped, ...fields } = record.fields;
+      return { ...record, fields };
+    });
+    const unclassified = tagged.map((record) => ({ ...record, fields: { ...record.fields, fromDomain: 'unclassified' } }));
+    expect(configurationFromDomains(summaryOf(tagged))).toEqual(['news.example.com']);
+    for (const lane of [absent, unclassified]) {
+      const summary = summaryOf(lane);
+      expect(configurationFromDomains(summary)).toEqual([]);
+      expect(buildLaneConfigurationRows({ summary, identities: [BROKEN], txtAnswers: BROKEN_ANSWERS })).toEqual([]);
+      expect(planDnsLookups(configurationFromDomains(summary), [BROKEN], []).lookups).toEqual([]);
+    }
+  });
+
+  it('builds the four rows of each from-domain the lane sends from', () => {
+    const summary = summaryOf(recordsOf([{ bucketOffset: 1, count: 40 }]));
+    const rows = buildLaneConfigurationRows({ summary, identities: [BROKEN], txtAnswers: BROKEN_ANSWERS });
+    expect(rows.map((row) => `${row.fromDomain}:${row.record}`)).toEqual([
+      'news.example.com:dkim',
+      'news.example.com:mail-from',
+      'news.example.com:dmarc',
+      'news.example.com:spf',
+    ]);
+  });
+});
+
+describe('the DNS lookup plan and its bound (D-58)', () => {
+  it('lists the worst-case lookups before any runs: both DMARC names, the SPF name and one MX per domain', () => {
+    expect(planDnsLookups(['news.example.com', 'shop.example.com'], [HEALTHY], ['example.org'])).toEqual({
+      lookups: [
+        { name: '_dmarc.news.example.com', recordType: 'TXT' },
+        { name: '_dmarc.example.com', recordType: 'TXT' },
+        { name: 'bounce.example.com', recordType: 'TXT' },
+        { name: '_dmarc.shop.example.com', recordType: 'TXT' },
+        { name: 'example.org', recordType: 'MX' },
+      ],
+      bound: null,
+    });
+  });
+
+  it('plans no SPF name without a custom MAIL FROM and nothing for a from-domain with no identity', () => {
+    const { mailFromDomain: _omitted, ...withoutMailFrom } = HEALTHY;
+    expect(planDnsLookups(['example.com'], [withoutMailFrom], []).lookups).toEqual([{ name: '_dmarc.example.com', recordType: 'TXT' }]);
+    expect(planDnsLookups(['example.org'], [HEALTHY], []).lookups).toEqual([]);
+  });
+
+  it('reports dns-bound past MAX_DNS_LOOKUPS_PER_CYCLE and not at it', () => {
+    const domains = (count: number) => Array.from({ length: count }, (_, index) => `d${index}.example.org`);
+    expect(MAX_DNS_LOOKUPS_PER_CYCLE).toBe(200);
+    expect(DNS_LOOKUP_CONCURRENCY).toBe(10);
+    expect(planDnsLookups([], [], domains(MAX_DNS_LOOKUPS_PER_CYCLE)).bound).toBeNull();
+    expect(planDnsLookups([], [], domains(MAX_DNS_LOOKUPS_PER_CYCLE + 1)).bound).toBe('dns-bound');
   });
 });

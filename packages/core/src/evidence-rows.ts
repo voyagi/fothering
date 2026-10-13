@@ -330,3 +330,78 @@ export function buildShareRow(laneSummary: WindowSummary, allLaneSummaries: read
     label: LANE_SHARE_LABEL,
   };
 }
+
+export type DnsTxtOutcome = { kind: 'records'; records: string[] } | { kind: 'missing' } | { kind: 'unknown' };
+
+export interface IdentityAuthFacts {
+  identity: string;
+  defaultConfigurationSet?: string;
+  dkimStatus?: string;
+  dkimSigningEnabled?: boolean;
+  mailFromDomain?: string;
+  mailFromStatus?: string;
+  identityType?: string;
+}
+
+export const MAX_DNS_LOOKUPS_PER_CYCLE = 200;
+export const DNS_LOOKUP_CONCURRENCY = 10;
+
+export function organizationalDomain(fromDomain: string): string | undefined {
+  void fromDomain;
+  return undefined;
+}
+
+export function identityFor(fromDomain: string, identities: readonly IdentityAuthFacts[]): IdentityAuthFacts | undefined {
+  void fromDomain;
+  void identities;
+  return undefined;
+}
+
+export interface ConfigurationRowsInput {
+  fromDomain: string;
+  identities: readonly IdentityAuthFacts[];
+  txtAnswers: ReadonlyMap<string, DnsTxtOutcome>;
+  totals: WindowSummary['totals'];
+}
+
+export function buildConfigurationRows(input: ConfigurationRowsInput): ConfigurationRow[] {
+  void input;
+  return [];
+}
+
+export function configurationFromDomains(summary: WindowSummary): string[] {
+  void summary;
+  return [];
+}
+
+export interface LaneConfigurationInput {
+  summary: WindowSummary;
+  identities: readonly IdentityAuthFacts[];
+  txtAnswers: ReadonlyMap<string, DnsTxtOutcome>;
+}
+
+export function buildLaneConfigurationRows(input: LaneConfigurationInput): ConfigurationRow[] {
+  void input;
+  return [];
+}
+
+export interface PlannedLookup {
+  name: string;
+  recordType: 'TXT' | 'MX';
+}
+
+export interface DnsLookupPlan {
+  lookups: PlannedLookup[];
+  bound: 'dns-bound' | null;
+}
+
+export function planDnsLookups(
+  fromDomains: readonly string[],
+  identities: readonly IdentityAuthFacts[],
+  receivingDomainsNeedingMx: readonly string[],
+): DnsLookupPlan {
+  void fromDomains;
+  void identities;
+  void receivingDomainsNeedingMx;
+  return { lookups: [], bound: null };
+}
