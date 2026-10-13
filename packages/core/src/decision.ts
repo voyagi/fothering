@@ -1,29 +1,31 @@
 import type { CloseabilityResult, RefusalReason } from './closeability.js';
-import type { EvidenceRecord, FIX_KINDS, ISOLATION_VERDICTS, SHARED_CAUSE_KINDS } from './evidence-record.js';
-import { rowVerdict, type ConfigurationRow, type EvidenceRow, type RowDimension, type TagDimension } from './evidence-rows.js';
+import {
+  RECORD_BYTE_CEILING,
+  buildEvidenceRecord,
+  serializedRecordBytes,
+  type DECISION_OUTCOMES,
+  type DECISION_REASONS,
+  type EvidenceRecord,
+  type EvidenceRecordInput,
+  type FIX_KINDS,
+  type ISOLATION_VERDICTS,
+  type READ_BOUNDS,
+  type SHARED_CAUSE_KINDS,
+} from './evidence-record.js';
+import {
+  buildShareRow,
+  rowVerdict,
+  type ConfigurationRow,
+  type EvidenceRow,
+  type RowDimension,
+  type TagDimension,
+} from './evidence-rows.js';
 import { findLane, type LaneEntry, type LaneMap } from './lanes.js';
-import type { CoverageVerdict, LaneSpikeVerdict } from './verdicts.js';
-import type { DimensionTally, WindowSummary } from './window-fold.js';
+import { LANE_RATIO_LABELS, type CoverageVerdict, type LaneSpikeVerdict } from './verdicts.js';
+import type { ConfigurationRecord, DimensionTally, WindowSummary } from './window-fold.js';
 
-export const DECISION_OUTCOMES = ['approved', 'unknown', 'refused'] as const;
 export type DecisionOutcome = (typeof DECISION_OUTCOMES)[number];
-
-// D-62's unknown reasons, D-46's dimension bound and D-70's size ceiling, in one closed vocabulary.
-export const DECISION_REASONS = [
-  'approved',
-  'no-data',
-  'ses-facts-bound',
-  'dns-bound',
-  'dimension-bound',
-  'not-settled',
-  'not-lane-scoped',
-  'spread',
-  'not-closeable',
-  'record-too-large',
-] as const;
 export type DecisionReason = (typeof DECISION_REASONS)[number];
-
-export const READ_BOUNDS = ['ses-facts-bound', 'dns-bound', 'dimension-bound'] as const;
 export type ReadBound = (typeof READ_BOUNDS)[number];
 
 export interface DecisionCloseability {
@@ -262,22 +264,203 @@ export interface FixValues {
   'missing-spf': { fromDomain: string; mailFromDomain: string };
 }
 
-export function questionFor(_decision: CycleDecision, _analyses: readonly LaneAnalysis[]): string {
-  return '';
+// The schema holds question and fix text to 1,000 printable ASCII characters (D-64).
+const TEXT_LIMIT = 1_000;
+const LANE_LIST_BUDGET = 400;
+
+// Every value a template fills is already printable ASCII (set names, tag values, mapping names,
+// reason names, hostnames), so cutting at the limit keeps the text valid; only extreme lengths reach it.
+function capped(text: string): string {
+  return text.length <= TEXT_LIMIT ? text : text.slice(0, TEXT_LIMIT);
 }
 
-export function fixFor<K extends FixKind>(kind: K, _values: FixValues[K]): { kind: K; text: string } {
-  return { kind, text: '' };
+// No count is written for what is left out: a number in code-written text that the evidence table
+// does not hold would teach the model to repeat one.
+function listWithin(items: readonly string[], budget: number, noun: string): string {
+  const all = items.join(', ');
+  if (all.length <= budget) return all;
+  const more = `, and other ${noun}`;
+  let kept = '';
+  for (const item of items) {
+    const next = kept === '' ? item : `${kept}, ${item}`;
+    if (next.length + more.length > budget) break;
+    kept = next;
+  }
+  return kept === '' ? `several ${noun}` : `${kept}${more}`;
+}
+
+const NOT_A_LANE_FIX = 'pausing one lane would not fix it, because';
+
+const FIX_TEMPLATES: { [K in FixKind]: (values: FixValues[K]) => string } = {
+  'shared-tag-value': ({ dimension, value, lanes }) =>
+    `The ${dimension} ${value} is at or above a Fothering lane threshold on ${listWithin(lanes, LANE_LIST_BUDGET, 'lanes')}. ` +
+    `Pausing one lane would not stop it. Hold that ${dimension} on every lane and check its addresses and content before it is sent again.`,
+  'shared-provider': ({ provider, lanes }) =>
+    `Mail to ${provider} is at or above a Fothering lane threshold on ${listWithin(lanes, LANE_LIST_BUDGET, 'lanes')}. ` +
+    `Pausing one lane would not stop it. Check what ${provider} reports about the sending domains before sending it more mail from any lane.`,
+  'missing-dkim': ({ fromDomain, identity }) =>
+    `DKIM for ${fromDomain} reads missing on the SES identity ${identity} (GetEmailIdentity). Publish the DKIM records SES lists for ` +
+    `${identity} and make sure signing is enabled; ${NOT_A_LANE_FIX} ${fromDomain} sends on other lanes as well.`,
+  'failed-mail-from': ({ fromDomain, identity, mailFromDomain }) =>
+    `The custom MAIL FROM domain ${mailFromDomain} of the SES identity ${identity} reads failed (GetEmailIdentity), and ${fromDomain} ` +
+    `sends through it. Publish the MX record SES lists for ${mailFromDomain}; ${NOT_A_LANE_FIX} ${fromDomain} sends on other lanes as well.`,
+  'missing-dmarc': ({ fromDomain }) =>
+    `No DMARC record was found at _dmarc.${fromDomain}, and at least half of this lane's permanent bounces carry ` +
+    `authentication-failure enhanced status codes. Publish a DMARC record at _dmarc.${fromDomain}; ${NOT_A_LANE_FIX} ${fromDomain} ` +
+    'sends on other lanes as well.',
+  'missing-spf': ({ fromDomain, mailFromDomain }) =>
+    `No SPF TXT record was found at ${mailFromDomain}, the custom MAIL FROM domain ${fromDomain} sends through. Publish one that ` +
+    `authorizes SES; ${NOT_A_LANE_FIX} ${fromDomain} sends on other lanes as well.`,
+};
+
+/** One code template per cause kind, filled only with closed values (D-64). The DMARC sentence names
+ * no status code or RFC number, so a model that copies it still passes the explanation's number check. */
+export function fixFor<K extends FixKind>(kind: K, values: FixValues[K]): { kind: K; text: string } {
+  return { kind, text: capped(FIX_TEMPLATES[kind](values)) };
+}
+
+const RECORD_LABEL: Readonly<Record<ConfigurationRecord, string>> = { dkim: 'DKIM', 'mail-from': 'MAIL FROM', dmarc: 'DMARC', spf: 'SPF' };
+
+function rowPhrase(row: EvidenceRow): string {
+  if (row.kind === 'value') return `${row.dimension} ${row.value ?? ''}`;
+  if (row.kind === 'no-value') return `${row.dimension} with no value`;
+  return row.dimension === 'provider' ? 'other providers' : `other ${row.dimension} values`;
+}
+
+function findingsOf(analysis: LaneAnalysis): string[] {
+  const found = (verdict: string): boolean => verdict === 'cause' || verdict === 'elevated';
+  return [
+    ...analysis.rows.filter((row) => found(row.verdict)).map((row) => `${row.verdict} ${rowPhrase(row)}`),
+    ...analysis.configurationRows.filter((row) => found(row.verdict)).map((row) => `${row.verdict} ${RECORD_LABEL[row.record]} of ${row.fromDomain}`),
+  ];
+}
+
+function refusalsOf(closeability: CloseabilityResult): string {
+  if (closeability.state === 'refused') return closeability.reasons.join(', ');
+  return closeability.state === 'no-data' ? 'no data' : 'none';
+}
+
+const QUESTION_CLOSE = 'Which lane, if any, should be paused?';
+
+/**
+ * Names the decided lane and every other spiking lane by its lane-map set name as committed (AC-E28),
+ * with the rows code found cause or elevated and the lane's closeability refusals. The lane names and
+ * refusals always fit; the rows share what is left of the limit.
+ */
+export function questionFor(decision: CycleDecision, analyses: readonly LaneAnalysis[]): string {
+  const opening = `Fothering decided unknown for ${decision.configurationSet} (${decision.reason}).`;
+  const named = [decision.configurationSet, ...decision.otherSpikingLanes].flatMap((set) => analyses.filter((analysis) => setOf(analysis) === set));
+  const parts = named.map((analysis) => ({
+    head: `${setOf(analysis)}:`,
+    findings: findingsOf(analysis),
+    tail: `; closeability refusals: ${refusalsOf(analysis.closeability)}.`,
+  }));
+  const fixedLength = parts.reduce((sum, part) => sum + part.head.length + part.tail.length + 2, opening.length + QUESTION_CLOSE.length + 1);
+  const perLane = Math.floor((TEXT_LIMIT - fixedLength) / Math.max(parts.length, 1));
+  const segments = parts.map(({ head, findings, tail }) => {
+    const listed = findings.length === 0 ? 'no cause or elevated row' : listWithin(findings, perLane, 'rows');
+    return `${head} ${listed}${tail}`;
+  });
+  return capped([opening, ...segments, QUESTION_CLOSE].join(' '));
+}
+
+function required(value: string | undefined, what: string, fromDomain: string): string {
+  if (value === undefined) {
+    throw new RangeError(`the configuration rows of ${fromDomain} carry no ${what}, so no fix can name it`);
+  }
+  return value;
+}
+
+function authenticationFix(fromDomain: string, analysis: LaneAnalysis): NonNullable<EvidenceRecord['fix']> {
+  const rows = analysis.configurationRows.filter((row) => row.fromDomain === fromDomain);
+  const cause = rows.find((row) => row.verdict === 'cause');
+  const lookups = rows.flatMap((row) => row.lookups);
+  const identity = lookups.flatMap((lookup) => (lookup.kind === 'ses' && lookup.identity !== null ? [lookup.identity] : []))[0];
+  // The SPF row reads the TXT record on the custom MAIL FROM domain, so its lookup names that domain.
+  const spfLookups = rows.filter((row) => row.record === 'spf').flatMap((row) => row.lookups);
+  const mailFromDomain = spfLookups.flatMap((lookup) => (lookup.kind === 'dns' ? [lookup.name] : []))[0];
+  if (cause === undefined) throw new RangeError(`no configuration row of ${fromDomain} reads cause, so no authentication fix applies`);
+  switch (cause.record) {
+    case 'dkim':
+      return fixFor('missing-dkim', { fromDomain, identity: required(identity, 'SES identity', fromDomain) });
+    case 'mail-from':
+      return fixFor('failed-mail-from', {
+        fromDomain,
+        identity: required(identity, 'SES identity', fromDomain),
+        mailFromDomain: required(mailFromDomain, 'MAIL FROM domain', fromDomain),
+      });
+    case 'dmarc':
+      return fixFor('missing-dmarc', { fromDomain });
+    case 'spf':
+      return fixFor('missing-spf', { fromDomain, mailFromDomain: required(mailFromDomain, 'MAIL FROM domain', fromDomain) });
+  }
+}
+
+function fixOf(decision: CycleDecision, analysis: LaneAnalysis): NonNullable<EvidenceRecord['fix']> {
+  const shared = decision.sharedCause;
+  if (shared === null) throw new RangeError(`the refused decision for ${decision.configurationSet} names no shared cause to write a fix for`);
+  switch (shared.kind) {
+    case 'provider':
+      return fixFor('shared-provider', { provider: shared.value, lanes: shared.lanes });
+    case 'from-domain':
+      return authenticationFix(shared.value, analysis);
+    default:
+      return fixFor('shared-tag-value', { dimension: shared.kind, value: shared.value, lanes: shared.lanes });
+  }
 }
 
 export interface AssembleInput {
   incidentId: string;
   analysis: LaneAnalysis;
   decision: CycleDecision;
+  /** Every lane analysed in the cycle: the share is taken over their summaries and the question names their rows. */
   analyses: readonly LaneAnalysis[];
   expiresAt: number;
 }
 
-export function assembleEvidenceRecord(_input: AssembleInput): EvidenceRecord {
-  throw new Error('assembleEvidenceRecord is not built yet');
+function recordInput(input: AssembleInput, decision: CycleDecision): EvidenceRecordInput {
+  const { analysis } = input;
+  const { summary, spike } = analysis;
+  return {
+    incidentId: input.incidentId,
+    lane: { configurationSet: analysis.lane.configurationSet, lane: analysis.lane.lane },
+    window: { fromBucketMs: summary.window.fromBucketMs, toBucketMs: summary.window.toBucketMs },
+    laneTotals: {
+      recipientSends: summary.totals.recipientSends,
+      permanentBounces: summary.totals.permanentBounces,
+      complaints: summary.totals.complaints,
+      hardBounceRatio: spike.hardBounceRatio,
+      complaintRatio: spike.complaintRatio,
+      verdict: spike.verdict,
+      triggers: [...spike.triggers],
+      label: { hardBounceRatio: LANE_RATIO_LABELS.hardBounce, complaintRatio: LANE_RATIO_LABELS.complaint },
+    },
+    share: buildShareRow(summary, input.analyses.map((other) => other.summary)),
+    rows: [...analysis.rows],
+    configurationRows: [...analysis.configurationRows],
+    isolation: decision.isolation,
+    decision: {
+      outcome: decision.outcome,
+      reason: decision.reason,
+      closeability: { state: decision.closeability.state, reasons: [...decision.closeability.reasons] },
+      noData: decision.noData,
+      bound: decision.bound,
+      otherSpikingLanes: [...decision.otherSpikingLanes],
+      sharedCause: decision.sharedCause === null ? null : { ...decision.sharedCause, lanes: [...decision.sharedCause.lanes] },
+    },
+    question: decision.outcome === 'unknown' ? questionFor(decision, input.analyses) : null,
+    fix: decision.outcome === 'refused' ? fixOf(decision, analysis) : null,
+    expiresAt: input.expiresAt,
+  };
+}
+
+/** D-70: assembled once; a record past RECORD_BYTE_CEILING is assembled again as unknown
+ * record-too-large with no option, so nothing oversized can ever be offered or sent. */
+export function assembleEvidenceRecord(input: AssembleInput): EvidenceRecord {
+  if (input.decision.configurationSet !== setOf(input.analysis)) {
+    throw new RangeError(`the decision for ${input.decision.configurationSet} cannot be assembled with the analysis of ${setOf(input.analysis)}`);
+  }
+  const record = buildEvidenceRecord(recordInput(input, input.decision));
+  if (serializedRecordBytes(record) <= RECORD_BYTE_CEILING) return record;
+  return buildEvidenceRecord(recordInput(input, { ...input.decision, outcome: 'unknown', reason: 'record-too-large' }));
 }

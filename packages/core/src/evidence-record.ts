@@ -1,7 +1,6 @@
 import { createHash } from 'node:crypto';
 import * as z from 'zod';
 import { REFUSAL_REASONS } from './closeability.js';
-import { DECISION_OUTCOMES, DECISION_REASONS, READ_BOUNDS } from './decision.js';
 import {
   CONFIGURATION_STATES,
   CONFIGURATION_VERDICTS,
@@ -52,6 +51,26 @@ export const EVIDENCE_RECORD_SCHEMA_VERSION = 1;
 // D-70: ten rows per dimension across four dimensions plus the configuration rows fit in a few
 // kilobytes, so this ceiling only trips on a bug, and past it nothing is sent to the agent.
 export const RECORD_BYTE_CEILING = 16_384;
+
+// The decision vocabulary lives beside the schema that stores it: decision.ts assembles records
+// through this module, so defining it there would make the two modules import each other.
+export const DECISION_OUTCOMES = ['approved', 'unknown', 'refused'] as const;
+
+// D-62's unknown reasons, D-46's dimension bound and D-70's size ceiling, in one closed vocabulary.
+export const DECISION_REASONS = [
+  'approved',
+  'no-data',
+  'ses-facts-bound',
+  'dns-bound',
+  'dimension-bound',
+  'not-settled',
+  'not-lane-scoped',
+  'spread',
+  'not-closeable',
+  'record-too-large',
+] as const;
+
+export const READ_BOUNDS = ['ses-facts-bound', 'dns-bound', 'dimension-bound'] as const;
 
 export const FIX_KINDS = [
   'shared-tag-value',
