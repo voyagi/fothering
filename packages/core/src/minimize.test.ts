@@ -362,7 +362,6 @@ const FIELD_CHECKS: Record<StringField, (value: string) => boolean> = {
   remoteMtaIp: isAddress,
   reportingMta: (value) => isAddress(value) || isHostname(value),
   outgoingIp: isAddress,
-  sourceIp: isAddress,
   fromDomain: isHostname,
   callerIdentity: (value) => /^[A-Za-z0-9+=,._-]{1,128}$/.test(value),
   streamTagValue: (value) => /^[A-Za-z0-9_-]{1,256}$/.test(value),
