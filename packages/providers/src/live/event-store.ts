@@ -184,12 +184,21 @@ const VERSION_ATTRIBUTE = 'version';
 // Cancellation reasons come in the order of the requested items. Only a failed condition is a cap; a
 // TransactionConflict is two cycles racing, which a retry settles, so it must never read as the cap
 // that ends an incident (research Pitfall 6). Anything else is not this adapter's to answer.
+function cancellationCodes(error: unknown): (string | undefined)[] {
+  if (!hasErrorName(error, TRANSACTION_CANCELED)) return [];
+  return ((error as { CancellationReasons?: readonly { Code?: string }[] }).CancellationReasons ?? []).map((reason) => reason.Code);
+}
+
+function failedCondition(error: unknown): boolean {
+  return cancellationCodes(error).includes('ConditionalCheckFailed');
+}
+
 function reservationRefusal(error: unknown): ReservationResult {
   if (!hasErrorName(error, TRANSACTION_CANCELED)) throw error;
-  const reasons = (error as { CancellationReasons?: readonly { Code?: string }[] }).CancellationReasons ?? [];
-  const capped = RESERVATION_ITEMS.filter((_item, index) => reasons[index]?.Code === 'ConditionalCheckFailed');
+  const codes = cancellationCodes(error);
+  const capped = RESERVATION_ITEMS.filter((_item, index) => codes[index] === 'ConditionalCheckFailed');
   if (capped.length > 0) return { ok: false, reason: 'cap', items: capped };
-  if (reasons.some((reason) => reason.Code === 'TransactionConflict')) return { ok: false, reason: 'conflict' };
+  if (codes.includes('TransactionConflict')) return { ok: false, reason: 'conflict' };
   throw error;
 }
 
@@ -302,20 +311,27 @@ export function createDynamoDecisionStore(options: CreateDynamoEventStoreOptions
       }
     },
 
-    // ADD only, with no condition: these totals are reporting figures no cap reads, and nothing here
-    // can take a counter down.
+    // ADD only, so nothing here can take a counter down. ADD on a missing item would create it with no
+    // expiresAt, outliving the retention period, so both updates require the item a reservation made,
+    // and one transaction keeps a refusal from leaving usage on one counter but not the other.
     async recordUsage(usage) {
       assertUsage(usage);
       const tableName = requireTableName(options.tableName);
-      for (const key of [usage.incidentKey, usage.dayKey]) {
-        await options.client().send(
-          new UpdateCommand({
-            TableName: tableName,
-            Key: tableKey(key),
-            UpdateExpression: 'ADD inputTokens :inputTokens, outputTokens :outputTokens, modelCalls :modelCalls',
-            ExpressionAttributeValues: { ':inputTokens': usage.inputTokens, ':outputTokens': usage.outputTokens, ':modelCalls': usage.modelCalls },
-          }),
-        );
+      const update = (key: RecordKey) => ({
+        Update: {
+          TableName: tableName,
+          Key: tableKey(key),
+          UpdateExpression: 'ADD inputTokens :inputTokens, outputTokens :outputTokens, modelCalls :modelCalls',
+          ConditionExpression: `attribute_exists(${PARTITION_KEY})`,
+          ExpressionAttributeValues: { ':inputTokens': usage.inputTokens, ':outputTokens': usage.outputTokens, ':modelCalls': usage.modelCalls },
+        },
+      });
+      try {
+        await options.client().send(new TransactWriteCommand({ TransactItems: [update(usage.incidentKey), update(usage.dayKey)] }));
+        return 'recorded';
+      } catch (error) {
+        if (failedCondition(error)) return 'not-reserved';
+        throw error;
       }
     },
   };

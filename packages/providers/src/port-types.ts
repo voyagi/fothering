@@ -51,6 +51,12 @@ export type ReservationResult =
   | { ok: false; reason: 'cap'; items: ReservationItem[] }
   | { ok: false; reason: 'conflict' };
 
+/**
+ * not-reserved: a counter the usage names was never created by a reservation, so nothing was added
+ * to either. A counter made by usage alone would carry no expiresAt and outlive the retention period.
+ */
+export type UsageResult = 'recorded' | 'not-reserved';
+
 /** Reporting totals added to both counters after an invocation; no cap reads them (D-67, D-68). */
 export interface UsageRecord {
   incidentKey: RecordKey;
@@ -74,7 +80,8 @@ export interface DecisionStorePort {
   ): Promise<'updated' | 'conflict'>;
   /** Adds one invocation to both counters and the token reservation to the day, all or nothing. */
   reserveInvocation(request: ReservationRequest): Promise<ReservationResult>;
-  recordUsage(usage: UsageRecord): Promise<void>;
+  /** Adds to both counters only when both already exist, all or nothing. */
+  recordUsage(usage: UsageRecord): Promise<UsageResult>;
 }
 
 const LANE_PARTITION_PREFIX = lanePartitionKey('');

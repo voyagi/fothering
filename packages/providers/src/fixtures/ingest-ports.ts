@@ -269,12 +269,15 @@ export function createFixtureDecisionStore(options: FixtureOptions = {}, dryRun?
       addToCounter(items, request.dayKey, { invocations: 1, tokenReservations: request.tokenReservation }, request.expiresAt);
       return { ok: true };
     },
+    // attribute_exists(pk) on both updates of one transaction live, so a missing counter refuses both.
     async recordUsage(usage) {
       assertUsage(usage);
       await dryRun?.would('decisionStore.recordUsage', usage.incidentKey.pk, usage);
+      if (!items.has(keyOf(usage.incidentKey)) || !items.has(keyOf(usage.dayKey))) return 'not-reserved';
       const amounts = { inputTokens: usage.inputTokens, outputTokens: usage.outputTokens, modelCalls: usage.modelCalls };
       addToCounter(items, usage.incidentKey, amounts);
       addToCounter(items, usage.dayKey, amounts);
+      return 'recorded';
     },
   }, 'fixture');
 }
