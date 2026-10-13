@@ -131,12 +131,13 @@ describe('validateExplanation (D-78, R12)', () => {
       'please reopen it',
       'Keep Closed',
       'the closure stands',
+      'closing it now',
       'we disclose this',
       `CLO${ZERO_WIDTH_SPACE}SE it`,
       'ｃｌｏｓｅ it',
       `clo${SOFT_HYPHEN}se it`,
     ];
-    for (const text of words) expect(checkOf(text, closeOn(APPROVED))).toBe('command-word');
+    for (const text of words) expect(checkOf(text, closeOn(APPROVED)), text).toBe('command-word');
   });
 
   it('allows only the record lane set with close, and no lane-map set with unknown (5-2, F4)', () => {

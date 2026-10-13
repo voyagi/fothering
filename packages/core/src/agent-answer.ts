@@ -1,6 +1,6 @@
 import * as z from 'zod';
 import type { EvidenceRecord } from './evidence-record.js';
-import { PINNED_MODEL_VALUES } from './model-values.js';
+import { MODEL_VALUES, PINNED_MODEL_VALUES } from './model-values.js';
 
 export const AGENT_DECISIONS = ['close', 'unknown'] as const;
 
@@ -108,12 +108,152 @@ export interface ExplanationCheckEntry {
 
 export type ExplanationVerdict = { ok: true } | { ok: false; check: ExplanationCheck };
 
-export const EXPLANATION_CHECKS: readonly ExplanationCheckEntry[] = [];
+function charClassOf(codePoints: readonly number[]): string {
+  return `[${codePoints.map((codePoint) => String.fromCodePoint(codePoint)).join('')}]`;
+}
 
+// U+200B to U+200D, U+2060, U+FEFF and the soft hyphen U+00AD, built from their numbers so this file
+// holds only printable text.
+const ZERO_WIDTH = new RegExp(charClassOf([0x200b, 0x200c, 0x200d, 0x2060, 0xfeff, 0xad]), 'g');
+
+function withoutZeroWidth(text: string): string {
+  return text.replace(ZERO_WIDTH, '');
+}
+
+// NFKC folds fullwidth and other compatibility forms into the ASCII a check compares against, and the
+// zero-width removal runs after it so a joiner can never split a token the check looks for (AC-E44).
+function folded(text: string): string {
+  return withoutZeroWidth(text.normalize('NFKC')).toLowerCase();
+}
+
+function isNotEmpty(text: string): boolean {
+  return text.normalize('NFC').trim() !== '';
+}
+
+// Code points, never UTF-16 units: a character outside the BMP counts once (D-75).
+function isWithinLength(text: string): boolean {
+  return [...text.normalize('NFC')].length <= MODEL_VALUES.explanationMaxCodePoints;
+}
+
+const LINE_SEPARATOR = String.fromCodePoint(0x2028);
+const PARAGRAPH_SEPARATOR = String.fromCodePoint(0x2029);
+const BLANK_LINE = new RegExp(`\\n\\s*\\n|\\r\\s*\\r|${PARAGRAPH_SEPARATOR}|${LINE_SEPARATOR}\\s*${LINE_SEPARATOR}`);
+
+function isOneParagraph(text: string): boolean {
+  return !BLANK_LINE.test(text.normalize('NFC'));
+}
+
+const SCHEME_URL = /[\p{L}\p{N}+.-]+:\/\//u;
+const DEFANGED_URL = /hxxp/;
+const WWW_TOKEN = /(?<![\p{L}\p{N}_-])www\./u;
+
+function holdsNoUrl(text: string): boolean {
+  const normal = folded(text);
+  return !SCHEME_URL.test(normal) && !DEFANGED_URL.test(normal) && !WWW_TOKEN.test(normal);
+}
+
+// The stem "clos" anywhere, so closed, closing, closure and disclose reject too: "closure" and
+// "closing" do not contain "close", and the stricter reading of D-78 is meant to catch them.
+function holdsNoCommandWord(text: string): boolean {
+  const normal = folded(text);
+  return !normal.includes('clos') && !normal.includes('reopen');
+}
+
+function occurrences(text: string, needle: string): number[] {
+  const found: number[] = [];
+  for (let at = text.indexOf(needle); at !== -1; at = text.indexOf(needle, at + 1)) found.push(at);
+  return found;
+}
+
+// An other set is judged by where each of its occurrences sits rather than on a text with the allowed
+// name cut out: cutting fothering-bulk out of fothering-bulk-eu would leave -eu and hide the other set.
+function namesNoOtherSet(text: string, context: ExplanationContext): boolean {
+  const normal = folded(text);
+  const allowed = context.decision === 'close' ? context.record.lane.configurationSet.toLowerCase() : null;
+  const allowedSpans = allowed === null ? [] : occurrences(normal, allowed).map((start) => [start, start + allowed.length] as const);
+  const inAllowedSpan = (start: number, end: number): boolean => allowedSpans.some(([from, to]) => from <= start && end <= to);
+  return context.laneMapSets.every((set) => {
+    const name = set.toLowerCase();
+    return occurrences(normal, name).every((start) => inAllowedSpan(start, start + name.length));
+  });
+}
+
+const BANNED_PHRASES = ['ses bounce rate', 'ses complaint rate', 'your bounce rate'] as const;
+
+function holdsNoBannedPhrase(text: string): boolean {
+  const normal = folded(text).replace(/\s+/g, ' ');
+  return BANNED_PHRASES.every((phrase) => !normal.includes(phrase));
+}
+
+const PERCENT_STRING = /^\d{1,3}\.\d{2}%$/;
+const DIGIT_ONLY = /^\p{Nd}+$/u;
+
+interface RecordFacts {
+  integers: Set<string>;
+  percents: Set<string>;
+  names: string[];
+}
+
+function recordFacts(record: EvidenceRecord): RecordFacts {
+  const integers = new Set<string>();
+  const percents = new Set<string>();
+  const walk = (value: unknown): void => {
+    if (typeof value === 'number' && Number.isSafeInteger(value)) integers.add(String(value));
+    else if (typeof value === 'string' && PERCENT_STRING.test(value)) percents.add(value);
+    else if (Array.isArray(value)) value.forEach(walk);
+    else if (typeof value === 'object' && value !== null) Object.values(value).forEach(walk);
+  };
+  walk(record);
+  const names = [
+    record.lane.configurationSet,
+    record.lane.lane,
+    ...record.rows.flatMap((row) => (row.value === null ? [] : [row.value])),
+    ...record.configurationRows.map((row) => row.fromDomain),
+  ];
+  const removable = [...new Set(names.map((name) => withoutZeroWidth(name.normalize('NFKC'))))].filter((name) => name !== '' && !DIGIT_ONLY.test(name));
+  return { integers, percents, names: removable.sort((left, right) => right.length - left.length) };
+}
+
+function escapeRegExp(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+// 4b-Q, an additive implementation detail of D-78 and not a rule change: exact whole-token copies of
+// the record's own names are removed before the number check, so a cause batch written with digits
+// still passes. A digit-only value is never removed, or a fabricated count equal to it would vanish.
+function withoutRecordNames(text: string, names: readonly string[]): string {
+  return names.reduce((rest, name) => rest.replace(new RegExp(`(?<![\\p{L}\\p{N}_-])${escapeRegExp(name)}(?![\\p{L}\\p{N}_-])`, 'gu'), ' '), text);
+}
+
+const NUMBER_TOKEN = /\p{Nd}+(?:,\p{Nd}{3})*(?:\.\p{Nd}+)?%?/gu;
+
+function holdsOnlyRecordNumbers(text: string, context: ExplanationContext): boolean {
+  const facts = recordFacts(context.record);
+  const rest = withoutRecordNames(withoutZeroWidth(text.normalize('NFKC')), facts.names);
+  return [...rest.matchAll(NUMBER_TOKEN)].every(([token]) => {
+    if (token.endsWith('%')) return facts.percents.has(token);
+    if (token.includes('.')) return false;
+    return facts.integers.has(token.replaceAll(',', ''));
+  });
+}
+
+export const EXPLANATION_CHECKS: readonly ExplanationCheckEntry[] = [
+  { check: 'empty', holds: isNotEmpty },
+  { check: 'length', holds: isWithinLength },
+  { check: 'paragraph', holds: isOneParagraph },
+  { check: 'url', holds: holdsNoUrl },
+  { check: 'command-word', holds: holdsNoCommandWord },
+  { check: 'set-name', holds: namesNoOtherSet },
+  { check: 'phrase', holds: holdsNoBannedPhrase },
+  { check: 'number', holds: holdsOnlyRecordNumbers },
+];
+
+/** D-78 and R12: any failed check rejects the whole answer; the caller keeps the code, never the text. */
 export function validateExplanation(
-  _text: string,
-  _context: ExplanationContext,
-  _checks: readonly ExplanationCheckEntry[] = EXPLANATION_CHECKS,
+  text: string,
+  context: ExplanationContext,
+  checks: readonly ExplanationCheckEntry[] = EXPLANATION_CHECKS,
 ): ExplanationVerdict {
-  return { ok: true };
+  const failed = checks.find((entry) => !entry.holds(text, context));
+  return failed === undefined ? { ok: true } : { ok: false, check: failed.check };
 }
