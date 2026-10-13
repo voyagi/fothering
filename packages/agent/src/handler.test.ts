@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { format } from 'node:util';
 import { configureLogging, type ModelStreamEvent, type Usage } from '@strands-agents/sdk';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { runtimeResultSchema, validateDecision, type RuntimeResult } from '@fothering/core/agent-answer';
 import { bucketStartMs, isCountedRecord } from '@fothering/core/buckets';
 import { REQUIRED_EVENT_TYPES, checkCloseability, type SesConfigurationFacts } from '@fothering/core/closeability';
@@ -10,14 +10,19 @@ import {
   RECORD_BYTE_CEILING,
   buildEvidenceRecord,
   canonicalJson,
+  counterDayKey,
+  evidenceRecordSchema,
   incidentIdFor,
+  incidentItemKey,
+  optionIdFor,
+  recordHash,
   serializedRecordBytes,
   type EvidenceRecord,
   type EvidenceRecordInput,
 } from '@fothering/core/evidence-record';
 import { buildTagRows } from '@fothering/core/evidence-rows';
 import { parseLaneMap } from '@fothering/core/lanes';
-import { MODEL_VALUES, PINNED_MODEL_VALUES } from '@fothering/core/model-values';
+import { MODEL_VALUES, PINNED_MODEL_VALUES, TOKEN_RESERVATION_PER_INVOCATION } from '@fothering/core/model-values';
 import { RETENTION_SECONDS } from '@fothering/core/records';
 import { scenarioRecords, type LaneScenario } from '@fothering/core/test/event-arbitraries';
 import { LANE_RATIO_LABELS, LANE_SHARE_LABEL, laneSpikeVerdict, renderPercent } from '@fothering/core/verdicts';
@@ -31,9 +36,12 @@ import {
   type FixtureModel,
   type FixtureTurn,
 } from '@fothering/providers/fixtures/fixture-model';
-import type { BedrockModelPort } from '@fothering/providers/port-types';
-import { TEST_ADDRESS_KEY_SET } from '@fothering/providers/fixtures/ingest-ports';
+import type { BedrockModelPort, Recording } from '@fothering/providers/port-types';
+import { TEST_ADDRESS_KEY_SET, createFixtureTableState } from '@fothering/providers/fixtures/ingest-ports';
+import { runDetectionCycle } from '@fothering/functions/detect/detect';
+import { buildDetectRoot } from '@fothering/functions/detect/root';
 import lanesJson from '../../../lanes.json' with { type: 'json' };
+import completeSesConfig from '../../providers/src/fixtures/ses-config/complete.json' with { type: 'json' };
 import { SYSTEM_PROMPT, SYSTEM_PROMPT_SHA256, createInvocationHandler } from './handler.js';
 import { buildAgentRoot } from './root.js';
 
@@ -149,8 +157,70 @@ describe('tracer, agent half: the runtime explains the evidence record and retur
   });
 });
 
+const FIXTURE_RUNTIME_ARN = 'arn:aws:bedrock-agentcore:eu-central-1:000000000000:runtime/fixture-runtime';
+const COMPLETE_SES_RECORDINGS = completeSesConfig.recordings as readonly Recording[];
+const AGENT_CORE_LINE = '(dry-run) WOULD agentCore.invokeAgentRuntime ';
+
+// The detection half: the real detection root and the real runtime handler share nothing but the
+// fixture agentCore row's in-process route, so the record crosses as JSON exactly as it would to AgentCore.
+describe('tracer, end to end: one detection cycle stores a validated close from the real runtime handler', () => {
+  it('folds the lanes, writes the evidence, reserves once, invokes the runtime handler and stores the validated close', async () => {
+    const incidentId = incidentIdFor(BULK, bucketStartMs(TRACER_NOW_MS));
+    const optionId = optionIdFor(incidentId, 0);
+    const model = createFixtureModel([structuredAnswerTurn({ decision: 'close', optionId, explanation: TRACER_EXPLANATION }, USAGE)]);
+    const agentDeps = buildAgentRoot({ runtimeContext: 'test', switchValue: undefined, fixtures: { model } });
+    const dryRunLines: string[] = [];
+    const deps = buildDetectRoot({
+      runtimeContext: 'test',
+      switchValue: undefined,
+      fixtures: { store: createFixtureTableState(), recordings: { ses: COMPLETE_SES_RECORDINGS }, agentRuntime: createInvocationHandler(agentDeps) },
+      liveConfig: { agentRuntimeArn: FIXTURE_RUNTIME_ARN },
+      dryRunSink: (line) => dryRunLines.push(line),
+      now: () => TRACER_NOW_MS,
+      wait: async () => {},
+    });
+    for (const record of scenarioRecords(ONE_BAD_BATCH, TRACER_NOW_MS, LANES, TEST_ADDRESS_KEY_SET)) await deps.ports.eventStore.putIfAbsent(record);
+    const queryLane = vi.spyOn(deps.ports.eventStore, 'queryLane');
+
+    const summary = await runDetectionCycle(deps);
+
+    const decision = await deps.ports.decisionStore.getItem(incidentItemKey(incidentId, 'DECISION'), TRACER_NOW_MS);
+    expect(decision?.outcome ?? 'no DECISION item').toBe('close');
+    expect(decision?.optionId).toBe(optionId);
+    expect(decision).toMatchObject({
+      explanation: TRACER_EXPLANATION,
+      pinned: PINNED_MODEL_VALUES,
+      promptSha256: SYSTEM_PROMPT_SHA256,
+      usage: USAGE,
+      modelCalls: 1,
+      attempt: 1,
+      decidedAtMs: TRACER_NOW_MS,
+    });
+    for (const count of Object.values(decision?.usage as Record<string, unknown>)) expect(Number.isInteger(count)).toBe(true);
+
+    const evidence = await deps.ports.decisionStore.getItem(incidentItemKey(incidentId, 'EVIDENCE'), TRACER_NOW_MS);
+    const record = evidenceRecordSchema.parse(evidence?.record);
+    expect(recordHash(record)).toBe(record.hash);
+    expect(record.approvedOptions).toEqual([{ optionId }]);
+
+    expect(TOKEN_RESERVATION_PER_INVOCATION).toBe(64_512);
+    const incidentCounter = await deps.ports.decisionStore.getItem(incidentItemKey(incidentId, 'COUNTER'), TRACER_NOW_MS);
+    const dayCounter = await deps.ports.decisionStore.getItem(counterDayKey('2026-10-11'), TRACER_NOW_MS);
+    expect(incidentCounter?.invocations).toBe(1);
+    expect(dayCounter).toMatchObject({ invocations: 1, tokenReservations: 64_512 });
+
+    expect(dryRunLines.filter((line) => line.startsWith(AGENT_CORE_LINE))).toHaveLength(1);
+    expect(model.calls).toHaveLength(1);
+    expect(queryLane).not.toHaveBeenCalled();
+    expect(summary).toMatchObject({ incidentsOpened: 1, invocations: 1, sesReads: 7, dnsLookups: 0, outcomes: [{ incidentId, result: 'close' }] });
+    expect(summary.lanes.map((lane) => `${lane.configurationSet}:${lane.verdict}`).join(' ')).toBe(
+      'fothering-transactional:not-enough-volume fothering-bulk:spike fothering-alerts:not-enough-volume',
+    );
+  });
+});
+
 const ZERO_USAGE = { inputTokens: 0, outputTokens: 0, totalTokens: 0 };
-const REBUILT_KEYS = new Set(['schemaVersion', 'approvedOptions', 'hash']);
+const REBUILT_KEYS =new Set(['schemaVersion', 'approvedOptions', 'hash']);
 
 function rebuilt(record: EvidenceRecord, changes: Partial<EvidenceRecordInput>): EvidenceRecord {
   const input = Object.fromEntries(Object.entries(record).filter(([key]) => !REBUILT_KEYS.has(key))) as EvidenceRecordInput;
