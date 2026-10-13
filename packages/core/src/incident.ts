@@ -1,4 +1,4 @@
-import { BUCKET_MS, bucketStartMs } from './buckets.js';
+import { bucketStartMs, isBucketComplete } from './buckets.js';
 import { incidentIdFor } from './evidence-record.js';
 import type { LaneVerdict } from './verdicts.js';
 import type { BucketWindow } from './window-fold.js';
@@ -53,11 +53,77 @@ export function openIncident(configurationSet: string, nowMs: number, spikeWindo
   };
 }
 
-export function windowsNeedingFinalVerdict(state: IncidentState, nowMs: number): BucketWindow[] {
-  const candidates = [...(state.openingFinalized ? [] : [state.openingWindow]), ...(state.pendingRecovery === null ? [] : [state.pendingRecovery])];
-  return candidates.filter((window) => nowMs >= window.toBucketMs + BUCKET_MS);
+// A window is final only once its last bucket is complete, by the one completeness rule phase 1
+// owns: a no-spike verdict over incomplete buckets can still turn into a spike as late bounces and
+// complaints land, so closing on it would open a second incident and a second invocation (D-54).
+function isWindowComplete(window: BucketWindow, nowMs: number): boolean {
+  return isBucketComplete(window.toBucketMs, nowMs);
 }
 
+function sameWindow(left: BucketWindow, right: BucketWindow): boolean {
+  return left.fromBucketMs === right.fromBucketMs && left.toBucketMs === right.toBucketMs;
+}
+
+export function windowsNeedingFinalVerdict(state: IncidentState, nowMs: number): BucketWindow[] {
+  if (state.status === 'closed') return [];
+  const candidates = [...(state.openingFinalized ? [] : [state.openingWindow]), ...(state.pendingRecovery === null ? [] : [state.pendingRecovery])];
+  return candidates.filter((window) => isWindowComplete(window, nowMs));
+}
+
+function finalVerdictFor(window: BucketWindow, cycle: IncidentCycle): LifecycleVerdict | undefined {
+  if (!isWindowComplete(window, cycle.nowMs)) return undefined;
+  return cycle.finalVerdicts.find((final) => sameWindow(final.window, window))?.verdict;
+}
+
+function settleOpeningWindow(next: IncidentState, cycle: IncidentCycle, transitions: IncidentTransition[]): void {
+  if (next.openingFinalized) return;
+  const verdict = finalVerdictFor(next.openingWindow, cycle);
+  if (verdict === undefined) return;
+  next.openingFinalized = true;
+  if (verdict !== 'spike') {
+    next.falseSpikes += 1;
+    transitions.push('false-spike');
+  }
+}
+
+function settleRecoveryWindow(next: IncidentState, cycle: IncidentCycle, transitions: IncidentTransition[]): void {
+  if (next.pendingRecovery === null) return;
+  const verdict = finalVerdictFor(next.pendingRecovery, cycle);
+  if (verdict === undefined) return;
+  if (verdict === 'spike') {
+    next.falseRecoveries += 1;
+    next.pendingRecovery = null;
+    transitions.push('false-recovery');
+    return;
+  }
+  next.status = 'closed';
+  next.pendingRecovery = null;
+  transitions.push('closed');
+}
+
+function followCurrentVerdict(next: IncidentState, cycle: IncidentCycle, transitions: IncidentTransition[]): void {
+  if (cycle.currentVerdict === 'spike') {
+    next.pendingRecovery = null;
+    transitions.push('spiking');
+    return;
+  }
+  next.pendingRecovery ??= { ...cycle.currentWindow };
+  transitions.push('watching');
+}
+
+function stateChanged(before: IncidentState, after: IncidentState): boolean {
+  return JSON.stringify({ ...before, version: 0 }) !== JSON.stringify({ ...after, version: 0 });
+}
+
+/** One detection cycle for an open incident: final verdicts of complete windows first, then the
+ * cycle's own verdict. Pure, so the cycle in plan 02-12 owns every read and write of the state. */
 export function stepIncident(state: IncidentState, cycle: IncidentCycle): IncidentStep {
-  return { state, transitions: [cycle.currentVerdict === 'spike' ? 'spiking' : 'watching'] };
+  if (state.status === 'closed') return { state, transitions: [] };
+  const next: IncidentState = structuredClone(state);
+  const transitions: IncidentTransition[] = [];
+  settleOpeningWindow(next, cycle, transitions);
+  settleRecoveryWindow(next, cycle, transitions);
+  if (next.status === 'open') followCurrentVerdict(next, cycle, transitions);
+  if (stateChanged(state, next)) next.version = state.version + 1;
+  return { state: next, transitions };
 }
