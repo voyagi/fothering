@@ -939,21 +939,46 @@ describe('createDynamoDecisionStore', () => {
     await expect(store.reserveInvocation(LIVE_RESERVATION)).rejects.toThrow('network blip');
   });
 
-  it('records usage with one ADD-only update per counter item, after refusing a negative amount unsent', async () => {
+  // A counter item without its reservation would carry no expiresAt and outlive the 30-day retention,
+  // so usage is added only to items that already exist, both or neither.
+  it('records usage with one TransactWriteCommand of two ADD-only updates on existing counters, after refusing a negative amount unsent', async () => {
     const { store, calls } = decisionStoreAnswering(() => ({}));
     await expect(store.recordUsage({ ...LIVE_USAGE, outputTokens: -1 })).rejects.toThrow(RangeError);
     expect(calls).toHaveLength(0);
 
-    await store.recordUsage(LIVE_USAGE);
-    expect(calls.map((call) => call.name).join(' ')).toBe('UpdateCommand UpdateCommand');
-    expect(calls.map((call) => (call.input as { Key: { pk: string } }).Key.pk).join(' ')).toBe(`${INCIDENT_PK} COUNTER_DAY#2026-10-11`);
-    for (const call of calls) {
-      expect(call.input).toMatchObject({
+    await expect(store.recordUsage(LIVE_USAGE)).resolves.toBe('recorded');
+    expect(calls.map((call) => call.name).join(' ')).toBe('TransactWriteCommand');
+    const items = (calls[0]?.input as { TransactItems: { Update: { Key: { pk: string } } }[] }).TransactItems;
+    expect(items.map((item) => item.Update.Key.pk).join(' ')).toBe(`${INCIDENT_PK} COUNTER_DAY#2026-10-11`);
+    for (const item of items) {
+      expect(item.Update).toEqual({
+        TableName: 'events',
+        Key: item.Update.Key,
         UpdateExpression: 'ADD inputTokens :inputTokens, outputTokens :outputTokens, modelCalls :modelCalls',
+        ConditionExpression: 'attribute_exists(pk)',
         ExpressionAttributeValues: { ':inputTokens': 1_200, ':outputTokens': 80, ':modelCalls': 2 },
       });
-      expect(call.input).not.toHaveProperty('ConditionExpression');
     }
+  });
+
+  it.each([
+    ['ConditionalCheckFailed', 'None'],
+    ['None', 'ConditionalCheckFailed'],
+    ['ConditionalCheckFailed', 'ConditionalCheckFailed'],
+  ])('answers not-reserved for usage on a counter no reservation created, cancellation reasons %s %s', async (...codes) => {
+    const { store } = decisionStoreAnswering(() => {
+      throw cancelled(...codes);
+    });
+    await expect(store.recordUsage(LIVE_USAGE)).resolves.toBe('not-reserved');
+  });
+
+  it('passes on a usage cancellation holding no failed condition, and any other error', async () => {
+    const errors: unknown[] = [cancelled('TransactionConflict', 'None'), new Error('network blip')];
+    const { store } = decisionStoreAnswering(() => {
+      throw errors.shift();
+    });
+    await expect(store.recordUsage(LIVE_USAGE)).rejects.toBeInstanceOf(TransactionCanceledException);
+    await expect(store.recordUsage(LIVE_USAGE)).rejects.toThrow('network blip');
   });
 
   it('builds no client and names FOTHERING_TABLE_NAME from every operation when the table name is unset', async () => {

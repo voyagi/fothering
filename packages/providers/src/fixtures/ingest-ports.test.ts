@@ -962,11 +962,28 @@ describe('the fixture decision store records usage by adding only (AC-P6 store h
   it('adds each amount to both counter items, call after call', async () => {
     const decisions = createFixtureDecisionStore();
     await decisions.reserveInvocation(reservation());
-    await decisions.recordUsage(usage());
-    await decisions.recordUsage(usage({ inputTokens: 300, outputTokens: 20, modelCalls: 1 }));
+    expect(await decisions.recordUsage(usage())).toBe('recorded');
+    expect(await decisions.recordUsage(usage({ inputTokens: 300, outputTokens: 20, modelCalls: 1 }))).toBe('recorded');
     for (const key of [INCIDENT_COUNTER, DAY_COUNTER]) {
       expect(await decisions.getItem(key, TRACER_NOW_MS)).toMatchObject({ inputTokens: 1_500, outputTokens: 100, modelCalls: 3, invocations: 1 });
     }
+  });
+
+  // A counter item made by usage alone would carry no expiresAt and outlive the 30-day retention.
+  it('answers not-reserved and writes nothing for usage on counters no reservation created', async () => {
+    const decisions = createFixtureDecisionStore();
+    expect(await decisions.recordUsage(usage())).toBe('not-reserved');
+    expect(await decisions.getItem(INCIDENT_COUNTER, TRACER_NOW_MS)).toBeUndefined();
+    expect(await decisions.getItem(DAY_COUNTER, TRACER_NOW_MS)).toBeUndefined();
+  });
+
+  it('answers not-reserved and leaves the reserved counter unchanged when only one of the two exists', async () => {
+    const decisions = createFixtureDecisionStore();
+    await decisions.reserveInvocation(reservation({ incidentKey: incidentItemKey('6'.repeat(32), 'COUNTER') }));
+    const before = await decisions.getItem(DAY_COUNTER, TRACER_NOW_MS);
+    expect(await decisions.recordUsage(usage())).toBe('not-reserved');
+    expect(await decisions.getItem(DAY_COUNTER, TRACER_NOW_MS)).toEqual(before);
+    expect(await decisions.getItem(INCIDENT_COUNTER, TRACER_NOW_MS)).toBeUndefined();
   });
 
   it('throws a RangeError for a negative or fractional amount before anything is written', async () => {
