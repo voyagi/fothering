@@ -20,7 +20,8 @@ Three constraints shape every choice below:
 |---|---|---|
 | Language | TypeScript | 6.0.3 |
 | Runtime | Node.js 22 | AgentCore `NODE_22` |
-| Agent framework | Strands Agents TypeScript SDK | `@strands-agents/sdk` 1.x, pinned below 1.18.0 until it is three days old |
+| Agent framework | Strands Agents TypeScript SDK | `@strands-agents/sdk` 1.20.0, exact, as package-lock.json resolves it (read 2026-10-13) |
+| Public suffix list (organizational domain for the two DMARC lookups, the RFC 7489 rule; RFC 9989 obsoletes RFC 7489 with a DNS tree walk, so a from-domain more than one label below its organizational domain reads unknown when neither lookup finds a record) | tldts | 7.4.18, exact, published 2026-10-07 |
 | Agent contract server | `bedrock-agentcore` (`BedrockAgentCoreApp`) | 0.4.4, pinned exactly |
 | Agent host | Amazon Bedrock AgentCore Runtime, code package (CodeZip), arm64 | eu-central-1 |
 | Model | Claude Sonnet 5 through the EU inference profile `eu.anthropic.claude-sonnet-5` | |
