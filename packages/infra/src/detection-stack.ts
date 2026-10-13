@@ -1,9 +1,14 @@
-import { RemovalPolicy, Stack, type StackProps } from 'aws-cdk-lib';
+import { Duration, Stack, type StackProps } from 'aws-cdk-lib';
 import type { IBedrockAgentRuntime } from 'aws-cdk-lib/aws-bedrockagentcore';
 import type { ITable } from 'aws-cdk-lib/aws-dynamodb';
-import { LogGroup, RetentionDays } from 'aws-cdk-lib/aws-logs';
+import { Rule, Schedule } from 'aws-cdk-lib/aws-events';
+import { LambdaFunction as LambdaFunctionTarget } from 'aws-cdk-lib/aws-events-targets';
+import { Effect, PolicyStatement } from 'aws-cdk-lib/aws-iam';
+import { Function as LambdaFunction } from 'aws-cdk-lib/aws-lambda';
 import type { Construct } from 'constructs';
 import type { LaneMap } from '@fothering/core/lanes';
+import { liveSwitchEnvironment } from './live-switch.js';
+import { createFunctionRole, functionBase } from './log-statements.js';
 
 export interface DetectionStackProps extends StackProps {
   readonly laneMap: LaneMap;
@@ -15,9 +20,59 @@ export interface DetectionStackProps extends StackProps {
   readonly runtime: IBedrockAgentRuntime;
 }
 
+// Its own stack, so the runtime can be deployed and tried alone while ingest and detection stay
+// undeployed, and neither of the other two stacks depends on this one. It reads the table and the
+// runtime through cross-stack exports, which is why it deploys after both and is destroyed first.
 export class DetectionStack extends Stack {
   constructor(scope: Construct, id: string, props: DetectionStackProps) {
     super(scope, id, props);
-    new LogGroup(this, 'DetectLogs', { retention: RetentionDays.ONE_MONTH, removalPolicy: RemovalPolicy.DESTROY });
+
+    // A transaction's Update items authorize as UpdateItem, so the counter reservation needs no
+    // action of its own. Detection never deletes and never scans. The SES reads are the four
+    // readSesFacts makes; nothing here can change SES state.
+    const detectRole = createFunctionRole(this, 'Detect', [
+      new PolicyStatement({
+        effect: Effect.ALLOW,
+        actions: ['dynamodb:Query', 'dynamodb:GetItem', 'dynamodb:PutItem', 'dynamodb:UpdateItem'],
+        resources: [props.table.tableArn],
+      }),
+      // Neither list action has a resource type, so it can only be granted on every resource.
+      new PolicyStatement({ effect: Effect.ALLOW, actions: ['ses:ListEmailIdentities', 'ses:ListConfigurationSets'], resources: ['*'] }),
+      new PolicyStatement({
+        effect: Effect.ALLOW,
+        actions: ['ses:GetEmailIdentity'],
+        resources: [this.formatArn({ service: 'ses', resource: 'identity', resourceName: '*' })],
+      }),
+      new PolicyStatement({
+        effect: Effect.ALLOW,
+        actions: ['ses:GetConfigurationSetEventDestinations'],
+        resources: props.laneMap.lanes.map((lane) =>
+          this.formatArn({ service: 'ses', resource: 'configuration-set', resourceName: lane.configurationSet }),
+        ),
+      }),
+    ]);
+    // InvokeAgentRuntime alone, on the runtime and its endpoints; grantInvoke would add the
+    // on-behalf-of-a-user action too.
+    props.runtime.grantInvokeRuntime(detectRole.role);
+
+    // No reserved concurrency: two overlapping cycles are carried by the conditional writes. No
+    // Lambda retry either, because the schedule already reruns the cycle five minutes later, and a
+    // retry would only start a second cycle that spends SES reads and invocation caps again.
+    const detectFunction = new LambdaFunction(this, 'DetectFunction', {
+      ...functionBase(props.detectAssetDir, detectRole),
+      timeout: Duration.seconds(300),
+      memorySize: 512,
+      retryAttempts: 0,
+      environment: {
+        FOTHERING_TABLE_NAME: props.table.tableName,
+        FOTHERING_AGENT_RUNTIME_ARN: props.runtime.agentRuntimeArn,
+        ...liveSwitchEnvironment(this),
+      },
+    });
+
+    new Rule(this, 'DetectSchedule', {
+      schedule: Schedule.rate(Duration.minutes(5)),
+      targets: [new LambdaFunctionTarget(detectFunction)],
+    });
   }
 }

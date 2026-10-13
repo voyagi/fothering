@@ -4,7 +4,8 @@ import { expect } from 'vitest';
 import { parseLaneMap, type LaneMap } from '@fothering/core/lanes';
 import lanesJson from '../../../../lanes.json' with { type: 'json' };
 import { cdkJsonContext } from '../cdk-context.js';
-import { addFotheringStacks } from '../create-app.js';
+import { addFotheringStacks, DETECTION_STACK_ID, RUNTIME_STACK_ID } from '../create-app.js';
+import type { PermissionEntry } from '../permissions.js';
 import { createStubAssets } from '../stub-assets.js';
 
 export interface SynthesizedStacks {
@@ -90,6 +91,58 @@ export interface StatementView {
   readonly effect: string;
   readonly actions: string[];
   readonly resources: unknown[];
+}
+
+// IAM compares action names case-insensitively, a * standing for any run of characters (the colon
+// included) and a ? for exactly one.
+export function grantsAction(granted: string, probe: string): boolean {
+  const pattern = [...granted].map((char) => (char === '*' ? '.*' : char === '?' ? '.' : char.replace(/[\\^$.|+()[\]{}]/g, '\\$&'))).join('');
+  return new RegExp(`^${pattern}$`, 'i').test(probe);
+}
+
+// Whether a granted action reaches any action of the service, so a literal action, a service
+// wildcard and a bare * are all caught without listing the service's every action.
+function reachesService(granted: string, service: string): boolean {
+  const colon = granted.indexOf(':');
+  return colon === -1 ? grantsAction(granted, `${service}:Probe`) : grantsAction(granted.slice(0, colon), service);
+}
+
+const RUNTIME_FORBIDDEN_SERVICES = ['ses', 'dynamodb', 's3'];
+const INVOKE_RUNTIME = 'bedrock-agentcore:InvokeAgentRuntime';
+const NO_ROLE_MAY_HOLD = [
+  'bedrock-agentcore:InvokeAgentRuntimeForUser',
+  'bedrock-agentcore:InvokeAgentRuntimeCommand',
+  'bedrock-agentcore:InvokeAgentRuntimeCommandShell',
+  'bedrock-agentcore:CreateEvent',
+];
+const SES_WRITES = [
+  'ses:PutConfigurationSetSendingOptions',
+  'ses:PutAccountSendingAttributes',
+  'ses:UpdateAccountSendingEnabled',
+  'ses:UpdateConfigurationSetSendingEnabled',
+  'ses:SendEmail',
+  'ses:SendRawEmail',
+  'ses:SendBulkEmail',
+];
+
+// Every Allow grant that breaks the boundaries the stacks promise: the runtime reaches no SES,
+// DynamoDB or S3 action, only the detection role may invoke the runtime, no role may invoke it for a
+// user or run commands in it or write AgentCore Memory, and no role may change or use SES sending.
+export function permissionViolations(entries: readonly PermissionEntry[]): string[] {
+  const violations: string[] = [];
+  for (const entry of entries) {
+    if (entry.kind !== 'permission' || entry.effect !== 'Allow') continue;
+    const where = `${entry.stack}/${entry.role} ${entry.action}`;
+    const isDetectRole = entry.stack === DETECTION_STACK_ID && entry.role.startsWith('DetectRole');
+    for (const service of RUNTIME_FORBIDDEN_SERVICES) {
+      if (entry.stack === RUNTIME_STACK_ID && reachesService(entry.action, service)) violations.push(`${where}: the runtime role reaches ${service}`);
+    }
+    if (!isDetectRole && grantsAction(entry.action, INVOKE_RUNTIME)) violations.push(`${where}: only the detection role may invoke the runtime`);
+    for (const probe of [...NO_ROLE_MAY_HOLD, ...SES_WRITES]) {
+      if (grantsAction(entry.action, probe)) violations.push(`${where}: no role may hold ${probe}`);
+    }
+  }
+  return violations;
 }
 
 // Every statement each IAM role carries, from its inline policies and from the standalone

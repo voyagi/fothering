@@ -3,9 +3,9 @@ import { Alarm, ComparisonOperator, TreatMissingData, type IMetric } from 'aws-c
 import { AttributeType, BillingMode, ProjectionType, Table } from 'aws-cdk-lib/aws-dynamodb';
 import { Rule } from 'aws-cdk-lib/aws-events';
 import { LambdaFunction as LambdaFunctionTarget } from 'aws-cdk-lib/aws-events-targets';
-import { Effect, PolicyStatement, Role, ServicePrincipal } from 'aws-cdk-lib/aws-iam';
-import { Architecture, Code, Function as LambdaFunction, Runtime } from 'aws-cdk-lib/aws-lambda';
-import { FilterPattern, LogGroup, MetricFilter, RetentionDays } from 'aws-cdk-lib/aws-logs';
+import { Effect, PolicyStatement } from 'aws-cdk-lib/aws-iam';
+import { Function as LambdaFunction } from 'aws-cdk-lib/aws-lambda';
+import { FilterPattern, MetricFilter } from 'aws-cdk-lib/aws-logs';
 import { Secret } from 'aws-cdk-lib/aws-secretsmanager';
 import { Queue, QueueEncryption } from 'aws-cdk-lib/aws-sqs';
 import type { Construct } from 'constructs';
@@ -13,7 +13,7 @@ import { PARTITION_KEY, RECIPIENT_INDEX_NAME, RECIPIENT_KEY, SORT_KEY, TTL_ATTRI
 import type { LaneMap } from '@fothering/core/lanes';
 import { DETAIL_TYPE_BY_EVENT_TYPE } from '@fothering/core/ses-events';
 import { liveSwitchEnvironment } from './live-switch.js';
-import { logWriteStatement } from './log-statements.js';
+import { createFunctionRole, functionBase } from './log-statements.js';
 
 // The six of the SES detail-types EventBridge carries that a lane's health is read from, taken from
 // the map the event parser checks each envelope against, so the rule forwards exactly the types the
@@ -34,11 +34,6 @@ export interface IngestStackProps extends StackProps {
   readonly ingestAssetDir: string;
   /** Directory holding the bundled forget handler (dist/forget in a build, a stub folder in synth tests). */
   readonly forgetAssetDir: string;
-}
-
-interface FunctionRole {
-  readonly role: Role;
-  readonly logGroup: LogGroup;
 }
 
 // Nothing here needs a context lookup or a literal account id, so `cdk synth` runs with no
@@ -69,14 +64,14 @@ export class IngestStack extends Stack {
       removalPolicy: RemovalPolicy.DESTROY,
     });
 
-    const ingestRole = this.createFunctionRole('Ingest', [
+    const ingestRole = createFunctionRole(this, 'Ingest', [
       new PolicyStatement({ effect: Effect.ALLOW, actions: ['dynamodb:PutItem'], resources: [table.tableArn] }),
       new PolicyStatement({ effect: Effect.ALLOW, actions: ['secretsmanager:GetSecretValue'], resources: [addressKey.secretArn] }),
       new PolicyStatement({ effect: Effect.ALLOW, actions: ['sqs:SendMessage'], resources: [queue.queueArn] }),
     ]);
     // Forget finds a recipient's records through the recipient index alone and never queries the
     // base table, so Query names only the index.
-    const forgetRole = this.createFunctionRole('Forget', [
+    const forgetRole = createFunctionRole(this, 'Forget', [
       new PolicyStatement({
         effect: Effect.ALLOW,
         actions: ['dynamodb:Query'],
@@ -92,7 +87,7 @@ export class IngestStack extends Stack {
     // own dead-letter path runs and the event is gone after its retries. These values are headroom,
     // not a measurement; the live runs measure the real duration.
     const ingestFunction = new LambdaFunction(this, 'IngestFunction', {
-      ...this.functionBase(props.ingestAssetDir, ingestRole),
+      ...functionBase(props.ingestAssetDir, ingestRole),
       timeout: Duration.seconds(30),
       memorySize: 512,
       // Both are Lambda's defaults, written out so a synth test can pin them. There is deliberately
@@ -115,7 +110,7 @@ export class IngestStack extends Stack {
     // when every re-read finds them all again. A run cut off by this limit removes what it reached
     // and a second run finishes the rest.
     const forgetFunction = new LambdaFunction(this, 'ForgetFunction', {
-      ...this.functionBase(props.forgetAssetDir, forgetRole),
+      ...functionBase(props.forgetAssetDir, forgetRole),
       timeout: Duration.minutes(5),
       memorySize: 256,
       environment: {
@@ -200,26 +195,4 @@ export class IngestStack extends Stack {
     return table;
   }
 
-  // The role and its log group exist before the function so the function's own role never gains the
-  // managed execution policy, and the stack, not first invocation, creates the log group.
-  private createFunctionRole(name: string, statements: PolicyStatement[]): FunctionRole {
-    const role = new Role(this, `${name}Role`, { assumedBy: new ServicePrincipal('lambda.amazonaws.com') });
-    const logGroup = new LogGroup(this, `${name}Logs`, {
-      retention: RetentionDays.ONE_MONTH,
-      removalPolicy: RemovalPolicy.DESTROY,
-    });
-    for (const statement of [...statements, logWriteStatement(this, logGroup)]) role.addToPolicy(statement);
-    return { role, logGroup };
-  }
-
-  private functionBase(assetDir: string, { role, logGroup }: FunctionRole) {
-    return {
-      runtime: Runtime.NODEJS_22_X,
-      architecture: Architecture.ARM_64,
-      code: Code.fromAsset(assetDir),
-      handler: 'index.handler',
-      role,
-      logGroup,
-    };
-  }
 }

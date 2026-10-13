@@ -289,8 +289,15 @@ describe('IngestStack synth', () => {
     expect(Object.keys(resourcesOfType(stacks.ingest, 'AWS::Lambda::Function'))).toHaveLength(2);
   });
 
-  it('outputs the forget function name and nothing else', () => {
-    expect(stacks.ingest.toJSON().Outputs).toEqual({ ForgetFunctionName: { Value: { Ref: forgetFunction().logicalId } } });
+  // The detection stack imports the table, so CDK exports its name and ARN from here.
+  it('outputs the forget function name, and exports only the table name and arn detection imports', () => {
+    const { ForgetFunctionName, ...exported } = stacks.ingest.toJSON().Outputs as Record<string, { Value: unknown; Export?: { Name: string } }>;
+    expect(ForgetFunctionName).toEqual({ Value: { Ref: forgetFunction().logicalId } });
+    const tableId = logicalIdOf(stacks.ingest, 'AWS::DynamoDB::Table');
+    expect(Object.values(exported).map((output) => JSON.stringify(output.Value)).sort()).toEqual(
+      [JSON.stringify({ 'Fn::GetAtt': [tableId, 'Arn'] }), JSON.stringify({ Ref: tableId })].sort(),
+    );
+    for (const output of Object.values(exported)) expect(output.Export?.Name).toMatch(/^FotheringIngest:ExportsOutput/);
   });
 
   it('holds only the resources the deploy page lists, and no custom resource', () => {
