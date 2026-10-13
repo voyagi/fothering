@@ -1,5 +1,6 @@
 import {
   BUCKET_MS,
+  LATENESS_HORIZON_MS,
   applyRecord,
   assertBucketBounds,
   bounceClass,
@@ -101,6 +102,21 @@ interface BucketTally {
   dimensions: Record<Dimension, Map<string, DimensionTally>>;
   noValue: Record<Dimension, DimensionTally>;
   complaints: Map<string, ComplaintAttribution>;
+  keys: BucketKeyVerdict;
+}
+
+interface BucketKeyVerdict {
+  pending: boolean;
+  coverage: CoverageTally;
+}
+
+/** The recipient keys of the one bucket being read: `messageId#recipientHmac` per send and per
+ * terminal outcome, and the messageId of each Reject, which names no recipient. */
+interface BucketKeys {
+  readonly bucketStartMs: number;
+  readonly sends: Map<string, string>;
+  readonly outcomes: Set<string>;
+  readonly rejectedMessages: Set<string>;
 }
 
 export interface WindowFoldState {
@@ -113,6 +129,9 @@ export interface WindowFoldState {
   trackedComplaints: number;
   readonly observe: ObserveTally;
   dimensionBound: boolean;
+  openKeys: BucketKeys | undefined;
+  readonly finalizedBuckets: Set<number>;
+  orderBroken: boolean;
 }
 
 export interface CoverageTally {
@@ -126,7 +145,8 @@ export interface BucketCoverage extends CoverageTally {
 }
 
 export function coverageWindowFor(nowMs: number): BucketWindow {
-  return spikeWindowFor(nowMs);
+  const toBucketMs = bucketStartMs(nowMs - BUCKET_MS - LATENESS_HORIZON_MS);
+  return { fromBucketMs: toBucketMs - (COVERAGE_WINDOW_BUCKETS - 1) * BUCKET_MS, toBucketMs };
 }
 
 export function windowCoverage(
@@ -202,6 +222,9 @@ function emptyState(options: CreateWindowFoldOptions): WindowFoldState {
     trackedComplaints: 0,
     observe: createObserveTally(),
     dimensionBound: false,
+    openKeys: undefined,
+    finalizedBuckets: new Set(),
+    orderBroken: false,
   };
 }
 
@@ -214,6 +237,7 @@ function bucketTallyFor(state: WindowFoldState, bucketStartMsValue: number): Buc
       dimensions: perDimension(() => new Map<string, DimensionTally>()),
       noValue: perDimension(emptyDimensionTally),
       complaints: new Map(),
+      keys: { pending: false, coverage: { recipientSends: 0, covered: 0 } },
     };
     state.buckets.set(bucketStartMsValue, bucket);
   }
@@ -323,8 +347,70 @@ function withinObserveCap(values: ReadonlySet<string>, value: string | undefined
   return !isUsableValue(value) || values.has(value) || values.size < MAX_TRACKED_VALUES;
 }
 
+function recipientKeyOf(record: EventRecord): string | undefined {
+  return record.recipientHmac === undefined ? undefined : `${record.messageId}#${record.recipientHmac}`;
+}
+
+// DeliveryDelay is no terminal outcome (a recipient can be delayed many times), and a complaint
+// follows a delivery, so neither covers a recipient-send nor marks a bucket pending.
+function bufferKeys(keys: BucketKeys, record: EventRecord): void {
+  const key = recipientKeyOf(record);
+  if (record.kind === 'send') {
+    if (key !== undefined) keys.sends.set(key, record.messageId);
+  } else if (record.eventType === 'Reject') {
+    keys.rejectedMessages.add(record.messageId);
+  } else if (record.kind === 'outcome' && (record.eventType === 'Delivery' || record.eventType === 'Bounce') && key !== undefined) {
+    keys.outcomes.add(key);
+  }
+}
+
+// R3's guard by distinct recipient keys rather than record counts: a Delivery and a later Bounce
+// for one recipient outnumber its one send, yet the bucket is complete and correct (AC-E14).
+function judgeKeys(keys: BucketKeys): BucketKeyVerdict {
+  let pending = false;
+  for (const key of keys.outcomes) {
+    if (!keys.sends.has(key)) {
+      pending = true;
+      break;
+    }
+  }
+  let covered = 0;
+  for (const [key, messageId] of keys.sends) {
+    if (keys.outcomes.has(key) || keys.rejectedMessages.has(messageId)) covered += 1;
+  }
+  return { pending, coverage: { recipientSends: keys.sends.size, covered } };
+}
+
+function finalizeOpenBucket(state: WindowFoldState): void {
+  const keys = state.openKeys;
+  if (keys === undefined) return;
+  const bucket = state.buckets.get(keys.bucketStartMs);
+  if (bucket !== undefined) bucket.keys = judgeKeys(keys);
+  state.finalizedBuckets.add(keys.bucketStartMs);
+  state.openKeys = undefined;
+}
+
+// The store returns a bucket's records together (D-45), so a record of a finalized bucket means
+// the order guarantee failed and that bucket's keys were judged on part of it. Its pending flag is
+// dropped rather than trusted, and orderBroken makes coverage read NO DATA, which decides the lane
+// unknown before any approval whatever the ratios say.
+function keysFor(state: WindowFoldState, bucket: BucketTally): BucketKeys | undefined {
+  const start = bucket.count.bucketStartMs;
+  if (state.openKeys?.bucketStartMs === start) return state.openKeys;
+  finalizeOpenBucket(state);
+  if (state.finalizedBuckets.has(start)) {
+    state.orderBroken = true;
+    bucket.keys.pending = false;
+    return undefined;
+  }
+  state.openKeys = { bucketStartMs: start, sends: new Map(), outcomes: new Set(), rejectedMessages: new Set() };
+  return state.openKeys;
+}
+
 function foldRecord(state: WindowFoldState, record: EventRecord): void {
   const bucket = bucketTallyFor(state, record.bucketStartMs);
+  const keys = keysFor(state, bucket);
+  if (keys !== undefined) bufferKeys(keys, record);
   if (record.kind === 'complaintRecipient') {
     noteComplaintRecipient(state, bucket, record);
     return;
@@ -398,39 +484,66 @@ function attributeComplaints(bucket: BucketTally, domains: Map<string, Dimension
   }
 }
 
+interface RatioParts {
+  totals: WindowSummary['totals'];
+  dimensions: Record<Dimension, Map<string, DimensionTally>>;
+  noValue: Record<Dimension, DimensionTally>;
+}
+
+function addToRatios(parts: RatioParts, bucket: BucketTally): void {
+  const { totals, dimensions, noValue } = parts;
+  totals.recipientSends += bucket.count.send;
+  totals.permanentBounces += bucket.count.permanentBounce;
+  totals.complaints += bucket.count.complaint;
+  for (const detail of AUTH_DETAILS) totals.permanentBouncesByAuthCode[detail] += bucket.permanentBouncesByAuthCode[detail];
+  for (const dimension of DIMENSIONS) {
+    mergeDimension(dimensions[dimension], bucket.dimensions[dimension]);
+    addTally(noValue[dimension], bucket.noValue[dimension]);
+  }
+  attributeComplaints(bucket, dimensions.receivingDomain, noValue.receivingDomain);
+}
+
+/** Read-only: a bucket still open at summary time is judged on its keys here without being
+ * finalized, so a fold can keep stepping after a summary. */
 export function summarizeWindow(state: WindowFoldState): WindowSummary {
   const buckets: BucketCount[] = [];
-  const totals = { recipientSends: 0, permanentBounces: 0, permanentBouncesByAuthCode: emptyAuthCodeTally(), complaints: 0 };
-  const dimensions = perDimension(() => new Map<string, DimensionTally>());
-  const noValue = perDimension(emptyDimensionTally);
+  const bucketCoverage: BucketCoverage[] = [];
+  const pendingBuckets: number[] = [];
+  const parts: RatioParts = {
+    totals: { recipientSends: 0, permanentBounces: 0, permanentBouncesByAuthCode: emptyAuthCodeTally(), complaints: 0 },
+    dimensions: perDimension(() => new Map<string, DimensionTally>()),
+    noValue: perDimension(emptyDimensionTally),
+  };
+  const open = state.openKeys;
+  const openVerdict = open === undefined ? undefined : judgeKeys(open);
   for (let start = state.window.fromBucketMs; start <= state.window.toBucketMs; start += BUCKET_MS) {
     const bucket = state.buckets.get(start);
     if (bucket === undefined) {
-      buckets.push(emptyBucket(start, state.nowMs));
+      const empty = emptyBucket(start, state.nowMs);
+      buckets.push(empty);
+      bucketCoverage.push({ bucketStartMs: start, complete: empty.complete, recipientSends: 0, covered: 0 });
       continue;
     }
+    const keys = openVerdict !== undefined && open?.bucketStartMs === start ? openVerdict : bucket.keys;
     buckets.push({ ...bucket.count });
-    totals.recipientSends += bucket.count.send;
-    totals.permanentBounces += bucket.count.permanentBounce;
-    totals.complaints += bucket.count.complaint;
-    for (const detail of AUTH_DETAILS) totals.permanentBouncesByAuthCode[detail] += bucket.permanentBouncesByAuthCode[detail];
-    for (const dimension of DIMENSIONS) {
-      mergeDimension(dimensions[dimension], bucket.dimensions[dimension]);
-      addTally(noValue[dimension], bucket.noValue[dimension]);
+    bucketCoverage.push({ bucketStartMs: start, complete: bucket.count.complete, ...keys.coverage });
+    if (keys.pending) {
+      pendingBuckets.push(start);
+      continue;
     }
-    attributeComplaints(bucket, dimensions.receivingDomain, noValue.receivingDomain);
+    addToRatios(parts, bucket);
   }
   return {
     window: { ...state.window },
     pages: state.pages,
     buckets,
-    coverage: { recipientSends: 0, covered: 0 },
-    bucketCoverage: [],
-    pendingBuckets: [],
-    orderBroken: false,
-    totals,
-    dimensions,
-    noValue,
+    coverage: windowCoverage(bucketCoverage),
+    bucketCoverage,
+    pendingBuckets,
+    orderBroken: state.orderBroken,
+    totals: parts.totals,
+    dimensions: parts.dimensions,
+    noValue: parts.noValue,
     dimensionBound: state.dimensionBound,
     observed: observedFactsOf(state.observe),
   };

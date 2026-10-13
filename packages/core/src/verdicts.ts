@@ -43,8 +43,13 @@ export interface CoverageInput {
   orderBroken: boolean;
 }
 
+/** D-51 over complete buckets only. A fold that saw records out of store order cannot vouch for
+ * its per-bucket keys, so it reads NO DATA, the reading that never lets a lane look healthy. */
 export function coverageVerdict(input: CoverageInput): CoverageVerdict {
-  return input.coverage.recipientSends === 0 ? 'not-judged' : 'no-data';
+  if (input.orderBroken) return 'no-data';
+  const { recipientSends, covered } = input.coverage;
+  if (recipientSends === 0) return 'not-judged';
+  return covered * COVERAGE_THRESHOLD.denominator >= COVERAGE_THRESHOLD.numerator * recipientSends ? 'data' : 'no-data';
 }
 
 export const LANE_TRIGGERS = ['hard-bounce', 'complaint'] as const;
