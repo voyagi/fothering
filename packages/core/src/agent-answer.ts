@@ -293,6 +293,39 @@ export type ClassifiedOutcome =
   | { kind: 'validated'; answer: AgentAnswer }
   | { kind: 'unavailable'; reason: AgentUnavailableReason; check?: InvalidCheck };
 
-export function classifyRuntimeOutcome(_outcome: RuntimeOutcome, _context: OutcomeContext): ClassifiedOutcome {
-  return { kind: 'unavailable', reason: 'agent-error' };
+function unavailable(reason: AgentUnavailableReason, check?: InvalidCheck): ClassifiedOutcome {
+  return check === undefined ? { kind: 'unavailable', reason } : { kind: 'unavailable', reason, check };
+}
+
+function classifyAnswer(raw: unknown, context: OutcomeContext): ClassifiedOutcome {
+  const approvedOptionIds = context.record.approvedOptions.map((option) => option.optionId);
+  const decided = validateDecision(raw, approvedOptionIds);
+  if (!decided.ok) return unavailable('response-invalid', agentAnswerSchema.safeParse(raw).success ? 'option-id' : 'schema');
+  const { answer } = decided;
+  const explained = validateExplanation(answer.explanation, { record: context.record, decision: answer.decision, laneMapSets: context.laneMapSets });
+  return explained.ok ? { kind: 'validated', answer } : unavailable('response-invalid', explained.check);
+}
+
+/**
+ * D-77, as plan 02-06 confirmed it: every way an invocation can end becomes either a validated answer
+ * or one named reason with a closed check code. Nothing returned holds model text or an error message
+ * (D-74), so a caller can store and log the whole result.
+ */
+export function classifyRuntimeOutcome(outcome: RuntimeOutcome, context: OutcomeContext): ClassifiedOutcome {
+  if (outcome.kind === 'threw') return unavailable(outcome.callerAborted ? 'agent-timeout' : 'agent-error');
+  const parsed = runtimeResultSchema.safeParse(outcome.response);
+  if (!parsed.success) return unavailable('response-invalid', 'runtime-result');
+  const result = parsed.data;
+  switch (result.status) {
+    case 'answered':
+      return classifyAnswer(result.answer, context);
+    case 'failed':
+      if (result.reason === 'deadline') return unavailable('agent-timeout');
+      if (result.reason === 'model-error') return unavailable('agent-error');
+      return unavailable('response-invalid', result.reason);
+    case 'refused':
+      return unavailable('agent-error');
+    case 'dry-run':
+      return unavailable('agent-dry-run');
+  }
 }
