@@ -1,3 +1,4 @@
+import type { DnsMxOutcome, DnsTxtOutcome } from '@fothering/core/evidence-rows';
 import type {
   AgentCorePort,
   AgentRuntimeRequest,
@@ -44,14 +45,16 @@ export function createFixtureSes(options: FixtureMutatingOptions): SesPort {
   );
 }
 
-export function createFixtureDns(_options: FixtureRecordingOptions): DnsPort {
+// Recorded answers only (D-26): in 'test' no lookup ever reaches a DNS server (R6).
+export function createFixtureDns(options: FixtureRecordingOptions): DnsPort {
+  const recorded = recordedPort(options.recordings);
   return brandPort(
     {
-      async resolveMx() {
-        return { kind: 'unknown' as const };
+      async resolveMx(name: string) {
+        return recorded.respond<DnsMxOutcome>('dns.resolveMx', name);
       },
-      async resolveTxt() {
-        return { kind: 'unknown' as const };
+      async resolveTxt(name: string) {
+        return recorded.respond<DnsTxtOutcome>('dns.resolveTxt', name);
       },
     },
     'fixture',
