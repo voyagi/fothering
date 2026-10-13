@@ -1,8 +1,10 @@
+import { bucketStartMs } from '../buckets.js';
 import { REQUIRED_EVENT_TYPES, checkCloseability, type SesConfigurationFacts } from '../closeability.js';
-import type { LaneAnalysis } from '../decision.js';
+import { assembleEvidenceRecord, decideCycle, type LaneAnalysis } from '../decision.js';
+import { incidentIdFor, type EvidenceRecord } from '../evidence-record.js';
 import { buildLaneConfigurationRows, buildProviderRows, buildTagRows, type DnsTxtOutcome, type IdentityAuthFacts } from '../evidence-rows.js';
 import { findLane, type LaneEntry, type LaneMap } from '../lanes.js';
-import type { EventRecord } from '../records.js';
+import { RETENTION_SECONDS, type EventRecord } from '../records.js';
 import { coverageVerdict, laneSpikeVerdict } from '../verdicts.js';
 import { createWindowFold, spikeWindowFor, summarizeWindow } from '../window-fold.js';
 import { TEST_KEY_SET, scenarioRecords, type ScenarioGroup } from './event-arbitraries.js';
@@ -86,4 +88,21 @@ export function cycleOf(laneMap: LaneMap, story: CycleStory, options: { reverseR
     };
   });
   return { analyses, records: folded.flatMap(({ records }) => records) };
+}
+
+export const CYCLE_EXPIRES_AT = Math.floor(CYCLE_NOW_MS / 1000) + RETENTION_SECONDS;
+
+/** The evidence record detection would assemble for one lane of the cycle, the incident opening now. */
+export function recordFor(laneMap: LaneMap, story: CycleStory, configurationSet: string): EvidenceRecord {
+  const { analyses } = cycleOf(laneMap, story);
+  const decision = decideCycle(analyses, laneMap).get(configurationSet);
+  const analysis = analyses.find((candidate) => candidate.lane.configurationSet === configurationSet);
+  if (decision === undefined || analysis === undefined) throw new Error(`the cycle decided nothing for ${configurationSet}`);
+  return assembleEvidenceRecord({
+    incidentId: incidentIdFor(configurationSet, bucketStartMs(CYCLE_NOW_MS)),
+    analysis,
+    decision,
+    analyses,
+    expiresAt: CYCLE_EXPIRES_AT,
+  });
 }

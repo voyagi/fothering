@@ -1,11 +1,24 @@
 import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
 import lanesJson from '../../../lanes.json' with { type: 'json' };
-import { decideCycle, isolationVerdict, type CycleDecision, type DecisionOutcome, type DecisionReason, type LaneAnalysis, type SharedCause } from './decision.js';
-import { canonicalJson } from './evidence-record.js';
+import {
+  assembleEvidenceRecord,
+  decideCycle,
+  fixFor,
+  isolationVerdict,
+  questionFor,
+  type CycleDecision,
+  type DecisionOutcome,
+  type DecisionReason,
+  type FixKind,
+  type LaneAnalysis,
+  type SharedCause,
+} from './decision.js';
+import { FIX_KINDS, RECORD_BYTE_CEILING, canonicalJson, serializedRecordBytes, type EvidenceRecord } from './evidence-record.js';
 import type { DnsTxtOutcome, IdentityAuthFacts } from './evidence-rows.js';
 import { parseLaneMap, type LaneMap } from './lanes.js';
-import { cycleOf, type CycleStory } from './test/decision-cycle.js';
+import { LANE_RATIO_LABELS, LANE_SHARE_LABEL } from './verdicts.js';
+import { CYCLE_EXPIRES_AT, cycleOf, recordFor, type CycleStory } from './test/decision-cycle.js';
 import { propertySeed } from './test/property-seed.js';
 
 const BULK = 'fothering-bulk';
@@ -217,6 +230,7 @@ function plantDecision(analysis: LaneAnalysis, outcome: DecisionOutcome, reason:
     outcome,
     reason,
     closeability: { state: closeability.state, reasons: closeability.state === 'refused' ? [...closeability.reasons] : [] },
+    configurationSet: analysis.lane.configurationSet,
     isolation: 'confined',
     noData: false,
     bound: null,
@@ -318,8 +332,8 @@ describe('the isolation verdict (D-63)', () => {
   });
 });
 
-describe('review-fold pins (2026-10-12, D-61 as amended)', () => {
-  const dmarcStory = (diagnosticCode: string): PairedCase => ({
+function dmarcStory(diagnosticCode: string): PairedCase {
+  return {
     name: `a missing DMARC record with bounces carrying ${diagnosticCode}`,
     laneMap: COMMITTED,
     story: {
@@ -338,8 +352,10 @@ describe('review-fold pins (2026-10-12, D-61 as amended)', () => {
       txtAnswers: DMARC_MISSING,
     },
     expected: { lane: BULK, outcome: 'unknown', reason: 'not-settled' },
-  });
+  };
+}
 
+describe('review-fold pins (2026-10-12, D-61 as amended)', () => {
   it('(a) settles and approves a bad batch sent with one template, its batch and template rows both cause', () => {
     const decision = decisionsOf({
       ...ISOLATING,
@@ -435,5 +451,183 @@ describe('the decision ignores lane and record order (SPEC R7 backstop)', () => 
     const reversed = decideCycle(cycleOf(reversedMap, reversedStory, { reverseRecords: true }).analyses, reversedMap);
     expect(canonicalJson(Object.fromEntries(reversed))).toBe(canonicalJson(Object.fromEntries(decisionsOf(paired))));
     expect(reversed.size).toBeGreaterThan(0);
+  });
+});
+
+function twinNamed(name: string): PairedCase {
+  const twin = TWINS.find((candidate) => candidate.name === name);
+  if (twin === undefined) throw new Error(`the paired suite holds no twin named ${name}`);
+  return twin;
+}
+
+function recordOf(paired: PairedCase, lane: string = paired.expected.lane): EvidenceRecord {
+  return recordFor(paired.laneMap, paired.story, lane);
+}
+
+const PRINTABLE_TEXT = /^[\x20-\x7E]{1,1000}$/;
+
+describe('the question names what code found (D-64, AC-E28)', () => {
+  it('names every spiking lane by its committed configuration set', () => {
+    const { analyses } = cycleOf(TWO_CAUSES.laneMap, TWO_CAUSES.story);
+    const decision = decideCycle(analyses, TWO_CAUSES.laneMap).get(BULK);
+    if (decision === undefined) throw new Error('the cycle decides the bulk lane');
+    const question = questionFor(decision, analyses);
+    expect(question).toContain(DIGEST);
+    expect(question).toContain(BULK);
+  });
+
+  it('keeps a mixed-case set name byte for byte', () => {
+    const bulkLane = COMMITTED.lanes.find((lane) => lane.configurationSet === BULK);
+    if (bulkLane === undefined) throw new Error('the committed lane map holds the bulk lane');
+    const mixed = 'News_Bulk-EU';
+    const laneMap = parseLaneMap({ ...COMMITTED, lanes: [...COMMITTED.lanes.filter((lane) => lane !== bulkLane), { ...bulkLane, configurationSet: mixed, lane: 'News bulk EU' }] });
+    const twoBatches = twinNamed('two bad batches on that lane');
+    const story: CycleStory = { lanes: twoBatches.story.lanes.map((lane) => (lane.configurationSet === BULK ? { ...lane, configurationSet: mixed } : lane)) };
+    const question = recordFor(laneMap, story, mixed).question ?? '';
+    expect(question).toContain(mixed);
+    expect(question).not.toContain(mixed.toLowerCase());
+  });
+
+  it('names both elevated batches of two bad batches on one lane', () => {
+    const question = recordOf(twinNamed('two bad batches on that lane')).question;
+    expect(question).toContain('batch import-0915');
+    expect(question).toContain('batch import-0916');
+  });
+
+  it('names the elevated DMARC row behind 5.7.1 spam blocks (pin b)', () => {
+    const record = recordOf(dmarcStory(SPAM_BLOCK));
+    expect(record.question).toContain(`DMARC of ${NEWS}`);
+    expect(record.approvedOptions).toEqual([]);
+  });
+
+  it('names the refusal reasons of a lane that is not closeable', () => {
+    expect(recordOf(twinNamed('the same incident on a transactional lane')).question).toContain('transactional');
+  });
+
+  it('stays printable ASCII under 1,000 characters when the rows carry long values', () => {
+    const longName = (index: number) => `${'long-batch-name-'.repeat(12)}${index}`;
+    const record = recordFor(COMMITTED, {
+      lanes: [
+        {
+          configurationSet: BULK,
+          fromDomain: NEWS,
+          groups: [
+            ...Array.from({ length: 6 }, (_, index) => ({ bucketOffset: 0, count: 40, batch: longName(index), permanentBounces: 15 })),
+            { bucketOffset: 1, count: 160, batch: 'import-0901' },
+          ],
+        },
+      ],
+    }, BULK);
+    expect(record.decision.reason).toBe('not-settled');
+    expect(record.question).toMatch(PRINTABLE_TEXT);
+    expect(record.question).toContain(longName(0));
+  });
+});
+
+describe('fix templates (D-64)', () => {
+  const FIXES: Record<FixKind, { text: string; names: string[] }> = {
+    'shared-tag-value': {
+      text: fixFor('shared-tag-value', { dimension: 'batch', value: 'import-0915', lanes: [BULK, DIGEST] }).text,
+      names: ['batch import-0915', BULK, DIGEST, 'Pausing one lane would not stop it'],
+    },
+    'shared-provider': {
+      text: fixFor('shared-provider', { provider: 'Google', lanes: [BULK, DIGEST] }).text,
+      names: ['Google', BULK, DIGEST, 'Pausing one lane would not stop it'],
+    },
+    'missing-dkim': {
+      text: fixFor('missing-dkim', { fromDomain: NEWS, identity: 'example.com' }).text,
+      names: [NEWS, 'SES identity example.com', 'DKIM'],
+    },
+    'failed-mail-from': {
+      text: fixFor('failed-mail-from', { fromDomain: NEWS, identity: 'example.com', mailFromDomain: 'bounce.example.com' }).text,
+      names: [NEWS, 'SES identity example.com', 'MX record', 'bounce.example.com'],
+    },
+    'missing-dmarc': {
+      text: fixFor('missing-dmarc', { fromDomain: NEWS }).text,
+      names: [`_dmarc.${NEWS}`, 'at least half', 'authentication-failure enhanced status codes'],
+    },
+    'missing-spf': {
+      text: fixFor('missing-spf', { fromDomain: NEWS, mailFromDomain: 'bounce.example.com' }).text,
+      names: [NEWS, 'TXT record', 'bounce.example.com'],
+    },
+  };
+
+  it('has one template per fix kind', () => {
+    expect(Object.keys(FIXES).sort()).toEqual([...FIX_KINDS].sort());
+  });
+
+  it.each(FIX_KINDS.map((kind) => [kind] as const))('%s names its closed values in printable ASCII', (kind) => {
+    const fix = FIXES[kind];
+    expect(fix.text).toMatch(PRINTABLE_TEXT);
+    for (const name of fix.names) expect(fix.text).toContain(name);
+  });
+
+  it('words the DMARC corroboration without a status code or an RFC number', () => {
+    const text = FIXES['missing-dmarc'].text;
+    expect(text).not.toMatch(/\d/);
+    expect(text).not.toMatch(/rfc/i);
+  });
+
+  it('returns the kind it was asked for', () => {
+    expect(fixFor('missing-spf', { fromDomain: NEWS, mailFromDomain: 'bounce.example.com' }).kind).toBe('missing-spf');
+  });
+});
+
+describe('the evidence record is assembled once with its question or fix (D-70)', () => {
+  it('assembles the isolating incident approved with one option, its rows, totals and share', () => {
+    const record = recordOf(ISOLATING);
+    expect(record.decision.outcome).toBe('approved');
+    expect(record.approvedOptions).toHaveLength(1);
+    expect(record.question).toBeNull();
+    expect(record.fix).toBeNull();
+    expect(record.isolation).toBe('confined');
+    expect(record.laneTotals).toMatchObject({ recipientSends: 200, permanentBounces: 15, hardBounceRatio: '7.50%', triggers: ['hard-bounce'] });
+    expect(record.laneTotals.label).toEqual({ hardBounceRatio: LANE_RATIO_LABELS.hardBounce, complaintRatio: LANE_RATIO_LABELS.complaint });
+    expect(record.share.label).toBe(LANE_SHARE_LABEL);
+    expect(new Set(record.rows.map((row) => row.dimension))).toEqual(new Set(['batch', 'template', 'campaign', 'provider']));
+    expect(record.expiresAt).toBe(CYCLE_EXPIRES_AT);
+  });
+
+  it.each([
+    ['the batch spread to a second lane', 'shared-tag-value'],
+    ['a provider elevated on two lanes', 'shared-provider'],
+    ['a missing DMARC record on a shared from-domain', 'missing-dmarc'],
+  ] as const)('refuses %s with the %s fix and no option or question', (name, kind) => {
+    const record = recordOf(twinNamed(name));
+    expect(record.fix?.kind).toBe(kind);
+    expect(record.approvedOptions).toEqual([]);
+    expect(record.question).toBeNull();
+  });
+
+  it('names _dmarc.<from-domain> in the shared DMARC fix', () => {
+    expect(recordOf(twinNamed('a missing DMARC record on a shared from-domain')).fix?.text).toContain(`_dmarc.${NEWS}`);
+  });
+
+  it('asks a question and carries no fix or option for an unknown decision', () => {
+    const record = recordOf(twinNamed('two bad batches on that lane'));
+    expect(record.question).toMatch(PRINTABLE_TEXT);
+    expect(record.fix).toBeNull();
+    expect(record.approvedOptions).toEqual([]);
+  });
+
+  it('assembles a record past RECORD_BYTE_CEILING again as unknown record-too-large with no option (AC-E35)', () => {
+    const { analyses } = cycleOf(ISOLATING.laneMap, ISOLATING.story);
+    const decision = decideCycle(analyses, ISOLATING.laneMap).get(BULK);
+    const bulk = analyses.find((analysis) => analysis.lane.configurationSet === BULK);
+    if (decision === undefined || bulk === undefined) throw new Error('the cycle decides the bulk lane');
+    const padded: LaneAnalysis = { ...bulk, rows: Array.from({ length: 60 }, () => bulk.rows).flat() };
+    const record = assembleEvidenceRecord({ incidentId: '0'.repeat(32), analysis: padded, decision, analyses, expiresAt: CYCLE_EXPIRES_AT });
+    expect(decision.outcome).toBe('approved');
+    expect(serializedRecordBytes(record)).toBeGreaterThan(RECORD_BYTE_CEILING);
+    expect(record.decision.outcome).toBe('unknown');
+    expect(record.decision.reason).toBe('record-too-large');
+    expect(record.approvedOptions).toEqual([]);
+  });
+
+  it('carries none of the SES-rate phrases in any assembled record (AC-4)', () => {
+    for (const paired of [ISOLATING, ...TWINS, TWO_CAUSES]) {
+      const lowered = canonicalJson(recordOf(paired)).toLowerCase();
+      for (const phrase of ['ses bounce rate', 'ses complaint rate', 'your bounce rate']) expect(lowered, paired.name).not.toContain(phrase);
+    }
   });
 });

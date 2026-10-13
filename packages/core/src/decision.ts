@@ -1,5 +1,5 @@
 import type { CloseabilityResult, RefusalReason } from './closeability.js';
-import type { ISOLATION_VERDICTS, SHARED_CAUSE_KINDS } from './evidence-record.js';
+import type { EvidenceRecord, FIX_KINDS, ISOLATION_VERDICTS, SHARED_CAUSE_KINDS } from './evidence-record.js';
 import { rowVerdict, type ConfigurationRow, type EvidenceRow, type RowDimension, type TagDimension } from './evidence-rows.js';
 import { findLane, type LaneEntry, type LaneMap } from './lanes.js';
 import type { CoverageVerdict, LaneSpikeVerdict } from './verdicts.js';
@@ -119,6 +119,7 @@ export interface LaneAnalysis {
 }
 
 export interface CycleDecision extends LaneDecision {
+  configurationSet: string;
   isolation: IsolationVerdict;
   noData: boolean;
   bound: ReadBound | null;
@@ -238,6 +239,7 @@ export function decideCycle(analyses: readonly LaneAnalysis[], laneMap: LaneMap)
       setOf(analysis),
       {
         ...decision,
+        configurationSet: setOf(analysis),
         isolation: isolationVerdict(analysis, analyses),
         noData: analysis.closeability.state === 'no-data' || analysis.coverage === 'no-data',
         bound: analysis.bound,
@@ -247,4 +249,35 @@ export function decideCycle(analyses: readonly LaneAnalysis[], laneMap: LaneMap)
     ];
   });
   return new Map(decided.sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0)));
+}
+
+export type FixKind = (typeof FIX_KINDS)[number];
+
+export interface FixValues {
+  'shared-tag-value': { dimension: TagDimension; value: string; lanes: readonly string[] };
+  'shared-provider': { provider: string; lanes: readonly string[] };
+  'missing-dkim': { fromDomain: string; identity: string };
+  'failed-mail-from': { fromDomain: string; identity: string; mailFromDomain: string };
+  'missing-dmarc': { fromDomain: string };
+  'missing-spf': { fromDomain: string; mailFromDomain: string };
+}
+
+export function questionFor(_decision: CycleDecision, _analyses: readonly LaneAnalysis[]): string {
+  return '';
+}
+
+export function fixFor<K extends FixKind>(kind: K, _values: FixValues[K]): { kind: K; text: string } {
+  return { kind, text: '' };
+}
+
+export interface AssembleInput {
+  incidentId: string;
+  analysis: LaneAnalysis;
+  decision: CycleDecision;
+  analyses: readonly LaneAnalysis[];
+  expiresAt: number;
+}
+
+export function assembleEvidenceRecord(_input: AssembleInput): EvidenceRecord {
+  throw new Error('assembleEvidenceRecord is not built yet');
 }
