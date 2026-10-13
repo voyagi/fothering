@@ -4,6 +4,7 @@ import {
   type AgentAnswer,
   type AgentUnavailableReason,
   type RuntimeOutcome,
+  type RuntimeResult,
 } from '@fothering/core/agent-answer';
 import { bucketStartMs } from '@fothering/core/buckets';
 import { checkCloseability, type SesConfigurationFacts } from '@fothering/core/closeability';
@@ -12,6 +13,7 @@ import { assembleEvidenceRecord, decideCycle, type LaneAnalysis } from '@fotheri
 import { evidenceRecordSchema, incidentIdFor, incidentItemKey, type EvidenceRecord } from '@fothering/core/evidence-record';
 import { buildProviderRows, buildTagRows } from '@fothering/core/evidence-rows';
 import type { LaneEntry } from '@fothering/core/lanes';
+import type { LogEntry } from '@fothering/core/log';
 import { MODEL_VALUES } from '@fothering/core/model-values';
 import { RETENTION_SECONDS } from '@fothering/core/records';
 import { laneSpikeVerdict, type LaneSpikeVerdict, type LaneVerdict } from '@fothering/core/verdicts';
@@ -115,7 +117,7 @@ async function openIncidents(deps: DetectDeps, folded: readonly FoldedLane[], in
   if (unopened.length === 0) return 0;
   const facts = await readSesFacts(countedSesReads(deps.ports.ses, counts), deps.laneMap, { wait: deps.wait });
   if (!facts.ok) {
-    deps.log.info({ event: 'opening-deferred' });
+    deps.log.info({ event: 'opening-deferred', reason: facts.reason });
     return 0;
   }
   const analyses = analysesOf(folded, deps, facts.facts);
@@ -131,7 +133,7 @@ async function openIncidents(deps: DetectDeps, folded: readonly FoldedLane[], in
     const written = await deps.ports.decisionStore.putIfAbsent({ ...incidentItemKey(incidentId, 'EVIDENCE'), expiresAt, record });
     if (written === 'written') {
       opened += 1;
-      deps.log.info({ event: 'incident-opened' });
+      deps.log.info({ event: 'incident-opened', configurationSet, incidentId, reason: record.decision.reason });
     }
   }
   return opened;
@@ -169,10 +171,22 @@ async function invokeRuntime(deps: DetectDeps, runtimeArn: string, record: Evide
   }
 }
 
-async function storeDecision(deps: DetectDeps, record: EvidenceRecord, answer: AgentAnswer, outcome: RuntimeOutcome): Promise<void> {
-  const parsed = outcome.kind === 'returned' ? runtimeResultSchema.safeParse(outcome.response) : undefined;
-  if (parsed?.success !== true || parsed.data.status !== 'answered') return;
-  const result = parsed.data;
+function parsedResult(outcome: RuntimeOutcome): RuntimeResult | undefined {
+  if (outcome.kind !== 'returned') return undefined;
+  const parsed = runtimeResultSchema.safeParse(outcome.response);
+  return parsed.success ? parsed.data : undefined;
+}
+
+// Codes and integers from the parsed result only: a response that failed the schema logs none of them.
+function resultFields(result: RuntimeResult | undefined): Pick<LogEntry, 'status' | 'modelCalls' | 'inputTokens' | 'outputTokens'> {
+  if (result === undefined) return {};
+  if (result.status === 'dry-run') return { status: result.status };
+  return { status: result.status, modelCalls: result.modelCalls, inputTokens: result.usage.inputTokens, outputTokens: result.usage.outputTokens };
+}
+
+type AnsweredResult = Extract<RuntimeResult, { status: 'answered' }>;
+
+async function storeDecision(deps: DetectDeps, record: EvidenceRecord, answer: AgentAnswer, result: AnsweredResult): Promise<void> {
   const decidedAtMs = deps.now();
   await deps.ports.decisionStore.putIfAbsent({
     ...incidentItemKey(record.incidentId, 'DECISION'),
@@ -192,25 +206,30 @@ async function storeDecision(deps: DetectDeps, record: EvidenceRecord, answer: A
 // D-42 step 5. The ARN is checked before the reservation, and the reservation must succeed before
 // the call, so a deployment missing its ARN or past a cap spends nothing (T-02-41).
 async function attemptAgent(deps: DetectDeps, record: EvidenceRecord, nowMs: number, counts: CycleCounts): Promise<CycleResult> {
+  const incident = { configurationSet: record.lane.configurationSet, incidentId: record.incidentId, attempt: FIRST_ATTEMPT };
   const runtimeArn = runtimeArnOf(deps);
   if (runtimeArn === undefined) {
-    deps.log.error({ event: 'agent-unavailable', errorName: 'LiveConfigMissingError' });
+    deps.log.error({ event: 'agent-unavailable', ...incident, reason: 'agent-error', errorName: 'LiveConfigMissingError' });
     return 'agent-error';
   }
   const reservation = await reserveInvocation(deps.ports.decisionStore, { incidentId: record.incidentId, nowMs });
   if (!reservation.ok) {
-    deps.log.info({ event: 'agent-unavailable' });
-    return reservation.reason === 'cap' ? 'cap-reached' : 'agent-error';
+    const reason = reservation.reason === 'cap' ? 'cap-reached' : 'agent-error';
+    deps.log.info({ event: 'agent-unavailable', ...incident, reason });
+    return reason;
   }
   counts.invocations += 1;
   const outcome = await invokeRuntime(deps, runtimeArn, record);
+  const result = parsedResult(outcome);
   const classified = classifyRuntimeOutcome(outcome, { record, laneMapSets: deps.laneMap.lanes.map((lane) => lane.configurationSet) });
-  if (classified.kind === 'unavailable') {
-    deps.log.info({ event: 'agent-unavailable' });
-    return classified.reason;
+  if (classified.kind === 'unavailable' || result?.status !== 'answered') {
+    const reason = classified.kind === 'unavailable' ? classified.reason : 'response-invalid';
+    const check = classified.kind === 'unavailable' ? classified.check : undefined;
+    deps.log.info({ event: 'agent-unavailable', ...incident, reason, ...(check === undefined ? {} : { check }), ...resultFields(result) });
+    return reason;
   }
-  await storeDecision(deps, record, classified.answer, outcome);
-  deps.log.info({ event: 'agent-decided' });
+  await storeDecision(deps, record, classified.answer, result);
+  deps.log.info({ event: 'agent-decided', ...incident, ...resultFields(result) });
   return classified.answer.decision;
 }
 
