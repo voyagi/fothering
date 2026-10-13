@@ -1,6 +1,7 @@
 import * as z from 'zod';
-import type { EvidenceRecord } from './evidence-record.js';
-import type { LaneMap } from './lanes.js';
+import { decideFromEvidence } from './decision.js';
+import { evidenceRecordSchema, optionIdFor, recordHash, type EvidenceRecord } from './evidence-record.js';
+import { findLane, type LaneMap } from './lanes.js';
 import { MODEL_VALUES, PINNED_MODEL_VALUES } from './model-values.js';
 
 export const AGENT_DECISIONS = ['close', 'unknown'] as const;
@@ -364,6 +365,37 @@ export interface ActionGateInput {
 
 export type GateResult = { ok: true; intent: ClosureIntent } | { ok: false; refusal: GateRefusal };
 
-export async function actionGate(_input: ActionGateInput): Promise<GateResult> {
-  return Promise.resolve({ ok: false, refusal: 'no-close' });
+function refused(refusal: GateRefusal): GateResult {
+  return { ok: false, refusal };
+}
+
+function optionSetIsHonest(record: EvidenceRecord): boolean {
+  const expected = record.decision.outcome === 'approved' ? [optionIdFor(record.incidentId, 0)] : [];
+  const stored = record.approvedOptions.map((option) => option.optionId);
+  return stored.length === expected.length && stored.every((optionId, index) => optionId === expected[index]);
+}
+
+/**
+ * D-79 and R10: phase 3's action function calls this first. It reloads the stored record through the
+ * read-only loader it is given and re-proves every link from the decision to the set name, so a
+ * stored close never pauses anything on its own say-so. It does not judge whether the record is
+ * still current: phase 3 reads the incident's state for that before acting.
+ */
+export async function actionGate(input: ActionGateInput): Promise<GateResult> {
+  const { decision, incidentId, laneMap } = input;
+  if (decision.decision !== 'close') return refused('no-close');
+  const loaded = await input.loadRecord(incidentId);
+  if (loaded === undefined) return refused('record-missing');
+  const parsed = evidenceRecordSchema.safeParse(loaded);
+  if (!parsed.success) return refused('record-invalid');
+  const record = parsed.data;
+  if (record.incidentId !== incidentId) return refused('incident-mismatch');
+  if (recordHash(record) !== record.hash) return refused('hash-mismatch');
+  if (!optionSetIsHonest(record)) return refused('option-set-tampered');
+  const optionId = decision.optionId;
+  if (optionId === undefined || !record.approvedOptions.some((option) => option.optionId === optionId)) return refused('option-not-approved');
+  if (decideFromEvidence(record).outcome !== 'approved') return refused('decision-differs');
+  const lane = findLane(laneMap, record.lane.configurationSet);
+  if (lane === undefined) return refused('lane-not-in-map');
+  return { ok: true, intent: { configurationSet: lane.configurationSet, incidentId, optionId } };
 }
