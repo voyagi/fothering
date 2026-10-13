@@ -336,6 +336,21 @@ describe('the handler maps every loop outcome to a result', () => {
     expect(fixture.calls).toHaveLength(0);
   });
 
+  it('fails deadline, not model-error, when the deadline fires during a model call that then throws', async () => {
+    const deadline = new AbortController();
+    const abortingTurn: FixtureTurn = {
+      events: [],
+      error: () => {
+        deadline.abort();
+        return new Error('the request was aborted');
+      },
+    };
+    const { handler } = testHandler([abortingTurn], { deadlineSignal: deadline.signal });
+    const result = runtimeResultSchema.parse(await handler(tracerRecord()));
+    expect(failureOf(result)).toBe('failed:deadline');
+    expect(result.status === 'failed' ? result.modelCalls : -1).toBe(1);
+  });
+
   it('never rejects: a payload of every shape returns a result that parses', async () => {
     const { handler } = testHandler([]);
     for (const payload of [undefined, null, 'text', 42, [], { hash: 'x' }]) {

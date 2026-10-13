@@ -79,14 +79,23 @@ async function recordDryRun(deps: AgentDeps, userText: string): Promise<RuntimeR
 
 // Classified by the wrapper's own flags, because the SDK wraps a model-side error before it reaches
 // here. The error itself is never read into the result: an SDK or zod message can quote model text.
-function failureReason(model: PortBackedModel, error: unknown): FailureReason {
+// Strands 1.20.0 returns stopReason 'cancelled' both for a signal aborted before the loop and for one
+// that fires during a model call; the check here keeps a fired deadline reported as one should a
+// later version throw instead.
+function failureReason(model: PortBackedModel, error: unknown, deadline: AbortSignal): FailureReason {
+  if (deadline.aborted) return 'deadline';
   if (model.ceilingReached) return 'model-call-ceiling';
   if (model.inputCeilingReached) return 'input-ceiling';
   if (error instanceof StructuredOutputError) return 'structured-output';
   return 'model-error';
 }
 
-export function createInvocationHandler(deps: AgentDeps): (payload: unknown) => Promise<RuntimeResult> {
+export interface InvocationHandlerOptions {
+  /** Tests only: a signal that ends the loop in place of the per-invocation runtimeDeadlineMs timer. */
+  deadlineSignal?: AbortSignal;
+}
+
+export function createInvocationHandler(deps: AgentDeps, options: InvocationHandlerOptions = {}): (payload: unknown) => Promise<RuntimeResult> {
   return async (payload) => {
     const admitted = admit(payload);
     if ('refusal' in admitted) return refused(admitted.refusal);
@@ -131,11 +140,9 @@ export function createInvocationHandler(deps: AgentDeps): (payload: unknown) => 
       modelCalls: model.calls,
     });
 
+    const deadline = options.deadlineSignal ?? AbortSignal.timeout(MODEL_VALUES.runtimeDeadlineMs);
     try {
-      const result = await agent.invoke(userText, {
-        limits: { turns: MODEL_VALUES.loopTurns },
-        cancelSignal: AbortSignal.timeout(MODEL_VALUES.runtimeDeadlineMs),
-      });
+      const result = await agent.invoke(userText, { limits: { turns: MODEL_VALUES.loopTurns }, cancelSignal: deadline });
       // A turn limit or a cancel returns a result with no structured output; it does not throw.
       if (result.structuredOutput === undefined) return failed(result.stopReason === 'cancelled' ? 'deadline' : 'loop-limit');
       // The raw answer: detection re-validates it before anything is stored (D-74).
@@ -149,7 +156,7 @@ export function createInvocationHandler(deps: AgentDeps): (payload: unknown) => 
       };
     } catch (error) {
       // Never rethrown: BedrockAgentCoreApp's Fastify logger would record the message (D-73).
-      return failed(failureReason(model, error));
+      return failed(failureReason(model, error, deadline));
     }
   };
 }
