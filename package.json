@@ -59,6 +59,7 @@
   "overrides": {
     "typed-rest-client@2.3.1": {
       "qs": "6.16.0"
-    }
+    },
+    "@aws-sdk/client-bedrock-agentcore": "3.1136.0"
   }
 }
