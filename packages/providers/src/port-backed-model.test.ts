@@ -21,7 +21,7 @@ async function drain(iterable: AsyncIterable<ModelStreamEvent>): Promise<ModelSt
   return events;
 }
 
-function wrap(port: BedrockModelPort, ceiling = MODEL_VALUES.modelCallCeiling): PortBackedModel {
+function wrap(port: BedrockModelPort, ceiling: number = MODEL_VALUES.modelCallCeiling): PortBackedModel {
   return new PortBackedModel({ port, config: PINNED_CONFIG, ceiling, inputByteCeiling: MODEL_VALUES.inputTokenCeiling });
 }
 
