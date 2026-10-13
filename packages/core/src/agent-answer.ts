@@ -1,4 +1,5 @@
 import * as z from 'zod';
+import type { EvidenceRecord } from './evidence-record.js';
 import { PINNED_MODEL_VALUES } from './model-values.js';
 
 export const AGENT_DECISIONS = ['close', 'unknown'] as const;
@@ -91,3 +92,28 @@ export const runtimeResultSchema = z.discriminatedUnion('status', [
 ]);
 
 export type RuntimeResult = z.infer<typeof runtimeResultSchema>;
+
+export type ExplanationCheck = 'empty' | 'length' | 'paragraph' | 'url' | 'command-word' | 'set-name' | 'phrase' | 'number';
+
+export interface ExplanationContext {
+  record: EvidenceRecord;
+  decision: AgentAnswer['decision'];
+  laneMapSets: readonly string[];
+}
+
+export interface ExplanationCheckEntry {
+  check: ExplanationCheck;
+  holds: (text: string, context: ExplanationContext) => boolean;
+}
+
+export type ExplanationVerdict = { ok: true } | { ok: false; check: ExplanationCheck };
+
+export const EXPLANATION_CHECKS: readonly ExplanationCheckEntry[] = [];
+
+export function validateExplanation(
+  _text: string,
+  _context: ExplanationContext,
+  _checks: readonly ExplanationCheckEntry[] = EXPLANATION_CHECKS,
+): ExplanationVerdict {
+  return { ok: true };
+}
