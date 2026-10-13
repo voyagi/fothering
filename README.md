@@ -45,11 +45,11 @@ rule's permission to invoke the ingest function, is pinned by the ingest stack's
 - A deployed stack with `FOTHERING_LIVE` unset: the product's own table, the address key secret
   and the queue are live, while every SES pause, reopen and send, every model call and every
   InvokeAgentRuntime becomes one dry-run line instead of a real call. The four SES reads the
-  closeability check needs resolve live too, but no deployed function calls them yet. No deployed
-  role holds an SES or model permission yet: the role of the phase that first calls those reads
-  gains `ses:ListEmailIdentities`, `ses:ListConfigurationSets`, `ses:GetEmailIdentity` and
-  `ses:GetConfigurationSetEventDestinations`, and every other permission arrives with the phase
-  that first makes its call.
+  closeability check needs resolve live too, and the detection function makes them. Only the
+  detection role holds SES permissions, and only those four reads (`ses:ListEmailIdentities`,
+  `ses:ListConfigurationSets`, `ses:GetEmailIdentity` and
+  `ses:GetConfigurationSetEventDestinations`); only the runtime role may invoke the model. Every
+  other permission arrives with the phase that first makes its call.
 - A deployed stack with `FOTHERING_LIVE` set to the exact word `live`: those mutations go live as
   later phases build them. Until a phase builds an operation, a call to it fails with a
   `not built until phase N` error instead of writing a dry-run line, so going live before phases
@@ -68,6 +68,13 @@ until you remove it; the test suite fails when `cdk.json` carries it.
 
 ## Deploy and remove
 
+The app has three stacks: `FotheringIngest` (the event table, the ingest and forget functions),
+`FotheringRuntime` (the agent on AgentCore Runtime) and `FotheringDetection` (the detection
+function and its schedule). Detection imports the table and the runtime ARN from the other two, so
+`npx cdk deploy --all` deploys `FotheringIngest` and `FotheringRuntime` before
+`FotheringDetection`, and `npx cdk destroy --all` removes `FotheringDetection` first. Neither of the
+other two stacks can be removed or replace the table or the runtime while detection is deployed.
+
 Run from the owner's account, in `eu-central-1`:
 
 ```sh
@@ -77,12 +84,37 @@ npx cdk deploy --all
 npx cdk destroy --all
 ```
 
+The detection function runs every five minutes. It reads SES configuration and DNS only when a
+spike opens an incident, and it may invoke the runtime and write its own incident, evidence,
+decision and counter items to the table. It invokes the runtime for an incident that stored events
+opened, at most three times per incident and six times a UTC day.
+
 To deploy with the switch on, pass the context key. Do this only after a dry-run week you are
 happy with:
 
 ```sh
 npx cdk deploy --all -c fothering:live=live
 ```
+
+To try the model on its own, deploy only the runtime with the switch on and invoke it once with an
+evidence record built from fixtures, saved as `record.json`. The runtime ARN is among the
+`FotheringRuntime` stack outputs in the CloudFormation console. The session id must be at least 33
+characters, and the read timeout is raised because the CLI gives up after 60 seconds by default:
+
+```sh
+npx cdk deploy FotheringRuntime -c fothering:live=live
+aws bedrock-agentcore invoke-agent-runtime --region eu-central-1 \
+  --agent-runtime-arn <runtime arn> \
+  --runtime-session-id fothering-trial-0000000000000000000001 \
+  --payload fileb://record.json \
+  --cli-read-timeout 120 \
+  response.json
+```
+
+Then deploy the runtime again without the flag, or remove it with `npx cdk destroy FotheringRuntime`.
+A direct invocation like this one is bounded only by the runtime's limit of three model calls and
+reserves no counter: only the detection function reserves. Nothing in this repository runs a
+repeated live evaluation yet.
 
 Before sending any mail through a deployed stack, check that the ingest rule catches your
 configuration sets. `npm run build` writes the rule into `cdk.out/FotheringIngest.template.json`:
