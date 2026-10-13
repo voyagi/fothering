@@ -75,13 +75,27 @@ export interface LaneSpikeVerdict {
   complaintRatio: string | null;
 }
 
-export function laneSpikeVerdict(totals: LaneTotals): LaneSpikeVerdict {
+export interface VerdictRules {
+  hardBounce: Rational;
+  complaint: Rational;
+  minRatioEvents: number;
+  minRecipientSends: number;
+}
+
+export const LANE_RULES: Readonly<VerdictRules> = {
+  hardBounce: HARD_BOUNCE_THRESHOLD,
+  complaint: COMPLAINT_THRESHOLD,
+  minRatioEvents: MIN_RATIO_EVENTS,
+  minRecipientSends: LANE_MIN_RECIPIENT_SENDS,
+};
+
+export function laneSpikeVerdict(totals: LaneTotals, rules: Readonly<VerdictRules> = LANE_RULES): LaneSpikeVerdict {
   const ratios = {
     hardBounceRatio: renderPercent(totals.permanentBounces, totals.recipientSends),
     complaintRatio: renderPercent(totals.complaints, totals.recipientSends),
   };
-  if (totals.recipientSends < LANE_MIN_RECIPIENT_SENDS) return { verdict: 'not-enough-volume', triggers: [], ...ratios };
+  if (totals.recipientSends < rules.minRecipientSends) return { verdict: 'not-enough-volume', triggers: [], ...ratios };
   const triggers: LaneTrigger[] = [];
-  if (ratioAtOrAbove(totals.permanentBounces, totals.recipientSends, HARD_BOUNCE_THRESHOLD)) triggers.push('hard-bounce');
+  if (ratioAtOrAbove(totals.permanentBounces, totals.recipientSends, rules.hardBounce)) triggers.push('hard-bounce');
   return { verdict: triggers.length > 0 ? 'spike' : 'no-spike', triggers, ...ratios };
 }
