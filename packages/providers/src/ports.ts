@@ -114,7 +114,7 @@ export interface ResolvedPorts {
 // a runtime surprise the first time a caller asks for the missing one (D-05).
 export const PORT_TABLE = {
   eventStore: {
-    operations: ['putIfAbsent', 'queryLane', 'queryByRecipient', 'deleteRecord', 'getRecord'],
+    operations: ['putIfAbsent', 'queryLane', 'queryByRecipient', 'deleteRecord', 'getRecord', 'foldLane'],
     mutatingOperations: ['putIfAbsent', 'deleteRecord'],
     gatedOperations: [],
     fixture: (fixtures: FixtureOptions, dryRun: DryRunLog) => createFixtureEventStore(fixtures, dryRun),

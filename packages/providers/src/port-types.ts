@@ -1,5 +1,5 @@
 import type { Message, ModelStreamEvent, StreamOptions } from '@strands-agents/sdk';
-import type { EventRecord, RecordKey } from '@fothering/core/records';
+import { lanePartitionKey, type EventRecord, type RecordKey } from '@fothering/core/records';
 import type { AddressKeySet } from '@fothering/core/address';
 import type { LaneFold } from '@fothering/core/window-fold';
 
@@ -76,6 +76,7 @@ export interface DecisionStorePort {
   recordUsage(usage: UsageRecord): Promise<void>;
 }
 
+const LANE_PARTITION_PREFIX = lanePartitionKey('');
 const INCIDENT_PARTITION_PREFIX = 'INCIDENT#';
 const COUNTER_DAY_PARTITION_PREFIX = 'COUNTER_DAY#';
 const COUNTER_SORT_KEY = 'COUNTER';
@@ -91,12 +92,29 @@ function requireWholeNumber(name: string, value: number, minimum: number): void 
 // The fixture and the live adapter both run these checks before anything is sent or stored, so the
 // two can never disagree about which request reaches the table.
 
-/** A counter moves only through reserveInvocation and recordUsage, which only add; a put or a versioned
- * update could otherwise write one back to zero. */
-export function assertNotCounterItem(key: RecordKey): void {
+/**
+ * A decision item never sits under an event record's LANE# key (D-65), and a counter moves only
+ * through reserveInvocation and recordUsage, which only add: a put or a versioned update could
+ * otherwise write one back to zero.
+ */
+export function assertDecisionItemKey(key: RecordKey): void {
+  if (key.pk.startsWith(LANE_PARTITION_PREFIX)) {
+    throw new RangeError('a decision store item never takes a LANE# partition key, which belongs to event records');
+  }
   if (key.sk === COUNTER_SORT_KEY) {
     throw new RangeError('a counter item changes only through reserveInvocation and recordUsage, which only add');
   }
+}
+
+export function isDecisionStoreItem(item: unknown): item is DecisionStoreItem {
+  if (typeof item !== 'object' || item === null) return false;
+  const { pk, sk, expiresAt } = item as { pk?: unknown; sk?: unknown; expiresAt?: unknown };
+  return typeof pk === 'string' && !pk.startsWith(LANE_PARTITION_PREFIX) && typeof sk === 'string' && typeof expiresAt === 'number';
+}
+
+/** GetItem applies no TTL filter, so an item past its expiresAt but not yet deleted reads as absent (Pitfall 4). */
+export function unexpiredDecisionItem(item: unknown, nowMs: number): DecisionStoreItem | undefined {
+  return isDecisionStoreItem(item) && item.expiresAt > Math.floor(nowMs / 1000) ? item : undefined;
 }
 
 function assertCounterKeys(incidentKey: RecordKey, dayKey: RecordKey): void {
@@ -109,7 +127,7 @@ function assertCounterKeys(incidentKey: RecordKey, dayKey: RecordKey): void {
 }
 
 export function assertVersionedUpdate(key: RecordKey, expectedVersion: number, attributes: Readonly<Record<string, unknown>>): void {
-  assertNotCounterItem(key);
+  assertDecisionItemKey(key);
   requireWholeNumber('expectedVersion', expectedVersion, 0);
   for (const name of Object.keys(attributes)) {
     if (MANAGED_ATTRIBUTES.has(name)) throw new RangeError(`updateIfVersion writes ${name} itself, so it is not an attribute to pass`);

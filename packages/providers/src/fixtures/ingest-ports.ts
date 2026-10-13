@@ -4,7 +4,6 @@ import { assertFoldWindow } from '@fothering/core/window-fold';
 import type {
   AddressKeyPort,
   DeadLetterPort,
-  DecisionStoreItem,
   DecisionStorePort,
   EventStorePort,
   FixtureOptions,
@@ -12,7 +11,15 @@ import type {
   ReservationItem,
   ReservationRequest,
 } from '../port-types.js';
-import { assertNotCounterItem, assertReservation, assertUsage, assertVersionedUpdate, brandPort } from '../port-types.js';
+import {
+  assertDecisionItemKey,
+  assertReservation,
+  assertUsage,
+  assertVersionedUpdate,
+  brandPort,
+  isDecisionStoreItem,
+  unexpiredDecisionItem,
+} from '../port-types.js';
 import { DEAD_LETTER_QUEUE_TARGET, type DryRunLog } from '../dry-run.js';
 
 export class FixtureWriteError extends Error {
@@ -168,12 +175,6 @@ export function createFixtureEventStore(options: FixtureOptions = {}, dryRun?: D
   }, 'fixture');
 }
 
-function isDecisionItem(item: unknown): item is DecisionStoreItem {
-  if (typeof item !== 'object' || item === null || isLaneRecord(item)) return false;
-  const { pk, expiresAt } = item as { pk?: unknown; expiresAt?: unknown };
-  return typeof pk === 'string' && typeof expiresAt === 'number';
-}
-
 function numberAttribute(item: unknown, attribute: string): number | undefined {
   if (typeof item !== 'object' || item === null) return undefined;
   const value = (item as Record<string, unknown>)[attribute];
@@ -229,10 +230,7 @@ export function createFixtureDecisionStore(options: FixtureOptions = {}, dryRun?
     async putIfAbsent(item) {
       await dryRun?.would('decisionStore.putIfAbsent', item.pk, item);
       rejectUnmarshallable(item);
-      if (isLaneRecord(item)) {
-        throw new RangeError('a decision store item never takes a LANE# partition key, which belongs to event records');
-      }
-      assertNotCounterItem(item);
+      assertDecisionItemKey(item);
       const key = keyOf(item);
       if (items.has(key)) return 'duplicate';
       items.set(key, structuredClone(item));
@@ -240,9 +238,8 @@ export function createFixtureDecisionStore(options: FixtureOptions = {}, dryRun?
     },
     async getItem(key, nowMs) {
       rejectUnmarshallable(nowMs);
-      const item = items.get(keyOf(key));
-      if (!isDecisionItem(item) || item.expiresAt <= Math.floor(nowMs / 1000)) return undefined;
-      return structuredClone(item);
+      const item = unexpiredDecisionItem(items.get(keyOf(key)), nowMs);
+      return item === undefined ? undefined : structuredClone(item);
     },
     async updateIfVersion(key, expectedVersion, attributes, nowMs) {
       assertVersionedUpdate(key, expectedVersion, attributes);
@@ -250,7 +247,7 @@ export function createFixtureDecisionStore(options: FixtureOptions = {}, dryRun?
       rejectUnmarshallable(nowMs);
       await dryRun?.would('decisionStore.updateIfVersion', key.pk, { pk: key.pk, sk: key.sk, expectedVersion });
       const stored = items.get(keyOf(key));
-      if (!isDecisionItem(stored) || stored.version !== expectedVersion) return 'conflict';
+      if (!isDecisionStoreItem(stored) || stored.version !== expectedVersion) return 'conflict';
       items.set(keyOf(key), {
         ...stored,
         ...structuredClone(attributes),
