@@ -71,6 +71,9 @@ const HEX_64 = /^[0-9a-f]{64}$/;
 const OPTION_ID = /^opt-[0-9a-f]{24}$/;
 const PERCENT = /^\d{1,3}\.\d{2}%$/;
 const HOSTNAME = /^(?=.{1,253}$)[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$/;
+// A DMARC lookup reads _dmarc.<domain> (RFC 7489 section 6.6.3), so the first label of a looked-up
+// name may start with an underscore, which no hostname carries.
+const DNS_NAME = /^(?=.{1,253}$)_?[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$/;
 // The lane-map name is operator text; the record crosses to a model provider, so only printable
 // ASCII may ride along, and the question and fix are held to the same alphabet.
 const PRINTABLE_ASCII = (max: number) => new RegExp(`^[\\x20-\\x7E]{1,${max}}$`);
@@ -115,7 +118,7 @@ const lookupSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('ses'), operation: z.literal('GetEmailIdentity'), identity: hostname.nullable() }),
   z.strictObject({
     kind: z.literal('dns'),
-    name: hostname,
+    name: z.string().regex(DNS_NAME),
     recordType: z.enum(['TXT', 'MX']),
     outcome: z.enum(['records', 'missing', 'unknown']),
   }),

@@ -1,3 +1,4 @@
+import { parse } from 'tldts';
 import {
   LANE_MIN_RECIPIENT_SENDS,
   LANE_SHARE_LABEL,
@@ -9,11 +10,12 @@ import {
   type LaneSpikeVerdict,
   type LaneTotals,
   type LaneTrigger,
+  type Rational,
 } from './verdicts.js';
 import type { BucketCount } from './buckets.js';
 import { validHostname } from './extract.js';
 import { UNCLASSIFIED } from './records.js';
-import type { ConfigurationRecord, DimensionTally, WindowSummary } from './window-fold.js';
+import { AUTH_CORROBORATION_CODES, type ConfigurationRecord, type DimensionTally, type WindowSummary } from './window-fold.js';
 
 export const ROW_VERDICTS = ['cause', 'elevated', 'ruled-out', 'not-enough-volume'] as const;
 export type RowVerdict = (typeof ROW_VERDICTS)[number];
@@ -343,35 +345,199 @@ export interface IdentityAuthFacts {
   identityType?: string;
 }
 
+// D-58: one MX lookup per unlisted receiving domain plus up to three TXT lookups per from-domain;
+// at DNS_LOOKUP_CONCURRENCY in flight and 2 s each the worst case is about 40 s of the detection
+// function's 300 s. Past the bound the lane decides unknown (dns-bound) before any lookup runs.
 export const MAX_DNS_LOOKUPS_PER_CYCLE = 200;
+// D-58: ten in flight keep a cycle's resolver load small while 200 lookups still finish in about 40 s.
 export const DNS_LOOKUP_CONCURRENCY = 10;
 
+/**
+ * The RFC 7489 organizational domain, from tldts 7.4.18 with the public suffix list as bundled
+ * 2026-10-07. tldts answers an unknown TLD with its right-most label and isIcann false, and a host
+ * under a private suffix with isIcann false too, so requiring isIcann keeps either from borrowing
+ * another party's DMARC record (research Pitfall 14): both read undefined, and the row unknown.
+ */
 export function organizationalDomain(fromDomain: string): string | undefined {
-  void fromDomain;
-  return undefined;
+  const result = parse(fromDomain, { allowPrivateDomains: true });
+  if (result.isIp === true || result.isIcann !== true || result.domain === null) return undefined;
+  return result.domain;
 }
 
+/** D-60: the exact domain identity, else the longest listed parent, as SES inherits DKIM from the
+ * parent domain; an email address identity never covers a from-domain. */
 export function identityFor(fromDomain: string, identities: readonly IdentityAuthFacts[]): IdentityAuthFacts | undefined {
-  void fromDomain;
-  void identities;
-  return undefined;
+  const domain = fromDomain.toLowerCase();
+  let best: IdentityAuthFacts | undefined;
+  for (const facts of identities) {
+    const name = facts.identity.toLowerCase();
+    if (name.includes('@') || (name !== domain && !domain.endsWith(`.${name}`))) continue;
+    if (best === undefined || name.length > best.identity.length) best = facts;
+  }
+  return best;
+}
+
+type ConfigurationState = ConfigurationRow['state'];
+type ConfigurationVerdict = ConfigurationRow['verdict'];
+
+interface RowReading {
+  state: ConfigurationState;
+  lookups: ConfigurationLookup[];
+}
+
+const CONFIGURATION_RECORD_ORDER: readonly ConfigurationRecord[] = ['dkim', 'mail-from', 'dmarc', 'spf'];
+
+// D-61 as amended 2026-10-12: a missing record is a cause only when at least half of the window's
+// counted permanent bounces, and at least MIN_RATIO_EVENTS of them, carry one of that row's RFC 7372
+// codes. Complaints carry no status code, so they never corroborate.
+const CORROBORATION_SHARE: Rational = { numerator: 1, denominator: 2 };
+
+const DMARC_RECORD = /^v=DMARC1(?:;|\s|$)/;
+const SPF_RECORD = /^v=spf1(?: |$)/;
+
+type TxtReading = 'one' | 'none' | 'many' | 'unknown';
+
+function readTxt(outcome: DnsTxtOutcome | undefined, pattern: RegExp): TxtReading {
+  if (outcome === undefined || outcome.kind === 'unknown') return 'unknown';
+  if (outcome.kind === 'missing') return 'none';
+  const matching = outcome.records.filter((record) => pattern.test(record)).length;
+  if (matching === 0) return 'none';
+  return matching === 1 ? 'one' : 'many';
+}
+
+// Two records at one name are discarded by receivers (RFC 9989 for DMARC, RFC 7208's single record
+// for SPF), so they read unknown, and so does a lookup that failed or never ran.
+function definiteState(reading: TxtReading): ConfigurationState {
+  if (reading === 'one') return 'present';
+  return reading === 'none' ? 'missing' : 'unknown';
+}
+
+function sesLookup(facts: IdentityAuthFacts | undefined): ConfigurationLookup {
+  return { kind: 'ses', operation: 'GetEmailIdentity', identity: facts === undefined ? null : facts.identity.toLowerCase() };
+}
+
+function txtLookup(name: string, outcome: DnsTxtOutcome | undefined): ConfigurationLookup {
+  return { kind: 'dns', name, recordType: 'TXT', outcome: outcome?.kind ?? 'unknown' };
+}
+
+function customMailFromOf(facts: IdentityAuthFacts): string | undefined {
+  return facts.mailFromDomain === undefined || facts.mailFromDomain === '' ? undefined : facts.mailFromDomain.toLowerCase();
+}
+
+function dkimState(facts: IdentityAuthFacts): ConfigurationState {
+  if (facts.dkimStatus === 'FAILED' || facts.dkimSigningEnabled === false) return 'missing';
+  return facts.dkimStatus === 'SUCCESS' && facts.dkimSigningEnabled === true ? 'present' : 'unknown';
+}
+
+// SES's default MAIL FROM domain is AWS's own, so without a custom one there is nothing of the
+// sender's to be missing, and the row can never be a cause.
+function mailFromState(facts: IdentityAuthFacts): ConfigurationState {
+  if (customMailFromOf(facts) === undefined) return 'not-applicable';
+  if (facts.mailFromStatus === 'SUCCESS') return 'present';
+  return facts.mailFromStatus === 'FAILED' ? 'missing' : 'unknown';
+}
+
+interface DmarcNames {
+  fromName: string;
+  organizational: string | undefined;
+  organizationalName: string | undefined;
+}
+
+function dmarcNamesFor(fromDomain: string): DmarcNames {
+  const organizational = organizationalDomain(fromDomain);
+  return {
+    fromName: `_dmarc.${fromDomain}`,
+    organizational,
+    organizationalName: organizational === undefined || organizational === fromDomain ? undefined : `_dmarc.${organizational}`,
+  };
+}
+
+function labelCount(name: string): number {
+  return name.split('.').length;
+}
+
+// RFC 7489 section 6.6.3: the from-domain's own record first, then the organizational domain's.
+function dmarcReading(fromDomain: string, answers: ReadonlyMap<string, DnsTxtOutcome>): RowReading {
+  const names = dmarcNamesFor(fromDomain);
+  const fromAnswer = answers.get(names.fromName);
+  const lookups = [txtLookup(names.fromName, fromAnswer)];
+  const atFrom = readTxt(fromAnswer, DMARC_RECORD);
+  if (atFrom !== 'none') return { state: definiteState(atFrom), lookups };
+  if (names.organizational === undefined) return { state: 'unknown', lookups };
+  if (names.organizationalName === undefined) return { state: 'missing', lookups };
+  const organizationalAnswer = answers.get(names.organizationalName);
+  lookups.push(txtLookup(names.organizationalName, organizationalAnswer));
+  const atOrganizational = readTxt(organizationalAnswer, DMARC_RECORD);
+  if (atOrganizational !== 'none') return { state: definiteState(atOrganizational), lookups };
+  // A current receiver (RFC 9989's tree walk) also queries every name between the two, which D-60
+  // never reads, so a deeper from-domain could hold a record there: unknown, not a missing record
+  // that would send the operator to fix the wrong name (AI-SPEC 1b-1).
+  const directChild = labelCount(fromDomain) - labelCount(names.organizational) === 1;
+  return { state: directChild ? 'missing' : 'unknown', lookups };
+}
+
+function spfReading(facts: IdentityAuthFacts, answers: ReadonlyMap<string, DnsTxtOutcome>): RowReading {
+  const mailFrom = customMailFromOf(facts);
+  if (mailFrom === undefined) return { state: 'not-applicable', lookups: [sesLookup(facts)] };
+  const answer = answers.get(mailFrom);
+  return { state: definiteState(readTxt(answer, SPF_RECORD)), lookups: [txtLookup(mailFrom, answer)] };
+}
+
+function corroborationOf(record: ConfigurationRecord, totals: WindowSummary['totals']): ConfigurationRow['corroboration'] {
+  let corroboratingBounces = 0;
+  for (const detail of AUTH_CORROBORATION_CODES[record]) corroboratingBounces += totals.permanentBouncesByAuthCode[detail];
+  return { corroboratingBounces, permanentBounces: totals.permanentBounces };
+}
+
+function configurationVerdict(state: ConfigurationState, corroboration: ConfigurationRow['corroboration']): ConfigurationVerdict {
+  switch (state) {
+    case 'present':
+      return 'ruled-out';
+    case 'unknown':
+      return 'unknown';
+    case 'not-applicable':
+      return 'not-applicable';
+    case 'missing':
+      return ratioAtOrAbove(corroboration.corroboratingBounces, corroboration.permanentBounces, CORROBORATION_SHARE) ? 'cause' : 'elevated';
+  }
+}
+
+function readingsFor(fromDomain: string, facts: IdentityAuthFacts | undefined, answers: ReadonlyMap<string, DnsTxtOutcome>) {
+  // D-60: with no identity nothing about the sender's records is known, and no DNS read is planned.
+  if (facts === undefined) {
+    const unknown = (): RowReading => ({ state: 'unknown', lookups: [sesLookup(undefined)] });
+    return { dkim: unknown(), 'mail-from': unknown(), dmarc: unknown(), spf: unknown() } satisfies Record<ConfigurationRecord, RowReading>;
+  }
+  return {
+    dkim: { state: dkimState(facts), lookups: [sesLookup(facts)] },
+    'mail-from': { state: mailFromState(facts), lookups: [sesLookup(facts)] },
+    dmarc: dmarcReading(fromDomain, answers),
+    spf: spfReading(facts, answers),
+  } satisfies Record<ConfigurationRecord, RowReading>;
 }
 
 export interface ConfigurationRowsInput {
   fromDomain: string;
   identities: readonly IdentityAuthFacts[];
+  /** Answers by DNS name; a planned name with no answer reads unknown, as a lookup that never ran. */
   txtAnswers: ReadonlyMap<string, DnsTxtOutcome>;
   totals: WindowSummary['totals'];
 }
 
+/** The DKIM, MAIL FROM, DMARC and SPF rows of one from-domain, each naming its lookups (AC-9). */
 export function buildConfigurationRows(input: ConfigurationRowsInput): ConfigurationRow[] {
-  void input;
-  return [];
+  const fromDomain = input.fromDomain.toLowerCase();
+  const readings = readingsFor(fromDomain, identityFor(fromDomain, input.identities), input.txtAnswers);
+  return CONFIGURATION_RECORD_ORDER.map((record) => {
+    const corroboration = corroborationOf(record, input.totals);
+    const { state, lookups } = readings[record];
+    return { fromDomain, record, state, verdict: configurationVerdict(state, corroboration), lookups, corroboration };
+  });
 }
 
+/** AC-E24: a lane whose records carry no usable from-domain gets no configuration row. */
 export function configurationFromDomains(summary: WindowSummary): string[] {
-  void summary;
-  return [];
+  return [...summary.dimensions.fromDomain.keys()].filter((domain) => validHostname(domain) !== UNCLASSIFIED).sort(compareValueBytes);
 }
 
 export interface LaneConfigurationInput {
@@ -381,8 +547,9 @@ export interface LaneConfigurationInput {
 }
 
 export function buildLaneConfigurationRows(input: LaneConfigurationInput): ConfigurationRow[] {
-  void input;
-  return [];
+  return configurationFromDomains(input.summary).flatMap((fromDomain) =>
+    buildConfigurationRows({ fromDomain, identities: input.identities, txtAnswers: input.txtAnswers, totals: input.summary.totals }),
+  );
 }
 
 export interface PlannedLookup {
@@ -395,13 +562,30 @@ export interface DnsLookupPlan {
   bound: 'dns-bound' | null;
 }
 
+/** The worst-case lookup list, built before any lookup runs, so the bound is decided on it (D-58). */
 export function planDnsLookups(
   fromDomains: readonly string[],
   identities: readonly IdentityAuthFacts[],
   receivingDomainsNeedingMx: readonly string[],
 ): DnsLookupPlan {
-  void fromDomains;
-  void identities;
-  void receivingDomainsNeedingMx;
-  return { lookups: [], bound: null };
+  const lookups: PlannedLookup[] = [];
+  const planned = new Set<string>();
+  const plan = (name: string, recordType: PlannedLookup['recordType']): void => {
+    const key = `${recordType} ${name}`;
+    if (planned.has(key)) return;
+    planned.add(key);
+    lookups.push({ name, recordType });
+  };
+  for (const raw of fromDomains) {
+    const fromDomain = raw.toLowerCase();
+    const facts = identityFor(fromDomain, identities);
+    if (facts === undefined) continue;
+    const names = dmarcNamesFor(fromDomain);
+    plan(names.fromName, 'TXT');
+    if (names.organizationalName !== undefined) plan(names.organizationalName, 'TXT');
+    const mailFrom = customMailFromOf(facts);
+    if (mailFrom !== undefined) plan(mailFrom, 'TXT');
+  }
+  for (const domain of receivingDomainsNeedingMx) plan(domain, 'MX');
+  return { lookups, bound: lookups.length > MAX_DNS_LOOKUPS_PER_CYCLE ? 'dns-bound' : null };
 }
