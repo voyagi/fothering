@@ -4,6 +4,7 @@ import { Effect, Policy, PolicyStatement, Role, ServicePrincipal } from 'aws-cdk
 import { LogGroup, RetentionDays } from 'aws-cdk-lib/aws-logs';
 import type { Construct } from 'constructs';
 import { AGENTCORE_RUNTIME } from '@fothering/agent/listen-host';
+import { MODEL_VALUES } from '@fothering/core/model-values';
 import { liveSwitchEnvironment } from './live-switch.js';
 import { logWriteStatement } from './log-statements.js';
 
@@ -25,6 +26,8 @@ export interface RuntimeStackProps extends StackProps {
 // account, and a source ARN of any AgentCore resource in this account and Region, which needs no
 // runtime ARN and so is written before the first deploy.
 export class RuntimeStack extends Stack {
+  readonly runtime: Runtime;
+
   constructor(scope: Construct, id: string, props: RuntimeStackProps) {
     super(scope, id, props);
 
@@ -39,7 +42,7 @@ export class RuntimeStack extends Stack {
       }),
     });
 
-    const runtime = new Runtime(this, 'Runtime', {
+    this.runtime = new Runtime(this, 'Runtime', {
       agentRuntimeArtifact: AgentRuntimeArtifact.fromCodeAsset({
         path: props.agentAssetDir,
         runtime: AgentCoreRuntime.NODE_22,
@@ -66,7 +69,7 @@ export class RuntimeStack extends Stack {
     // with the stack's removal. The first invocation after the first deploy must show a log line
     // here; without one, the create permission is the fallback.
     const logGroup = new LogGroup(this, 'RuntimeLogs', {
-      logGroupName: `/aws/bedrock-agentcore/runtimes/${runtime.agentRuntimeId}-DEFAULT`,
+      logGroupName: `/aws/bedrock-agentcore/runtimes/${this.runtime.agentRuntimeId}-DEFAULT`,
       retention: RetentionDays.ONE_MONTH,
       removalPolicy: RemovalPolicy.DESTROY,
     });
@@ -90,6 +93,30 @@ export class RuntimeStack extends Stack {
           effect: Effect.ALLOW,
           actions: ['logs:DescribeLogGroups'],
           resources: [this.logGroupArn('*')],
+        }),
+      ],
+    });
+
+    // A geographic inference profile is invoked by its own ARN, and Bedrock then calls the foundation
+    // model in whichever destination Region it routes to, so the role needs both: the profile here,
+    // and the model in each destination only when the call came through this profile (the two
+    // statement example on https://docs.aws.amazon.com/bedrock/latest/userguide/geographic-cross-region-inference.html).
+    // Non-streaming Converse authorizes as InvokeModel alone. The runtime's role is read-only to the
+    // construct, so these go on a policy the stack owns; it names no runtime id, so unlike the log
+    // policy it could not form a cycle, and it stays separate so the snapshot reads model access apart
+    // from logging.
+    const profileArn = this.formatArn({ service: 'bedrock', resource: 'inference-profile', resourceName: MODEL_VALUES.inferenceProfileId });
+    new Policy(this, 'RuntimeModelPolicy', {
+      roles: [role],
+      statements: [
+        new PolicyStatement({ effect: Effect.ALLOW, actions: ['bedrock:InvokeModel'], resources: [profileArn] }),
+        new PolicyStatement({
+          effect: Effect.ALLOW,
+          actions: ['bedrock:InvokeModel'],
+          resources: MODEL_VALUES.destinationRegions.map((region) =>
+            this.formatArn({ service: 'bedrock', region, account: '', resource: 'foundation-model', resourceName: MODEL_VALUES.modelId }),
+          ),
+          conditions: { StringEquals: { 'bedrock:InferenceProfileArn': profileArn } },
         }),
       ],
     });
