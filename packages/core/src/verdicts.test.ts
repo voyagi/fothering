@@ -14,12 +14,14 @@ import {
 import { propertySeed } from './test/property-seed.js';
 import {
   COMPLAINT_THRESHOLD,
+  COVERAGE_THRESHOLD,
   HARD_BOUNCE_THRESHOLD,
   LANE_MIN_RECIPIENT_SENDS,
   LANE_RATIO_LABELS,
   LANE_RULES,
   LANE_SHARE_LABEL,
   MIN_RATIO_EVENTS,
+  coverageVerdict,
   laneSpikeVerdict,
   type LaneTotals,
 } from './verdicts.js';
@@ -178,6 +180,32 @@ describe('planted failures: each floor is load-bearing (AC-5, D-49, steelman S3)
   it('keeps LANE_RULES equal to the declared constants', () => {
     expect(LANE_RULES).toEqual({ hardBounce: HARD_BOUNCE_THRESHOLD, complaint: COMPLAINT_THRESHOLD, minRatioEvents: 3, minRecipientSends: 100 });
   });
+});
+
+describe('the coverage verdict, compared with integers (AC-E12, AC-E13)', () => {
+  const coverage = (recipientSends: number, covered: number, orderBroken = false) => ({ coverage: { recipientSends, covered }, orderBroken });
+
+  it('reads 9 covered of 10 as data, 8 as NO DATA and zero recipient-sends as not judged', () => {
+    expect(coverageVerdict(coverage(10, 9))).toBe('data');
+    expect(coverageVerdict(coverage(10, 8))).toBe('no-data');
+    expect(coverageVerdict(coverage(0, 0))).toBe('not-judged');
+  });
+
+  it('reads NO DATA whatever the tallies once the fold saw records out of store order', () => {
+    expect(coverageVerdict(coverage(10, 10, true))).toBe('no-data');
+    expect(coverageVerdict(coverage(0, 0, true))).toBe('no-data');
+  });
+
+  it('reads covered = 9k over 10k as data and one covered fewer as NO DATA, k from 1 to 2000', () =>
+    fc.assert(
+      fc.property(fc.integer({ min: 1, max: 2_000 }), (k) => {
+        const sends = k * COVERAGE_THRESHOLD.denominator;
+        const covered = k * COVERAGE_THRESHOLD.numerator;
+        expect(coverageVerdict(coverage(sends, covered))).toBe('data');
+        expect(coverageVerdict(coverage(sends, covered - 1))).toBe('no-data');
+      }),
+      { seed: propertySeed(), numRuns: 500 },
+    ));
 });
 
 describe('verdict labels never claim to be SES figures (AC-4)', () => {

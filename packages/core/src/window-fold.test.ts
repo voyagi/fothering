@@ -1,6 +1,6 @@
 import fc from 'fast-check';
 import { describe, expect, expectTypeOf, it } from 'vitest';
-import { BUCKET_MS, bucketStartMs } from './buckets.js';
+import { BUCKET_MS, LATENESS_HORIZON_MS, bucketStartMs, isBucketComplete } from './buckets.js';
 import { createObserveTally, mergeObserveTallies, observeRecord } from './closeability.js';
 import {
   RECORD_BYTE_CEILING,
@@ -11,7 +11,7 @@ import {
   serializedRecordBytes,
   type EvidenceRecord,
 } from './evidence-record.js';
-import type { EventRecord } from './records.js';
+import { recordKey, type EventRecord } from './records.js';
 import {
   TEST_CONFIGURATION_SET,
   TEST_KEY_SET,
@@ -30,6 +30,8 @@ import {
   HARD_BOUNCE_THRESHOLD,
   LANE_MIN_RECIPIENT_SENDS,
   ROW_MIN_RECIPIENT_SENDS,
+  coverageVerdict,
+  laneSpikeVerdict,
 } from './verdicts.js';
 import {
   AUTH_CORROBORATION_CODES,
@@ -41,9 +43,11 @@ import {
   SPIKE_WINDOW_BUCKETS,
   WindowTooLongError,
   assertFoldWindow,
+  coverageWindowFor,
   createWindowFold,
   spikeWindowFor,
   summarizeWindow,
+  windowCoverage,
   type BucketWindow,
   type WindowFoldState,
   type WindowSummary,
@@ -420,5 +424,219 @@ describe('declared values, ids and keys the later plans build on', () => {
       observeRecord(index % 2 === 0 ? first : second, record, NOW_MS);
     });
     expect(mergeObserveTallies(first, second)).toEqual(whole);
+  });
+});
+
+// The store hands a lane's records over in UTF-8 byte order of the sort key, so every record of a
+// bucket arrives together and its Send records last (they sort after every outcome type).
+function storeOrder(records: readonly EventRecord[]): EventRecord[] {
+  return [...records].sort((left, right) => Buffer.compare(Buffer.from(left.sk), Buffer.from(right.sk)));
+}
+
+function foldPaged(records: readonly EventRecord[], window: BucketWindow, nowMs: number, pageSize: number): WindowSummary {
+  const fold = createWindowFold({ lane: TEST_CONFIGURATION_SET, window, nowMs });
+  return summarizeWindow(pagesOf(records, pageSize).reduce((state, page) => fold.step(state, page), fold.initial));
+}
+
+type LateOutcome = 'Delivery' | 'Bounce' | 'Reject';
+
+// An outcome SES could still send for a recipient-send already stored: same message, recipient
+// and send-time bucket, its own sort key.
+function lateOutcomeFor(send: EventRecord, eventType: LateOutcome, index: number): EventRecord {
+  const record = structuredClone(send);
+  const key = recordKey({ configurationSet: send.configurationSet, bucketStartMs: send.bucketStartMs, eventType, identity: `${send.messageId}#late-${index}` });
+  record.pk = key.pk;
+  record.sk = key.sk;
+  record.kind = 'outcome';
+  record.eventType = eventType;
+  if (eventType === 'Reject') {
+    delete record.recipientHmac;
+    delete record.receivingDomain;
+    delete record.keyVersion;
+  }
+  if (eventType === 'Bounce') {
+    record.feedbackId = `fb-late-${index}`;
+    record.fields = { ...record.fields, bounceType: 'Permanent', bounceSubType: 'General' };
+  }
+  return record;
+}
+
+describe('buckets whose outcomes arrived before their sends (R3 sends-pending guard)', () => {
+  const healthyAndBouncing = (withBouncingSends: boolean): EventRecord[] => {
+    const records = scenarioRecords(
+      scenario([
+        { bucketOffset: 1, count: 100 },
+        { bucketOffset: 0, count: 20, permanentBounces: 10 },
+      ]),
+      NOW_MS,
+      TEST_LANE_MAP,
+      TEST_KEY_SET,
+    );
+    const bouncingBucket = bucketStartMs(NOW_MS);
+    return storeOrder(records.filter((record) => withBouncingSends || record.kind !== 'send' || record.bucketStartMs !== bouncingBucket));
+  };
+
+  it('reads a bucket holding bounces with no send records as sends pending and leaves it out of the ratios', () => {
+    const summary = summarizeWindow(foldOnce(healthyAndBouncing(false)));
+    expect(summary.pendingBuckets).toEqual([bucketStartMs(NOW_MS)]);
+    expect(summary.totals.permanentBounces).toBe(0);
+    expect(summary.totals.recipientSends).toBe(100);
+    expect(summary.buckets.find((bucket) => bucket.bucketStartMs === bucketStartMs(NOW_MS))?.permanentBounce).toBe(10);
+    expect(laneSpikeVerdict(summary.totals).verdict).toBe('no-spike');
+  });
+
+  it('counts the same bucket once its sends are stored, and the lane then spikes', () => {
+    const summary = summarizeWindow(foldOnce(healthyAndBouncing(true)));
+    expect(summary.pendingBuckets).toEqual([]);
+    expect(summary.totals).toMatchObject({ recipientSends: 120, permanentBounces: 10 });
+    expect(laneSpikeVerdict(summary.totals).verdict).toBe('spike');
+  });
+
+  const spikingLaneArb = fc
+    .record({
+      count: fc.integer({ min: 100, max: 160 }),
+      extraBounces: fc.integer({ min: 0, max: 6 }),
+      deliverRest: fc.boolean(),
+      late: fc.array(fc.record({ pick: fc.nat(), eventType: fc.constantFrom<LateOutcome>('Delivery', 'Bounce', 'Reject') }), { maxLength: 30 }),
+    })
+    .map((spec) => {
+      const records = scenarioRecords(
+        scenario([{ bucketOffset: 0, count: spec.count, permanentBounces: Math.ceil(spec.count / 20) + spec.extraBounces, deliverRest: spec.deliverRest }]),
+        NOW_MS,
+        TEST_LANE_MAP,
+        TEST_KEY_SET,
+      );
+      const sends = records.filter((record) => record.kind === 'send');
+      const late = spec.late.map(({ pick, eventType }, index) => {
+        const send = sends[pick % sends.length];
+        if (send === undefined) throw new Error('expected a stored send');
+        return lateOutcomeFor(send, eventType, index);
+      });
+      return { records, late };
+    });
+
+  it('never turns a spike into no spike when outcomes arrive for sends already stored (AC-5)', () =>
+    fc.assert(
+      fc.property(spikingLaneArb, ({ records, late }) => {
+        expect(laneSpikeVerdict(summarizeWindow(foldOnce(storeOrder(records))).totals).verdict).toBe('spike');
+        const withLate = summarizeWindow(foldOnce(storeOrder([...records, ...late])));
+        expect(withLate.pendingBuckets).toEqual([]);
+        expect(laneSpikeVerdict(withLate.totals).verdict).toBe('spike');
+      }),
+      { seed: propertySeed(), numRuns: 40 },
+    ));
+});
+
+describe('outcome coverage over complete buckets (R4, AC-6, AC-E12 to AC-E14)', () => {
+  const COMPLETE_NOW_MS = NOW_MS + BUCKET_MS + LATENESS_HORIZON_MS;
+  const coverageOf = (records: readonly EventRecord[], nowMs = COMPLETE_NOW_MS): WindowSummary =>
+    summarizeWindow(foldOnce(storeOrder(records), coverageWindowFor(nowMs), nowMs));
+  const covering = (covered: number, uncovered: number): EventRecord[] =>
+    scenarioRecords(
+      scenario([
+        { bucketOffset: 0, count: covered },
+        { bucketOffset: 0, count: uncovered, deliverRest: false },
+      ]),
+      NOW_MS,
+      TEST_LANE_MAP,
+      TEST_KEY_SET,
+    );
+
+  it('ends the coverage window with the newest complete bucket, 12 buckets long (D-44)', () => {
+    const window = coverageWindowFor(COMPLETE_NOW_MS);
+    expect(window).toEqual({ fromBucketMs: bucketStartMs(NOW_MS) - (COVERAGE_WINDOW_BUCKETS - 1) * BUCKET_MS, toBucketMs: bucketStartMs(NOW_MS) });
+    expect(isBucketComplete(window.toBucketMs, COMPLETE_NOW_MS)).toBe(true);
+    expect(isBucketComplete(window.toBucketMs + BUCKET_MS, COMPLETE_NOW_MS)).toBe(false);
+  });
+
+  it('reads coverage exactly at 9/10 of recipient-sends as data and one covered fewer as NO DATA', () => {
+    const at = coverageOf(covering(90, 10));
+    expect(coverageVerdict(at)).toBe('data');
+    expect(at.coverage).toEqual({ recipientSends: 100, covered: 90 });
+    const below = coverageOf(covering(89, 11));
+    expect(below.coverage).toEqual({ recipientSends: 100, covered: 89 });
+    expect(coverageVerdict(below)).toBe('no-data');
+  });
+
+  it('computes no coverage over complete buckets without recipient-sends, which reads not judged (AC-E13)', () => {
+    const empty = coverageOf([]);
+    expect(empty.coverage).toEqual({ recipientSends: 0, covered: 0 });
+    expect(coverageVerdict(empty)).toBe('not-judged');
+  });
+
+  it('covers every recipient of a rejected message, and a recipient with a Delivery and a later Bounce once (AC-E14)', () => {
+    const sendTimestampMs = bucketStartMs(NOW_MS) + 1_000;
+    const threeRecipients = ingestAll(
+      envelopesFor({ messageSeed: 41, recipientCount: 3, sendTimestampMs, bounces: [], delivery: undefined, complaint: undefined, delays: [] }),
+      contextFor(NOW_MS),
+    );
+    const [firstSend] = threeRecipients;
+    if (firstSend === undefined) throw new Error('expected three sends');
+    const rejected = coverageOf([...threeRecipients, lateOutcomeFor(firstSend, 'Reject', 0)]);
+    expect(rejected.coverage).toEqual({ recipientSends: 3, covered: 3 });
+
+    const deliveredThenBounced = ingestAll(
+      envelopesFor({
+        messageSeed: 42,
+        recipientCount: 1,
+        sendTimestampMs,
+        bounces: [{ feedbackId: 'fb-42', bounceType: 'Permanent', bounceSubType: 'General', timestampMs: sendTimestampMs + 2_000 }],
+        delivery: { timestampMs: sendTimestampMs + 500 },
+        complaint: undefined,
+        delays: [],
+      }),
+      contextFor(NOW_MS),
+    );
+    const once = coverageOf(deliveredThenBounced);
+    expect(once.coverage).toEqual({ recipientSends: 1, covered: 1 });
+    expect(once.pendingBuckets).toEqual([]);
+  });
+
+  it('finalizes a bucket split across a page boundary once, with its full key set (D-45)', () => {
+    const records = storeOrder(covering(95, 5));
+    const whole = foldPaged(records, coverageWindowFor(COMPLETE_NOW_MS), COMPLETE_NOW_MS, records.length);
+    expect(whole.coverage).toEqual({ recipientSends: 100, covered: 95 });
+    for (const pageSize of [1, 2, 7, 97]) {
+      const paged = foldPaged(records, coverageWindowFor(COMPLETE_NOW_MS), COMPLETE_NOW_MS, pageSize);
+      expect(paged.pages).toBeGreaterThan(1);
+      expect([paged.coverage, paged.pendingBuckets, paged.orderBroken]).toEqual([whole.coverage, whole.pendingBuckets, false]);
+    }
+  });
+
+  it('marks orderBroken when a record of an already finalized bucket arrives, reads NO DATA, and keeps the raw counts', () => {
+    const records = storeOrder(
+      scenarioRecords(
+        scenario([
+          { bucketOffset: 1, count: 30 },
+          { bucketOffset: 0, count: 30 },
+        ]),
+        NOW_MS,
+        TEST_LANE_MAP,
+        TEST_KEY_SET,
+      ),
+    );
+    const window = coverageWindowFor(COMPLETE_NOW_MS);
+    const inOrder = summarizeWindow(foldOnce(records, window, COMPLETE_NOW_MS));
+    expect([inOrder.orderBroken, coverageVerdict(inOrder)]).toEqual([false, 'data']);
+    const [straggler, ...rest] = records;
+    if (straggler === undefined) throw new Error('expected records');
+    const broken = summarizeWindow(foldOnce([...rest, straggler], window, COMPLETE_NOW_MS));
+    expect(broken.orderBroken).toBe(true);
+    expect(coverageVerdict(broken)).toBe('no-data');
+    expect(broken.buckets).toEqual(inOrder.buckets);
+  });
+
+  it('turns the incomplete-bucket case red under a planted coverage that also counts incomplete buckets (AC-6)', () => {
+    const records = storeOrder([
+      ...scenarioRecords(scenario([{ bucketOffset: 0, count: 100 }]), NOW_MS, TEST_LANE_MAP, TEST_KEY_SET),
+      ...scenarioRecords(scenario([{ bucketOffset: 0, count: 100, deliverRest: false }]), COMPLETE_NOW_MS, TEST_LANE_MAP, TEST_KEY_SET),
+    ]);
+    const span: BucketWindow = { fromBucketMs: bucketStartMs(NOW_MS), toBucketMs: bucketStartMs(COMPLETE_NOW_MS) };
+    const summary = summarizeWindow(foldOnce(records, span, COMPLETE_NOW_MS));
+    const incompleteCaseHolds = (counts?: Parameters<typeof windowCoverage>[1]): boolean =>
+      coverageVerdict({ coverage: windowCoverage(summary.bucketCoverage, counts), orderBroken: summary.orderBroken }) === 'data';
+    expect(summary.coverage).toEqual({ recipientSends: 100, covered: 100 });
+    expect(incompleteCaseHolds()).toBe(true);
+    expect(incompleteCaseHolds(() => true)).toBe(false);
   });
 });

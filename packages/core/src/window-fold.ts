@@ -115,10 +115,41 @@ export interface WindowFoldState {
   dimensionBound: boolean;
 }
 
+export interface CoverageTally {
+  recipientSends: number;
+  covered: number;
+}
+
+export interface BucketCoverage extends CoverageTally {
+  bucketStartMs: number;
+  complete: boolean;
+}
+
+export function coverageWindowFor(nowMs: number): BucketWindow {
+  return spikeWindowFor(nowMs);
+}
+
+export function windowCoverage(
+  buckets: readonly BucketCoverage[],
+  counts: (bucket: BucketCoverage) => boolean = (bucket) => bucket.complete,
+): CoverageTally {
+  const tally = { recipientSends: 0, covered: 0 };
+  for (const bucket of buckets) {
+    if (!counts(bucket)) continue;
+    tally.recipientSends += bucket.recipientSends;
+    tally.covered += bucket.covered;
+  }
+  return tally;
+}
+
 export interface WindowSummary {
   window: BucketWindow;
   pages: number;
   buckets: readonly BucketCount[];
+  coverage: CoverageTally;
+  bucketCoverage: readonly BucketCoverage[];
+  pendingBuckets: readonly number[];
+  orderBroken: boolean;
   totals: {
     recipientSends: number;
     permanentBounces: number;
@@ -393,6 +424,10 @@ export function summarizeWindow(state: WindowFoldState): WindowSummary {
     window: { ...state.window },
     pages: state.pages,
     buckets,
+    coverage: { recipientSends: 0, covered: 0 },
+    bucketCoverage: [],
+    pendingBuckets: [],
+    orderBroken: false,
     totals,
     dimensions,
     noValue,

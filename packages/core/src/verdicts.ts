@@ -35,6 +35,18 @@ export const ROW_MIN_RECIPIENT_SENDS = 20;
 // type (Delivery off) covers only its bounces, far below 90 percent.
 export const COVERAGE_THRESHOLD: Rational = { numerator: 9, denominator: 10 };
 
+export const COVERAGE_VERDICTS = ['data', 'no-data', 'not-judged'] as const;
+export type CoverageVerdict = (typeof COVERAGE_VERDICTS)[number];
+
+export interface CoverageInput {
+  coverage: { recipientSends: number; covered: number };
+  orderBroken: boolean;
+}
+
+export function coverageVerdict(input: CoverageInput): CoverageVerdict {
+  return input.coverage.recipientSends === 0 ? 'not-judged' : 'no-data';
+}
+
 export const LANE_TRIGGERS = ['hard-bounce', 'complaint'] as const;
 export type LaneTrigger = (typeof LANE_TRIGGERS)[number];
 
