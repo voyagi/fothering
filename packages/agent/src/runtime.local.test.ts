@@ -7,6 +7,20 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { bucketStartMs, isCountedRecord } from '@fothering/core/buckets';
+import { REQUIRED_EVENT_TYPES, checkCloseability } from '@fothering/core/closeability';
+import { decideLane } from '@fothering/core/decision';
+import { buildEvidenceRecord, incidentIdFor, type EvidenceRecord } from '@fothering/core/evidence-record';
+import { buildTagRows } from '@fothering/core/evidence-rows';
+import { parseLaneMap } from '@fothering/core/lanes';
+import { PINNED_MODEL_VALUES } from '@fothering/core/model-values';
+import { RETENTION_SECONDS } from '@fothering/core/records';
+import { scenarioRecords } from '@fothering/core/test/event-arbitraries';
+import { LANE_RATIO_LABELS, LANE_SHARE_LABEL, laneSpikeVerdict, renderPercent } from '@fothering/core/verdicts';
+import { createWindowFold, spikeWindowFor, summarizeWindow } from '@fothering/core/window-fold';
+import { TEST_ADDRESS_KEY_SET } from '@fothering/providers/fixtures/ingest-ports';
+import lanesJson from '../../../lanes.json' with { type: 'json' };
+import { SYSTEM_PROMPT_SHA256 } from './handler.js';
 
 // This file lives at packages/agent/src/, two levels below the repo root every path here is
 // read relative to.
@@ -87,7 +101,66 @@ async function waitForOk(url: string, deadlineMs: number, exitedEarly: () => str
   }
 }
 
-describe('the agent bundle answers the AgentCore contract with no model and no AWS client', () => {
+// A real evidence record, built in this process by the core path detection runs: one bad import
+// batch on fothering-bulk with one approved option. The runtime child receives it as the request body.
+function fixtureEvidenceRecord(): EvidenceRecord {
+  const lanes = parseLaneMap(lanesJson);
+  const bulk = 'fothering-bulk';
+  const nowMs = Date.UTC(2026, 9, 11, 12, 2, 0);
+  const records = scenarioRecords(
+    {
+      configurationSet: bulk,
+      streamTag: 'newsletter',
+      callerIdentity: 'bulk-sender',
+      fromDomain: 'news.example.com',
+      groups: [
+        { bucketOffset: 0, count: 40, batch: 'import-0915', permanentBounces: 15 },
+        { bucketOffset: 1, count: 160, batch: 'import-0901' },
+      ],
+    },
+    nowMs,
+    lanes,
+    TEST_ADDRESS_KEY_SET,
+  );
+  const window = spikeWindowFor(nowMs);
+  const fold = createWindowFold({ lane: bulk, window, nowMs });
+  const summary = summarizeWindow(fold.step(fold.initial, records));
+  const spike = laneSpikeVerdict(summary.totals);
+  const rows = buildTagRows('batch', summary, spike);
+  const ses = {
+    configurationSets: new Set(lanes.lanes.map((lane) => lane.configurationSet)),
+    defaultConfigurationSets: new Set<string>(),
+    eventDestinations: new Map([[bulk, [{ enabled: true, eventBridge: true, matchingEventTypes: [...REQUIRED_EVENT_TYPES] }]]]),
+  };
+  const closeability = checkCloseability(bulk, { laneMap: lanes, observed: new Map([[bulk, summary.observed]]), ses });
+  const decision = decideLane({ spike, rows, configurationRows: [], closeability, coverageNoData: false, bound: null, otherSpikingLanes: [] });
+  const countable = records.filter(isCountedRecord).length;
+  return buildEvidenceRecord({
+    incidentId: incidentIdFor(bulk, bucketStartMs(nowMs)),
+    lane: { configurationSet: bulk, lane: bulk },
+    window,
+    laneTotals: {
+      recipientSends: summary.totals.recipientSends,
+      permanentBounces: summary.totals.permanentBounces,
+      complaints: summary.totals.complaints,
+      hardBounceRatio: spike.hardBounceRatio,
+      complaintRatio: spike.complaintRatio,
+      verdict: spike.verdict,
+      triggers: [...spike.triggers],
+      label: { hardBounceRatio: LANE_RATIO_LABELS.hardBounce, complaintRatio: LANE_RATIO_LABELS.complaint },
+    },
+    share: { laneCountableEvents: countable, storedCountableEvents: countable, percent: renderPercent(countable, countable), label: LANE_SHARE_LABEL },
+    rows,
+    configurationRows: [],
+    isolation: 'confined',
+    decision: { ...decision, noData: false, bound: null, otherSpikingLanes: [], sharedCause: null },
+    question: null,
+    fix: null,
+    expiresAt: Math.floor(nowMs / 1000) + RETENTION_SECONDS,
+  });
+}
+
+describe('the agent bundle answers the AgentCore contract with the real handler and no AWS client', () => {
   const outDir = mkdtempSync(join(tmpdir(), 'fothering-agent-bundle-'));
   const workDir = mkdtempSync(join(tmpdir(), 'fothering-agent-work-'));
   const listenGuard = join(workDir, 'listen-guard.mjs');
@@ -258,17 +331,22 @@ describe('the agent bundle answers the AgentCore contract with no model and no A
   );
 
   it(
-    'answers /ping and /invocations locally with no model and no AWS client (AC-21, AC-E38)',
+    'answers /ping, and /invocations over a fixture evidence record with a dry-run result, with no AWS client (AC-14, AC-21, AC-E38)',
     async () => {
       const port = await findFreePort();
       const host = '127.0.0.1';
 
       // No deploy variable and the listen guard preloaded: the runtime must choose loopback on its
-      // own, or the guard ends it before it answers a single ping.
+      // own, or the guard ends it before it answers a single ping. No live switch either, so the
+      // model row is the dry-run recorder.
       child = spawn(
         process.execPath,
         ['--import', pathToFileURL(preloadOut).href, '--import', pathToFileURL(listenGuard).href, 'main.js', '--port', String(port)],
-        { cwd: outDir, env: { ...process.env, FOTHERING_DEPLOYED_RUNTIME: undefined }, stdio: ['ignore', 'pipe', 'pipe'] },
+        {
+          cwd: outDir,
+          env: { ...process.env, FOTHERING_DEPLOYED_RUNTIME: undefined, FOTHERING_LIVE: undefined },
+          stdio: ['ignore', 'pipe', 'pipe'],
+        },
       );
       let output = '';
       const collect = (chunk: Buffer): void => {
@@ -295,14 +373,34 @@ describe('the agent bundle answers the AgentCore contract with no model and no A
 
       const invokeUrl = `http://${host}:${port}/invocations`;
       const headers = { 'content-type': 'application/json', [SESSION_HEADER]: 'session-1' };
+      const record = JSON.stringify(fixtureEvidenceRecord());
       const [a, b] = await Promise.all([
-        fetch(invokeUrl, { method: 'POST', headers, body: '{}' }),
-        fetch(invokeUrl, { method: 'POST', headers, body: '{}' }),
+        fetch(invokeUrl, { method: 'POST', headers, body: record }),
+        fetch(invokeUrl, { method: 'POST', headers, body: record }),
       ]);
-      expect(a.status).toBe(200);
-      expect(b.status).toBe(200);
-      expect(await a.json()).toEqual({ status: 'no-model', model: 'none' });
-      expect(await b.json()).toEqual({ status: 'no-model', model: 'none' });
+      expect(a.status, output).toBe(200);
+      expect(b.status, output).toBe(200);
+      const dryRun = { status: 'dry-run', pinned: PINNED_MODEL_VALUES, promptSha256: SYSTEM_PROMPT_SHA256 };
+      expect(await a.json()).toEqual(dryRun);
+      expect(await b.json()).toEqual(dryRun);
+      // The child writes its line before it answers, but the pipe may deliver it a moment later.
+      const dryRunLines = (): number =>
+        output.split('\n').filter((line) => line.startsWith('(dry-run) WOULD bedrockModel.stream eu.anthropic.claude-sonnet-5 ')).length;
+      for (let waitedMs = 0; dryRunLines() < 2 && waitedMs < 5000; waitedMs += 100) {
+        await new Promise((resolveDelay) => setTimeout(resolveDelay, 100));
+      }
+      expect(dryRunLines(), output).toBe(2);
+
+      const empty = await fetch(invokeUrl, { method: 'POST', headers, body: '{}' });
+      expect(empty.status).toBe(200);
+      expect(await empty.json()).toEqual({
+        status: 'refused',
+        reason: 'payload-invalid',
+        pinned: PINNED_MODEL_VALUES,
+        promptSha256: SYSTEM_PROMPT_SHA256,
+        usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
+        modelCalls: 0,
+      });
 
       const noSession = await fetch(invokeUrl, {
         method: 'POST',
