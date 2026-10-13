@@ -1,3 +1,4 @@
+import * as dnsPromises from 'node:dns/promises';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import fc from 'fast-check';
 import { BedrockAgentCoreClient } from '@aws-sdk/client-bedrock-agentcore';
@@ -45,6 +46,16 @@ import { AddressKeySecretError, createSecretsManagerAddressKey } from './address
 import { createSqsDeadLetter } from './dead-letter.js';
 import { createSesReads } from './ses-reads.js';
 import { createLiveAgentCore, createLiveBedrockModel } from './agent-adapters.js';
+import { NetworkGuardError } from '../test/guards.js';
+import {
+  DNS_LOOKUP_TIMEOUT_MS,
+  DNS_LOOKUP_TRIES,
+  createLiveDns,
+  type DnsMxAnswer,
+  type DnsResolver,
+  type DnsResolverFactory,
+  type DnsResolverOptions,
+} from './dns.js';
 
 // Region is fixed for every live adapter (SPEC constraint); the static credentials keep client
 // construction from touching the real default provider chain (env, files, IMDS), which this
@@ -1151,6 +1162,226 @@ describe('createSesReads', () => {
 
     await expect(reads.getEmailIdentity('gone.example.com')).resolves.toBeUndefined();
     await expect(reads.getEmailIdentity('busy.example.com')).rejects.toBeInstanceOf(TooManyRequestsException);
+  });
+});
+
+interface StubDnsAnswers {
+  txt?: (name: string) => Promise<string[][]>;
+  mx?: (name: string) => Promise<DnsMxAnswer[]>;
+}
+
+interface StubDnsResolvers {
+  factory: DnsResolverFactory;
+  built: DnsResolverOptions[];
+  cancels: () => number;
+}
+
+function dnsError(code: unknown): Error {
+  return Object.assign(new Error('the lookup failed'), code === undefined ? {} : { code });
+}
+
+// Each resolver the factory builds behaves like node's own: cancel rejects only that resolver's
+// outstanding queries, with the ECANCELLED code. Every classification case runs through these stubs,
+// because the test guard refuses any real resolve call (research Pitfall 11).
+function stubDnsResolvers(answers: StubDnsAnswers): StubDnsResolvers {
+  const built: DnsResolverOptions[] = [];
+  let cancels = 0;
+  const factory = (options: DnsResolverOptions): DnsResolver => {
+    built.push(options);
+    const outstanding: ((error: Error) => void)[] = [];
+    function tracked<T>(answer: ((name: string) => Promise<T>) | undefined, name: string): Promise<T> {
+      return new Promise<T>((resolve, reject) => {
+        outstanding.push(reject);
+        (answer?.(name) ?? Promise.reject(new Error('no answer stubbed for this lookup'))).then(resolve, reject);
+      });
+    }
+    return {
+      resolveTxt: (name) => tracked(answers.txt, name),
+      resolveMx: (name) => tracked(answers.mx, name),
+      cancel: () => {
+        cancels += 1;
+        for (const reject of outstanding) reject(dnsError(dnsPromises.CANCELLED));
+      },
+    };
+  };
+  return { factory, built, cancels: () => cancels };
+}
+
+const NEVER_SETTLES = (): Promise<never> => new Promise<never>(() => {});
+
+describe('createLiveDns (D-58, AC-E26 adapter half)', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('builds no resolver before the first lookup, then one per lookup with timeout 2,000 and tries 1', async () => {
+    const stub = stubDnsResolvers({ txt: async () => [], mx: async () => [] });
+    const dns = createLiveDns({ resolverFactory: stub.factory });
+    expect(stub.built.length).toBe(0);
+
+    await dns.resolveTxt('example.com');
+    await dns.resolveMx('example.com');
+
+    expect(`${DNS_LOOKUP_TIMEOUT_MS} ${DNS_LOOKUP_TRIES}`).toBe('2000 1');
+    expect(JSON.stringify(stub.built)).toBe('[{"timeout":2000,"tries":1},{"timeout":2000,"tries":1}]');
+  });
+
+  it("joins each TXT record's chunks into one string per record", async () => {
+    const stub = stubDnsResolvers({ txt: async () => [['v=spf1 include:', '_spf.example.com ~all'], ['site-verification=abc']] });
+    const outcome = await createLiveDns({ resolverFactory: stub.factory }).resolveTxt('example.com');
+    expect(JSON.stringify(outcome)).toBe('{"kind":"records","records":["v=spf1 include:_spf.example.com ~all","site-verification=abc"]}');
+  });
+
+  it('returns each MX exchange lowercased with its trailing dot removed', async () => {
+    const stub = stubDnsResolvers({
+      mx: async () => [
+        { exchange: 'MX01.Mail.Example.COM.', priority: 10 },
+        { exchange: 'mx02.mail.example.com', priority: 20 },
+      ],
+    });
+    const outcome = await createLiveDns({ resolverFactory: stub.factory }).resolveMx('example.com');
+    expect(JSON.stringify(outcome)).toBe('{"kind":"records","exchanges":["mx01.mail.example.com","mx02.mail.example.com"]}');
+  });
+
+  it.each([
+    ['NODATA', dnsPromises.NODATA],
+    ['NOTFOUND', dnsPromises.NOTFOUND],
+  ])('reads missing for a %s error on TXT and on MX', async (_label, code) => {
+    const stub = stubDnsResolvers({ txt: async () => Promise.reject(dnsError(code)), mx: async () => Promise.reject(dnsError(code)) });
+    const dns = createLiveDns({ resolverFactory: stub.factory });
+    const txt = await dns.resolveTxt('_dmarc.example.com');
+    const mx = await dns.resolveMx('example.com');
+    expect(`${txt.kind} ${mx.kind}`).toBe('missing missing');
+  });
+
+  // AC-P11: a failed lookup is not a missing record, so everything but a definite no-record answer reads unknown.
+  it.each<[string, () => unknown]>([
+    ['TIMEOUT', () => dnsError(dnsPromises.TIMEOUT)],
+    ['SERVFAIL', () => dnsError(dnsPromises.SERVFAIL)],
+    ['REFUSED', () => dnsError(dnsPromises.REFUSED)],
+    ['CONNREFUSED', () => dnsError(dnsPromises.CONNREFUSED)],
+    ['BADRESP', () => dnsError(dnsPromises.BADRESP)],
+    ['FORMERR', () => dnsError(dnsPromises.FORMERR)],
+    ['CANCELLED', () => dnsError(dnsPromises.CANCELLED)],
+    ['a code node does not list', () => dnsError('EUNLISTED')],
+    ['a code that is not a string', () => dnsError(404)],
+    ['an error with no code', () => dnsError(undefined)],
+    ['a thrown value that is not an object', () => 'lookup failed'],
+  ])('reads unknown, never missing, for %s on TXT and on MX', async (_label, thrown) => {
+    const stub = stubDnsResolvers({ txt: async () => Promise.reject(thrown()), mx: async () => Promise.reject(thrown()) });
+    const dns = createLiveDns({ resolverFactory: stub.factory });
+    const txt = await dns.resolveTxt('_dmarc.example.com');
+    const mx = await dns.resolveMx('example.com');
+    expect(`${txt.kind} ${mx.kind}`).toBe('unknown unknown');
+  });
+
+  it('classifies a resolver that throws before it returns a promise the same as one that rejects', async () => {
+    const throwing: DnsResolverFactory = () => ({
+      resolveTxt: () => {
+        throw dnsError(dnsPromises.NOTFOUND);
+      },
+      resolveMx: () => {
+        throw dnsError(dnsPromises.NODATA);
+      },
+      cancel: () => {},
+    });
+    const dns = createLiveDns({ resolverFactory: throwing });
+    const txt = await dns.resolveTxt('example.com');
+    const mx = await dns.resolveMx('example.com');
+    expect(`${txt.kind} ${mx.kind}`).toBe('missing missing');
+  });
+
+  it.each(['resolveTxt', 'resolveMx'] as const)(
+    'gives unknown for a %s that outlives the 2,000 ms bound, and cancels its resolver at the bound',
+    async (operation) => {
+      vi.useFakeTimers();
+      const stub = stubDnsResolvers({ txt: NEVER_SETTLES, mx: NEVER_SETTLES });
+      const dns = createLiveDns({ resolverFactory: stub.factory });
+      let kind = 'pending';
+      const pending = dns[operation]('example.com').then((outcome) => {
+        kind = outcome.kind;
+      });
+
+      await vi.advanceTimersByTimeAsync(DNS_LOOKUP_TIMEOUT_MS - 1);
+      expect(`${kind} cancels ${stub.cancels()}`).toBe('pending cancels 0');
+      await vi.advanceTimersByTimeAsync(1);
+      await pending;
+      expect(`${kind} cancels ${stub.cancels()}`).toBe('unknown cancels 1');
+    },
+  );
+
+  it('leaves no timer behind once a lookup settles inside the bound', async () => {
+    vi.useFakeTimers();
+    const stub = stubDnsResolvers({ txt: async () => [['v=spf1 -all']] });
+    await createLiveDns({ resolverFactory: stub.factory }).resolveTxt('example.com');
+    expect(`timers ${vi.getTimerCount()} cancels ${stub.cancels()}`).toBe('timers 0 cancels 0');
+  });
+
+  // cancel() ends every outstanding query of a resolver, so a resolver shared by concurrent lookups
+  // would turn a slow neighbour's timeout into an unknown for an answer still on its way.
+  it('gives each lookup its own resolver, so a timed-out lookup never cancels a concurrent one', async () => {
+    vi.useFakeTimers();
+    const stub = stubDnsResolvers({
+      txt: (name) =>
+        name === 'slow.example.com'
+          ? NEVER_SETTLES()
+          : new Promise((resolve) => {
+              setTimeout(() => resolve([['v=spf1 -all']]), 1_500);
+            }),
+    });
+    const dns = createLiveDns({ resolverFactory: stub.factory });
+    const slow = dns.resolveTxt('slow.example.com');
+    await vi.advanceTimersByTimeAsync(1_000);
+    const fast = dns.resolveTxt('fast.example.com');
+    await vi.advanceTimersByTimeAsync(1_500);
+
+    const outcomes = await Promise.all([slow, fast]);
+    expect(`${outcomes.map((outcome) => outcome.kind).join(' ')} cancels ${stub.cancels()}`).toBe('unknown records cancels 1');
+  });
+
+  // The control for every case above: without an injected resolver the guard is what answers, and
+  // the adapter must read that refusal as unknown for the guard's own reason, not by accident.
+  it('reads unknown on a real Resolver under the test guard, and the error it caught is the guard refusal', async () => {
+    const caught: unknown[] = [];
+    const watched = async <T>(lookup: () => Promise<T>): Promise<T> => {
+      try {
+        return await lookup();
+      } catch (error) {
+        caught.push(error);
+        throw error;
+      }
+    };
+    const realResolvers: DnsResolverFactory = (options) => {
+      const real = new dnsPromises.Resolver(options);
+      return {
+        resolveTxt: (name) => watched(() => real.resolveTxt(name)),
+        resolveMx: (name) => watched(() => real.resolveMx(name)),
+        cancel: () => real.cancel(),
+      };
+    };
+    const dns = createLiveDns({ resolverFactory: realResolvers });
+
+    const txt = await dns.resolveTxt('example.com');
+    const mx = await dns.resolveMx('example.com');
+    expect(`${txt.kind} ${mx.kind}`).toBe('unknown unknown');
+    expect(caught.map((error) => (error as Error).name).join(' ')).toBe('NetworkGuardError NetworkGuardError');
+    expect(caught[0]).toBeInstanceOf(NetworkGuardError);
+    expect((await createLiveDns().resolveTxt('example.com')).kind).toBe('unknown');
+  });
+
+  it('resolves the dns row live in deployed whatever the switch, looking up through liveClients.dnsResolver', async () => {
+    for (const switchValue of [undefined, 'live']) {
+      const stub = stubDnsResolvers({ mx: async () => [{ exchange: 'MX.Example.com.', priority: 10 }] });
+      const { ports, kinds } = resolvePortTable({
+        runtimeContext: 'deployed',
+        switchValue,
+        liveClients: { dnsResolver: stub.factory },
+        dryRunSink: () => {},
+      });
+      expect(`${kinds.dns?.resolveMx} ${kinds.dns?.resolveTxt} built ${stub.built.length}`).toBe('live live built 0');
+      expect(JSON.stringify(await ports.dns.resolveMx('example.com'))).toBe('{"kind":"records","exchanges":["mx.example.com"]}');
+      expect(stub.built.length).toBe(1);
+    }
   });
 });
 

@@ -1,6 +1,7 @@
 import type { Message, ModelStreamEvent, StreamOptions } from '@strands-agents/sdk';
 import { lanePartitionKey, type EventRecord, type RecordKey } from '@fothering/core/records';
 import type { AddressKeySet } from '@fothering/core/address';
+import type { DnsMxOutcome, DnsTxtOutcome } from '@fothering/core/evidence-rows';
 import type { LaneFold } from '@fothering/core/window-fold';
 
 export interface EventStorePort {
@@ -178,7 +179,7 @@ export interface FixtureOptions {
   eventStoreFailure?: 'put';
   deadLetterFailure?: 'send';
   /** A call with no matching recording throws instead of answering, so a test cannot pass on an invented reply. */
-  recordings?: Partial<Record<'ses' | 'agentCore' | 'replyBucket', readonly Recording[]>>;
+  recordings?: Partial<Record<'ses' | 'dns' | 'agentCore' | 'replyBucket', readonly Recording[]>>;
   /** The scripted model the bedrockModel row streams from in 'test'; without one every call misses. */
   model?: BedrockModelPort;
   /** An in-process runtime handler the agentCore row hands each payload to in 'test', in place of a recording (D-80). */
@@ -206,8 +207,10 @@ export type KindTable = Readonly<Record<string, Readonly<Record<string, Resolved
  * Each key holds one of three shapes: an already-built SDK client, a zero-argument factory that
  * returns one, or nothing (the adapter constructs its own client, lazily, on first use). Tests
  * pass a counting factory here to prove a client is built once and only when a port method runs.
+ * 'dnsResolver' is the one exception: a factory that takes the resolver options, since the DNS
+ * adapter builds a resolver per lookup.
  */
-export type LiveClients = Partial<Record<'dynamoDb' | 'secretsManager' | 'sqs' | 'sesv2' | 'bedrockAgentCore', unknown>>;
+export type LiveClients = Partial<Record<'dynamoDb' | 'secretsManager' | 'sqs' | 'sesv2' | 'bedrockAgentCore' | 'dnsResolver', unknown>>;
 
 export interface LiveConfig {
   tableName?: string;
@@ -266,6 +269,12 @@ export interface SesReadPort {
   /** Every configuration set SES holds in the Region, so the check can see one lanes.json leaves out. */
   listConfigurationSets(): Promise<string[]>;
   getConfigurationSetEventDestinations(configurationSetName: string): Promise<EventDestinationFact[]>;
+}
+
+/** Reads only: a lookup changes nothing and costs nothing, so the row stays live in 'deployed' whatever the switch (D-58). */
+export interface DnsPort {
+  resolveMx(name: string): Promise<DnsMxOutcome>;
+  resolveTxt(name: string): Promise<DnsTxtOutcome>;
 }
 
 export interface SendEmailRequest {

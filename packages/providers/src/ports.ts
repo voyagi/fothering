@@ -11,6 +11,7 @@ import type {
   BedrockModelPort,
   DeadLetterPort,
   DecisionStorePort,
+  DnsPort,
   EventStorePort,
   FixtureOptions,
   ReplyBucketPort,
@@ -31,9 +32,16 @@ import {
   createFixtureDecisionStore,
   createFixtureEventStore,
 } from './fixtures/ingest-ports.js';
-import { createFixtureAgentCore, createFixtureBedrockModel, createFixtureReplyBucket, createFixtureSes } from './fixtures/later-ports.js';
+import {
+  createFixtureAgentCore,
+  createFixtureBedrockModel,
+  createFixtureDns,
+  createFixtureReplyBucket,
+  createFixtureSes,
+} from './fixtures/later-ports.js';
 import { lazyClient } from './live/lazy-client.js';
 import { createLiveAgentCore, createLiveBedrockModel } from './live/agent-adapters.js';
+import { createLiveDns, type DnsResolverFactory } from './live/dns.js';
 import { createDynamoDecisionStore, createDynamoEventStore } from './live/event-store.js';
 import { createSecretsManagerAddressKey } from './live/address-key.js';
 import { createSqsDeadLetter } from './live/dead-letter.js';
@@ -58,6 +66,7 @@ export type PortName =
   | 'addressKey'
   | 'deadLetter'
   | 'ses'
+  | 'dns'
   | 'bedrockModel'
   | 'agentCore'
   | 'replyBucket';
@@ -104,6 +113,7 @@ export interface ResolvedPorts {
   addressKey: AddressKeyPort;
   deadLetter: DeadLetterPort;
   ses: SesPort;
+  dns: DnsPort;
   bedrockModel: BedrockModelPort;
   agentCore: AgentCorePort;
   replyBucket: ReplyBucketPort;
@@ -190,6 +200,17 @@ export const PORT_TABLE = {
       brandPort(createSesReads({ client: resolveLiveClient(liveClients.sesv2, () => new SESv2Client({ region: LIVE_REGION })) }), 'live'),
     notBuiltOperations: { pauseConfigurationSet: 3, reopenConfigurationSet: 3, sendEmail: 4 },
     dryRun: (log: DryRunLog) => createSesDryRun(log),
+  },
+  // R6 reads the ROADMAP's "DNS behind the dry-run gate" as DNS behind this table: recorded answers in
+  // 'test', so no test or CI run ever queries DNS, and live in 'deployed' whatever the switch, the
+  // treatment SAFE-01 gives the SES reads, since a lookup changes nothing and costs nothing.
+  dns: {
+    operations: ['resolveMx', 'resolveTxt'],
+    mutatingOperations: [],
+    gatedOperations: [],
+    fixture: (fixtures: FixtureOptions) => createFixtureDns({ recordings: fixtures.recordings?.dns ?? [] }),
+    live: ({ liveClients }) =>
+      brandPort(createLiveDns({ resolverFactory: liveClients.dnsResolver as DnsResolverFactory | undefined }), 'live'),
   },
   bedrockModel: {
     operations: ['stream'],

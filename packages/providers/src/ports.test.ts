@@ -265,17 +265,27 @@ describe('resolvePortTable with live adapters written as classes', () => {
 });
 
 describe('the real port table', () => {
-  it('names the eight rows', () => {
+  it('names the nine rows', () => {
     expect(Object.keys(PORT_TABLE).sort()).toEqual([
       'addressKey',
       'agentCore',
       'bedrockModel',
       'deadLetter',
       'decisionStore',
+      'dns',
       'eventStore',
       'replyBucket',
       'ses',
     ]);
+  });
+
+  // D-58, R6: a lookup changes nothing and costs nothing, so no switch owns it and no recorder stands in for it.
+  it('gives the dns row two reads, neither mutating nor gated, with no dry-run recorder', () => {
+    const row: PortRow = PORT_TABLE.dns;
+    expect(row.operations.join(' ')).toBe('resolveMx resolveTxt');
+    expect(row.mutatingOperations.join(' ')).toBe('');
+    expect(row.gatedOperations.join(' ')).toBe('');
+    expect(row.dryRun).toBeUndefined();
   });
 
   // AC-P6, store half: the caps hold only if no process can take a counter back down, so the row
@@ -342,9 +352,9 @@ describe('the real port table', () => {
     expect(lines).toEqual([]);
   });
 
-  it.each(SWITCH_VALUES)('resolves all eight rows to fixture in test for switch %j', (switchValue) => {
+  it.each(SWITCH_VALUES)('resolves all nine rows to fixture in test for switch %j', (switchValue) => {
     const { kinds } = resolvePortTable({ runtimeContext: 'test', switchValue });
-    expect(Object.keys(kinds)).toHaveLength(8);
+    expect(Object.keys(kinds)).toHaveLength(9);
     for (const row of Object.values(kinds)) {
       for (const kind of Object.values(row)) expect(kind).toBe('fixture');
     }
@@ -354,6 +364,8 @@ describe('the real port table', () => {
   // is exactly live, and only then is it the not-built phase; an ungated one is live or not built.
   it.each<[string, string, ResolvedKind, ResolvedKind]>([
     ['ses', 'getEmailIdentity', 'live', 'live'],
+    ['dns', 'resolveMx', 'live', 'live'],
+    ['dns', 'resolveTxt', 'live', 'live'],
     ['ses', 'pauseConfigurationSet', 'dry-run', 'not-built-until-phase-3'],
     ['ses', 'reopenConfigurationSet', 'dry-run', 'not-built-until-phase-3'],
     ['ses', 'sendEmail', 'dry-run', 'not-built-until-phase-4'],
@@ -809,6 +821,34 @@ describe('recorded fixtures (AC-E5)', () => {
     await expect(ses.getEmailIdentity('example.org')).resolves.toBe('fothering-default');
     await expect(ses.getEmailIdentity('example.net')).resolves.toBeUndefined();
     await expect(ses.getEmailIdentity('example.com')).rejects.toThrow(FixtureMissError);
+  });
+
+  // D-26: the dns row answers in test only from recordings, so no test or CI run ever reaches DNS (R6).
+  it('answers the dns row in test from recordings under dns.resolveMx and dns.resolveTxt', async () => {
+    const { ports } = resolvePortTable({
+      runtimeContext: 'test',
+      switchValue: 'live',
+      fixtures: {
+        recordings: {
+          dns: [
+            { operation: 'dns.resolveMx', request: 'example.com', response: { kind: 'records', exchanges: ['mx.example.com'] } },
+            { operation: 'dns.resolveTxt', request: '_dmarc.example.com', response: { kind: 'missing' } },
+            { operation: 'dns.resolveTxt', request: 'example.com', response: { kind: 'unknown' } },
+          ],
+        },
+      },
+    });
+    await expect(ports.dns.resolveMx('example.com')).resolves.toEqual({ kind: 'records', exchanges: ['mx.example.com'] });
+    await expect(ports.dns.resolveTxt('_dmarc.example.com')).resolves.toEqual({ kind: 'missing' });
+    await expect(ports.dns.resolveTxt('example.com')).resolves.toEqual({ kind: 'unknown' });
+  });
+
+  it.each(['resolveMx', 'resolveTxt'] as const)('rejects dns.%s with FixtureMissError naming the operation for an unrecorded name', async (operation) => {
+    const { ports } = resolvePortTable({ runtimeContext: 'test', switchValue: undefined });
+    const refusal = await ports.dns[operation]('example.org').catch((error: unknown) => error);
+    expect(refusal).toBeInstanceOf(FixtureMissError);
+    expect((refusal as FixtureMissError).operation).toBe(`dns.${operation}`);
+    expect((refusal as FixtureMissError).message).not.toContain('example.org');
   });
 
   it('matches a request whatever order its properties were written in, and hands out copies', () => {

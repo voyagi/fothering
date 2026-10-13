@@ -44,6 +44,11 @@ export const EXPECTED_KINDS: Readonly<Record<string, Readonly<Record<string, Kin
     reopenConfigurationSet: ['fixture', 'dry-run', 'not-built-until-phase-3'],
     sendEmail: ['fixture', 'dry-run', 'not-built-until-phase-4'],
   },
+  // R6: recorded in test, live in deployed whatever the switch.
+  dns: {
+    resolveMx: ['fixture', 'live', 'live'],
+    resolveTxt: ['fixture', 'live', 'live'],
+  },
   bedrockModel: {
     stream: ['fixture', 'dry-run', 'live'],
   },

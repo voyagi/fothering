@@ -2,6 +2,7 @@ import type {
   AgentCorePort,
   AgentRuntimeRequest,
   BedrockModelPort,
+  DnsPort,
   EventDestinationFact,
   Recording,
   ReplyBucketPort,
@@ -38,6 +39,20 @@ export function createFixtureSes(options: FixtureMutatingOptions): SesPort {
         return recorded.respond<EventDestinationFact[]>('ses.getConfigurationSetEventDestinations', configurationSetName);
       },
       ...createSesDryRun(options.dryRun),
+    },
+    'fixture',
+  );
+}
+
+export function createFixtureDns(_options: FixtureRecordingOptions): DnsPort {
+  return brandPort(
+    {
+      async resolveMx() {
+        return { kind: 'unknown' as const };
+      },
+      async resolveTxt() {
+        return { kind: 'unknown' as const };
+      },
     },
     'fixture',
   );
