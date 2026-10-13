@@ -337,16 +337,12 @@ describe('the agent bundle answers the AgentCore contract with the real handler 
       const host = '127.0.0.1';
 
       // No deploy variable and the listen guard preloaded: the runtime must choose loopback on its
-      // own, or the guard ends it before it answers a single ping. No live switch either, so the
-      // model row is the dry-run recorder.
+      // own, or the guard ends it before it answers a single ping. The suite's global setup refuses
+      // to start with the live switch set, so the child's model row is the dry-run recorder.
       child = spawn(
         process.execPath,
         ['--import', pathToFileURL(preloadOut).href, '--import', pathToFileURL(listenGuard).href, 'main.js', '--port', String(port)],
-        {
-          cwd: outDir,
-          env: { ...process.env, FOTHERING_DEPLOYED_RUNTIME: undefined, FOTHERING_LIVE: undefined },
-          stdio: ['ignore', 'pipe', 'pipe'],
-        },
+        { cwd: outDir, env: { ...process.env, FOTHERING_DEPLOYED_RUNTIME: undefined }, stdio: ['ignore', 'pipe', 'pipe'] },
       );
       let output = '';
       const collect = (chunk: Buffer): void => {
