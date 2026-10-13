@@ -1,9 +1,22 @@
 import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
 import lanesJson from '../../../lanes.json' with { type: 'json' };
-import { EXPLANATION_CHECKS, validateExplanation, type ExplanationContext } from './agent-answer.js';
-import { canonicalJson, type EvidenceRecord } from './evidence-record.js';
+import {
+  AGENT_UNAVAILABLE_REASONS,
+  EXPLANATION_CHECKS,
+  INVALID_CHECKS,
+  RETRYABLE_UNAVAILABLE_REASONS,
+  agentAnswerSchema,
+  classifyRuntimeOutcome,
+  validateDecision,
+  validateExplanation,
+  type ExplanationContext,
+  type RuntimeOutcome,
+  type RuntimeResult,
+} from './agent-answer.js';
+import { canonicalJson, optionIdFor, type EvidenceRecord } from './evidence-record.js';
 import { parseLaneMap } from './lanes.js';
+import { PINNED_MODEL_VALUES } from './model-values.js';
 import { recordFor, type CycleStory } from './test/decision-cycle.js';
 import { propertySeed } from './test/property-seed.js';
 
@@ -209,4 +222,243 @@ describe('validateExplanation (D-78, R12)', () => {
       { seed: propertySeed(), numRuns: 300 },
     );
   });
+});
+
+type DecisionValidator = (raw: unknown, approvedOptionIds: readonly string[]) => { ok: boolean };
+
+const APPROVED_IDS = APPROVED.approvedOptions.map((option) => option.optionId);
+const APPROVED_ID = APPROVED_IDS[0] ?? '';
+const COMBINING_ACUTE = String.fromCharCode(0x301);
+
+// Latin letters an approved id can hold, each beside a Cyrillic and a Greek look-alike.
+const CONFUSABLES: Readonly<Record<string, readonly string[]>> = {
+  o: [String.fromCharCode(0x43e), String.fromCharCode(0x3bf)],
+  p: [String.fromCharCode(0x440), String.fromCharCode(0x3c1)],
+  e: [String.fromCharCode(0x435), String.fromCharCode(0x3b5)],
+  c: [String.fromCharCode(0x441), String.fromCharCode(0x3f2)],
+  a: [String.fromCharCode(0x430), String.fromCharCode(0x3b1)],
+};
+
+function confusableVariants(id: string): string[] {
+  return [...id].flatMap((char, index) => (CONFUSABLES[char] ?? []).map((lookAlike) => `${id.slice(0, index)}${lookAlike}${id.slice(index + 1)}`));
+}
+
+const FIXED_VARIANTS = [
+  APPROVED_ID.toUpperCase(),
+  ` ${APPROVED_ID}`,
+  `${APPROVED_ID} `,
+  `\t${APPROVED_ID}\n`,
+  ...confusableVariants(APPROVED_ID),
+  `${APPROVED_ID}${COMBINING_ACUTE}`,
+  `${APPROVED_ID}${COMBINING_ACUTE}`.normalize('NFC'),
+  `${APPROVED_ID}${COMBINING_ACUTE}`.normalize('NFD'),
+  optionIdFor(UNSETTLED.incidentId, 0),
+  optionIdFor(DIGIT_BATCH.incidentId, 0),
+  optionIdFor(APPROVED.incidentId, 1),
+  '',
+  '   ',
+];
+
+const optionIdCandidate = fc.oneof(
+  fc.constant(APPROVED_ID),
+  fc.constantFrom(...FIXED_VARIANTS),
+  fc
+    .tuple(fc.nat(APPROVED_ID.length), fc.nat(APPROVED_ID.length))
+    .map(([from, to]) => APPROVED_ID.slice(Math.min(from, to), Math.max(from, to)))
+    .filter((part) => part !== APPROVED_ID),
+  fc.array(fc.boolean(), { minLength: APPROVED_ID.length, maxLength: APPROVED_ID.length }).map((upper) =>
+    [...APPROVED_ID].map((char, index) => (upper[index] === true ? char.toUpperCase() : char)).join(''),
+  ),
+  fc.string({ minLength: 1, maxLength: 1 }).map((extra) => `${APPROVED_ID}${extra}`),
+  fc.stringMatching(/^opt-[0-9a-f]{24}$/),
+  fc.string(),
+);
+
+const answerCandidate: fc.Arbitrary<unknown> = fc.oneof(
+  fc.record({ decision: fc.constant('close'), optionId: optionIdCandidate, explanation: fc.string() }),
+  fc.record({ decision: fc.constant('unknown'), explanation: fc.string() }),
+  fc.record({ decision: fc.constant('unknown'), optionId: optionIdCandidate, explanation: fc.string() }),
+  fc.record({ decision: fc.constant('close'), explanation: fc.string() }),
+  fc.record({ decision: fc.constantFrom('close', 'unknown'), optionId: optionIdCandidate, explanation: fc.string(), note: fc.string() }),
+  fc.record({ decision: fc.string(), optionId: optionIdCandidate, explanation: fc.string() }),
+  fc.anything(),
+  fc.string(),
+  fc.double(),
+  fc.array(fc.anything()),
+  fc.object(),
+);
+
+// Written apart from the schema: the only answers to accept are a well-formed unknown and a close
+// whose option id is byte-equal to an approved one.
+function acceptable(raw: unknown, approvedOptionIds: readonly string[]): boolean {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return false;
+  const answer = raw as Record<string, unknown>;
+  const keys = Object.keys(answer).sort().join(',');
+  if (typeof answer.explanation !== 'string') return false;
+  if (answer.decision === 'unknown') return keys === 'decision,explanation';
+  if (answer.decision !== 'close' || keys !== 'decision,explanation,optionId') return false;
+  return approvedOptionIds.some((id) => id === answer.optionId);
+}
+
+function decisionProperty(validator: DecisionValidator): fc.IPropertyWithHooks<[unknown, readonly string[]]> {
+  return fc.property(answerCandidate, fc.constantFrom<readonly string[]>(APPROVED_IDS, []), (raw, approvedOptionIds) => {
+    return validator(raw, approvedOptionIds).ok === acceptable(raw, approvedOptionIds);
+  });
+}
+
+function plantedValidator(matches: (approved: string, candidate: string) => boolean): DecisionValidator {
+  return (raw, approvedOptionIds) => {
+    const parsed = agentAnswerSchema.safeParse(raw);
+    if (!parsed.success) return { ok: false };
+    const { decision, optionId } = parsed.data;
+    if (decision === 'unknown') return { ok: true };
+    return { ok: optionId !== undefined && approvedOptionIds.some((id) => matches(id, optionId)) };
+  };
+}
+
+describe('validateDecision (AC-15, D-74)', () => {
+  it('accepts exactly the byte-equal approved ids and every well-formed unknown', () => {
+    fc.assert(decisionProperty(validateDecision), { seed: propertySeed(), numRuns: 2000 });
+  });
+
+  it('the property catches a validator comparing with includes()', () => {
+    const planted = plantedValidator((approved, candidate) => approved.includes(candidate));
+    expect(fc.check(decisionProperty(planted), { seed: propertySeed(), numRuns: 2000 }).failed).toBe(true);
+  });
+
+  it('the property catches a validator comparing case-insensitively', () => {
+    const planted = plantedValidator((approved, candidate) => approved.toLowerCase() === candidate.toLowerCase());
+    expect(fc.check(decisionProperty(planted), { seed: propertySeed(), numRuns: 2000 }).failed).toBe(true);
+  });
+
+  it('rejects a close with an empty, missing or whitespace-only option id (AC-E36)', () => {
+    for (const answer of [
+      { decision: 'close', optionId: '', explanation: 'x' },
+      { decision: 'close', explanation: 'x' },
+      { decision: 'close', optionId: '   ', explanation: 'x' },
+    ]) {
+      expect(validateDecision(answer, ['', '   ', ...APPROVED_IDS]).ok).toBe(false);
+    }
+  });
+
+  it('gives the same verdict in any key order and rejects any extra field (AC-E37)', () => {
+    const forward = { decision: 'close', optionId: APPROVED_ID, explanation: 'x' };
+    const backward = { explanation: 'x', optionId: APPROVED_ID, decision: 'close' };
+    expect(validateDecision(forward, APPROVED_IDS).ok).toBe(true);
+    expect(validateDecision(backward, APPROVED_IDS).ok).toBe(true);
+    expect(validateDecision({ ...forward, confidence: 'high' }, APPROVED_IDS).ok).toBe(false);
+    expect(validateDecision({ decision: 'unknown', explanation: 'x', target: BULK }, APPROVED_IDS).ok).toBe(false);
+  });
+});
+
+const PROMPT_SHA = 'a'.repeat(64);
+const USAGE = { inputTokens: 900, outputTokens: 80, totalTokens: 980 };
+const NO_USAGE = { inputTokens: 0, outputTokens: 0, totalTokens: 0 };
+
+function answered(answer: unknown): RuntimeResult {
+  return { status: 'answered', answer, pinned: { ...PINNED_MODEL_VALUES }, promptSha256: PROMPT_SHA, usage: USAGE, modelCalls: 1 };
+}
+
+function returned(response: unknown): RuntimeOutcome {
+  return { kind: 'returned', response };
+}
+
+const OUTCOME_CONTEXT = { record: APPROVED, laneMapSets: LANE_MAP_SETS };
+
+describe('classifyRuntimeOutcome (D-77)', () => {
+  it('names the five unavailable reasons, the three retryable ones and the closed invalid checks', () => {
+    expect(AGENT_UNAVAILABLE_REASONS).toEqual(['agent-error', 'agent-timeout', 'cap-reached', 'response-invalid', 'agent-dry-run']);
+    expect(RETRYABLE_UNAVAILABLE_REASONS).toEqual(['agent-error', 'agent-timeout', 'response-invalid']);
+    expect(INVALID_CHECKS).toEqual([
+      'schema',
+      'option-id',
+      'number',
+      'url',
+      'command-word',
+      'set-name',
+      'phrase',
+      'paragraph',
+      'length',
+      'empty',
+      'model-call-ceiling',
+      'input-ceiling',
+      'structured-output',
+      'loop-limit',
+      'runtime-result',
+    ]);
+    for (const entry of EXPLANATION_CHECKS) expect(INVALID_CHECKS).toContain(entry.check);
+  });
+
+  it('validates an answered close on the approved option and carries its option id', () => {
+    const answer = { decision: 'close', optionId: APPROVED_ID, explanation: F1 };
+    expect(classifyRuntimeOutcome(returned(answered(answer)), OUTCOME_CONTEXT)).toEqual({ kind: 'validated', answer });
+  });
+
+  it('validates an answered unknown with a clean explanation', () => {
+    const answer = { decision: 'unknown', explanation: 'the table does not settle one cause' };
+    expect(classifyRuntimeOutcome(returned(answered(answer)), { record: UNSETTLED, laneMapSets: LANE_MAP_SETS })).toEqual({ kind: 'validated', answer });
+  });
+
+  const PLANTED = 'QZVX planted words';
+  const cases: readonly { name: string; outcome: RuntimeOutcome; context?: ExplanationContext['record']; expected: unknown }[] = [
+    { name: 'an answer failing the schema', outcome: returned(answered({ decision: 'close', explanation: PLANTED })), expected: { reason: 'response-invalid', check: 'schema' } },
+    {
+      name: 'a close on an unapproved option',
+      outcome: returned(answered({ decision: 'close', optionId: APPROVED_ID.toUpperCase(), explanation: PLANTED })),
+      expected: { reason: 'response-invalid', check: 'option-id' },
+    },
+    {
+      name: 'a close on a record with no approved option',
+      outcome: returned(answered({ decision: 'close', optionId: APPROVED_ID, explanation: PLANTED })),
+      context: UNSETTLED,
+      expected: { reason: 'response-invalid', check: 'option-id' },
+    },
+    {
+      name: 'an explanation with a URL',
+      outcome: returned(answered({ decision: 'close', optionId: APPROVED_ID, explanation: `${PLANTED} https://example.com` })),
+      expected: { reason: 'response-invalid', check: 'url' },
+    },
+    {
+      name: 'an explanation with a stray number',
+      outcome: returned(answered({ decision: 'unknown', explanation: `${PLANTED} 424242` })),
+      expected: { reason: 'response-invalid', check: 'number' },
+    },
+    ...(['model-call-ceiling', 'input-ceiling', 'structured-output', 'loop-limit'] as const).map((reason) => ({
+      name: `failed ${reason}`,
+      outcome: returned({ status: 'failed', reason, pinned: { ...PINNED_MODEL_VALUES }, promptSha256: PROMPT_SHA, usage: USAGE, modelCalls: 2 }),
+      expected: { reason: 'response-invalid', check: reason },
+    })),
+    {
+      name: 'failed deadline',
+      outcome: returned({ status: 'failed', reason: 'deadline', pinned: { ...PINNED_MODEL_VALUES }, promptSha256: PROMPT_SHA, usage: USAGE, modelCalls: 1 }),
+      expected: { reason: 'agent-timeout' },
+    },
+    {
+      name: 'failed model-error',
+      outcome: returned({ status: 'failed', reason: 'model-error', pinned: { ...PINNED_MODEL_VALUES }, promptSha256: PROMPT_SHA, usage: USAGE, modelCalls: 1 }),
+      expected: { reason: 'agent-error' },
+    },
+    ...(['payload-invalid', 'hash-mismatch', 'record-too-large'] as const).map((reason) => ({
+      name: `refused ${reason}`,
+      outcome: returned({ status: 'refused', reason, pinned: { ...PINNED_MODEL_VALUES }, promptSha256: PROMPT_SHA, usage: NO_USAGE, modelCalls: 0 }),
+      expected: { reason: 'agent-error' },
+    })),
+    {
+      name: 'a dry-run result',
+      outcome: returned({ status: 'dry-run', pinned: { ...PINNED_MODEL_VALUES }, promptSha256: PROMPT_SHA }),
+      expected: { reason: 'agent-dry-run' },
+    },
+    { name: 'a response that is not a runtime result', outcome: returned({ status: 'answered', answer: PLANTED }), expected: { reason: 'response-invalid', check: 'runtime-result' } },
+    { name: 'a plain-text response', outcome: returned(PLANTED), expected: { reason: 'response-invalid', check: 'runtime-result' } },
+    { name: 'a thrown invocation', outcome: { kind: 'threw', callerAborted: false }, expected: { reason: 'agent-error' } },
+    { name: "a thrown invocation after the caller's abort fired", outcome: { kind: 'threw', callerAborted: true }, expected: { reason: 'agent-timeout' } },
+  ];
+
+  for (const testCase of cases) {
+    it(`maps ${testCase.name} to one named reason and holds no model text`, () => {
+      const result = classifyRuntimeOutcome(testCase.outcome, { record: testCase.context ?? APPROVED, laneMapSets: LANE_MAP_SETS });
+      expect(canonicalJson(result)).toBe(canonicalJson({ kind: 'unavailable', ...(testCase.expected as object) }));
+      expect(JSON.stringify(result)).not.toContain('QZVX');
+    });
+  }
 });

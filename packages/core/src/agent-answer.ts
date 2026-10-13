@@ -257,3 +257,42 @@ export function validateExplanation(
   const failed = checks.find((entry) => !entry.holds(text, context));
   return failed === undefined ? { ok: true } : { ok: false, check: failed.check };
 }
+
+export const AGENT_UNAVAILABLE_REASONS = ['agent-error', 'agent-timeout', 'cap-reached', 'response-invalid', 'agent-dry-run'] as const;
+export type AgentUnavailableReason = (typeof AGENT_UNAVAILABLE_REASONS)[number];
+
+export const RETRYABLE_UNAVAILABLE_REASONS = ['agent-error', 'agent-timeout', 'response-invalid'] as const satisfies readonly AgentUnavailableReason[];
+
+export const INVALID_CHECKS = [
+  'schema',
+  'option-id',
+  'number',
+  'url',
+  'command-word',
+  'set-name',
+  'phrase',
+  'paragraph',
+  'length',
+  'empty',
+  'model-call-ceiling',
+  'input-ceiling',
+  'structured-output',
+  'loop-limit',
+  'runtime-result',
+] as const;
+export type InvalidCheck = (typeof INVALID_CHECKS)[number];
+
+export type RuntimeOutcome = { kind: 'returned'; response: unknown } | { kind: 'threw'; callerAborted: boolean };
+
+export interface OutcomeContext {
+  record: EvidenceRecord;
+  laneMapSets: readonly string[];
+}
+
+export type ClassifiedOutcome =
+  | { kind: 'validated'; answer: AgentAnswer }
+  | { kind: 'unavailable'; reason: AgentUnavailableReason; check?: InvalidCheck };
+
+export function classifyRuntimeOutcome(_outcome: RuntimeOutcome, _context: OutcomeContext): ClassifiedOutcome {
+  return { kind: 'unavailable', reason: 'agent-error' };
+}
