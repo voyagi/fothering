@@ -4,6 +4,7 @@ import lanesJson from '../../../lanes.json' with { type: 'json' };
 import {
   assembleEvidenceRecord,
   decideCycle,
+  decideFromEvidence,
   fixFor,
   isolationVerdict,
   questionFor,
@@ -629,5 +630,58 @@ describe('the evidence record is assembled once with its question or fix (D-70)'
       const lowered = canonicalJson(recordOf(paired)).toLowerCase();
       for (const phrase of ['ses bounce rate', 'ses complaint rate', 'your bounce rate']) expect(lowered, paired.name).not.toContain(phrase);
     }
+  });
+});
+
+describe('the decision recomputes from the record alone (decideFromEvidence)', () => {
+  const RECORDED = [ISOLATING, ...TWINS, TWO_CAUSES, dmarcStory(SPAM_BLOCK), dmarcStory(AUTH_FAILED)];
+
+  it('returns the stored approval of the isolating record', () => {
+    expect(decideFromEvidence(recordOf(ISOLATING)).outcome).toBe('approved');
+  });
+
+  it.each(RECORDED.map((paired) => [paired.name, paired] as const))('reproduces every stored decision of %s', (_name, paired) => {
+    const lanes = [...decisionsOf(paired).keys()];
+    expect(lanes.length).toBeGreaterThan(0);
+    for (const lane of lanes) {
+      const record = recordOf(paired, lane);
+      expect(decideFromEvidence(record), lane).toEqual({ outcome: record.decision.outcome, reason: record.decision.reason });
+    }
+  });
+
+  it('reads unknown not-settled when the cause row is edited below the threshold', () => {
+    const record = recordOf(ISOLATING);
+    const edited: EvidenceRecord = {
+      ...record,
+      rows: record.rows.map((row) => (row.dimension === 'batch' && row.value === 'import-0915' ? { ...row, permanentBounces: 0 } : row)),
+    };
+    expect(decideFromEvidence(edited)).toEqual({ outcome: 'unknown', reason: 'not-settled' });
+  });
+
+  it('judges rows by their counts, not by the verdict stored beside them', () => {
+    const record = recordOf(twinNamed('two bad batches on that lane'));
+    const edited: EvidenceRecord = { ...record, rows: record.rows.map((row) => (row.value === 'import-0915' ? { ...row, verdict: 'cause' } : row)) };
+    expect(decideFromEvidence(edited)).toEqual({ outcome: 'unknown', reason: 'not-settled' });
+  });
+
+  it('reads unknown not-closeable when the stored closeability is changed to refused', () => {
+    const record = recordOf(ISOLATING);
+    const edited: EvidenceRecord = { ...record, decision: { ...record.decision, closeability: { state: 'refused', reasons: ['transactional'] } } };
+    expect(decideFromEvidence(edited)).toEqual({ outcome: 'unknown', reason: 'not-closeable' });
+  });
+
+  it('never approves a record whose isolation is not confined', () => {
+    const record = recordOf(ISOLATING);
+    expect(decideFromEvidence({ ...record, isolation: 'spread-account' }).outcome).not.toBe('approved');
+  });
+
+  it('keeps a record past the byte ceiling at record-too-large', () => {
+    const { analyses } = cycleOf(ISOLATING.laneMap, ISOLATING.story);
+    const decision = decideCycle(analyses, ISOLATING.laneMap).get(BULK);
+    const bulk = analyses.find((analysis) => analysis.lane.configurationSet === BULK);
+    if (decision === undefined || bulk === undefined) throw new Error('the cycle decides the bulk lane');
+    const padded: LaneAnalysis = { ...bulk, rows: Array.from({ length: 60 }, () => bulk.rows).flat() };
+    const record = assembleEvidenceRecord({ incidentId: '0'.repeat(32), analysis: padded, decision, analyses, expiresAt: CYCLE_EXPIRES_AT });
+    expect(decideFromEvidence(record)).toEqual({ outcome: 'unknown', reason: 'record-too-large' });
   });
 });

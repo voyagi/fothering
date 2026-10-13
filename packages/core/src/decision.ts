@@ -454,6 +454,10 @@ function recordInput(input: AssembleInput, decision: CycleDecision): EvidenceRec
   };
 }
 
+export function decideFromEvidence(_record: EvidenceRecord): { outcome: DecisionOutcome; reason: DecisionReason } {
+  return { outcome: 'unknown', reason: 'not-settled' };
+}
+
 /** D-70: assembled once; a record past RECORD_BYTE_CEILING is assembled again as unknown
  * record-too-large with no option, so nothing oversized can ever be offered or sent. */
 export function assembleEvidenceRecord(input: AssembleInput): EvidenceRecord {
