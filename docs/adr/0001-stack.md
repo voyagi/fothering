@@ -27,7 +27,7 @@ Three constraints shape every choice below:
 | SES access | SES API v2 (`@aws-sdk/client-sesv2`) | 3.x |
 | Event destination | EventBridge (default bus) | |
 | Event store | DynamoDB, on demand, TTL | |
-| Infrastructure | AWS CDK in TypeScript | `aws-cdk-lib` 2.269.0 |
+| Infrastructure | AWS CDK in TypeScript | `aws-cdk-lib` 2.273.0 |
 | Site | Astro, static output, at `packages/web` inside the existing `packages/*` workspace glob | 7.3.2 |
 | Site host | Cloudflare Workers with static assets | `wrangler` 4.x |
 | Schemas | zod | 4.x |
@@ -39,7 +39,7 @@ Three constraints shape every choice below:
 - AWS documents a TypeScript Strands agent deployed to AgentCore Runtime as a code package: [Get started with the AgentCore CLI in TypeScript](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-get-started-cli-typescript.html). The CLI compiles the agent, packages it as a CodeZip archive and deploys it through the AWS CDK. The runtime is arm64 only.
 - `NODE_22` is the one Node.js runtime for direct code deploy, deprecation 2027-04-30: [Supported language runtimes](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-code-deploy-supported-runtimes.html).
 - Europe (Frankfurt) supports AgentCore Runtime and AgentCore Memory: [Supported AWS Regions](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/agentcore-regions.html).
-- `aws-cdk-lib` 2.269.0 ships `AgentRuntimeArtifact.fromCodeAsset({ path, runtime, entrypoint })` with `AgentCoreRuntime.NODE_22` in `aws-bedrockagentcore/lib/runtime/runtime-artifact.d.ts`.
+- `aws-cdk-lib` 2.273.0 ships `AgentRuntimeArtifact.fromCodeAsset({ path, runtime, entrypoint })` with `AgentCoreRuntime.NODE_22` in `aws-bedrockagentcore/lib/runtime/runtime-artifact.d.ts`.
 
 The one part without an official example is a Node code package deployed through our own CDK app rather than the AgentCore CLI. The CDK module README only shows Python for `fromCodeAsset`. The first deploy of the agent settles it. If it fails, in order:
 
