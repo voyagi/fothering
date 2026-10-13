@@ -9,7 +9,6 @@ import type {
   EventStorePort,
   FixtureOptions,
   FixtureTableState,
-  LaneFoldReader,
   ReservationItem,
   ReservationRequest,
 } from '../port-types.js';
@@ -117,7 +116,7 @@ function laneSnapshot(
 // come out as copies, as they do through the real table, so a caller's later mutation of its
 // own object can never change what is stored. A write leaves one dry-run line when the caller
 // passes a log, and the line comes first, so the intent is on record even for a write that fails.
-export function createFixtureEventStore(options: FixtureOptions = {}, dryRun?: DryRunLog): EventStorePort & LaneFoldReader {
+export function createFixtureEventStore(options: FixtureOptions = {}, dryRun?: DryRunLog): EventStorePort {
   const { items } = options.store ?? createFixtureTableState();
   const pageSize = pageSizeOf(options);
 

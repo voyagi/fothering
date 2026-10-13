@@ -20,6 +20,7 @@ export const EXPECTED_KINDS: Readonly<Record<string, Readonly<Record<string, Kin
     queryByRecipient: ['fixture', 'live', 'live'],
     deleteRecord: ['fixture', 'live', 'live'],
     getRecord: ['fixture', 'live', 'live'],
+    foldLane: ['fixture', 'live', 'live'],
   },
   decisionStore: {
     putIfAbsent: ['fixture', 'live', 'live'],

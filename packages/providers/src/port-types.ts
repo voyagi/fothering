@@ -15,10 +15,7 @@ export interface EventStorePort {
   /** Resolves true when a record was removed, false when none was stored under that key. */
   deleteRecord(key: RecordKey): Promise<boolean>;
   getRecord(key: RecordKey): Promise<EventRecord | undefined>;
-}
-
-/** Reads one lane window page by page into a fold and returns only the fold's final state (D-43). */
-export interface LaneFoldReader {
+  /** Reads one lane window page by page into a fold and returns only the fold's final state (D-43). */
   foldLane<S>(configurationSet: string, fromBucketMs: number, toBucketMs: number, nowMs: number, fold: LaneFold<S>): Promise<S>;
 }
 

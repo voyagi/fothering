@@ -4,6 +4,7 @@ import { pseudonymizeRecipient } from '@fothering/core/address';
 import { RECORD_BYTE_CEILING } from '@fothering/core/evidence-record';
 import { MODEL_VALUES, PINNED_MODEL_VALUES, TOKEN_RESERVATION_PER_INVOCATION } from '@fothering/core/model-values';
 import type { EventRecord, RecordKey } from '@fothering/core/records';
+import type { LaneFold } from '@fothering/core/window-fold';
 import { PORT_TABLE, resolvePortTable, type PortName, type PortRow, type ResolvedPorts } from './ports.js';
 import {
   NotBuiltError,
@@ -84,6 +85,10 @@ class PlantedEventStore {
   async getRecord(): Promise<undefined> {
     this.calls.push('getRecord');
     return undefined;
+  }
+  async foldLane<S>(_configurationSet: string, _fromBucketMs: number, _toBucketMs: number, _nowMs: number, fold: LaneFold<S>): Promise<S> {
+    this.calls.push('foldLane');
+    return fold.initial;
   }
 }
 

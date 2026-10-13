@@ -3,12 +3,13 @@ import fc from 'fast-check';
 import { BedrockAgentCoreClient } from '@aws-sdk/client-bedrock-agentcore';
 import { BedrockModel, Message, TextBlock, type BedrockModelOptions, type ModelStreamEvent } from '@strands-agents/sdk';
 import { MODEL_VALUES } from '@fothering/core/model-values';
-import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
+import { DynamoDBClient, TransactionCanceledException } from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocumentClient } from '@aws-sdk/lib-dynamodb';
 import { SecretsManagerClient } from '@aws-sdk/client-secrets-manager';
 import { SQSClient } from '@aws-sdk/client-sqs';
 import { NotFoundException, SESv2Client, TooManyRequestsException } from '@aws-sdk/client-sesv2';
 import {
+  RETENTION_SECONDS,
   SES_EVENT_TYPES,
   bucketSortKeyPrefix,
   isStorableBucketStart,
@@ -17,8 +18,21 @@ import {
   type RecordKey,
 } from '@fothering/core/records';
 import { selectKeyVersion } from '@fothering/core/address';
+import { BUCKET_MS, bucketStartMs } from '@fothering/core/buckets';
 import { propertySeed } from '@fothering/core/test/property-seed';
-import { findLane } from '@fothering/core/lanes';
+import { scenarioRecords } from '@fothering/core/test/event-arbitraries';
+import {
+  MAX_WINDOW_BUCKETS,
+  WindowTooLongError,
+  createWindowFold,
+  spikeWindowFor,
+  summarizeWindow,
+  type LaneFold,
+  type WindowFoldState,
+} from '@fothering/core/window-fold';
+import { findLane, parseLaneMap } from '@fothering/core/lanes';
+import lanesJson from '../../../../lanes.json' with { type: 'json' };
+import type { ReservationRequest, UsageRecord } from '../port-types.js';
 import { minimizeEvent } from '@fothering/core/minimize';
 import { parseSesEvent } from '@fothering/core/ses-events';
 import { resolvePortTable } from '../ports.js';
@@ -26,7 +40,7 @@ import { SES_READ_SPACING_MS } from '../ses-facts.js';
 import { TEST_ADDRESS_KEY_SET } from '../fixtures/ingest-ports.js';
 import { DOC_EXAMPLE_LANE_MAP, SES_EVENT_FIXTURE_NAMES, loadSesEventFixture } from '../fixtures/ses-events/index.js';
 import { lazyClient } from './lazy-client.js';
-import { createDynamoEventStore } from './event-store.js';
+import { createDynamoDecisionStore, createDynamoEventStore } from './event-store.js';
 import { AddressKeySecretError, createSecretsManagerAddressKey } from './address-key.js';
 import { createSqsDeadLetter } from './dead-letter.js';
 import { createSesReads } from './ses-reads.js';
@@ -656,6 +670,325 @@ describe('an empty configuration value counts as missing', () => {
   it('treats a value of spaces as missing too', async () => {
     const store = createDynamoEventStore({ tableName: '   ', client: dynamoClient });
     await expect(store.getRecord({ pk: 'LANE#x', sk: 'y' })).rejects.toMatchObject({ envVar: 'FOTHERING_TABLE_NAME' });
+  });
+});
+
+const LANES = parseLaneMap(lanesJson);
+const BULK = 'fothering-bulk';
+const FOLD_NOW_MS = Date.UTC(2026, 9, 11, 12, 2, 0);
+
+function bulkSends(count: number): EventRecord[] {
+  const scenario = { configurationSet: BULK, streamTag: 'newsletter', callerIdentity: 'bulk-sender', fromDomain: 'news.example.com' };
+  return scenarioRecords({ ...scenario, groups: [{ bucketOffset: 0, count, deliverRest: false }] }, FOLD_NOW_MS, LANES, TEST_ADDRESS_KEY_SET);
+}
+
+function nthRecord(records: readonly EventRecord[], index: number): EventRecord {
+  const record = records[index];
+  if (record === undefined) throw new Error(`expected a record at ${index}`);
+  return record;
+}
+
+describe('createDynamoEventStore foldLane (R1 live half)', () => {
+  const window = spikeWindowFor(FOLD_NOW_MS);
+
+  it('sends one query per page and folds each page before asking for the next, across three pages (AC-1)', async () => {
+    const client = dynamoClient();
+    const records = bulkSends(3);
+    const pages = [
+      { Items: [nthRecord(records, 0)], LastEvaluatedKey: { pk: 'LANE#fothering-bulk', sk: 'page-1' } },
+      { Items: [], LastEvaluatedKey: { pk: 'LANE#fothering-bulk', sk: 'page-2' } },
+      { Items: [nthRecord(records, 1), nthRecord(records, 2)] },
+    ];
+    const order: string[] = [];
+    let queries = 0;
+    const calls = stubSend(client, (command) => {
+      if (command.name !== 'QueryCommand') throw new Error(`unexpected command ${command.name}`);
+      queries += 1;
+      order.push(`query ${queries}`);
+      return pages[queries - 1];
+    });
+    const base = createWindowFold({ lane: BULK, window, nowMs: FOLD_NOW_MS });
+    const fold: LaneFold<WindowFoldState> = {
+      initial: base.initial,
+      step: (state, page) => {
+        order.push(`step ${page.length}`);
+        return base.step(state, page);
+      },
+    };
+    const store = createDynamoEventStore({ tableName: 'events', client: () => client });
+
+    const state = await store.foldLane(BULK, window.fromBucketMs, window.toBucketMs, FOLD_NOW_MS, fold);
+
+    expect(order.join(', ')).toBe('query 1, step 1, query 2, step 0, query 3, step 2');
+    expect(summarizeWindow(state).totals.recipientSends).toBe(3);
+    expect(calls).toHaveLength(3);
+    for (const call of calls) {
+      expect(call.input).toMatchObject({
+        TableName: 'events',
+        KeyConditionExpression: 'pk = :pk AND sk BETWEEN :from AND :to',
+        FilterExpression: 'expiresAt > :now',
+        ExpressionAttributeValues: {
+          ':pk': 'LANE#fothering-bulk',
+          ':from': bucketSortKeyPrefix(window.fromBucketMs),
+          ':to': `${bucketSortKeyPrefix(window.toBucketMs)}￿`,
+          ':now': Math.floor(FOLD_NOW_MS / 1000),
+        },
+      });
+    }
+    const startKeys = calls.map((call) => (call.input as { ExclusiveStartKey?: { sk: string } }).ExclusiveStartKey?.sk ?? 'none');
+    expect(startKeys.join(' ')).toBe('none page-1 page-2');
+  });
+
+  it('counts nowhere an expired item a misbehaving client still returns, by the fold own check (AC-2)', async () => {
+    const client = dynamoClient();
+    const records = bulkSends(2);
+    const expired = { ...nthRecord(records, 1), expiresAt: Math.floor(FOLD_NOW_MS / 1000) };
+    stubSend(client, () => ({ Items: [nthRecord(records, 0), expired] }));
+    const store = createDynamoEventStore({ tableName: 'events', client: () => client });
+
+    const state = await store.foldLane(BULK, window.fromBucketMs, window.toBucketMs, FOLD_NOW_MS, createWindowFold({ lane: BULK, window, nowMs: FOLD_NOW_MS }));
+    expect(summarizeWindow(state).totals.recipientSends).toBe(1);
+  });
+
+  it('refuses a window one bucket past MAX_WINDOW_BUCKETS with WindowTooLongError before any QueryCommand (AC-E1)', async () => {
+    const client = dynamoClient();
+    const calls = stubSend(client, () => ({ Items: [] }));
+    const store = createDynamoEventStore({ tableName: 'events', client: () => client });
+    const toBucketMs = bucketStartMs(FOLD_NOW_MS);
+    const counting: LaneFold<number> = { initial: 0, step: (steps) => steps + 1 };
+
+    const refusal = await store.foldLane(BULK, toBucketMs - MAX_WINDOW_BUCKETS * BUCKET_MS, toBucketMs, FOLD_NOW_MS, counting).catch((error: unknown) => error);
+    expect(refusal).toBeInstanceOf(WindowTooLongError);
+    expect(calls).toHaveLength(0);
+    await expect(store.foldLane(BULK, toBucketMs - (MAX_WINDOW_BUCKETS - 1) * BUCKET_MS, toBucketMs, FOLD_NOW_MS, counting)).resolves.toBe(1);
+  });
+});
+
+const INCIDENT_PK = `INCIDENT#${'b'.repeat(32)}`;
+const STATE_ITEM_KEY = { pk: INCIDENT_PK, sk: 'STATE' };
+const DECISION_NOW_MS = 1_760_000_000_000;
+const LIVE_RESERVATION: ReservationRequest = {
+  incidentKey: { pk: INCIDENT_PK, sk: 'COUNTER' },
+  dayKey: { pk: 'COUNTER_DAY#2026-10-11', sk: 'COUNTER' },
+  incidentCap: 3,
+  dayInvocationCap: 10,
+  dayTokenCap: 1_000,
+  tokenReservation: 100,
+  expiresAt: 1_800_000_000,
+};
+const LIVE_USAGE: UsageRecord = {
+  incidentKey: LIVE_RESERVATION.incidentKey,
+  dayKey: LIVE_RESERVATION.dayKey,
+  inputTokens: 1_200,
+  outputTokens: 80,
+  modelCalls: 2,
+};
+
+function conditionalCheckFailed(): Error {
+  const error = new Error('The conditional request failed');
+  error.name = 'ConditionalCheckFailedException';
+  return error;
+}
+
+function cancelled(...codes: string[]): TransactionCanceledException {
+  return new TransactionCanceledException({
+    message: 'Transaction cancelled',
+    $metadata: {},
+    CancellationReasons: codes.map((Code) => ({ Code })),
+  });
+}
+
+function decisionStoreAnswering(handler: (command: RecordedCommand) => unknown): { store: ReturnType<typeof createDynamoDecisionStore>; calls: RecordedCommand[] } {
+  const client = dynamoClient();
+  const calls = stubSend(client, handler);
+  return { store: createDynamoDecisionStore({ tableName: 'events', client: () => client }), calls };
+}
+
+describe('createDynamoDecisionStore', () => {
+  it('puts with attribute_not_exists(pk) and maps ConditionalCheckFailedException to duplicate (AC-E33)', async () => {
+    let puts = 0;
+    const item = { ...STATE_ITEM_KEY, expiresAt: 1_800_000_000, version: 1 };
+    const { store, calls } = decisionStoreAnswering((command) => {
+      puts += 1;
+      if (command.name !== 'PutCommand') throw new Error(`unexpected command ${command.name}`);
+      if (puts === 2) throw conditionalCheckFailed();
+      if (puts === 3) throw new Error('network blip');
+      return {};
+    });
+
+    await expect(store.putIfAbsent(item)).resolves.toBe('written');
+    await expect(store.putIfAbsent(item)).resolves.toBe('duplicate');
+    await expect(store.putIfAbsent(item)).rejects.toThrow('network blip');
+    expect(calls[0]?.input).toEqual({ TableName: 'events', Item: item, ConditionExpression: 'attribute_not_exists(pk)' });
+  });
+
+  it('refuses an item under a LANE# key or a counter item before sending anything', async () => {
+    const { store, calls } = decisionStoreAnswering(() => ({}));
+    await expect(store.putIfAbsent({ pk: 'LANE#fothering-bulk', sk: 'STATE', expiresAt: 1 })).rejects.toThrow(RangeError);
+    await expect(store.putIfAbsent({ ...LIVE_RESERVATION.dayKey, expiresAt: 1, invocations: -5 })).rejects.toThrow(RangeError);
+    expect(calls).toHaveLength(0);
+  });
+
+  it('reads consistently and answers nothing for an item whose expiresAt is at or before now in seconds (Pitfall 4)', async () => {
+    const nowSeconds = Math.floor(DECISION_NOW_MS / 1000);
+    const answers = [{ Item: { ...STATE_ITEM_KEY, expiresAt: nowSeconds + 1 } }, { Item: { ...STATE_ITEM_KEY, expiresAt: nowSeconds } }, {}];
+    const { store, calls } = decisionStoreAnswering(() => answers.shift());
+
+    await expect(store.getItem(STATE_ITEM_KEY, DECISION_NOW_MS)).resolves.toEqual({ ...STATE_ITEM_KEY, expiresAt: nowSeconds + 1 });
+    await expect(store.getItem(STATE_ITEM_KEY, DECISION_NOW_MS)).resolves.toBeUndefined();
+    await expect(store.getItem(STATE_ITEM_KEY, DECISION_NOW_MS)).resolves.toBeUndefined();
+    expect(calls[0]?.name).toBe('GetCommand');
+    expect(calls[0]?.input).toEqual({ TableName: 'events', Key: STATE_ITEM_KEY, ConsistentRead: true });
+  });
+
+  it('updates under a version condition, naming each attribute by placeholder, with the next version and a fresh expiresAt', async () => {
+    const { store, calls } = decisionStoreAnswering(() => ({}));
+    await expect(store.updateIfVersion(STATE_ITEM_KEY, 1, { state: 'closed', closedAtMs: 5 }, DECISION_NOW_MS)).resolves.toBe('updated');
+    expect(calls[0]?.name).toBe('UpdateCommand');
+    expect(calls[0]?.input).toEqual({
+      TableName: 'events',
+      Key: STATE_ITEM_KEY,
+      UpdateExpression: 'SET #a0 = :a0, #a1 = :a1, version = :next, expiresAt = :expiresAt',
+      ConditionExpression: 'version = :expected',
+      ExpressionAttributeNames: { '#a0': 'state', '#a1': 'closedAtMs' },
+      ExpressionAttributeValues: {
+        ':a0': 'closed',
+        ':a1': 5,
+        ':expected': 1,
+        ':next': 2,
+        ':expiresAt': Math.floor(DECISION_NOW_MS / 1000) + RETENTION_SECONDS,
+      },
+    });
+  });
+
+  it('maps a failed version condition to conflict, passes any other error on, and refuses a managed attribute unsent', async () => {
+    let updates = 0;
+    const { store, calls } = decisionStoreAnswering(() => {
+      updates += 1;
+      throw updates === 1 ? conditionalCheckFailed() : new Error('network blip');
+    });
+    await expect(store.updateIfVersion(STATE_ITEM_KEY, 1, { state: 'closed' }, DECISION_NOW_MS)).resolves.toBe('conflict');
+    await expect(store.updateIfVersion(STATE_ITEM_KEY, 1, { state: 'closed' }, DECISION_NOW_MS)).rejects.toThrow('network blip');
+    await expect(store.updateIfVersion(STATE_ITEM_KEY, 1, { version: 9 }, DECISION_NOW_MS)).rejects.toThrow(RangeError);
+    expect(calls).toHaveLength(2);
+  });
+
+  it('reserves through one TransactWriteCommand of two conditional updates (D-67)', async () => {
+    const { store, calls } = decisionStoreAnswering(() => ({}));
+    await expect(store.reserveInvocation(LIVE_RESERVATION)).resolves.toEqual({ ok: true });
+    expect(calls.map((call) => call.name).join(' ')).toBe('TransactWriteCommand');
+    expect(calls[0]?.input).toEqual({
+      TransactItems: [
+        {
+          Update: {
+            TableName: 'events',
+            Key: LIVE_RESERVATION.incidentKey,
+            UpdateExpression: 'ADD invocations :one SET expiresAt = if_not_exists(expiresAt, :exp)',
+            ConditionExpression: 'attribute_not_exists(invocations) OR invocations < :incidentCap',
+            ExpressionAttributeValues: { ':one': 1, ':incidentCap': 3, ':exp': 1_800_000_000 },
+          },
+        },
+        {
+          Update: {
+            TableName: 'events',
+            Key: LIVE_RESERVATION.dayKey,
+            UpdateExpression: 'ADD invocations :one, tokenReservations :tokens SET expiresAt = if_not_exists(expiresAt, :exp)',
+            ConditionExpression:
+              '(attribute_not_exists(invocations) OR invocations < :dayCap) AND (attribute_not_exists(tokenReservations) OR tokenReservations <= :tokenRoom)',
+            ExpressionAttributeValues: { ':one': 1, ':tokens': 100, ':dayCap': 10, ':tokenRoom': 900, ':exp': 1_800_000_000 },
+          },
+        },
+      ],
+    });
+  });
+
+  // Reasons arrive in the order of the requested items, and only a failed condition is a cap: a
+  // TransactionConflict is two writers racing, which a retry settles (AC-E45, Pitfall 6).
+  it.each<[string[], string]>([
+    [['ConditionalCheckFailed', 'None'], 'cap incident'],
+    [['None', 'ConditionalCheckFailed'], 'cap day'],
+    [['ConditionalCheckFailed', 'ConditionalCheckFailed'], 'cap incident day'],
+    [['ConditionalCheckFailed', 'TransactionConflict'], 'cap incident'],
+    [['TransactionConflict', 'None'], 'conflict'],
+    [['None', 'TransactionConflict'], 'conflict'],
+  ])('maps the cancellation reasons %j to %s', async (codes, outcome) => {
+    const { store } = decisionStoreAnswering(() => {
+      throw cancelled(...codes);
+    });
+    const result = await store.reserveInvocation(LIVE_RESERVATION);
+    expect(result.ok ? 'ok' : [result.reason, ...(result.reason === 'cap' ? result.items : [])].join(' ')).toBe(outcome);
+  });
+
+  it('passes on a cancellation holding neither a failed condition nor a conflict, and any other error', async () => {
+    const errors: unknown[] = [cancelled('ThrottlingError', 'None'), new Error('network blip')];
+    const { store } = decisionStoreAnswering(() => {
+      throw errors.shift();
+    });
+    await expect(store.reserveInvocation(LIVE_RESERVATION)).rejects.toBeInstanceOf(TransactionCanceledException);
+    await expect(store.reserveInvocation(LIVE_RESERVATION)).rejects.toThrow('network blip');
+  });
+
+  it('records usage with one ADD-only update per counter item, after refusing a negative amount unsent', async () => {
+    const { store, calls } = decisionStoreAnswering(() => ({}));
+    await expect(store.recordUsage({ ...LIVE_USAGE, outputTokens: -1 })).rejects.toThrow(RangeError);
+    expect(calls).toHaveLength(0);
+
+    await store.recordUsage(LIVE_USAGE);
+    expect(calls.map((call) => call.name).join(' ')).toBe('UpdateCommand UpdateCommand');
+    expect(calls.map((call) => (call.input as { Key: { pk: string } }).Key.pk).join(' ')).toBe(`${INCIDENT_PK} COUNTER_DAY#2026-10-11`);
+    for (const call of calls) {
+      expect(call.input).toMatchObject({
+        UpdateExpression: 'ADD inputTokens :inputTokens, outputTokens :outputTokens, modelCalls :modelCalls',
+        ExpressionAttributeValues: { ':inputTokens': 1_200, ':outputTokens': 80, ':modelCalls': 2 },
+      });
+      expect(call.input).not.toHaveProperty('ConditionExpression');
+    }
+  });
+
+  it('builds no client and names FOTHERING_TABLE_NAME from every operation when the table name is unset', async () => {
+    let constructed = 0;
+    const store = createDynamoDecisionStore({
+      tableName: undefined,
+      client: () => {
+        constructed += 1;
+        return dynamoClient();
+      },
+    });
+    const operations = [
+      store.putIfAbsent({ ...STATE_ITEM_KEY, expiresAt: 1 }),
+      store.getItem(STATE_ITEM_KEY, DECISION_NOW_MS),
+      store.updateIfVersion(STATE_ITEM_KEY, 1, {}, DECISION_NOW_MS),
+      store.reserveInvocation(LIVE_RESERVATION),
+      store.recordUsage(LIVE_USAGE),
+    ];
+    for (const operation of operations) {
+      await expect(operation).rejects.toMatchObject({ name: 'LiveConfigMissingError', envVar: 'FOTHERING_TABLE_NAME' });
+    }
+    expect(constructed).toBe(0);
+  });
+
+  it('builds one client on the first decisionStore call through the port table, and none at resolution', async () => {
+    const client = dynamoClient();
+    stubSend(client, () => ({}));
+    let built = 0;
+    const { ports, kinds } = resolvePortTable({
+      runtimeContext: 'deployed',
+      switchValue: undefined,
+      liveConfig: { tableName: 'events' },
+      liveClients: {
+        dynamoDb: () => {
+          built += 1;
+          return client;
+        },
+      },
+      dryRunSink: () => {},
+    });
+
+    expect(Object.values(kinds.decisionStore ?? {}).join(' ')).toBe('live live live live live');
+    expect(built).toBe(0);
+    await ports.decisionStore.getItem(STATE_ITEM_KEY, DECISION_NOW_MS);
+    await ports.decisionStore.reserveInvocation(LIVE_RESERVATION);
+    expect(built).toBe(1);
   });
 });
 

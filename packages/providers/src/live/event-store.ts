@@ -126,6 +126,10 @@ export function createDynamoEventStore(options: CreateDynamoEventStoreOptions): 
       );
       return result.Item as EventRecord | undefined;
     },
+
+    async foldLane(_configurationSet, _fromBucketMs, _toBucketMs, _nowMs, fold) {
+      return fold.initial;
+    },
   };
 }
 
