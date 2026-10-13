@@ -1,4 +1,4 @@
-import { bucketSortKeyPrefix, lanePartitionKey, type EventRecord, type RecordKey } from '@fothering/core/records';
+import { RETENTION_SECONDS, bucketSortKeyPrefix, lanePartitionKey, type EventRecord, type RecordKey } from '@fothering/core/records';
 import type { AddressKeySet } from '@fothering/core/address';
 import { assertFoldWindow } from '@fothering/core/window-fold';
 import type {
@@ -10,8 +10,10 @@ import type {
   FixtureOptions,
   FixtureTableState,
   LaneFoldReader,
+  ReservationItem,
+  ReservationRequest,
 } from '../port-types.js';
-import { brandPort } from '../port-types.js';
+import { assertNotCounterItem, assertReservation, assertUsage, assertVersionedUpdate, brandPort } from '../port-types.js';
 import { DEAD_LETTER_QUEUE_TARGET, type DryRunLog } from '../dry-run.js';
 
 export class FixtureWriteError extends Error {
@@ -173,11 +175,56 @@ function isDecisionItem(item: unknown): item is DecisionStoreItem {
   return typeof pk === 'string' && typeof expiresAt === 'number';
 }
 
+function numberAttribute(item: unknown, attribute: string): number | undefined {
+  if (typeof item !== 'object' || item === null) return undefined;
+  const value = (item as Record<string, unknown>)[attribute];
+  return typeof value === 'number' ? value : undefined;
+}
+
+// The live condition reads "attribute_not_exists(x) OR x < cap": a counter not yet written has room.
+function hasRoom(current: number | undefined, cap: number): boolean {
+  return current === undefined || current < cap;
+}
+
+function refusedItems(items: ReadonlyMap<string, unknown>, request: ReservationRequest): ReservationItem[] {
+  const incident = items.get(keyOf(request.incidentKey));
+  const day = items.get(keyOf(request.dayKey));
+  const dayTokens = numberAttribute(day, 'tokenReservations');
+  const refused: ReservationItem[] = [];
+  if (!hasRoom(numberAttribute(incident, 'invocations'), request.incidentCap)) refused.push('incident');
+  const dayTokensFit = dayTokens === undefined || dayTokens <= request.dayTokenCap - request.tokenReservation;
+  if (!hasRoom(numberAttribute(day, 'invocations'), request.dayInvocationCap) || !dayTokensFit) refused.push('day');
+  return refused;
+}
+
+// DynamoDB's ADD: a missing attribute counts as zero, and a missing item is created. expiresAt is
+// written only where absent (if_not_exists), and only when the caller supplies one.
+function addToCounter(items: Map<string, unknown>, key: RecordKey, amounts: Readonly<Record<string, number>>, expiresAt?: number): void {
+  const mapKey = keyOf(key);
+  const stored = items.get(mapKey);
+  const next: Record<string, unknown> =
+    typeof stored === 'object' && stored !== null ? structuredClone(stored as Record<string, unknown>) : { pk: key.pk, sk: key.sk };
+  for (const [attribute, amount] of Object.entries(amounts)) next[attribute] = (numberAttribute(next, attribute) ?? 0) + amount;
+  if (expiresAt !== undefined && next.expiresAt === undefined) next.expiresAt = expiresAt;
+  items.set(mapKey, next);
+}
+
+function transactionConflictsOf(options: FixtureOptions): number {
+  const conflicts = options.transactionConflicts ?? 0;
+  if (!Number.isInteger(conflicts) || conflicts < 0) {
+    throw new RangeError(`a fixture transaction conflict count must be a whole number from 0 up, not ${String(conflicts)}`);
+  }
+  return conflicts;
+}
+
 // The same conditional put as the event store, on the same table. GetItem applies no TTL filter, so
 // an expired item DynamoDB has not deleted yet would still come back; the read checks expiresAt in
-// code instead (D-65, research Pitfall 4).
+// code instead (D-65, research Pitfall 4). Every write that checks a condition checks and sets with
+// no await between the two, so writes issued together under Promise.all resolve as DynamoDB's
+// conditional writes do: one wins, the rest see its result.
 export function createFixtureDecisionStore(options: FixtureOptions = {}, dryRun?: DryRunLog): DecisionStorePort {
   const { items } = options.store ?? createFixtureTableState();
+  let conflictsLeft = transactionConflictsOf(options);
 
   return brandPort({
     async putIfAbsent(item) {
@@ -186,6 +233,7 @@ export function createFixtureDecisionStore(options: FixtureOptions = {}, dryRun?
       if (isLaneRecord(item)) {
         throw new RangeError('a decision store item never takes a LANE# partition key, which belongs to event records');
       }
+      assertNotCounterItem(item);
       const key = keyOf(item);
       if (items.has(key)) return 'duplicate';
       items.set(key, structuredClone(item));
@@ -197,13 +245,41 @@ export function createFixtureDecisionStore(options: FixtureOptions = {}, dryRun?
       if (!isDecisionItem(item) || item.expiresAt <= Math.floor(nowMs / 1000)) return undefined;
       return structuredClone(item);
     },
-    async updateIfVersion() {
-      return 'conflict';
+    async updateIfVersion(key, expectedVersion, attributes, nowMs) {
+      assertVersionedUpdate(key, expectedVersion, attributes);
+      rejectUnmarshallable(attributes);
+      rejectUnmarshallable(nowMs);
+      await dryRun?.would('decisionStore.updateIfVersion', key.pk, { pk: key.pk, sk: key.sk, expectedVersion });
+      const stored = items.get(keyOf(key));
+      if (!isDecisionItem(stored) || stored.version !== expectedVersion) return 'conflict';
+      items.set(keyOf(key), {
+        ...stored,
+        ...structuredClone(attributes),
+        version: expectedVersion + 1,
+        expiresAt: Math.floor(nowMs / 1000) + RETENTION_SECONDS,
+      });
+      return 'updated';
     },
-    async reserveInvocation() {
-      return { ok: false, reason: 'conflict' };
+    async reserveInvocation(request) {
+      assertReservation(request);
+      await dryRun?.would('decisionStore.reserveInvocation', request.incidentKey.pk, request);
+      if (conflictsLeft > 0) {
+        conflictsLeft -= 1;
+        return { ok: false, reason: 'conflict' };
+      }
+      const refused = refusedItems(items, request);
+      if (refused.length > 0) return { ok: false, reason: 'cap', items: refused };
+      addToCounter(items, request.incidentKey, { invocations: 1 }, request.expiresAt);
+      addToCounter(items, request.dayKey, { invocations: 1, tokenReservations: request.tokenReservation }, request.expiresAt);
+      return { ok: true };
     },
-    async recordUsage() {},
+    async recordUsage(usage) {
+      assertUsage(usage);
+      await dryRun?.would('decisionStore.recordUsage', usage.incidentKey.pk, usage);
+      const amounts = { inputTokens: usage.inputTokens, outputTokens: usage.outputTokens, modelCalls: usage.modelCalls };
+      addToCounter(items, usage.incidentKey, amounts);
+      addToCounter(items, usage.dayKey, amounts);
+    },
   }, 'fixture');
 }
 
