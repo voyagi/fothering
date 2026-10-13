@@ -18,7 +18,9 @@ import { UNCLASSIFIED } from '@fothering/core/records';
 import { scenarioRecords, type LaneScenario } from '@fothering/core/test/event-arbitraries';
 import { AGENT_UNAVAILABLE_REASONS } from '@fothering/core/agent-answer';
 import { TEST_ADDRESS_KEY_SET, createFixtureTableState } from '@fothering/providers/fixtures/ingest-ports';
-import type { DecisionStoreItem, DecisionStorePort, FixtureTableState, Recording, SesPort } from '@fothering/providers/port-types';
+import { DNS_LOOKUP_CONCURRENCY, MAX_DNS_LOOKUPS_PER_CYCLE } from '@fothering/core/evidence-rows';
+import type { DecisionStoreItem, DecisionStorePort, DnsPort, FixtureTableState, Recording, SesPort } from '@fothering/providers/port-types';
+import { MAX_IDENTITY_READS } from '@fothering/providers/ses-facts';
 import { assertRootMatrix } from '@fothering/providers/test/root-matrix';
 import { runDetectionCycle } from './detect.js';
 import { buildDetectRoot, readDetectLiveConfig, type DetectDeps } from './root.js';
@@ -405,6 +407,250 @@ describe('one failing step never stops the other lanes of the cycle (steelman S3
     expect(summary.outcomes).toEqual([]);
     expect(itemsWithSortKey(store, 'COUNTER')).toHaveLength(0);
     expect(counting.calls.count).toBe(0);
+  });
+});
+
+interface ReadLog {
+  sesReads: number;
+  lookups: string[];
+  inFlight: number;
+  peak: number;
+}
+
+// Counts every SES read and DNS lookup the cycle makes, and the most lookups in flight at once; each
+// lookup yields to the timer queue first so lookups started together really overlap.
+function withReadLog(deps: DetectDeps): { deps: DetectDeps; reads: ReadLog } {
+  const reads: ReadLog = { sesReads: 0, lookups: [], inFlight: 0, peak: 0 };
+  const { ses, dns } = deps.ports;
+  const sesRead =
+    <Args extends unknown[], Result>(read: (...args: Args) => Promise<Result>) =>
+    async (...args: Args): Promise<Result> => {
+      reads.sesReads += 1;
+      return read(...args);
+    };
+  const lookup =
+    <Result,>(recordType: 'MX' | 'TXT', answer: (name: string) => Promise<Result>) =>
+    async (name: string): Promise<Result> => {
+      reads.lookups.push(`${recordType} ${name}`);
+      reads.inFlight += 1;
+      reads.peak = Math.max(reads.peak, reads.inFlight);
+      try {
+        await new Promise((resolve) => setTimeout(resolve, 1));
+        return await answer(name);
+      } finally {
+        reads.inFlight -= 1;
+      }
+    };
+  const countedDns: DnsPort = { resolveMx: lookup('MX', (name) => dns.resolveMx(name)), resolveTxt: lookup('TXT', (name) => dns.resolveTxt(name)) };
+  const countedSes: SesPort = {
+    ...ses,
+    getEmailIdentity: sesRead((identity: string) => ses.getEmailIdentity(identity)),
+    listEmailIdentities: sesRead(() => ses.listEmailIdentities()),
+    listConfigurationSets: sesRead(() => ses.listConfigurationSets()),
+    getConfigurationSetEventDestinations: sesRead((set: string) => ses.getConfigurationSetEventDestinations(set)),
+  };
+  return { deps: { ...deps, ports: { ...deps.ports, ses: countedSes, dns: countedDns } }, reads };
+}
+
+async function recordOf(deps: DetectDeps, incidentId: string, nowMs = NOW_MS): Promise<EvidenceRecord> {
+  return evidenceRecordSchema.parse((await storedItem(deps, incidentId, 'EVIDENCE', nowMs))?.record);
+}
+
+function decisionItemsOf(store: FixtureTableState): unknown[] {
+  return [...store.items.values()].filter((item) => !String((item as { pk?: unknown }).pk).startsWith('LANE#'));
+}
+
+function withAnswer(recordings: readonly Recording[], request: string, response: unknown): Recording[] {
+  return recordings.map((recording) => (recording.request === request ? { ...recording, response } : recording));
+}
+
+function bulkWithDomains(domains: readonly string[], healthyCount: number): LaneScenario {
+  return {
+    ...BAD_BATCH,
+    groups: [
+      { bucketOffset: 0, count: 40, batch: 'import-0915', permanentBounces: 15, receivingDomains: domains },
+      { bucketOffset: 1, count: healthyCount, batch: 'import-0901', receivingDomains: domains },
+    ],
+  };
+}
+
+function missingMxFor(domains: readonly string[]): Recording[] {
+  return domains.map((domain) => ({ operation: 'dns.resolveMx', request: domain, response: { kind: 'missing' } }));
+}
+
+const RECEIPT_ID = incidentIdFor(TRANSACTIONAL, BUCKET_NOW_MS);
+const AUTH_FAILURE_CODE = 'smtp; 550 5.7.26 Multiple authentication checks failed';
+const NO_DMARC_DNS_RECORDINGS = withAnswer(NEWS_DNS_RECORDINGS, '_dmarc.example.com', { kind: 'missing' });
+
+function untaggedAuthBounces(configurationSet: string, streamTag: string, callerIdentity: string): LaneScenario {
+  return {
+    configurationSet,
+    streamTag,
+    callerIdentity,
+    fromDomain: 'news.example.com',
+    groups: [{ bucketOffset: 0, count: 200, permanentBounces: 15, diagnosticCode: AUTH_FAILURE_CODE }],
+  };
+}
+
+describe('SES and DNS are read only in a cycle that opens an incident, within their bounds (D-42, D-57 to D-59)', () => {
+  it('makes zero SES and zero DNS reads and writes nothing in a cycle where no lane spikes (AC-9, AC-E27)', async () => {
+    const { deps, store } = await builtCycle({ scenario: HEALTHY, recordings: [], dnsRecordings: [], runtime: closeRuntime });
+    const counted = withReadLog(deps);
+    const summary = await runDetectionCycle(counted.deps);
+    expect([counted.reads.sesReads, counted.reads.lookups.length, summary.sesReads, summary.dnsLookups]).toEqual([0, 0, 0, 0]);
+    expect(decisionItemsOf(store)).toEqual([]);
+    expect(summary).toMatchObject({ incidentsOpened: 0, invocations: 0, incidents: [], outcomes: [] });
+  });
+
+  it('reads neither SES nor DNS in a cycle whose only spiking lane already has an open incident (D-42)', async () => {
+    const { deps } = await builtCycle({ runtime: closeRuntime });
+    await runDetectionCycle(deps);
+    const counted = withReadLog(at(deps, NOW_MS + BUCKET_MS));
+    const summary = await runDetectionCycle(counted.deps);
+    expect(summary.lanes.find((lane) => lane.configurationSet === BULK)?.verdict).toBe('spike');
+    expect([counted.reads.sesReads, counted.reads.lookups.length]).toEqual([0, 0]);
+  });
+
+  it('reads the SES facts once and runs the planned lookups, and the record carries their configuration rows', async () => {
+    const { deps } = await builtCycle({ runtime: closeRuntime });
+    const counted = withReadLog(deps);
+    const summary = await runDetectionCycle(counted.deps);
+
+    expect(summary.dnsLookups).toBe(4);
+    expect(counted.reads.lookups.join(' | ')).toBe('TXT _dmarc.news.example.com | TXT _dmarc.example.com | TXT bounce.example.com | MX example.com');
+    expect([summary.sesReads, counted.reads.sesReads]).toEqual([7, 7]);
+    const record = await recordOf(deps, INCIDENT_ID);
+    const dmarc = record.configurationRows.find((row) => row.record === 'dmarc');
+    expect(dmarc).toMatchObject({ fromDomain: 'news.example.com', state: 'present', verdict: 'ruled-out' });
+    expect(dmarc?.lookups.map((lookup) => (lookup.kind === 'dns' ? `${lookup.name} ${lookup.outcome}` : lookup.kind))).toEqual([
+      '_dmarc.news.example.com missing',
+      '_dmarc.example.com records',
+    ]);
+    expect(record.configurationRows.map((row) => `${row.record}:${row.state}`).join(' ')).toBe('dkim:present mail-from:present dmarc:present spf:present');
+    expect(record.decision).toMatchObject({ outcome: 'approved', reason: 'approved' });
+  });
+
+  it('runs no lookup and decides the new incident unknown dns-bound past MAX_DNS_LOOKUPS_PER_CYCLE', async () => {
+    const domains = Array.from({ length: MAX_DNS_LOOKUPS_PER_CYCLE }, (_, index) => `m${index}.example.com`);
+    const { deps } = await builtCycle({ scenario: bulkWithDomains(domains, 200), dnsRecordings: [], runtime: closeRuntime });
+    const counted = withReadLog(deps);
+    const summary = await runDetectionCycle(counted.deps);
+
+    expect((await recordOf(deps, INCIDENT_ID)).decision).toMatchObject({ outcome: 'unknown', reason: 'dns-bound', bound: 'dns-bound' });
+    expect([counted.reads.lookups.length, summary.dnsLookups, summary.failures]).toEqual([0, 0, 0]);
+  });
+
+  it('reads no identity and decides the new incident unknown ses-facts-bound with no partial SES facts past MAX_IDENTITY_READS', async () => {
+    const identities = Array.from({ length: MAX_IDENTITY_READS + 1 }, (_, index) => `id${index}.example.com`);
+    const recordings: Recording[] = [{ operation: 'ses.listEmailIdentities', request: null, response: identities }];
+    const { deps } = await builtCycle({ recordings, dnsRecordings: [], runtime: closeRuntime });
+    const counted = withReadLog(deps);
+    const summary = await runDetectionCycle(counted.deps);
+
+    const record = await recordOf(deps, INCIDENT_ID);
+    expect(record.decision.reason).toBe('ses-facts-bound');
+    expect(record.decision).toMatchObject({ outcome: 'unknown', bound: 'ses-facts-bound' });
+    expect(record.configurationRows).toEqual([]);
+    const sesFacts = ['unlisted-configuration-set', 'default-configuration-set', 'destination-missing-event-types'];
+    expect(record.decision.closeability.reasons.filter((reason) => sesFacts.includes(reason))).toEqual([]);
+    expect([counted.reads.sesReads, counted.reads.lookups.length, summary.failures]).toEqual([1, 0, 0]);
+  });
+
+  it('never runs more than DNS_LOOKUP_CONCURRENCY lookups at once', async () => {
+    const domains = Array.from({ length: 30 }, (_, index) => `c${index}.example.com`);
+    const dnsRecordings = [...NEWS_DNS_RECORDINGS.filter((recording) => recording.operation === 'dns.resolveTxt'), ...missingMxFor(domains)];
+    const { deps } = await builtCycle({ scenario: bulkWithDomains(domains, 160), dnsRecordings, runtime: closeRuntime });
+    const counted = withReadLog(deps);
+    const summary = await runDetectionCycle(counted.deps);
+
+    expect(counted.reads.peak).toBe(DNS_LOOKUP_CONCURRENCY);
+    expect([counted.reads.lookups.length, summary.dnsLookups, summary.failures]).toEqual([33, 33, 0]);
+  });
+});
+
+describe('every spiking lane is decided with the other lanes in view (D-60 to D-63)', () => {
+  it('gives each of two lanes spiking with different causes an EVIDENCE item decided unknown spread naming both (AC-E29)', async () => {
+    const { deps } = await builtCycle({ runtime: decidingRuntime });
+    await insert(deps, RECEIPT_BATCH, NOW_MS);
+    await runDetectionCycle(deps);
+
+    expect((await recordOf(deps, INCIDENT_ID)).decision).toMatchObject({ outcome: 'unknown', reason: 'spread', otherSpikingLanes: [TRANSACTIONAL] });
+    expect((await recordOf(deps, RECEIPT_ID)).decision).toMatchObject({ outcome: 'unknown', reason: 'spread', otherSpikingLanes: [BULK] });
+  });
+
+  it('refuses missing-dmarc with the fix naming _dmarc.<from-domain> when both lanes send from a domain with no DMARC record and X.7.26 bounces', async () => {
+    const { deps } = await builtCycle({
+      scenario: untaggedAuthBounces(BULK, 'newsletter', 'bulk-sender'),
+      dnsRecordings: NO_DMARC_DNS_RECORDINGS,
+      runtime: decidingRuntime,
+    });
+    await insert(deps, untaggedAuthBounces(TRANSACTIONAL, 'receipts', 'receipt-sender'), NOW_MS);
+    await runDetectionCycle(deps);
+
+    for (const incidentId of [INCIDENT_ID, RECEIPT_ID]) {
+      const record = await recordOf(deps, incidentId);
+      expect(record.decision.reason).toBe('not-lane-scoped');
+      expect(record.decision).toMatchObject({ outcome: 'refused', sharedCause: { kind: 'from-domain', value: 'news.example.com', lanes: [BULK, TRANSACTIONAL] } });
+      expect(record.fix?.kind).toBe('missing-dmarc');
+      expect(record.fix?.text).toContain('_dmarc.news.example.com');
+    }
+  });
+
+  it('leaves the DMARC row unknown and settles no authentication cause when the DNS answer is unknown (AC-E26)', async () => {
+    const { deps } = await builtCycle({
+      scenario: untaggedAuthBounces(BULK, 'newsletter', 'bulk-sender'),
+      dnsRecordings: withAnswer(NO_DMARC_DNS_RECORDINGS, '_dmarc.news.example.com', { kind: 'unknown' }),
+      runtime: decidingRuntime,
+    });
+    await insert(deps, untaggedAuthBounces(TRANSACTIONAL, 'receipts', 'receipt-sender'), NOW_MS);
+    await runDetectionCycle(deps);
+
+    const record = await recordOf(deps, INCIDENT_ID);
+    expect(record.configurationRows.find((row) => row.record === 'dmarc')).toMatchObject({ state: 'unknown', verdict: 'unknown' });
+    expect(record.configurationRows.some((row) => row.verdict === 'cause')).toBe(false);
+    expect(record.decision).toMatchObject({ outcome: 'unknown', reason: 'not-settled', sharedCause: null });
+    expect(record.fix).toBeNull();
+  });
+
+  it('places receiving domains by their MX answer on every lane, so one provider carrying both spikes is refused as shared', async () => {
+    const { deps } = await builtCycle({
+      dnsRecordings: withAnswer(NEWS_DNS_RECORDINGS, 'example.com', { kind: 'records', exchanges: ['smtp.google.com'] }),
+      runtime: decidingRuntime,
+    });
+    await insert(deps, RECEIPT_BATCH, NOW_MS);
+    await runDetectionCycle(deps);
+
+    const record = await recordOf(deps, INCIDENT_ID);
+    expect(record.rows.filter((row) => row.dimension === 'provider').map((row) => `${row.kind}:${String(row.value)}:${row.verdict}`)).toEqual(['value:Google:cause']);
+    expect(record.decision).toMatchObject({ outcome: 'refused', reason: 'not-lane-scoped', sharedCause: { kind: 'provider', value: 'Google' } });
+    expect(record.fix?.kind).toBe('shared-provider');
+  });
+
+  it('reads NO DATA from the coverage window, where complete buckets hold sends without outcomes (D-44, D-51)', async () => {
+    const { deps } = await builtCycle({ runtime: decidingRuntime });
+    await insert(deps, { ...BAD_BATCH, groups: [{ bucketOffset: 170, count: 100, batch: 'import-0801', deliverRest: false }] }, NOW_MS);
+    await runDetectionCycle(deps);
+
+    expect((await recordOf(deps, INCIDENT_ID)).decision).toMatchObject({ outcome: 'unknown', reason: 'no-data', noData: true });
+  });
+
+  it('catches an SES read that throws as opening-failed, still moves the open incident, and the next cycle completes the new one (steelman S3)', async () => {
+    const { deps, lines } = await builtCycle({ runtime: decidingRuntime });
+    await runDetectionCycle(deps);
+    await insert(deps, RECEIPT_BATCH, QUIET_NOW_MS);
+    const throttled = withSes(at(deps, QUIET_NOW_MS), { listEmailIdentities: async () => Promise.reject(namedError('ThrottlingException')) });
+    const summary = await runDetectionCycle(throttled);
+
+    const receiptId = incidentIdFor(TRANSACTIONAL, bucketStartMs(QUIET_NOW_MS));
+    expect(await storedItem(deps, receiptId, 'EVIDENCE', QUIET_NOW_MS)).toBeUndefined();
+    expect(await storedItem(deps, INCIDENT_ID, 'STATE', QUIET_NOW_MS)).toMatchObject({ version: 2, state: { status: 'open' } });
+    expect(lineOf(lines, 'opening-failed')).toMatchObject({ configurationSet: TRANSACTIONAL, incidentId: receiptId, errorName: 'ThrottlingException' });
+    expect(summary.failures).toBe(1);
+
+    const nextNowMs = QUIET_NOW_MS + BUCKET_MS;
+    await runDetectionCycle(at(deps, nextNowMs));
+    expect((await recordOf(deps, receiptId, nextNowMs)).incidentId).toBe(receiptId);
+    expect((await storedItem(deps, receiptId, 'DECISION', nextNowMs))?.outcome).toBe('unknown');
   });
 });
 

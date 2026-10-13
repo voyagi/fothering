@@ -159,6 +159,14 @@ describe('tracer, agent half: the runtime explains the evidence record and retur
 
 const FIXTURE_RUNTIME_ARN = 'arn:aws:bedrock-agentcore:eu-central-1:000000000000:runtime/fixture-runtime';
 const COMPLETE_SES_RECORDINGS = completeSesConfig.recordings as readonly Recording[];
+// The four lookups the bad batch's opening cycle plans: news.example.com's DMARC record, the
+// organizational one, the SPF record on the custom MAIL FROM domain and the MX of example.com.
+const TRACER_DNS_RECORDINGS: readonly Recording[] = [
+  { operation: 'dns.resolveTxt', request: '_dmarc.news.example.com', response: { kind: 'missing' } },
+  { operation: 'dns.resolveTxt', request: '_dmarc.example.com', response: { kind: 'records', records: ['v=DMARC1; p=none'] } },
+  { operation: 'dns.resolveTxt', request: 'bounce.example.com', response: { kind: 'records', records: ['v=spf1 include:amazonses.com ~all'] } },
+  { operation: 'dns.resolveMx', request: 'example.com', response: { kind: 'missing' } },
+];
 const AGENT_CORE_LINE = '(dry-run) WOULD agentCore.invokeAgentRuntime ';
 
 // The detection half: the real detection root and the real runtime handler share nothing but the
@@ -173,7 +181,11 @@ describe('tracer, end to end: one detection cycle stores a validated close from 
     const deps = buildDetectRoot({
       runtimeContext: 'test',
       switchValue: undefined,
-      fixtures: { store: createFixtureTableState(), recordings: { ses: COMPLETE_SES_RECORDINGS }, agentRuntime: createInvocationHandler(agentDeps) },
+      fixtures: {
+        store: createFixtureTableState(),
+        recordings: { ses: COMPLETE_SES_RECORDINGS, dns: TRACER_DNS_RECORDINGS },
+        agentRuntime: createInvocationHandler(agentDeps),
+      },
       liveConfig: { agentRuntimeArn: FIXTURE_RUNTIME_ARN },
       dryRunSink: (line) => dryRunLines.push(line),
       now: () => TRACER_NOW_MS,
@@ -212,7 +224,7 @@ describe('tracer, end to end: one detection cycle stores a validated close from 
     expect(dryRunLines.filter((line) => line.startsWith(AGENT_CORE_LINE))).toHaveLength(1);
     expect(model.calls).toHaveLength(1);
     expect(queryLane).not.toHaveBeenCalled();
-    expect(summary).toMatchObject({ incidentsOpened: 1, invocations: 1, sesReads: 7, dnsLookups: 0, outcomes: [{ incidentId, result: 'close' }] });
+    expect(summary).toMatchObject({ incidentsOpened: 1, invocations: 1, sesReads: 7, dnsLookups: 4, outcomes: [{ incidentId, result: 'close' }] });
     expect(summary.lanes.map((lane) => `${lane.configurationSet}:${lane.verdict}`).join(' ')).toBe(
       'fothering-transactional:not-enough-volume fothering-bulk:spike fothering-alerts:not-enough-volume',
     );
