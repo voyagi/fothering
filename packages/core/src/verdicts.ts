@@ -14,7 +14,9 @@ export interface Rational {
 // https://docs.aws.amazon.com/ses/latest/dg/reputationdashboardmessages.html), so one lane at this
 // ratio would alone bring a one-lane account to review. They are Fothering lane thresholds, not
 // SES's figure: SES computes its rates over a "representative volume" and leaves out mailbox
-// simulator mail and bounces to verified addresses, both of which a lane ratio counts.
+// simulator mail and bounces to verified addresses, both of which a lane ratio counts. A Permanent
+// bounce of subtype Suppressed (the global suppression list) also counts in the lane numerator, so
+// the lane ratio does not reproduce SES's method and no label may say it does.
 export const HARD_BOUNCE_THRESHOLD: Rational = { numerator: 5, denominator: 100 };
 export const COMPLAINT_THRESHOLD: Rational = { numerator: 1, denominator: 1000 };
 
@@ -48,8 +50,8 @@ export const LANE_RATIO_LABELS = {
 
 export const LANE_SHARE_LABEL = 'share of the countable events Fothering stores for its lane-map sets';
 
-export function ratioAtOrAbove(count: number, sends: number, threshold: Rational): boolean {
-  return sends > 0 && count >= MIN_RATIO_EVENTS && count * threshold.denominator >= threshold.numerator * sends;
+export function ratioAtOrAbove(count: number, sends: number, threshold: Rational, minEvents: number = MIN_RATIO_EVENTS): boolean {
+  return sends > 0 && count >= minEvents && count * threshold.denominator >= threshold.numerator * sends;
 }
 
 /** Hundredths of a percent, rounded half up from integers (D-56): 15 of 200 is "7.50%". */
@@ -82,6 +84,8 @@ export interface VerdictRules {
   minRecipientSends: number;
 }
 
+// The only rules a production caller passes; the parameter exists so a test can remove one floor
+// and show that the verdict turns, which is what proves each floor is load-bearing.
 export const LANE_RULES: Readonly<VerdictRules> = {
   hardBounce: HARD_BOUNCE_THRESHOLD,
   complaint: COMPLAINT_THRESHOLD,
@@ -96,6 +100,9 @@ export function laneSpikeVerdict(totals: LaneTotals, rules: Readonly<VerdictRule
   };
   if (totals.recipientSends < rules.minRecipientSends) return { verdict: 'not-enough-volume', triggers: [], ...ratios };
   const triggers: LaneTrigger[] = [];
-  if (ratioAtOrAbove(totals.permanentBounces, totals.recipientSends, rules.hardBounce)) triggers.push('hard-bounce');
+  // The complaint total already leaves out suppressed complaints and not-spam reports, the split
+  // countLaneBuckets and the window fold share (bounceClass and complaintClass in buckets.ts).
+  if (ratioAtOrAbove(totals.permanentBounces, totals.recipientSends, rules.hardBounce, rules.minRatioEvents)) triggers.push('hard-bounce');
+  if (ratioAtOrAbove(totals.complaints, totals.recipientSends, rules.complaint, rules.minRatioEvents)) triggers.push('complaint');
   return { verdict: triggers.length > 0 ? 'spike' : 'no-spike', triggers, ...ratios };
 }
