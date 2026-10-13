@@ -1,6 +1,9 @@
 import type { CloseabilityResult, RefusalReason } from './closeability.js';
+import type { ISOLATION_VERDICTS, SHARED_CAUSE_KINDS } from './evidence-record.js';
 import type { ConfigurationRow, EvidenceRow } from './evidence-rows.js';
-import type { LaneSpikeVerdict } from './verdicts.js';
+import type { LaneEntry, LaneMap } from './lanes.js';
+import type { CoverageVerdict, LaneSpikeVerdict } from './verdicts.js';
+import type { WindowSummary } from './window-fold.js';
 
 export const DECISION_OUTCOMES = ['approved', 'unknown', 'refused'] as const;
 export type DecisionOutcome = (typeof DECISION_OUTCOMES)[number];
@@ -70,4 +73,39 @@ export function decideLane(input: DecideLaneInput): LaneDecision {
   if (!causeIsSettled(input)) return decide('unknown', 'not-settled');
   if (input.closeability.state === 'refused') return decide('unknown', 'not-closeable');
   return decide('approved', 'approved');
+}
+
+export type IsolationVerdict = (typeof ISOLATION_VERDICTS)[number];
+
+export interface SharedCause {
+  kind: (typeof SHARED_CAUSE_KINDS)[number];
+  value: string;
+  lanes: string[];
+}
+
+export interface LaneAnalysis {
+  lane: LaneEntry;
+  summary: WindowSummary;
+  spike: LaneSpikeVerdict;
+  rows: readonly EvidenceRow[];
+  configurationRows: readonly ConfigurationRow[];
+  closeability: CloseabilityResult;
+  coverage: CoverageVerdict;
+  bound: ReadBound | null;
+}
+
+export interface CycleDecision extends LaneDecision {
+  isolation: IsolationVerdict;
+  noData: boolean;
+  bound: ReadBound | null;
+  otherSpikingLanes: string[];
+  sharedCause: SharedCause | null;
+}
+
+export function isolationVerdict(_analysis: LaneAnalysis, _cycle: readonly LaneAnalysis[]): IsolationVerdict {
+  return 'confined';
+}
+
+export function decideCycle(_analyses: readonly LaneAnalysis[], _laneMap: LaneMap): ReadonlyMap<string, CycleDecision> {
+  return new Map();
 }
