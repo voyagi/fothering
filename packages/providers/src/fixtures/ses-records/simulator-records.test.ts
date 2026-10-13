@@ -38,6 +38,13 @@ function isDocumentationIpv4(value: string): boolean {
   return isIP(value) === 4 && DOCUMENTATION_PREFIXES.some((prefix) => value.startsWith(prefix));
 }
 
+// Records captured before the sender source IP left the stored schedule still carry the field until
+// they expire, so it is read through an untyped view of fields.
+function capturedSourceIp(record: EventRecord): unknown {
+  const fields: Readonly<Record<string, unknown>> = { ...record.fields };
+  return fields.sourceIp;
+}
+
 // The two values a capture replaces before it is committed: the sending identity's domain and the
 // address the SendEmail calls came from. Only the placeholders pass, so any real value fails
 // without this file naming one, and no message repeats the value it found.
@@ -47,8 +54,8 @@ function capturedSenderValues(records: readonly EventRecord[]): string[] {
     if (record.fields.fromDomain !== SENDER_DOMAIN_PLACEHOLDER) {
       problems.push(`record ${index}: fromDomain is not the placeholder`);
     }
-    const sourceIp = record.fields.sourceIp;
-    if (sourceIp === undefined || !isDocumentationIpv4(sourceIp)) {
+    const sourceIp = capturedSourceIp(record);
+    if (typeof sourceIp !== 'string' || !isDocumentationIpv4(sourceIp)) {
       problems.push(`record ${index}: sourceIp is not a documentation address`);
     }
   }
@@ -152,7 +159,7 @@ describe('the simulator-captured stored records', () => {
       expect(capturedSenderValues(records)).toEqual([]);
       expect(validHostname(SENDER_DOMAIN_PLACEHOLDER)).toBe(SENDER_DOMAIN_PLACEHOLDER);
       expect(validIp(SOURCE_IP_PLACEHOLDER)).toBe(SOURCE_IP_PLACEHOLDER);
-      expect(records.filter((record) => record.fields.sourceIp !== SOURCE_IP_PLACEHOLDER)).toEqual([]);
+      expect(records.filter((record) => capturedSourceIp(record) !== SOURCE_IP_PLACEHOLDER)).toEqual([]);
     });
 
     it('fails on any other sender domain or a source address outside the documentation ranges, without repeating it', () => {

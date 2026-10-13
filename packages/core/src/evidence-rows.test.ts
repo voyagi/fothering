@@ -728,11 +728,36 @@ describe('the DNS lookup plan and its bound (D-58)', () => {
     expect(planDnsLookups(['example.org'], [HEALTHY], []).lookups).toEqual([]);
   });
 
+  it('plans names that the evidence record schema accepts as lookups', () => {
+    const lookups = planDnsLookups(['news.example.com'], [HEALTHY], []).lookups.map((lookup) => ({ kind: 'dns', ...lookup, outcome: 'missing' }));
+    expect(evidenceRecordSchema.shape.configurationRows.element.shape.lookups.safeParse(lookups).success).toBe(true);
+  });
+
   it('reports dns-bound past MAX_DNS_LOOKUPS_PER_CYCLE and not at it', () => {
     const domains = (count: number) => Array.from({ length: count }, (_, index) => `d${index}.example.org`);
     expect(MAX_DNS_LOOKUPS_PER_CYCLE).toBe(200);
     expect(DNS_LOOKUP_CONCURRENCY).toBe(10);
     expect(planDnsLookups([], [], domains(MAX_DNS_LOOKUPS_PER_CYCLE)).bound).toBeNull();
     expect(planDnsLookups([], [], domains(MAX_DNS_LOOKUPS_PER_CYCLE + 1)).bound).toBe('dns-bound');
+  });
+});
+
+describe('records stored before the source IP left the schedule (AC-E55)', () => {
+  it('folds and counts a record carrying fields.sourceIp, and no row carries the key or its value', () => {
+    const planted = '192.0.2.44';
+    const current = recordsOf([{ bucketOffset: 1, count: 120, batch: 'old-shape', permanentBounces: 8 }]);
+    const oldShape = current.map((record) => ({ ...record, fields: { ...record.fields, sourceIp: planted } }) as EventRecord);
+    const summary = summaryOf(oldShape);
+    expect(summary.totals).toEqual(summaryOf(current).totals);
+    expect(summary.totals.recipientSends).toBe(120);
+    const spike = laneSpikeVerdict(summary.totals);
+    const serialized = canonicalJson({
+      tags: buildTagRows('batch', summary, spike),
+      providers: buildProviderRows(summary, spike, new Map()),
+      configuration: buildLaneConfigurationRows({ summary, identities: [BROKEN], txtAnswers: BROKEN_ANSWERS }),
+      share: buildShareRow(summary, [summary]),
+    });
+    expect(serialized.includes('sourceIp')).toBe(false);
+    expect(serialized.includes(planted)).toBe(false);
   });
 });

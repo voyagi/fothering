@@ -1,4 +1,7 @@
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { isIP } from 'node:net';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import fc from 'fast-check';
 import { identityFor } from './identity.js';
@@ -182,9 +185,57 @@ describe('minimizeEvent: Bounce', () => {
     expect(record.fields.enhancedStatusCode).toBe('5.1.1');
     expect(record.fields.basicReplyCode).toBe('550');
     expect(record.fields.reportingMta).toBe('mta.example.com');
-    expect(record.fields.sourceIp).toBe('192.0.2.0');
     expect(record.fields.fromDomain).toBe('example.com');
     expect(record.fields.callerIdentity).toBe('ses_user');
+  });
+});
+
+describe('the sender source IP is not stored (R16, AC-25)', () => {
+  it('stores no sourceIp key for the doc fixture that carries ses:source-ip', () => {
+    expect(loadSesEventFixture('bounce').event).toMatchObject({ detail: { mail: { tags: { 'ses:source-ip': ['192.0.2.0'] } } } });
+    const [record] = minimizeFixture('bounce');
+    if (record === undefined) throw new Error('expected a record');
+    expect(Object.hasOwn(record.fields, 'sourceIp')).toBe(false);
+  });
+
+  it('lets an address planted in ses:source-ip reach no stored field', () => {
+    const planted = '198.51.100.77';
+    const bounce = editableBounceEvent();
+    bounce.detail.mail.tags['ses:source-ip'] = [planted];
+    const records = minimizeEvent(mustParse(bounce), contextFor());
+    expect(records.length).toBeGreaterThan(0);
+    expect(JSON.stringify(records).includes(planted)).toBe(false);
+  });
+});
+
+const PACKAGES_DIR = fileURLToPath(new URL('../../', import.meta.url));
+
+function nonTestSourceFiles(): string[] {
+  const files: string[] = [];
+  for (const entry of readdirSync(PACKAGES_DIR, { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue;
+    const src = join(PACKAGES_DIR, entry.name, 'src');
+    if (!existsSync(src)) continue;
+    for (const relative of readdirSync(src, { recursive: true, encoding: 'utf8' })) {
+      if (relative.endsWith('.ts') && !relative.endsWith('.test.ts')) files.push(join(entry.name, 'src', relative).replaceAll('\\', '/'));
+    }
+  }
+  return files.sort();
+}
+
+function filesNaming(identifier: RegExp): string[] {
+  return nonTestSourceFiles().filter((file) => identifier.test(readFileSync(join(PACKAGES_DIR, file), 'utf8')));
+}
+
+describe('no source file reads the sender source IP (AC-25)', () => {
+  it('reaches every package source tree, so a clean scan means something', () => {
+    const files = nonTestSourceFiles();
+    for (const expected of ['core/src/minimize.ts', 'providers/src/port-types.ts', 'functions/src/ingest/handler.ts']) expect(files).toContain(expected);
+    expect(filesNaming(/\bfromDomain\b/)).toContain('core/src/minimize.ts');
+  });
+
+  it('finds the identifier sourceIp in no non-test TypeScript file under packages/*/src', () => {
+    expect(filesNaming(/\bsourceIp\b/).join(', ')).toBe('');
   });
 });
 
@@ -382,7 +433,7 @@ describe('closed vocabulary under arbitrary text', () => {
     );
     const exercised: StringField[] = [
       'enhancedStatusCode', 'basicReplyCode', 'recipientStatus', 'recipientAction', 'reportingMta', 'remoteMtaIp',
-      'outgoingIp', 'sourceIp', 'fromDomain', 'callerIdentity', 'streamTagValue',
+      'outgoingIp', 'fromDomain', 'callerIdentity', 'streamTagValue',
     ];
     expect(exercised.filter((name) => !accepted.has(name))).toEqual([]);
   });
