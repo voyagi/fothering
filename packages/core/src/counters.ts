@@ -42,13 +42,32 @@ export interface UsageStore<Result> {
 
 export interface UsageInput {
   incidentId: string;
+  /**
+   * The nowMs the reservation was made with, never the clock at recording time: a call reserved just
+   * before midnight UTC and ending after it must add to the day counter that reservation created.
+   */
   reservedAtMs: number;
   usage: { inputTokens: number; outputTokens: number };
   modelCalls: number;
 }
 
-export function recordUsage<Result>(_store: UsageStore<Result>, _input: UsageInput): Promise<Result> {
-  return Promise.resolve('not-reserved' as Result);
+function requireCount(name: string, value: number): number {
+  if (!Number.isSafeInteger(value) || value < 0) throw new RangeError(`${name} must be a whole number from 0 up`);
+  return value;
+}
+
+/** Adds actual usage to the two counters a reservation made; nothing here can take a counter down. */
+export async function recordUsage<Result>(store: UsageStore<Result>, input: UsageInput): Promise<Result> {
+  const amounts = {
+    inputTokens: requireCount('inputTokens', input.usage.inputTokens),
+    outputTokens: requireCount('outputTokens', input.usage.outputTokens),
+    modelCalls: requireCount('modelCalls', input.modelCalls),
+  };
+  return store.recordUsage({
+    incidentKey: incidentItemKey(input.incidentId, 'COUNTER'),
+    dayKey: counterDayKey(utcDateOf(input.reservedAtMs)),
+    ...amounts,
+  });
 }
 
 /** Every number the reservation carries is computed here, so no caller can pass a cap of its own. */
