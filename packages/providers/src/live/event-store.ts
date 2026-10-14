@@ -28,6 +28,7 @@ import {
   assertReservation,
   assertUsage,
   assertVersionedUpdate,
+  expiryClockSeconds,
   requireLiveConfig,
   unexpiredDecisionItem,
   type DecisionStorePort,
@@ -270,11 +271,21 @@ function versionedUpdateInput(
 // same functions the fixture runs, before anything is sent.
 export function createDynamoDecisionStore(options: CreateDynamoEventStoreOptions): DecisionStorePort {
   return {
-    async putIfAbsent(item) {
+    // An item holding no expiresAt is meant to block the put, as the fixture's does; that a comparison on
+    // a missing attribute is false is UNVERIFIED in the condition docs read, and every item put here
+    // carries expiresAt (isDecisionStoreItem), so the case only arises from a hand-written item.
+    async putIfAbsent(item, nowMs) {
       assertDecisionItemKey(item);
       const tableName = requireTableName(options.tableName);
       try {
-        await options.client().send(new PutCommand({ TableName: tableName, Item: item, ConditionExpression: `attribute_not_exists(${PARTITION_KEY})` }));
+        await options.client().send(
+          new PutCommand({
+            TableName: tableName,
+            Item: item,
+            ConditionExpression: `attribute_not_exists(${PARTITION_KEY}) OR ${TTL_ATTRIBUTE} <= :now`,
+            ExpressionAttributeValues: { ':now': expiryClockSeconds(nowMs) },
+          }),
+        );
         return 'written';
       } catch (error) {
         if (hasErrorName(error, CONDITIONAL_CHECK_FAILED)) return 'duplicate';

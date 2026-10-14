@@ -124,9 +124,21 @@ export function isDecisionStoreItem(item: unknown): item is DecisionStoreItem {
   return typeof pk === 'string' && !pk.startsWith(LANE_PARTITION_PREFIX) && typeof sk === 'string' && typeof expiresAt === 'number';
 }
 
+/** The epoch seconds an item's expiresAt is compared with, by the read and by the put's condition alike. */
+export function expiryClockSeconds(nowMs: number): number {
+  return Math.floor(nowMs / 1000);
+}
+
 /** GetItem applies no TTL filter, so an item past its expiresAt but not yet deleted reads as absent (Pitfall 4). */
 export function unexpiredDecisionItem(item: unknown, nowMs: number): DecisionStoreItem | undefined {
-  return isDecisionStoreItem(item) && item.expiresAt > Math.floor(nowMs / 1000) ? item : undefined;
+  return isDecisionStoreItem(item) && item.expiresAt > expiryClockSeconds(nowMs) ? item : undefined;
+}
+
+/** The put's side of the same test: only an item holding an expiresAt at or before now may be written over. */
+export function expiredForPut(item: unknown, nowMs: number): boolean {
+  if (typeof item !== 'object' || item === null) return false;
+  const { expiresAt } = item as { expiresAt?: unknown };
+  return typeof expiresAt === 'number' && expiresAt <= expiryClockSeconds(nowMs);
 }
 
 function assertCounterKeys(incidentKey: RecordKey, dayKey: RecordKey): void {

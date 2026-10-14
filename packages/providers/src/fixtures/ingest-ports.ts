@@ -17,6 +17,7 @@ import {
   assertUsage,
   assertVersionedUpdate,
   brandPort,
+  expiredForPut,
   isDecisionStoreItem,
   unexpiredDecisionItem,
 } from '../port-types.js';
@@ -227,12 +228,13 @@ export function createFixtureDecisionStore(options: FixtureOptions = {}, dryRun?
   let conflictsLeft = transactionConflictsOf(options);
 
   return brandPort({
-    async putIfAbsent(item) {
+    async putIfAbsent(item, nowMs) {
       await dryRun?.would('decisionStore.putIfAbsent', item.pk, item);
       rejectUnmarshallable(item);
+      rejectUnmarshallable(nowMs);
       assertDecisionItemKey(item);
       const key = keyOf(item);
-      if (items.has(key)) return 'duplicate';
+      if (items.has(key) && !expiredForPut(items.get(key), nowMs)) return 'duplicate';
       items.set(key, structuredClone(item));
       return 'written';
     },
