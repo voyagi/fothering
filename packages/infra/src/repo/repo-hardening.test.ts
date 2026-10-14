@@ -135,15 +135,19 @@ describe('repo hardening: every gate, config and document ships what it claims',
     expect(verifyShip).toMatch(/name:\s*'selftest'/);
   });
 
-  it('the mutation config aims at exactly the decision modules and composition roots', () => {
+  it('the mutation config aims at exactly the decision modules, the composition roots and the agent boundary', () => {
     const stryker = readJson<StrykerConfig>('stryker.config.json');
     expect(stryker.mutate).toEqual([
       'packages/core/src/**/*.ts',
       'packages/providers/src/ports.ts',
       'packages/providers/src/dry-run.ts',
+      'packages/providers/src/port-backed-model.ts',
       'packages/functions/src/*/root.ts',
+      'packages/functions/src/detect/detect.ts',
       'packages/agent/src/root.ts',
       'packages/agent/src/listen-host.ts',
+      'packages/agent/src/handler.ts',
+      'packages/agent/src/eval/report.ts',
       '!packages/**/*.test.ts',
       '!packages/**/test/**',
       '!packages/**/fixtures/**',
