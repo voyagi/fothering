@@ -1,0 +1,111 @@
+{
+  "id": "a01",
+  "incident": "A1: one bad import batch on the bulk lane fothering-bulk; code approves that one lane and the agent explains the close",
+  "now": "2026-10-11T12:02:00.000Z",
+  "scenarios": [
+    {
+      "configurationSet": "fothering-bulk",
+      "streamTag": "newsletter",
+      "callerIdentity": "bulk-sender",
+      "fromDomain": "news.example.com",
+      "groups": [
+        { "bucketOffset": 0, "count": 40, "batch": "import-0915", "permanentBounces": 15 },
+        { "bucketOffset": 1, "count": 160, "batch": "import-0901" }
+      ]
+    }
+  ],
+  "ses": {
+    "identities": [
+      {
+        "identity": "example.com",
+        "dkimStatus": "SUCCESS",
+        "dkimSigningEnabled": true,
+        "mailFromDomain": "bounce.example.com",
+        "mailFromStatus": "SUCCESS"
+      }
+    ],
+    "destinations": "complete"
+  },
+  "dns": [
+    { "name": "_dmarc.news.example.com", "recordType": "TXT", "outcome": "missing" },
+    { "name": "_dmarc.example.com", "recordType": "TXT", "outcome": "records", "records": ["v=DMARC1; p=none"] },
+    { "name": "bounce.example.com", "recordType": "TXT", "outcome": "records", "records": ["v=spf1 include:amazonses.com ~all"] },
+    { "name": "example.com", "recordType": "MX", "outcome": "missing" }
+  ],
+  "labels": {
+    "fothering-bulk": { "outcome": "approved", "reason": "approved", "names": [], "fixKind": null, "rule": "approved" }
+  },
+  "variants": [
+    {
+      "id": "base",
+      "response": { "label": "hand-authored" },
+      "turns": [
+        {
+          "kind": "answer",
+          "decision": "close",
+          "optionId": { "from": "approved" },
+          "explanation": "This lane's hard-bounce ratio is 7.50%, 15 of 200 recipient-sends. The import-0915 batch is the cause: 15 of its 40 sends bounced permanently, and without it the rest of the lane has none. Pausing this lane stops that batch while the other lanes keep sending."
+        }
+      ],
+      "expected": { "fothering-bulk": { "kind": "validated", "decision": "close" } }
+    },
+    {
+      "id": "f1",
+      "incident": "F1 (AI-SPEC 4b-Q): A1 with the cause batch named import-2026-10-01, the paragraph naming it exactly; its digits are a record name, not a number",
+      "response": { "label": "hand-authored" },
+      "scenarios": [
+        {
+          "configurationSet": "fothering-bulk",
+          "streamTag": "newsletter",
+          "callerIdentity": "bulk-sender",
+          "fromDomain": "news.example.com",
+          "groups": [
+            { "bucketOffset": 0, "count": 40, "batch": "import-2026-10-01", "permanentBounces": 15 },
+            { "bucketOffset": 1, "count": 160, "batch": "import-0901" }
+          ]
+        }
+      ],
+      "turns": [
+        {
+          "kind": "answer",
+          "decision": "close",
+          "optionId": { "from": "approved" },
+          "explanation": "This lane's hard-bounce ratio is 7.50%, 15 of 200 recipient-sends. The import-2026-10-01 batch is the cause: 15 of its 40 sends bounced permanently, and without it the rest of the lane has none. Pausing this lane stops that batch while the other lanes keep sending."
+        }
+      ],
+      "expected": { "fothering-bulk": { "kind": "validated", "decision": "close" } }
+    },
+    {
+      "id": "f3",
+      "incident": "F3 (AI-SPEC 1b failure mode 1): an old-list import whose recipients spread over three mailbox providers, so every provider row reads elevated beside the one cause batch",
+      "response": { "label": "hand-authored" },
+      "scenarios": [
+        {
+          "configurationSet": "fothering-bulk",
+          "streamTag": "newsletter",
+          "callerIdentity": "bulk-sender",
+          "fromDomain": "news.example.com",
+          "groups": [
+            {
+              "bucketOffset": 0,
+              "count": 40,
+              "batch": "import-0915",
+              "permanentBounces": 15,
+              "receivingDomains": ["gmail.com", "outlook.com", "icloud.com"]
+            },
+            { "bucketOffset": 1, "count": 160, "batch": "import-0901", "receivingDomains": ["gmail.com", "outlook.com", "icloud.com"] }
+          ]
+        }
+      ],
+      "turns": [
+        {
+          "kind": "answer",
+          "decision": "close",
+          "optionId": { "from": "approved" },
+          "explanation": "This lane's hard-bounce ratio is 7.50%, 15 of 200 recipient-sends. The import-0915 batch is the cause: 15 of its 40 sends bounced permanently. Each mailbox provider reads elevated only because that batch reached all of them, and without the batch the rest of the lane has none. Pausing this lane stops that batch."
+        }
+      ],
+      "expected": { "fothering-bulk": { "kind": "validated", "decision": "close" } }
+    }
+  ]
+}
