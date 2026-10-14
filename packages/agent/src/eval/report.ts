@@ -418,7 +418,9 @@ export function evalResultFor(evalCase: EvalCase, variant: EvalVariant, observat
     const expected = variant.expected[set];
     return lane !== undefined && expected !== undefined && matchesLabel(labels[set], lane.record) && outcomeCode(lane.stored) === outcomeCode(expected);
   });
-  const pass = observation.failures === 0 && sameMembers(observation.incidentLanes, labelled) && labelledLanes.length === labelled.length && lanesHold;
+  const callsHold = variant.modelCalls === undefined || labelledLanes.every((lane) => lane.modelCalls === variant.modelCalls);
+  const pass =
+    observation.failures === 0 && sameMembers(observation.incidentLanes, labelled) && labelledLanes.length === labelled.length && lanesHold && callsHold;
   const { response } = variant;
   return {
     caseId: evalCase.id,

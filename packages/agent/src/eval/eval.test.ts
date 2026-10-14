@@ -99,17 +99,61 @@ function fixtureTurnOf(turn: EvalTurn, record: EvidenceRecord): FixtureTurn {
   }
 }
 
-// One turn per model call across every invocation of the cycle, in invocation order.
-function replayModel(turns: readonly EvalTurn[]): BedrockModelPort {
+// One turn per model call across every invocation of the cycle, in invocation order; each call as the
+// model received it lands in `calls`.
+function replayModel(turns: readonly EvalTurn[], calls: FixtureModelCall[]): BedrockModelPort {
   let next = 0;
   return {
     async *stream(messages, options) {
       const turn = turns[next];
       next += 1;
       if (turn === undefined) throw new Error('the variant scripts no turn for this model call');
-      yield* createFixtureModel([fixtureTurnOf(turn, recordOf(messages))]).stream(messages, options);
+      const fixture = createFixtureModel([fixtureTurnOf(turn, recordOf(messages))]);
+      try {
+        yield* fixture.stream(messages, options);
+      } finally {
+        calls.push(...fixture.calls);
+      }
     },
   };
+}
+
+interface RawMail {
+  commonHeaders?: { subject: string };
+  headers?: { name: string; value: string }[];
+  content?: string;
+}
+
+interface RawDetail {
+  mail: RawMail;
+  bounce?: { bouncedRecipients: { diagnosticCode?: string }[] };
+  delivery?: { smtpResponse: string };
+}
+
+// The twin's text goes into a copy of the raw envelope, where an outside sender or receiving server
+// would have written it; a tag-value twin needs no planting, since its scenario carries the value.
+function plantedEnvelope(envelope: unknown, twin: EvalTwin | undefined): unknown {
+  if (twin === undefined || twin.field === 'tagValue') return envelope;
+  const copy = JSON.parse(JSON.stringify(envelope)) as { detail: RawDetail };
+  const { detail } = copy;
+  switch (twin.field) {
+    case 'diagnosticCode':
+      for (const recipient of detail.bounce?.bouncedRecipients ?? []) recipient.diagnosticCode = twin.text;
+      break;
+    case 'smtpResponse':
+      if (detail.delivery !== undefined) detail.delivery.smtpResponse = twin.text;
+      break;
+    case 'subject':
+      detail.mail.commonHeaders = { subject: twin.text };
+      break;
+    case 'header':
+      detail.mail.headers = [{ name: 'X-Campaign-Note', value: twin.text }];
+      break;
+    case 'replyBody':
+      detail.mail.content = twin.text;
+      break;
+  }
+  return copy;
 }
 
 function sesRecordings(ses: EvalCase['ses'], laneMap: LaneMap): Recording[] {
@@ -141,33 +185,42 @@ function dnsRecordings(answers: EvalCase['dns']): Recording[] {
   }));
 }
 
-async function ingestScenarios(run: PlannedRun, laneMap: LaneMap, store: FixtureTableState, nowMs: number): Promise<void> {
+/** Ingests every scenario envelope and answers how many of them carried the twin's text. */
+async function ingestScenarios(run: PlannedRun, laneMap: LaneMap, store: FixtureTableState, nowMs: number): Promise<number> {
   const custom = run.evalCase.laneMap === undefined ? {} : { laneMap };
   const deps = buildIngestRoot({ runtimeContext: 'test', switchValue: undefined, fixtures: { store }, now: () => nowMs, ...custom });
+  const { twin } = run.variant;
+  let planted = 0;
   for (const scenario of run.variant.scenarios ?? run.evalCase.scenarios) {
     const lane = findLane(laneMap, scenario.configurationSet);
     if (lane === undefined) throw new Error(`the scenario lane ${scenario.configurationSet} is not in the case's lane map`);
     for (const envelope of scenarioEnvelopes(scenario as LaneScenario, nowMs, lane)) {
-      const result = await ingestEvent(envelope, deps, { provenance: 'generated' });
+      const raw = plantedEnvelope(envelope, twin);
+      if (twin !== undefined && JSON.stringify(raw).includes(twin.text)) planted += 1;
+      const result = await ingestEvent(raw, deps, { provenance: 'generated' });
       if (result.outcome !== 'stored') throw new Error(`ingest ${result.outcome} a scenario envelope of ${scenario.configurationSet}`);
     }
   }
+  return planted;
 }
 
 function isRecordObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
 }
 
-function storedOf(decision: DecisionStoreItem | undefined, state: DecisionStoreItem | undefined): { stored: StoredOutcome; explanation: string | undefined } {
+type StoredView = Pick<LaneObservation, 'stored' | 'explanation' | 'modelCalls'>;
+
+function storedOf(decision: DecisionStoreItem | undefined, state: DecisionStoreItem | undefined): StoredView {
   if (decision !== undefined) {
-    if (decision.reason === 'cap-reached') return { stored: { kind: 'unavailable', reason: 'cap-reached' }, explanation: undefined };
+    if (decision.reason === 'cap-reached') return { stored: { kind: 'unavailable', reason: 'cap-reached' }, explanation: undefined, modelCalls: undefined };
     const explanation = typeof decision.explanation === 'string' ? decision.explanation : undefined;
-    return { stored: { kind: 'validated', decision: decision.outcome === 'close' ? 'close' : 'unknown' }, explanation };
+    const modelCalls = typeof decision.modelCalls === 'number' ? decision.modelCalls : undefined;
+    return { stored: { kind: 'validated', decision: decision.outcome === 'close' ? 'close' : 'unknown' }, explanation, modelCalls };
   }
   const last = state?.lastAgentOutcome;
-  if (!isRecordObject(last)) return { stored: { kind: 'not-sent' }, explanation: undefined };
+  if (!isRecordObject(last)) return { stored: { kind: 'not-sent' }, explanation: undefined, modelCalls: undefined };
   const stored = { kind: 'unavailable', reason: last.reason, ...(last.check === undefined ? {} : { check: last.check }) } as StoredOutcome;
-  return { stored, explanation: undefined };
+  return { stored, explanation: undefined, modelCalls: undefined };
 }
 
 async function observeLane(store: ReturnType<typeof buildDetectRoot>['ports']['decisionStore'], configurationSet: string, nowMs: number): Promise<LaneObservation> {
@@ -176,7 +229,7 @@ async function observeLane(store: ReturnType<typeof buildDetectRoot>['ports']['d
   const parsed = evidenceRecordSchema.safeParse(evidence?.record);
   const decision = await store.getItem(incidentItemKey(incidentId, 'DECISION'), nowMs);
   const state = await store.getItem(incidentItemKey(incidentId, 'STATE'), nowMs);
-  return { configurationSet, record: parsed.success ? parsed.data : undefined, ...storedOf(decision, state), modelCalls: undefined };
+  return { configurationSet, record: parsed.success ? parsed.data : undefined, ...storedOf(decision, state) };
 }
 
 /** One variant's run: what the judge reads, plus what the boundary checks compare across runs. */
@@ -197,9 +250,11 @@ async function runVariant(run: PlannedRun): Promise<RunCapture> {
   const laneMap = run.evalCase.laneMap === undefined ? COMMITTED_LANES : parseLaneMap(run.evalCase.laneMap);
   const custom = run.evalCase.laneMap === undefined ? {} : { laneMap };
   const store = createFixtureTableState();
-  await ingestScenarios(run, laneMap, store, nowMs);
+  const plantedEnvelopes = await ingestScenarios(run, laneMap, store, nowMs);
 
-  const handler = createInvocationHandler(buildAgentRoot({ runtimeContext: 'test', switchValue: undefined, fixtures: { model: replayModel(run.variant.turns) } }));
+  const modelCalls: FixtureModelCall[] = [];
+  const model = replayModel(run.variant.turns, modelCalls);
+  const handler = createInvocationHandler(buildAgentRoot({ runtimeContext: 'test', switchValue: undefined, fixtures: { model } }));
   const runtimeResults: RuntimeResult[] = [];
   const deps = buildDetectRoot({
     runtimeContext: 'test',
@@ -232,7 +287,12 @@ async function runVariant(run: PlannedRun): Promise<RunCapture> {
     runtime: first === undefined ? undefined : { pinned: first.pinned, promptSha256: first.promptSha256 },
     failures: summary.failures,
   };
-  return { observation, table: [], modelCalls: [], plantedEnvelopes: 0 };
+  return { observation, table: tableOf(store), modelCalls, plantedEnvelopes };
+}
+
+function tableOf(store: FixtureTableState): [string, unknown][] {
+  const entries = [...store.items].sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0));
+  return JSON.parse(JSON.stringify(entries)) as [string, unknown][];
 }
 
 async function runAll(runs: readonly PlannedRun[]): Promise<Map<PlannedRun, RunCapture>> {
