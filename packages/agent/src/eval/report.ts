@@ -142,6 +142,9 @@ const variantSchema = z.strictObject({
   response: responseSchema,
   turns: z.array(turnSchema).min(1),
   scenarios: z.array(laneScenarioSchema).min(1).optional(),
+  // A scenario override can move the code decision itself (F2 turns A6's refusal into an unknown), so
+  // such a variant states its own labels instead of inheriting the case's.
+  labels: z.record(configurationSet, laneLabelSchema).optional(),
   expected: z.record(configurationSet, storedOutcomeSchema),
   review: reviewSchema.optional(),
 });
@@ -166,7 +169,7 @@ export const evalCaseSchema = z
     const ids = evalCase.variants.map((variant) => variant.id);
     if (new Set(ids).size !== ids.length) ctx.addIssue({ code: 'custom', path: ['variants'], message: 'two variants share an id' });
     evalCase.variants.forEach((variant, index) => {
-      if (sortedKeys(variant.expected) !== sortedKeys(evalCase.labels)) {
+      if (sortedKeys(variant.expected) !== sortedKeys(variant.labels ?? evalCase.labels)) {
         ctx.addIssue({ code: 'custom', path: ['variants', index, 'expected'], message: 'a variant expects an outcome for exactly the labelled lanes' });
       }
     });
@@ -198,9 +201,21 @@ export function loadEvalCases(directory: string): EvalCase[] {
   return cases.sort((left, right) => compareText(left.id, right.id));
 }
 
+type LabelOutcomes = Readonly<Record<string, Pick<LaneLabel, 'outcome'>>>;
+
+export interface CoverageCase {
+  id: string;
+  labels: LabelOutcomes;
+  variants?: readonly { labels?: LabelOutcomes | undefined }[];
+}
+
 /** AC-E52: a set that never exercises one of the three decision paths cannot show that path holds. */
-export function assertDecisionPathCoverage(cases: readonly Pick<EvalCase, 'id' | 'labels'>[]): void {
-  const covered = new Set(cases.flatMap((evalCase) => Object.values(evalCase.labels).map((label) => label.outcome)));
+export function assertDecisionPathCoverage(cases: readonly CoverageCase[]): void {
+  const labelSets: LabelOutcomes[] = cases.flatMap((evalCase) => [
+    evalCase.labels,
+    ...(evalCase.variants ?? []).flatMap((variant) => (variant.labels === undefined ? [] : [variant.labels])),
+  ]);
+  const covered = new Set(labelSets.flatMap((labels) => Object.values(labels).map((label) => label.outcome)));
   const missing = DECISION_OUTCOMES.filter((outcome) => !covered.has(outcome));
   if (missing.length > 0) throw new Error(`the eval set covers no ${missing.join(' or ')} decision path; add a case labelled with it`);
 }
@@ -358,13 +373,14 @@ function flagsOf(lanes: readonly LaneObservation[]): ExplanationFlag[] {
  * labelled lanes, and every labelled lane's record and stored agent outcome equal the label.
  */
 export function evalResultFor(evalCase: EvalCase, variant: EvalVariant, observation: VariantObservation): EvalResult {
-  const labelled = Object.keys(evalCase.labels);
+  const labels = variant.labels ?? evalCase.labels;
+  const labelled = Object.keys(labels);
   const byLane = new Map(observation.lanes.map((lane) => [lane.configurationSet, lane]));
   const labelledLanes = labelled.flatMap((set) => byLane.get(set) ?? []);
   const lanesHold = labelled.every((set) => {
     const lane = byLane.get(set);
     const expected = variant.expected[set];
-    return lane !== undefined && expected !== undefined && matchesLabel(evalCase.labels[set], lane.record) && outcomeCode(lane.stored) === outcomeCode(expected);
+    return lane !== undefined && expected !== undefined && matchesLabel(labels[set], lane.record) && outcomeCode(lane.stored) === outcomeCode(expected);
   });
   const pass = observation.failures === 0 && sameMembers(observation.incidentLanes, labelled) && labelledLanes.length === labelled.length && lanesHold;
   const { response } = variant;

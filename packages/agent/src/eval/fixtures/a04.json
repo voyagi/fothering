@@ -1,0 +1,83 @@
+{
+  "id": "a04",
+  "incident": "A4: the template welcome-v2 over the threshold on fothering-bulk and on fothering-transactional; refused on both lanes, since pausing one would not stop it",
+  "now": "2026-10-11T12:02:00.000Z",
+  "scenarios": [
+    {
+      "configurationSet": "fothering-bulk",
+      "streamTag": "newsletter",
+      "callerIdentity": "bulk-sender",
+      "fromDomain": "news.example.com",
+      "groups": [
+        { "bucketOffset": 0, "count": 40, "template": "welcome-v2", "permanentBounces": 15 },
+        { "bucketOffset": 1, "count": 160, "template": "newsletter-v7" }
+      ]
+    },
+    {
+      "configurationSet": "fothering-transactional",
+      "streamTag": "receipts",
+      "callerIdentity": "receipts-sender",
+      "fromDomain": "news.example.com",
+      "groups": [
+        { "bucketOffset": 0, "count": 40, "template": "welcome-v2", "permanentBounces": 15 },
+        { "bucketOffset": 1, "count": 160, "template": "receipt-v3" }
+      ]
+    }
+  ],
+  "ses": {
+    "identities": [
+      {
+        "identity": "example.com",
+        "dkimStatus": "SUCCESS",
+        "dkimSigningEnabled": true,
+        "mailFromDomain": "bounce.example.com",
+        "mailFromStatus": "SUCCESS"
+      }
+    ],
+    "destinations": "complete"
+  },
+  "dns": [
+    { "name": "_dmarc.news.example.com", "recordType": "TXT", "outcome": "missing" },
+    { "name": "_dmarc.example.com", "recordType": "TXT", "outcome": "records", "records": ["v=DMARC1; p=none"] },
+    { "name": "bounce.example.com", "recordType": "TXT", "outcome": "records", "records": ["v=spf1 include:amazonses.com ~all"] },
+    { "name": "example.com", "recordType": "MX", "outcome": "missing" }
+  ],
+  "labels": {
+    "fothering-bulk": {
+      "outcome": "refused",
+      "reason": "not-lane-scoped",
+      "names": ["template welcome-v2", "fothering-bulk, fothering-transactional"],
+      "fixKind": "shared-tag-value",
+      "rule": "shared-cause"
+    },
+    "fothering-transactional": {
+      "outcome": "refused",
+      "reason": "not-lane-scoped",
+      "names": ["template welcome-v2", "fothering-bulk, fothering-transactional"],
+      "fixKind": "shared-tag-value",
+      "rule": "shared-cause"
+    }
+  },
+  "variants": [
+    {
+      "id": "base",
+      "response": { "label": "hand-authored" },
+      "turns": [
+        {
+          "kind": "answer",
+          "decision": "unknown",
+          "explanation": "This lane's hard-bounce ratio is 7.50% over 200 recipient-sends, and the welcome-v2 template is the cause. The same template is over the threshold on the other lane too, so holding back one lane would not stop it. Hold that template everywhere and check its addresses and content before it is sent again."
+        },
+        {
+          "kind": "answer",
+          "decision": "unknown",
+          "explanation": "This lane's hard-bounce ratio is 7.50% over 200 recipient-sends, and the welcome-v2 template is the cause. The other lane shows the same template over the threshold, so holding back this lane alone would not stop it. Hold that template on every lane and check its addresses and content before it is sent again."
+        }
+      ],
+      "expected": {
+        "fothering-bulk": { "kind": "validated", "decision": "unknown" },
+        "fothering-transactional": { "kind": "validated", "decision": "unknown" }
+      }
+    }
+  ]
+}

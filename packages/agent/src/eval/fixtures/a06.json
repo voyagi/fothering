@@ -1,0 +1,93 @@
+{
+  "id": "a06",
+  "incident": "A6: no DMARC record for the shared from-domain news.example.com, corroborated by 5.7.26 bounces on fothering-bulk; refused with the DMARC fix, since the domain also sends on fothering-transactional",
+  "now": "2026-10-11T12:02:00.000Z",
+  "scenarios": [
+    {
+      "configurationSet": "fothering-bulk",
+      "streamTag": "newsletter",
+      "callerIdentity": "bulk-sender",
+      "fromDomain": "news.example.com",
+      "groups": [
+        { "bucketOffset": 0, "count": 200, "permanentBounces": 15, "diagnosticCode": "smtp; 550 5.7.26 Multiple authentication checks failed" }
+      ]
+    },
+    {
+      "configurationSet": "fothering-transactional",
+      "streamTag": "receipts",
+      "callerIdentity": "receipts-sender",
+      "fromDomain": "news.example.com",
+      "groups": [{ "bucketOffset": 1, "count": 100 }]
+    }
+  ],
+  "ses": {
+    "identities": [{ "identity": "example.com", "dkimStatus": "SUCCESS", "dkimSigningEnabled": true }],
+    "destinations": "complete"
+  },
+  "dns": [
+    { "name": "_dmarc.news.example.com", "recordType": "TXT", "outcome": "missing" },
+    { "name": "_dmarc.example.com", "recordType": "TXT", "outcome": "missing" },
+    { "name": "example.com", "recordType": "MX", "outcome": "missing" }
+  ],
+  "labels": {
+    "fothering-bulk": {
+      "outcome": "refused",
+      "reason": "not-lane-scoped",
+      "names": ["Publish a DMARC record at _dmarc.news.example.com"],
+      "fixKind": "missing-dmarc",
+      "rule": "shared-cause"
+    }
+  },
+  "variants": [
+    {
+      "id": "base",
+      "response": { "label": "hand-authored" },
+      "turns": [
+        {
+          "kind": "answer",
+          "decision": "unknown",
+          "explanation": "This lane's hard-bounce ratio is 7.50% over 200 recipient-sends. No DMARC record was found for news.example.com, and 15 of the 15 permanent bounces carry authentication-failure codes, so that row reads as the cause. The same from-domain sends on the other lane too, so this needs a DMARC record published in DNS rather than holding back one lane."
+        }
+      ],
+      "expected": { "fothering-bulk": { "kind": "validated", "decision": "unknown" } }
+    },
+    {
+      "id": "f2",
+      "incident": "F2 pins D-61 as amended 2026-10-12: a policy-class spam block is not an RFC 7372 authentication code, so its bounces never corroborate the missing record (02-REVIEWS.md SETTLED 1)",
+      "response": { "label": "hand-authored" },
+      "scenarios": [
+        {
+          "configurationSet": "fothering-bulk",
+          "streamTag": "newsletter",
+          "callerIdentity": "bulk-sender",
+          "fromDomain": "news.example.com",
+          "groups": [{ "bucketOffset": 0, "count": 200, "permanentBounces": 15, "diagnosticCode": "smtp; 550 5.7.1 Message rejected as spam" }]
+        },
+        {
+          "configurationSet": "fothering-transactional",
+          "streamTag": "receipts",
+          "callerIdentity": "receipts-sender",
+          "fromDomain": "news.example.com",
+          "groups": [{ "bucketOffset": 1, "count": 100 }]
+        }
+      ],
+      "labels": {
+        "fothering-bulk": {
+          "outcome": "unknown",
+          "reason": "not-settled",
+          "names": ["fothering-bulk", "elevated DMARC of news.example.com"],
+          "fixKind": null,
+          "rule": "not-settled"
+        }
+      },
+      "turns": [
+        {
+          "kind": "answer",
+          "decision": "unknown",
+          "explanation": "This lane's hard-bounce ratio is 7.50% over 200 recipient-sends, and no single cause was settled. No DMARC record was found for news.example.com, and that row reads elevated, not the cause, because none of the bounces carry an authentication-failure code. No batch, template or provider stands out either, so the decision is left to you."
+        }
+      ],
+      "expected": { "fothering-bulk": { "kind": "validated", "decision": "unknown" } }
+    }
+  ]
+}

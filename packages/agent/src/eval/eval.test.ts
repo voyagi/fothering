@@ -203,7 +203,7 @@ async function runVariant(run: PlannedRun): Promise<VariantObservation> {
 
   const incidentLanes = summary.incidents.map((incident) => incident.configurationSet);
   const lanes: LaneObservation[] = [];
-  for (const configurationSet of [...new Set([...Object.keys(run.evalCase.labels), ...incidentLanes])].sort()) {
+  for (const configurationSet of [...new Set([...Object.keys(run.variant.labels ?? run.evalCase.labels), ...incidentLanes])].sort()) {
     lanes.push(await observeLane(deps.ports.decisionStore, configurationSet, nowMs));
   }
   const [first] = runtimeResults;
