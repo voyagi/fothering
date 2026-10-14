@@ -316,11 +316,54 @@ describe('decision path coverage (AC-E52)', () => {
   });
 });
 
+let baseRun: Promise<VariantObservation> | undefined;
+
+function baseObservation(): Promise<VariantObservation> {
+  baseRun ??= runVariant(runOf('a01', 'base'));
+  return baseRun;
+}
+
+describe('the code verdict reads FAIL when anything is off its label (controls)', () => {
+  let observation: VariantObservation;
+  const run = runOf('a01', 'base');
+  const judged = (evalCase: EvalCase, variant: EvalVariant, seen: VariantObservation = observation) => evalResultFor(evalCase, variant, seen).code;
+  const relabelled = (change: Record<string, unknown>): EvalCase => {
+    const label = run.evalCase.labels['fothering-bulk'];
+    if (label === undefined) throw new Error('a01 labels no fothering-bulk lane');
+    return { ...run.evalCase, labels: { 'fothering-bulk': { ...label, ...change } } };
+  };
+
+  beforeAll(async () => {
+    observation = await baseObservation();
+  }, 60_000);
+
+  it('reads PASS on the a01 base observation as labelled', () => {
+    expect(judged(run.evalCase, run.variant)).toBe('PASS');
+  });
+
+  it('reads FAIL for a label off by its outcome, reason, fix kind or a name the record does not hold', () => {
+    expect(judged(relabelled({ outcome: 'unknown' }), run.variant)).toBe('FAIL');
+    expect(judged(relabelled({ reason: 'not-settled' }), run.variant)).toBe('FAIL');
+    expect(judged(relabelled({ fixKind: 'shared-tag-value' }), run.variant)).toBe('FAIL');
+    expect(judged(relabelled({ names: ['import-0915'] }), run.variant)).toBe('FAIL');
+  });
+
+  it('reads FAIL for a stored outcome other than the expected one', () => {
+    const variant = { ...run.variant, expected: { 'fothering-bulk': { kind: 'validated' as const, decision: 'unknown' as const } } };
+    expect(judged(run.evalCase, variant)).toBe('FAIL');
+  });
+
+  it('reads FAIL when the cycle opened an unlabelled lane or failed a step', () => {
+    expect(judged(run.evalCase, run.variant, { ...observation, incidentLanes: [...observation.incidentLanes, 'fothering-alerts'] })).toBe('FAIL');
+    expect(judged(run.evalCase, run.variant, { ...observation, failures: 1 })).toBe('FAIL');
+  });
+});
+
 describe('the code flags order the human reading and never fail a case', () => {
   let record: EvidenceRecord;
 
   beforeAll(async () => {
-    const [lane] = (await runVariant(runOf('a01', 'base'))).lanes;
+    const [lane] = (await baseObservation()).lanes;
     if (lane?.record === undefined) throw new Error('the a01 base run stored no evidence record');
     record = lane.record;
   }, 60_000);
