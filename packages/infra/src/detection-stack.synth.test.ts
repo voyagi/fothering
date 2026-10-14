@@ -2,6 +2,7 @@ import { App } from 'aws-cdk-lib';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { parseLaneMap } from '@fothering/core/lanes';
 import { LIVE_SWITCH } from '@fothering/core/mode';
+import { DETECT_FUNCTION_TIMEOUT_MS } from '@fothering/core/model-values';
 import lanesJson from '../../../lanes.json' with { type: 'json' };
 import { cdkJsonContext } from './cdk-context.js';
 import { DETECTION_STACK_ID, INGEST_STACK_ID, RUNTIME_STACK_ID } from './create-app.js';
@@ -77,6 +78,8 @@ describe('DetectionStack synth', () => {
     expect(properties.Runtime).toBe('nodejs22.x');
     expect(properties.Architectures).toEqual(['arm64']);
     expect(properties.Handler).toBe('index.handler');
+    // The same constant detection reads as a cycle's longest life, so the two cannot drift apart.
+    expect(properties.Timeout).toBe(DETECT_FUNCTION_TIMEOUT_MS / 1000);
     expect(properties.Timeout).toBe(300);
     expect(properties.MemorySize).toBe(512);
     expect(properties.ReservedConcurrentExecutions).toBeUndefined();

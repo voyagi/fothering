@@ -7,6 +7,7 @@ import { Effect, PolicyStatement } from 'aws-cdk-lib/aws-iam';
 import { Function as LambdaFunction } from 'aws-cdk-lib/aws-lambda';
 import type { Construct } from 'constructs';
 import type { LaneMap } from '@fothering/core/lanes';
+import { DETECT_FUNCTION_TIMEOUT_MS } from '@fothering/core/model-values';
 import { liveSwitchEnvironment } from './live-switch.js';
 import { createFunctionRole, functionBase } from './log-statements.js';
 
@@ -60,7 +61,7 @@ export class DetectionStack extends Stack {
     // retry would only start a second cycle that spends SES reads and invocation caps again.
     const detectFunction = new LambdaFunction(this, 'DetectFunction', {
       ...functionBase(props.detectAssetDir, detectRole),
-      timeout: Duration.seconds(300),
+      timeout: Duration.millis(DETECT_FUNCTION_TIMEOUT_MS),
       memorySize: 512,
       retryAttempts: 0,
       environment: {

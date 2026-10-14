@@ -61,6 +61,13 @@ export const MODEL_VALUES = {
   perDayTokenReservations: 390_000,
 } as const;
 
+/**
+ * D-40: the detection function's timeout. The stack sets it and detection reads it as the longest a
+ * cycle can live, so an agent claim younger than it is a cycle still invoking: two copies of the
+ * number could drift apart and let a slow cycle's claim be taken over.
+ */
+export const DETECT_FUNCTION_TIMEOUT_MS = 300_000;
+
 /** The worst one invocation can spend: every allowed call at its full input and output bound (D-68). */
 export const TOKEN_RESERVATION_PER_INVOCATION = MODEL_VALUES.modelCallCeiling * (MODEL_VALUES.maxTokens + MODEL_VALUES.inputTokenCeiling);
 

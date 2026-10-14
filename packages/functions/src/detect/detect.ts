@@ -46,7 +46,7 @@ import {
 import { openIncident, stepIncident, windowsNeedingFinalVerdict, type FinalVerdict, type IncidentState } from '@fothering/core/incident';
 import type { LaneEntry, LaneMap } from '@fothering/core/lanes';
 import type { LogEntry } from '@fothering/core/log';
-import { MODEL_VALUES } from '@fothering/core/model-values';
+import { DETECT_FUNCTION_TIMEOUT_MS, MODEL_VALUES } from '@fothering/core/model-values';
 import { RETENTION_SECONDS } from '@fothering/core/records';
 import { coverageVerdict, laneSpikeVerdict, type CoverageVerdict, type LaneSpikeVerdict, type LaneVerdict } from '@fothering/core/verdicts';
 import {
@@ -123,8 +123,6 @@ type FailureEvent = 'lifecycle-failed' | 'opening-failed' | 'agent-attempt-faile
 
 const RUNTIME_ARN_VARIABLE = 'FOTHERING_AGENT_RUNTIME_ARN';
 
-// D-40: the detection function's timeout, so no cycle outlives it.
-const DETECT_FUNCTION_TIMEOUT_MS = 300_000;
 const WRITES_AFTER_INVOCATION_MS = 30_000;
 
 /**
