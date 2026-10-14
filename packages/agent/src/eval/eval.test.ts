@@ -268,7 +268,7 @@ function without(object: Record<string, unknown>, key: string): Record<string, u
 
 describe('the eval case schema (AC-E51)', () => {
   it('accepts every case file in the fixtures folder, sorted by id', () => {
-    expect(CASES.map((evalCase) => evalCase.id).join(',')).toBe('a01');
+    expect(CASES.map((evalCase) => evalCase.id).join(',')).toBe('a01,a02,a03,a04,a05,a06,a07,a08,a09,a10');
   });
 
   it('accepts a captured response that carries its runtimeSessionId and capturedAt', () => {
@@ -304,6 +304,16 @@ describe('decision path coverage (AC-E52)', () => {
       { id: 'a02', labels: lane('unknown') },
     ];
     expect(() => assertDecisionPathCoverage(planted)).toThrow(/refused/);
+  });
+
+  it('passes over the committed eval set, which covers approved, unknown and refused', () => {
+    expect(() => assertDecisionPathCoverage(CASES)).not.toThrow();
+  });
+
+  it('holds R14 incidents A1 to A10 with F1 to F4 as variants, fourteen in all', () => {
+    expect(RUNS.map((run) => `${run.evalCase.id}/${run.variant.id}`).join(',')).toBe(
+      'a01/base,a01/f1,a01/f3,a02/base,a03/base,a03/f4,a04/base,a05/base,a06/base,a06/f2,a07/base,a08/base,a09/base,a10/base',
+    );
   });
 
   it('accepts a planted case list holding approved, unknown and refused', () => {
