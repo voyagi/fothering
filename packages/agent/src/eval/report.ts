@@ -136,11 +136,26 @@ const reviewSchema = z.strictObject({
   }),
 });
 
+// AC-19's planting sites: four raw-text fields the parser strips (D-12) or reduces to codes (D-15), a
+// reply-shaped body field, and the batch tag value, which reaches the record by design.
+export const TWIN_FIELDS = ['diagnosticCode', 'smtpResponse', 'subject', 'header', 'replyBody', 'tagValue'] as const;
+export type TwinField = (typeof TWIN_FIELDS)[number];
+
+const twinSchema = z.strictObject({
+  pair: z.string().regex(/^[a-z][a-z-]{0,31}$/),
+  role: z.enum(['benign', 'planted']),
+  field: z.enum(TWIN_FIELDS),
+  text: oneLine,
+});
+
 const variantSchema = z.strictObject({
   id: z.string().regex(/^[a-z0-9][a-z0-9-]{0,31}$/),
   incident: oneLine.optional(),
   response: responseSchema,
   turns: z.array(turnSchema).min(1),
+  twin: twinSchema.optional(),
+  /** The model calls the stored DECISION records, where a loop variant pins how many the loop took. */
+  modelCalls: z.int().positive().optional(),
   scenarios: z.array(laneScenarioSchema).min(1).optional(),
   // A scenario override can move the code decision itself (F2 turns A6's refusal into an unknown), so
   // such a variant states its own labels instead of inheriting the case's.
@@ -173,11 +188,30 @@ export const evalCaseSchema = z
         ctx.addIssue({ code: 'custom', path: ['variants', index, 'expected'], message: 'a variant expects an outcome for exactly the labelled lanes' });
       }
     });
+    for (const message of twinPairProblems(evalCase.variants)) ctx.addIssue({ code: 'custom', path: ['variants'], message });
   });
+
+type TwinnedVariant = { twin?: z.infer<typeof twinSchema> | undefined };
+
+// A twin compares against its other half, so a pair is exactly one benign and one planted variant on
+// one field; a tag-value twin's text is the tag value itself and so must be one SES accepts.
+function twinPairProblems(variants: readonly TwinnedVariant[]): string[] {
+  const pairs = new Map<string, z.infer<typeof twinSchema>[]>();
+  for (const { twin } of variants) if (twin !== undefined) pairs.set(twin.pair, [...(pairs.get(twin.pair) ?? []), twin]);
+  const problems: string[] = [];
+  for (const [pair, twins] of pairs) {
+    const roles = twins.map((twin) => twin.role).sort().join(',');
+    if (roles !== 'benign,planted') problems.push(`twin pair ${pair} needs exactly one benign and one planted variant`);
+    if (new Set(twins.map((twin) => twin.field)).size !== 1) problems.push(`twin pair ${pair} plants on two different fields`);
+    if (twins.some((twin) => twin.field === 'tagValue' && !SES_TAG_PATTERN.test(twin.text))) problems.push(`twin pair ${pair} holds a tag value SES would refuse`);
+  }
+  return problems;
+}
 
 export type EvalCase = z.infer<typeof evalCaseSchema>;
 export type EvalVariant = EvalCase['variants'][number];
 export type EvalTurn = EvalVariant['turns'][number];
+export type EvalTwin = NonNullable<EvalVariant['twin']>;
 export type StoredOutcome = z.infer<typeof storedOutcomeSchema>;
 export type PinnedValues = z.infer<typeof pinnedSchema>;
 export type ResponseLabel = EvalVariant['response']['label'];
@@ -287,6 +321,8 @@ export interface LaneObservation {
   record: EvidenceRecord | undefined;
   stored: StoredOutcome;
   explanation: string | undefined;
+  /** The model calls the stored DECISION item records; undefined where no answer was stored. */
+  modelCalls: number | undefined;
 }
 
 /** What one detection cycle left behind for a variant, read back from the table and the runtime. */
