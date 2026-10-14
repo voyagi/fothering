@@ -119,6 +119,8 @@ type FailureEvent = 'lifecycle-failed' | 'opening-failed' | 'agent-attempt-faile
 const FIRST_ATTEMPT = 1;
 const RUNTIME_ARN_VARIABLE = 'FOTHERING_AGENT_RUNTIME_ARN';
 
+export const CYCLE_INVOKE_BUDGET_MS = 180_000;
+
 function expiresAtFor(nowMs: number): number {
   return Math.floor(nowMs / 1000) + RETENTION_SECONDS;
 }
