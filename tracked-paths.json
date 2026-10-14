@@ -23,7 +23,8 @@
     "verify-ship.mjs",
     "vitest.config.ts",
     "vitest.stryker.config.ts",
-    "docs/forget-one-recipient.md"
+    "docs/forget-one-recipient.md",
+    "docs/agent-unavailable.md"
   ],
   "prefixes": [
     ".github/workflows/",
