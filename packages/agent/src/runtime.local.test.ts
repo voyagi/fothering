@@ -30,6 +30,12 @@ const BUNDLE_OPTIONS = join(REPO_ROOT, 'scripts', 'bundle-options.mjs');
 const AGENTCORE_APP_JS = join(REPO_ROOT, 'node_modules', 'bedrock-agentcore', 'dist', 'src', 'runtime', 'app.js');
 const CREATE_REQUIRE_LINE = 'const require = createRequire(import.meta.url);';
 const CHILD_TIMEOUT_MS = 60000;
+// The two tests that run esbuild inside this process write their planted inputs here, not under
+// the system temp folder: the time of those tiny builds follows the size of the folders above the
+// planted files. Under a temp folder holding about a million entries they took about 3 s alone and
+// went past 60 s in 3 of 4 cold verify:ship runs; from a small folder they took under 50 ms
+// (measured 2026-10-14). node_modules/ is git-ignored.
+const PLANT_PARENT = join(REPO_ROOT, 'node_modules', '.cache');
 const SESSION_HEADER = 'x-amzn-bedrock-agentcore-runtime-session-id';
 const LISTEN_REFUSED = 'listen guard refused a non-loopback bind';
 
@@ -163,6 +169,8 @@ function fixtureEvidenceRecord(): EvidenceRecord {
 describe('the agent bundle answers the AgentCore contract with the real handler and no AWS client', () => {
   const outDir = mkdtempSync(join(tmpdir(), 'fothering-agent-bundle-'));
   const workDir = mkdtempSync(join(tmpdir(), 'fothering-agent-work-'));
+  mkdirSync(PLANT_PARENT, { recursive: true });
+  const plantDir = mkdtempSync(join(PLANT_PARENT, 'fothering-agent-plant-'));
   const listenGuard = join(workDir, 'listen-guard.mjs');
   writeFileSync(listenGuard, LISTEN_GUARD_SOURCE);
   const preloadOut = join(workDir, 'guard-preload.mjs');
@@ -196,6 +204,7 @@ describe('the agent bundle answers the AgentCore contract with the real handler 
     const retryOptions = { recursive: true, force: true, maxRetries: 5, retryDelay: 200 } as const;
     rmSync(outDir, retryOptions);
     rmSync(workDir, retryOptions);
+    rmSync(plantDir, retryOptions);
   });
 
   it(
@@ -226,8 +235,8 @@ describe('the agent bundle answers the AgentCore contract with the real handler 
         CJS_BUNDLE_BASE: BuildOptions;
         agentcoreInlineRequirePlugin: () => Plugin;
       };
-      // A private copy of the package path the plugin's filter matches, under this test's own folder.
-      const plantedRoot = join(workDir, 'planted-agentcore');
+      // A private copy of the package path the plugin's filter matches, under this file's plant folder.
+      const plantedRoot = join(plantDir, 'planted-agentcore');
       const runtimeDir = join(plantedRoot, 'node_modules', 'bedrock-agentcore', 'dist', 'src', 'runtime');
       mkdirSync(runtimeDir, { recursive: true });
       const plantedApp = join(runtimeDir, 'app.js');
@@ -297,7 +306,7 @@ describe('the agent bundle answers the AgentCore contract with the real handler 
     'the shared CommonJS settings fail a planted import.meta use instead of bundling it as undefined',
     async () => {
       const { CJS_BUNDLE_BASE } = (await import(pathToFileURL(BUNDLE_OPTIONS).href)) as { CJS_BUNDLE_BASE: BuildOptions };
-      const planted = join(workDir, 'planted-import-meta.mjs');
+      const planted = join(plantDir, 'planted-import-meta.mjs');
       await writeFile(planted, 'export const where = import.meta.url;\n');
       const failure = await build({ ...CJS_BUNDLE_BASE, entryPoints: [planted], write: false, logLevel: 'silent' }).then(
         () => undefined,
@@ -307,7 +316,7 @@ describe('the agent bundle answers the AgentCore contract with the real handler 
 
       // Control: the same settings bundle a file with no import.meta, so the failure above is the
       // override firing, not settings that fail every build.
-      const clean = join(workDir, 'clean-entry.mjs');
+      const clean = join(plantDir, 'clean-entry.mjs');
       await writeFile(clean, 'export const where = 1;\n');
       const ok = await build({ ...CJS_BUNDLE_BASE, entryPoints: [clean], write: false, logLevel: 'silent' });
       expect(ok.errors).toEqual([]);
