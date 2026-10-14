@@ -1,8 +1,11 @@
 import {
+  AGENT_UNAVAILABLE_REASONS,
+  INVALID_CHECKS,
   classifyRuntimeOutcome,
   runtimeResultSchema,
   type AgentAnswer,
   type AgentUnavailableReason,
+  type InvalidCheck,
   type RuntimeOutcome,
   type RuntimeResult,
 } from '@fothering/core/agent-answer';
@@ -16,13 +19,15 @@ import {
   type ObservedLaneFacts,
   type SesConfigurationFacts,
 } from '@fothering/core/closeability';
-import { reserveInvocation } from '@fothering/core/counters';
+import { recordUsage, reserveInvocation } from '@fothering/core/counters';
 import { assembleEvidenceRecord, decideCycle, type CycleDecision, type LaneAnalysis } from '@fothering/core/decision';
 import {
+  RECORD_BYTE_CEILING,
   evidenceRecordSchema,
   incidentIdFor,
   incidentItemKey,
   incidentLaneKey,
+  serializedRecordBytes,
   type EvidenceRecord,
 } from '@fothering/core/evidence-record';
 import {
@@ -53,7 +58,7 @@ import {
   type WindowFoldState,
   type WindowSummary,
 } from '@fothering/core/window-fold';
-import { requireLiveConfig, type DecisionStoreItem, type SesReadPort } from '@fothering/providers/port-types';
+import { requireLiveConfig, type DecisionStoreItem, type ReservationItem, type SesReadPort } from '@fothering/providers/port-types';
 import { readSesFacts } from '@fothering/providers/ses-facts';
 import type { DetectDeps } from './root.js';
 
@@ -116,10 +121,19 @@ type StoredState = Omit<IncidentState, 'version'>;
 
 type FailureEvent = 'lifecycle-failed' | 'opening-failed' | 'agent-attempt-failed';
 
-const FIRST_ATTEMPT = 1;
 const RUNTIME_ARN_VARIABLE = 'FOTHERING_AGENT_RUNTIME_ARN';
 
-export const CYCLE_INVOKE_BUDGET_MS = 180_000;
+// D-40: the detection function's timeout, so no cycle outlives it.
+const DETECT_FUNCTION_TIMEOUT_MS = 300_000;
+const WRITES_AFTER_INVOCATION_MS = 30_000;
+
+/**
+ * The latest point in a cycle a reservation may start: the function timeout less one whole
+ * invocation and the decision and usage writes after it, so the timeout can never end an
+ * invocation whose reservation is already spent (steelman S3). A later incident waits for the
+ * next cycle with nothing reserved.
+ */
+export const CYCLE_INVOKE_BUDGET_MS = DETECT_FUNCTION_TIMEOUT_MS - MODEL_VALUES.agentInvocationTimeoutMs - WRITES_AFTER_INVOCATION_MS;
 
 function expiresAtFor(nowMs: number): number {
   return Math.floor(nowMs / 1000) + RETENTION_SECONDS;
@@ -509,13 +523,18 @@ function runtimeArnOf(deps: DetectDeps): string | undefined {
   }
 }
 
+// D-72: every attempt runs in a fresh session, so no attempt reads what an earlier one was told.
+function sessionIdOf(incidentId: string, attempt: number): string {
+  return `fothering-${incidentId}-a${attempt}`;
+}
+
 // The thrown error is never read: only whether the cycle's own deadline fired (D-77).
-async function invokeRuntime(deps: DetectDeps, runtimeArn: string, record: EvidenceRecord): Promise<RuntimeOutcome> {
+async function invokeRuntime(deps: DetectDeps, runtimeArn: string, record: EvidenceRecord, attempt: number): Promise<RuntimeOutcome> {
   const abortSignal = deps.agentTimeoutSignal(MODEL_VALUES.agentInvocationTimeoutMs);
   try {
     const response = await deps.ports.agentCore.invokeAgentRuntime({
       runtimeArn,
-      sessionId: `fothering-${record.incidentId}-a${FIRST_ATTEMPT}`,
+      sessionId: sessionIdOf(record.incidentId, attempt),
       payload: record,
       abortSignal,
     });
@@ -540,58 +559,205 @@ function resultFields(result: RuntimeResult | undefined): Pick<LogEntry, 'status
 
 type AnsweredResult = Extract<RuntimeResult, { status: 'answered' }>;
 
-async function storeDecision(deps: DetectDeps, record: EvidenceRecord, answer: AgentAnswer, result: AnsweredResult): Promise<void> {
-  const decidedAtMs = deps.now();
-  await deps.ports.decisionStore.putIfAbsent({
-    ...incidentItemKey(record.incidentId, 'DECISION'),
-    outcome: answer.decision,
-    ...(answer.decision === 'close' ? { optionId: answer.optionId } : {}),
-    explanation: answer.explanation,
-    pinned: result.pinned,
-    promptSha256: result.promptSha256,
-    usage: result.usage,
-    modelCalls: result.modelCalls,
-    attempt: FIRST_ATTEMPT,
-    decidedAtMs,
-    expiresAt: Math.floor(decidedAtMs / 1000) + RETENTION_SECONDS,
-  }, decidedAtMs);
+/** What one agent turn knows about its incident; stateVersion follows this turn's own STATE writes. */
+interface AgentTurn {
+  record: EvidenceRecord;
+  turnMs: number;
+  stateVersion: number;
+  /** Invocations already spent on the incident, by its stored outcome and any claim whose cycle has surely ended. */
+  attemptsMade: number;
+  lastOutcome: StoredAgentOutcome | undefined;
+  incident: { configurationSet: string; incidentId: string; attempt: number };
 }
 
-// D-42 step 5. The ARN is checked before the reservation, and the reservation must succeed before
-// the call, so a deployment missing its ARN or past a cap spends nothing (T-02-41).
-async function attemptAgent(deps: DetectDeps, record: EvidenceRecord, nowMs: number, counts: CycleCounts): Promise<CycleResult> {
-  const incident = { configurationSet: record.lane.configurationSet, incidentId: record.incidentId, attempt: FIRST_ATTEMPT };
-  const runtimeArn = runtimeArnOf(deps);
-  if (runtimeArn === undefined) {
-    deps.log.error({ event: 'agent-unavailable', ...incident, reason: 'agent-error', errorName: 'LiveConfigMissingError' });
-    return 'agent-error';
+/** STATE's lastAgentOutcome: codes and a count only, never the answer or an error message (D-74, AC-P8). */
+interface StoredAgentOutcome {
+  reason: AgentUnavailableReason;
+  check?: InvalidCheck;
+  attempt: number;
+}
+
+/** STATE's agentClaim: the attempt a cycle took before reserving, so a second cycle cannot take the same one. */
+interface AgentClaim {
+  attempt: number;
+  claimedAtMs: number;
+}
+
+function wholeCountOf(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : undefined;
+}
+
+function storedOutcomeOf(value: unknown): StoredAgentOutcome | undefined {
+  if (typeof value !== 'object' || value === null) return undefined;
+  const { reason, check, attempt } = value as Record<string, unknown>;
+  const count = wholeCountOf(attempt);
+  const knownReason = AGENT_UNAVAILABLE_REASONS.find((candidate) => candidate === reason);
+  if (knownReason === undefined || count === undefined) return undefined;
+  const knownCheck = INVALID_CHECKS.find((candidate) => candidate === check);
+  return knownCheck === undefined ? { reason: knownReason, attempt: count } : { reason: knownReason, check: knownCheck, attempt: count };
+}
+
+function claimOf(value: unknown): AgentClaim | undefined {
+  if (typeof value !== 'object' || value === null) return undefined;
+  const { attempt, claimedAtMs } = value as Record<string, unknown>;
+  const count = wholeCountOf(attempt);
+  const at = wholeCountOf(claimedAtMs);
+  return count === undefined || at === undefined ? undefined : { attempt: count, claimedAtMs: at };
+}
+
+// A claim with no outcome written over it is a cycle still invoking, or one that died. The function
+// timeout bounds every cycle, so a claim older than it is a dead cycle's and counts as spent; the
+// incident counter is what holds the cap either way.
+function agentTurnOf(record: EvidenceRecord, item: DecisionStoreItem | undefined, turnMs: number): AgentTurn | 'in-flight' | undefined {
+  if (item === undefined || typeof item.version !== 'number') return undefined;
+  const claim = claimOf(item.agentClaim);
+  if (claim !== undefined && turnMs < claim.claimedAtMs + DETECT_FUNCTION_TIMEOUT_MS) return 'in-flight';
+  const lastOutcome = storedOutcomeOf(item.lastAgentOutcome);
+  const attemptsMade = Math.max(lastOutcome?.attempt ?? 0, claim?.attempt ?? 0);
+  const incident = { configurationSet: record.lane.configurationSet, incidentId: record.incidentId, attempt: attemptsMade + 1 };
+  return { record, turnMs, stateVersion: item.version, attemptsMade, lastOutcome, incident };
+}
+
+function stateKeyOf(turn: AgentTurn) {
+  return incidentItemKey(turn.incident.incidentId, 'STATE');
+}
+
+// The outcome write releases the claim. A conflict means another cycle moved STATE meanwhile; the
+// claim then reads as spent once the function timeout has passed, so nothing is retried early.
+async function storeOutcome(deps: DetectDeps, turn: AgentTurn, outcome: StoredAgentOutcome): Promise<void> {
+  const attributes = { lastAgentOutcome: outcome, agentClaim: null };
+  const result = await deps.ports.decisionStore.updateIfVersion(stateKeyOf(turn), turn.stateVersion, attributes, turn.turnMs);
+  if (result === 'updated') turn.stateVersion += 1;
+  else deps.log.info({ event: 'agent-outcome-unsaved', ...turn.incident, reason: outcome.reason });
+}
+
+async function claimAttempt(deps: DetectDeps, turn: AgentTurn): Promise<boolean> {
+  const agentClaim: AgentClaim = { attempt: turn.incident.attempt, claimedAtMs: turn.turnMs };
+  const result = await deps.ports.decisionStore.updateIfVersion(stateKeyOf(turn), turn.stateVersion, { agentClaim }, turn.turnMs);
+  if (result !== 'updated') return false;
+  turn.stateVersion += 1;
+  return true;
+}
+
+function decisionItemBase(turn: AgentTurn) {
+  return {
+    ...incidentItemKey(turn.incident.incidentId, 'DECISION'),
+    attempt: turn.incident.attempt,
+    decidedAtMs: turn.turnMs,
+    expiresAt: expiresAtFor(turn.turnMs),
+  };
+}
+
+async function storeDecision(deps: DetectDeps, turn: AgentTurn, answer: AgentAnswer, result: AnsweredResult): Promise<void> {
+  await deps.ports.decisionStore.putIfAbsent(
+    {
+      ...decisionItemBase(turn),
+      outcome: answer.decision,
+      ...(answer.decision === 'close' ? { optionId: answer.optionId } : {}),
+      explanation: answer.explanation,
+      pinned: result.pinned,
+      promptSha256: result.promptSha256,
+      usage: result.usage,
+      modelCalls: result.modelCalls,
+    },
+    turn.turnMs,
+  );
+}
+
+// D-77: cap-reached is final, so it is a DECISION item and ends every later attempt.
+async function storeCapReached(deps: DetectDeps, turn: AgentTurn, items: readonly ReservationItem[]): Promise<CycleResult> {
+  await deps.ports.decisionStore.putIfAbsent({ ...decisionItemBase(turn), outcome: 'unknown', reason: 'cap-reached', items: [...items] }, turn.turnMs);
+  deps.log.info({ event: 'agent-unavailable', ...turn.incident, reason: 'cap-reached' });
+  return 'cap-reached';
+}
+
+// Nothing ran, so nothing is reserved and nothing counts as an attempt: once the row resolves live,
+// the incident's first metered invocation is its attempt 1 (SPEC R11, D-77).
+async function dryRunAttempt(deps: DetectDeps, turn: AgentTurn, runtimeArn: string): Promise<CycleResult | undefined> {
+  if (turn.lastOutcome?.reason === 'agent-dry-run') return undefined;
+  const { incidentId } = turn.incident;
+  await deps.ports.agentCore.invokeAgentRuntime({ runtimeArn, sessionId: sessionIdOf(incidentId, turn.incident.attempt), payload: turn.record });
+  await storeOutcome(deps, turn, { reason: 'agent-dry-run', attempt: turn.attemptsMade });
+  deps.log.info({ event: 'agent-unavailable', ...turn.incident, reason: 'agent-dry-run' });
+  return 'agent-dry-run';
+}
+
+// The usage write comes after the outcome is stored, so a usage write that throws can neither lose a
+// stored decision nor leave the incident to be invoked again for the same attempt.
+async function recordSpentUsage(deps: DetectDeps, turn: AgentTurn, result: RuntimeResult | undefined): Promise<void> {
+  if (result === undefined || result.status === 'dry-run') return;
+  const usageInput = { incidentId: turn.incident.incidentId, reservedAtMs: turn.turnMs, usage: result.usage, modelCalls: result.modelCalls };
+  if ((await recordUsage(deps.ports.decisionStore, usageInput)) === 'not-reserved') {
+    deps.log.error({ event: 'usage-not-reserved', ...turn.incident });
   }
-  const reservation = await reserveInvocation(deps.ports.decisionStore, { incidentId: record.incidentId, nowMs });
-  if (!reservation.ok) {
-    const reason = reservation.reason === 'cap' ? 'cap-reached' : 'agent-error';
-    deps.log.info({ event: 'agent-unavailable', ...incident, reason });
-    return reason;
-  }
-  counts.invocations += 1;
-  const outcome = await invokeRuntime(deps, runtimeArn, record);
+}
+
+async function invokeAndStore(deps: DetectDeps, turn: AgentTurn, runtimeArn: string): Promise<CycleResult> {
+  const { record, incident } = turn;
+  const outcome = await invokeRuntime(deps, runtimeArn, record, incident.attempt);
   const result = parsedResult(outcome);
   const classified = classifyRuntimeOutcome(outcome, { record, laneMapSets: deps.laneMap.lanes.map((lane) => lane.configurationSet) });
-  if (classified.kind === 'unavailable' || result?.status !== 'answered') {
+  let cycleResult: CycleResult;
+  if (classified.kind === 'validated' && result?.status === 'answered') {
+    await storeDecision(deps, turn, classified.answer, result);
+    deps.log.info({ event: 'agent-decided', ...incident, ...resultFields(result) });
+    cycleResult = classified.answer.decision;
+  } else {
     const reason = classified.kind === 'unavailable' ? classified.reason : 'response-invalid';
     const check = classified.kind === 'unavailable' ? classified.check : undefined;
+    await storeOutcome(deps, turn, check === undefined ? { reason, attempt: incident.attempt } : { reason, check, attempt: incident.attempt });
     deps.log.info({ event: 'agent-unavailable', ...incident, reason, ...(check === undefined ? {} : { check }), ...resultFields(result) });
-    return reason;
+    cycleResult = reason;
   }
-  await storeDecision(deps, record, classified.answer, result);
-  deps.log.info({ event: 'agent-decided', ...incident, ...resultFields(result) });
-  return classified.answer.decision;
+  await recordSpentUsage(deps, turn, result);
+  return cycleResult;
 }
 
-async function agentStep(deps: DetectDeps, incidentId: string, nowMs: number, counts: CycleCounts): Promise<CycleResult | undefined> {
-  const record = await storedRecordOf(deps, incidentId, nowMs);
+// D-42 step 5. The ARN is checked, the attempt claimed and one invocation reserved, in that order,
+// before the call, so a deployment missing its ARN, a cycle another one beat, or a cap spends nothing
+// (T-02-41). A TransactionConflict is two writers racing, retried by a later cycle (Pitfall 6).
+async function attemptAgent(deps: DetectDeps, turn: AgentTurn, counts: CycleCounts): Promise<CycleResult | undefined> {
+  const runtimeArn = runtimeArnOf(deps);
+  if (runtimeArn === undefined) {
+    deps.log.error({ event: 'agent-unavailable', ...turn.incident, reason: 'agent-error', errorName: 'LiveConfigMissingError' });
+    return 'agent-error';
+  }
+  if (deps.kinds.agentCore?.invokeAgentRuntime === 'dry-run') return dryRunAttempt(deps, turn, runtimeArn);
+  if (!(await claimAttempt(deps, turn))) return undefined;
+  const reservation = await reserveInvocation(deps.ports.decisionStore, { incidentId: turn.incident.incidentId, nowMs: turn.turnMs });
+  if (!reservation.ok) {
+    if (reservation.reason === 'cap') return storeCapReached(deps, turn, reservation.items);
+    await storeOutcome(deps, turn, { reason: 'agent-error', attempt: turn.attemptsMade });
+    deps.log.info({ event: 'agent-unavailable', ...turn.incident, reason: 'agent-error' });
+    return 'agent-error';
+  }
+  counts.invocations += 1;
+  return invokeAndStore(deps, turn, runtimeArn);
+}
+
+// A record past the ceiling is never sent (AC-E35): the runtime would refuse it, after a reservation.
+function tooLargeToSend(record: EvidenceRecord): boolean {
+  return record.decision.reason === 'record-too-large' || serializedRecordBytes(record) > RECORD_BYTE_CEILING;
+}
+
+async function agentStep(deps: DetectDeps, incidentId: string, cycleStartMs: number, counts: CycleCounts): Promise<CycleResult | undefined> {
+  const turnMs = deps.now();
+  const store = deps.ports.decisionStore;
+  const record = await storedRecordOf(deps, incidentId, turnMs);
   if (record === undefined) return undefined;
-  if ((await deps.ports.decisionStore.getItem(incidentItemKey(incidentId, 'DECISION'), nowMs)) !== undefined) return undefined;
-  return attemptAgent(deps, record, nowMs, counts);
+  if ((await store.getItem(incidentItemKey(incidentId, 'DECISION'), turnMs)) !== undefined) return undefined;
+  const incident = { configurationSet: record.lane.configurationSet, incidentId };
+  if (tooLargeToSend(record)) {
+    deps.log.info({ event: 'agent-not-invoked', ...incident, reason: 'record-too-large' });
+    return undefined;
+  }
+  if (turnMs - cycleStartMs > CYCLE_INVOKE_BUDGET_MS) {
+    deps.log.info({ event: 'agent-deferred', ...incident });
+    return undefined;
+  }
+  const turn = agentTurnOf(record, await store.getItem(incidentItemKey(incidentId, 'STATE'), turnMs), turnMs);
+  if (turn === undefined || turn === 'in-flight') return undefined;
+  return attemptAgent(deps, turn, counts);
 }
 
 // An incident is attempted only by a cycle that found its record already stored or wrote it itself:

@@ -215,8 +215,9 @@ describe('one spike is one incident across repeated cycles (D-53, D-54, D-55)', 
     const marker = await markerOf(deps);
     expect(marker?.incidentId ?? 'no marker').toBe(INCIDENT_ID);
     expect(marker).toMatchObject({ status: 'open', version: 1 });
+    // Version 2: the put, then the agent attempt's claim on the same item.
     expect(await storedItem(deps, INCIDENT_ID, 'STATE')).toMatchObject({
-      version: 1,
+      version: 2,
       state: { incidentId: INCIDENT_ID, configurationSet: BULK, status: 'open', openingFinalized: false, pendingRecovery: null, falseSpikes: 0, falseRecoveries: 0 },
     });
     expect(itemsWithSortKey(store, 'EVIDENCE')).toHaveLength(1);
@@ -237,7 +238,7 @@ describe('one spike is one incident across repeated cycles (D-53, D-54, D-55)', 
     expect(itemsWithSortKey(store, 'MARKER')).toHaveLength(1);
     expect(itemsWithSortKey(store, 'STATE').map((item) => item.pk)).toEqual([`INCIDENT#${INCIDENT_ID}`]);
     expect(itemsWithSortKey(store, 'EVIDENCE').map((item) => item.pk)).toEqual([`INCIDENT#${INCIDENT_ID}`]);
-    expect(await storedItem(deps, INCIDENT_ID, 'STATE', spikingNowMs)).toMatchObject({ version: 3, state: { status: 'open', pendingRecovery: null } });
+    expect(await storedItem(deps, INCIDENT_ID, 'STATE', spikingNowMs)).toMatchObject({ version: 4, state: { status: 'open', pendingRecovery: null } });
     expect([quiet, third].map((summary) => [summary.sesReads, summary.invocations, summary.incidentsOpened])).toEqual([[0, 0, 0], [0, 0, 0]]);
     expect(third.incidents).toEqual([{ configurationSet: BULK, incidentId: INCIDENT_ID }]);
   });
@@ -273,7 +274,7 @@ describe('one spike is one incident across repeated cycles (D-53, D-54, D-55)', 
     expect(await markerOf(deps, BULK, reopenNowMs)).toMatchObject({ incidentId: reopenedId, status: 'open', version: 3 });
     expect(itemsWithSortKey(store, 'MARKER')).toHaveLength(1);
     expect(await storedItem(deps, reopenedId, 'EVIDENCE', reopenNowMs)).toBeDefined();
-    expect(await storedItem(deps, reopenedId, 'STATE', reopenNowMs)).toMatchObject({ version: 1, state: { incidentId: reopenedId, status: 'open' } });
+    expect(await storedItem(deps, reopenedId, 'STATE', reopenNowMs)).toMatchObject({ version: 2, state: { incidentId: reopenedId, status: 'open' } });
     expect(summary.incidents).toEqual([{ configurationSet: BULK, incidentId: reopenedId }]);
   });
 
@@ -671,7 +672,7 @@ describe('every spiking lane is decided with the other lanes in view (D-60 to D-
 
     const receiptId = incidentIdFor(TRANSACTIONAL, bucketStartMs(QUIET_NOW_MS));
     expect(await storedItem(deps, receiptId, 'EVIDENCE', QUIET_NOW_MS)).toBeUndefined();
-    expect(await storedItem(deps, INCIDENT_ID, 'STATE', QUIET_NOW_MS)).toMatchObject({ version: 2, state: { status: 'open' } });
+    expect(await storedItem(deps, INCIDENT_ID, 'STATE', QUIET_NOW_MS)).toMatchObject({ version: 3, state: { status: 'open' } });
     expect(lineOf(lines, 'opening-failed')).toMatchObject({ configurationSet: TRANSACTIONAL, incidentId: receiptId, errorName: 'ThrottlingException' });
     expect(summary.failures).toBe(1);
 
