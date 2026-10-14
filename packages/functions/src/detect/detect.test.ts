@@ -170,7 +170,7 @@ function itemsWithSortKey(store: FixtureTableState, sk: string): DecisionStoreIt
 function withDecisionStore(deps: DetectDeps, overrides: Partial<DecisionStorePort>): DetectDeps {
   const store = deps.ports.decisionStore;
   const wrapped: DecisionStorePort = {
-    putIfAbsent: (item) => store.putIfAbsent(item),
+    putIfAbsent: (item, nowMs) => store.putIfAbsent(item, nowMs),
     getItem: (key, nowMs) => store.getItem(key, nowMs),
     updateIfVersion: (key, expectedVersion, attributes, nowMs) => store.updateIfVersion(key, expectedVersion, attributes, nowMs),
     reserveInvocation: (request) => store.reserveInvocation(request),
@@ -267,6 +267,24 @@ describe('one spike is one incident across repeated cycles (D-53, D-54, D-55)', 
     expect(summary.incidents).toEqual([{ configurationSet: BULK, incidentId: reopenedId }]);
   });
 
+  it.each([
+    ['opens a new incident when the lane marker has expired but is still in the table (orchestrator extra 1)', 0, true],
+    ['opens nothing new while the same lane marker is one second short of expiring (orchestrator extra 1 control)', 1, false],
+  ])('%s', async (_name, secondsLeft, opens) => {
+    const { deps, store } = await builtCycle({ runtime: closeRuntime });
+    await runDetectionCycle(deps);
+    const laterNowMs = NOW_MS + 2 * BUCKET_MS;
+    const laterId = incidentIdFor(BULK, bucketStartMs(laterNowMs));
+    const markerKey = `${incidentLaneKey(BULK).pk}\u0000${incidentLaneKey(BULK).sk}`;
+    store.items.set(markerKey, { ...(store.items.get(markerKey) as object), expiresAt: Math.floor(laterNowMs / 1000) + secondsLeft });
+    await insert(deps, BAD_BATCH, laterNowMs);
+    const summary = await runDetectionCycle(at(deps, laterNowMs));
+
+    expect(itemsWithSortKey(store, 'MARKER')[0]?.incidentId).toBe(opens ? laterId : INCIDENT_ID);
+    expect((await storedItem(deps, laterId, 'EVIDENCE', laterNowMs)) !== undefined).toBe(opens);
+    expect(summary.incidentsOpened).toBe(opens ? 1 : 0);
+  });
+
   it('counts a false spike and a false recovery on the STATE item (MEAS-10)', async () => {
     const { deps } = await builtCycle({ runtime: closeRuntime });
     await runDetectionCycle(deps);
@@ -340,9 +358,9 @@ describe('a cycle that dies part way is completed by the next one under the mark
     const counting = countingRuntime(closeRuntime);
     const { deps, store, lines } = await builtCycle({ runtime: counting.runtime });
     const failing = withDecisionStore(deps, {
-      putIfAbsent: async (item) => {
+      putIfAbsent: async (item, nowMs) => {
         if (item.sk === 'STATE') throw namedError('InternalServerError');
-        return deps.ports.decisionStore.putIfAbsent(item);
+        return deps.ports.decisionStore.putIfAbsent(item, nowMs);
       },
     });
     await runDetectionCycle(failing);

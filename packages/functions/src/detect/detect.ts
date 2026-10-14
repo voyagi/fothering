@@ -260,7 +260,7 @@ async function claimMarker(deps: DetectDeps, configurationSet: string, previous:
   const store = deps.ports.decisionStore;
   if (previous === undefined) {
     const item = { ...incidentLaneKey(configurationSet), incidentId, status: 'open', version: 1, expiresAt: expiresAtFor(nowMs) };
-    return (await store.putIfAbsent(item)) === 'written';
+    return (await store.putIfAbsent(item, nowMs)) === 'written';
   }
   return (await store.updateIfVersion(incidentLaneKey(configurationSet), previous.version, { incidentId, status: 'open' }, nowMs)) === 'updated';
 }
@@ -301,7 +301,7 @@ async function putState(deps: DetectDeps, view: LaneView, nowMs: number, counts:
       expiresAt: expiresAtFor(nowMs),
       version: state.version,
       state: storedStateOf(state),
-    });
+    }, nowMs);
     view.stateMissing = false;
   } catch (error) {
     view.failed = true;
@@ -462,7 +462,7 @@ async function writeLaneEvidence(deps: DetectDeps, view: LaneView, opening: Open
   if (analysis === undefined || decision === undefined) return false;
   const expiresAt = expiresAtFor(nowMs);
   const record = assembleEvidenceRecord({ incidentId, analysis, decision, analyses: opening.analyses, expiresAt });
-  const written = await deps.ports.decisionStore.putIfAbsent({ ...incidentItemKey(incidentId, 'EVIDENCE'), expiresAt, record });
+  const written = await deps.ports.decisionStore.putIfAbsent({ ...incidentItemKey(incidentId, 'EVIDENCE'), expiresAt, record }, nowMs);
   if (written !== 'written') return false;
   view.evidenceWritten = true;
   deps.log.info({ event: 'incident-opened', configurationSet, incidentId, reason: record.decision.reason });
@@ -552,7 +552,7 @@ async function storeDecision(deps: DetectDeps, record: EvidenceRecord, answer: A
     attempt: FIRST_ATTEMPT,
     decidedAtMs,
     expiresAt: Math.floor(decidedAtMs / 1000) + RETENTION_SECONDS,
-  });
+  }, decidedAtMs);
 }
 
 // D-42 step 5. The ARN is checked before the reservation, and the reservation must succeed before

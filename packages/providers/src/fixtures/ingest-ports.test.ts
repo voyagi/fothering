@@ -588,8 +588,8 @@ describe('tracer: one bad import batch on fothering-bulk becomes an evidence rec
     const decisions = createFixtureDecisionStore({ store: table });
     const key = incidentItemKey(record.incidentId, 'EVIDENCE');
     const item = { ...key, expiresAt: record.expiresAt, record };
-    expect(await decisions.putIfAbsent(item)).toBe('written');
-    expect(await decisions.putIfAbsent(item)).toBe('duplicate');
+    expect(await decisions.putIfAbsent(item, TRACER_NOW_MS)).toBe('written');
+    expect(await decisions.putIfAbsent(item, TRACER_NOW_MS)).toBe('duplicate');
     const stored = await decisions.getItem(key, TRACER_NOW_MS);
     const storedRecord = evidenceRecordSchema.parse(stored?.record);
     expect(recordHash(storedRecord)).toBe(record.hash);
@@ -777,7 +777,7 @@ describe('the fixture decision store shares the table without touching event rea
     const { table, events } = await storeHolding(records);
     const decisions = createFixtureDecisionStore({ store: table });
     const key = incidentItemKey('0'.repeat(32), 'STATE');
-    expect(await decisions.putIfAbsent({ ...key, expiresAt: Math.floor(TRACER_NOW_MS / 1000) + 60 })).toBe('written');
+    expect(await decisions.putIfAbsent({ ...key, expiresAt: Math.floor(TRACER_NOW_MS / 1000) + 60 }, TRACER_NOW_MS)).toBe('written');
 
     const window = spikeWindowFor(TRACER_NOW_MS);
     expect(await events.queryLane(BULK, window.fromBucketMs, window.toBucketMs, TRACER_NOW_MS)).toHaveLength(records.length);
@@ -787,7 +787,7 @@ describe('the fixture decision store shares the table without touching event rea
 
     const [record] = records;
     if (record === undefined) throw new Error('expected a record');
-    await expect(decisions.putIfAbsent({ pk: record.pk, sk: 'X', expiresAt: 1 })).rejects.toThrow(RangeError);
+    await expect(decisions.putIfAbsent({ pk: record.pk, sk: 'X', expiresAt: 1 }, TRACER_NOW_MS)).rejects.toThrow(RangeError);
     expect(await decisions.getItem({ pk: record.pk, sk: record.sk }, TRACER_NOW_MS)).toBeUndefined();
   });
 
@@ -795,7 +795,7 @@ describe('the fixture decision store shares the table without touching event rea
     const decisions = createFixtureDecisionStore();
     const nowSeconds = Math.floor(TRACER_NOW_MS / 1000);
     const key = incidentItemKey('1'.repeat(32), 'DECISION');
-    await decisions.putIfAbsent({ ...key, expiresAt: nowSeconds, note: 'kept' });
+    await decisions.putIfAbsent({ ...key, expiresAt: nowSeconds, note: 'kept' }, TRACER_NOW_MS);
     expect(await decisions.getItem(key, TRACER_NOW_MS)).toBeUndefined();
     const before = await decisions.getItem(key, TRACER_NOW_MS - 1000);
     expect(before).toEqual({ ...key, expiresAt: nowSeconds, note: 'kept' });
@@ -835,14 +835,36 @@ function usage(overrides: Partial<UsageRecord> = {}): UsageRecord {
 describe('the fixture decision store writes once and updates by version (D-66, AC-E33)', () => {
   it('keeps the first item when a second put names the same key', async () => {
     const decisions = createFixtureDecisionStore();
-    expect(await decisions.putIfAbsent({ ...STATE_KEY, expiresAt: NOW_SECONDS + 60, note: 'first' })).toBe('written');
-    expect(await decisions.putIfAbsent({ ...STATE_KEY, expiresAt: NOW_SECONDS + 60, note: 'second' })).toBe('duplicate');
+    expect(await decisions.putIfAbsent({ ...STATE_KEY, expiresAt: NOW_SECONDS + 60, note: 'first' }, TRACER_NOW_MS)).toBe('written');
+    expect(await decisions.putIfAbsent({ ...STATE_KEY, expiresAt: NOW_SECONDS + 60, note: 'second' }, TRACER_NOW_MS)).toBe('duplicate');
     expect((await decisions.getItem(STATE_KEY, TRACER_NOW_MS))?.note).toBe('first');
+  });
+
+  it('overwrites an item past its expiresAt that DynamoDB has not deleted yet, and answers written', async () => {
+    const decisions = createFixtureDecisionStore();
+    await decisions.putIfAbsent({ ...STATE_KEY, expiresAt: NOW_SECONDS, note: 'expired' }, TRACER_NOW_MS - 60_000);
+    expect(await decisions.putIfAbsent({ ...STATE_KEY, expiresAt: NOW_SECONDS + 60, note: 'fresh' }, TRACER_NOW_MS)).toBe('written');
+    expect((await decisions.getItem(STATE_KEY, TRACER_NOW_MS))?.note).toBe('fresh');
+  });
+
+  it('answers duplicate for an item whose expiresAt is one second after now', async () => {
+    const decisions = createFixtureDecisionStore();
+    await decisions.putIfAbsent({ ...STATE_KEY, expiresAt: NOW_SECONDS + 1, note: 'live' }, TRACER_NOW_MS);
+    expect(await decisions.putIfAbsent({ ...STATE_KEY, expiresAt: NOW_SECONDS + 60, note: 'second' }, TRACER_NOW_MS)).toBe('duplicate');
+    expect((await decisions.getItem(STATE_KEY, TRACER_NOW_MS))?.note).toBe('live');
+  });
+
+  it('answers duplicate for a stored item that carries no expiresAt', async () => {
+    const table = createFixtureTableState();
+    table.items.set(`${STATE_KEY.pk}\u0000${STATE_KEY.sk}`, { ...STATE_KEY, note: 'no expiry' });
+    const decisions = createFixtureDecisionStore({ store: table });
+    expect(await decisions.putIfAbsent({ ...STATE_KEY, expiresAt: NOW_SECONDS + 60, note: 'second' }, TRACER_NOW_MS)).toBe('duplicate');
+    expect(table.items.get(`${STATE_KEY.pk}\u0000${STATE_KEY.sk}`)).toEqual({ ...STATE_KEY, note: 'no expiry' });
   });
 
   it('updates an item whose stored version is the expected one, bumping the version and refreshing expiresAt', async () => {
     const decisions = createFixtureDecisionStore();
-    await decisions.putIfAbsent({ ...STATE_KEY, expiresAt: NOW_SECONDS + 60, version: 1, state: 'open' });
+    await decisions.putIfAbsent({ ...STATE_KEY, expiresAt: NOW_SECONDS + 60, version: 1, state: 'open' }, TRACER_NOW_MS);
     expect(await decisions.updateIfVersion(STATE_KEY, 1, { state: 'closed' }, TRACER_NOW_MS)).toBe('updated');
     expect(await decisions.getItem(STATE_KEY, TRACER_NOW_MS)).toEqual({
       ...STATE_KEY,
@@ -854,7 +876,7 @@ describe('the fixture decision store writes once and updates by version (D-66, A
 
   it('answers conflict and changes nothing for a stale version or an item that is not stored', async () => {
     const decisions = createFixtureDecisionStore();
-    await decisions.putIfAbsent({ ...STATE_KEY, expiresAt: NOW_SECONDS + 60, version: 1, state: 'open' });
+    await decisions.putIfAbsent({ ...STATE_KEY, expiresAt: NOW_SECONDS + 60, version: 1, state: 'open' }, TRACER_NOW_MS);
     await decisions.updateIfVersion(STATE_KEY, 1, { state: 'closed' }, TRACER_NOW_MS);
     expect(await decisions.updateIfVersion(STATE_KEY, 1, { state: 'open' }, TRACER_NOW_MS)).toBe('conflict');
     expect((await decisions.getItem(STATE_KEY, TRACER_NOW_MS))?.state).toBe('closed');
@@ -866,12 +888,12 @@ describe('the fixture decision store writes once and updates by version (D-66, A
 
   it('refuses an update naming an attribute it writes itself, and any put or update of a counter item', async () => {
     const decisions = createFixtureDecisionStore();
-    await decisions.putIfAbsent({ ...STATE_KEY, expiresAt: NOW_SECONDS + 60, version: 1 });
+    await decisions.putIfAbsent({ ...STATE_KEY, expiresAt: NOW_SECONDS + 60, version: 1 }, TRACER_NOW_MS);
     for (const attribute of ['pk', 'sk', 'version', 'expiresAt']) {
       await expect(decisions.updateIfVersion(STATE_KEY, 1, { [attribute]: 0 }, TRACER_NOW_MS)).rejects.toThrow(RangeError);
     }
     await expect(decisions.updateIfVersion(STATE_KEY, 1.5, {}, TRACER_NOW_MS)).rejects.toThrow(RangeError);
-    await expect(decisions.putIfAbsent({ ...DAY_COUNTER, expiresAt: NOW_SECONDS + 60, invocations: -5 })).rejects.toThrow(RangeError);
+    await expect(decisions.putIfAbsent({ ...DAY_COUNTER, expiresAt: NOW_SECONDS + 60, invocations: -5 }, TRACER_NOW_MS)).rejects.toThrow(RangeError);
     await expect(decisions.updateIfVersion(INCIDENT_COUNTER, 0, { invocations: 0 }, TRACER_NOW_MS)).rejects.toThrow(RangeError);
     expect(await decisions.getItem(DAY_COUNTER, TRACER_NOW_MS)).toBeUndefined();
     expect((await decisions.getItem(STATE_KEY, TRACER_NOW_MS))?.version).toBe(1);

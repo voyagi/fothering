@@ -68,7 +68,11 @@ export interface UsageRecord {
 
 /** No operation here deletes an item or lowers a counter: the caps hold only if nothing can (AC-P6). */
 export interface DecisionStorePort {
-  putIfAbsent(item: DecisionStoreItem): Promise<'written' | 'duplicate'>;
+  /**
+   * Writes only where no item is stored or the stored one has expired as of nowMs: TTL deletion runs
+   * days after expiresAt, and an item getItem already hides must not block a new write meanwhile.
+   */
+  putIfAbsent(item: DecisionStoreItem, nowMs: number): Promise<'written' | 'duplicate'>;
   /** Answers undefined for an item whose expiresAt has passed, since GetItem applies no TTL filter. */
   getItem(key: RecordKey, nowMs: number): Promise<DecisionStoreItem | undefined>;
   /** Sets the attributes, version + 1 and a fresh 30-day expiresAt, only while the stored version is expectedVersion. */

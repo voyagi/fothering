@@ -816,7 +816,7 @@ function decisionStoreAnswering(handler: (command: RecordedCommand) => unknown):
 }
 
 describe('createDynamoDecisionStore', () => {
-  it('puts with attribute_not_exists(pk) and maps ConditionalCheckFailedException to duplicate (AC-E33)', async () => {
+  it('puts only where no item is stored or the stored one has expired, and maps ConditionalCheckFailedException to duplicate (AC-E33)', async () => {
     let puts = 0;
     const item = { ...STATE_ITEM_KEY, expiresAt: 1_800_000_000, version: 1 };
     const { store, calls } = decisionStoreAnswering((command) => {
@@ -827,16 +827,24 @@ describe('createDynamoDecisionStore', () => {
       return {};
     });
 
-    await expect(store.putIfAbsent(item)).resolves.toBe('written');
-    await expect(store.putIfAbsent(item)).resolves.toBe('duplicate');
-    await expect(store.putIfAbsent(item)).rejects.toThrow('network blip');
-    expect(calls[0]?.input).toEqual({ TableName: 'events', Item: item, ConditionExpression: 'attribute_not_exists(pk)' });
+    await expect(store.putIfAbsent(item, DECISION_NOW_MS)).resolves.toBe('written');
+    await expect(store.putIfAbsent(item, DECISION_NOW_MS)).resolves.toBe('duplicate');
+    await expect(store.putIfAbsent(item, DECISION_NOW_MS + 1_999)).rejects.toThrow('network blip');
+    // The exact inverse of the read's unexpired test (expiresAt > floor(now / 1000)), so an item the
+    // read hides as expired never blocks the put, and one with no expiresAt always does.
+    expect(calls[0]?.input).toEqual({
+      TableName: 'events',
+      Item: item,
+      ConditionExpression: 'attribute_not_exists(pk) OR expiresAt <= :now',
+      ExpressionAttributeValues: { ':now': Math.floor(DECISION_NOW_MS / 1000) },
+    });
+    expect(calls[2]?.input).toMatchObject({ ExpressionAttributeValues: { ':now': Math.floor(DECISION_NOW_MS / 1000) + 1 } });
   });
 
   it('refuses an item under a LANE# key or a counter item before sending anything', async () => {
     const { store, calls } = decisionStoreAnswering(() => ({}));
-    await expect(store.putIfAbsent({ pk: 'LANE#fothering-bulk', sk: 'STATE', expiresAt: 1 })).rejects.toThrow(RangeError);
-    await expect(store.putIfAbsent({ ...LIVE_RESERVATION.dayKey, expiresAt: 1, invocations: -5 })).rejects.toThrow(RangeError);
+    await expect(store.putIfAbsent({ pk: 'LANE#fothering-bulk', sk: 'STATE', expiresAt: 1 }, DECISION_NOW_MS)).rejects.toThrow(RangeError);
+    await expect(store.putIfAbsent({ ...LIVE_RESERVATION.dayKey, expiresAt: 1, invocations: -5 }, DECISION_NOW_MS)).rejects.toThrow(RangeError);
     expect(calls).toHaveLength(0);
   });
 
@@ -991,7 +999,7 @@ describe('createDynamoDecisionStore', () => {
       },
     });
     const operations = [
-      store.putIfAbsent({ ...STATE_ITEM_KEY, expiresAt: 1 }),
+      store.putIfAbsent({ ...STATE_ITEM_KEY, expiresAt: 1 }, DECISION_NOW_MS),
       store.getItem(STATE_ITEM_KEY, DECISION_NOW_MS),
       store.updateIfVersion(STATE_ITEM_KEY, 1, {}, DECISION_NOW_MS),
       store.reserveInvocation(LIVE_RESERVATION),

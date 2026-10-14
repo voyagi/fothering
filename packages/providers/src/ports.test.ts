@@ -715,7 +715,7 @@ describe('the fixtures leave one dry-run line per mutating call (AC-4 dry-run ha
 const MUTATION_CALLS: Record<string, (ports: ResolvedPorts) => Promise<unknown>> = {
   'eventStore.putIfAbsent': (ports) => ports.eventStore.putIfAbsent({ ...RECORD_KEY, fields: {} } as unknown as EventRecord),
   'eventStore.deleteRecord': (ports) => ports.eventStore.deleteRecord(RECORD_KEY),
-  'decisionStore.putIfAbsent': (ports) => ports.decisionStore.putIfAbsent({ ...INCIDENT_STATE_KEY, expiresAt: 1, version: 1 }),
+  'decisionStore.putIfAbsent': (ports) => ports.decisionStore.putIfAbsent({ ...INCIDENT_STATE_KEY, expiresAt: 1, version: 1 }, 1_000),
   'decisionStore.updateIfVersion': (ports) => ports.decisionStore.updateIfVersion(INCIDENT_STATE_KEY, 1, { state: 'closed' }, 1_000),
   'decisionStore.reserveInvocation': (ports) => ports.decisionStore.reserveInvocation(RESERVATION),
   'decisionStore.recordUsage': (ports) => ports.decisionStore.recordUsage(TOKEN_USAGE),
