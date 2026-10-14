@@ -28,6 +28,29 @@ function utcDateOf(nowMs: number): string {
   return new Date(nowMs).toISOString().slice(0, 10);
 }
 
+export interface CounterUsage {
+  incidentKey: RecordKey;
+  dayKey: RecordKey;
+  inputTokens: number;
+  outputTokens: number;
+  modelCalls: number;
+}
+
+export interface UsageStore<Result> {
+  recordUsage(usage: CounterUsage): Promise<Result>;
+}
+
+export interface UsageInput {
+  incidentId: string;
+  reservedAtMs: number;
+  usage: { inputTokens: number; outputTokens: number };
+  modelCalls: number;
+}
+
+export function recordUsage<Result>(_store: UsageStore<Result>, _input: UsageInput): Promise<Result> {
+  return Promise.resolve('not-reserved' as Result);
+}
+
 /** Every number the reservation carries is computed here, so no caller can pass a cap of its own. */
 export function reserveInvocation<Result>(store: CounterStore<Result>, input: ReserveInput): Promise<Result> {
   return store.reserveInvocation({
