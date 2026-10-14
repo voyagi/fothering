@@ -1,5 +1,6 @@
 import fc from 'fast-check';
 import { describe, expect, it, vi } from 'vitest';
+import * as z from 'zod';
 import lanesJson from '../../../lanes.json' with { type: 'json' };
 import {
   AGENT_UNAVAILABLE_REASONS,
@@ -10,6 +11,7 @@ import {
   RETRYABLE_UNAVAILABLE_REASONS,
   agentAnswerSchema,
   classifyRuntimeOutcome,
+  runtimeResultSchema,
   validateDecision,
   validateExplanation,
   type ExplanationContext,
@@ -568,5 +570,94 @@ describe('actionGate (D-79, R10)', () => {
       const decision: GateDecision = classified.kind === 'validated' ? classified.answer : { decision: 'unknown' };
       expect(await refusalOf(APPROVED, decision)).toBe('no-close');
     }
+  });
+});
+
+// The 02-16 mutation run's survivors in agent-answer.ts, killed below where a test can tell the
+// mutant apart. Those left are equivalent, each for the reason given:
+// - SCHEME_URL with "+" dropped: a run of one or more scheme characters before "://" occurs exactly
+//   when one such character does, so the substring test matches the same texts.
+// - allowedSpans holding a string for an unknown decision: destructuring a string gives letters, and
+//   a letter compared with a number is false, so no span is allowed, as with [].
+// - recordFacts' typeof checks: Number.isSafeInteger is false for every non-number, and an integer
+//   token is looked up only among integers, so admitting a non-integer number changes no verdict; a
+//   percent token matches only a value rendered exactly like it, which no non-percent string or
+//   value in a record is; walking an array through Object.values visits the same elements.
+// - a null row value or an empty name added to the removable names: neither holds a digit, and an
+//   empty name only inserts spaces between two non-word characters, so no number token changes.
+// - removing a name with "" instead of " ": the whole-token boundary keeps a digit from touching a
+//   removed name on either side, so no two number tokens can join.
+// - token.includes('.') dropped: a token with a dot is never in the integer set either.
+// - PERCENT_STRING without its ^ or its $: a longer string holding a percent at its end or start
+//   joins the set whole, and no number token equals a whole longer string.
+// - optionId === undefined dropped in actionGate: no approved option id equals undefined.
+// - the option-set length check dropped: the schema refuses an approved record without its one
+//   option, and every() already refuses a longer stored set at the index past the expected one.
+// The schema, regex and describe mutants above the functions are applied when the module loads,
+// and the run reported them Survived after "Ran all tests" without activating them: applying the
+// answered-result mutant by hand fails both this file and handler.test.ts at import. The tests
+// below for the descriptions, the hash anchors, the zero-width flag, the two-digit percent and the
+// digit-led name were checked the same way, each failing with its mutant applied by hand.
+describe('the edges the 02-16 mutation run found unpinned', () => {
+  it('sends the model each field rule as the tool spec description', () => {
+    const spec = JSON.stringify(z.toJSONSchema(agentAnswerSchema));
+    for (const rule of ['close only with exactly one approved option; else unknown', 'With close only: the approved option id, copied exactly', 'One plain paragraph, at most 600 characters']) {
+      expect(spec).toContain(rule);
+    }
+  });
+
+  it('names the optionId field and its rule in the issue for a close without an id and an unknown with one', () => {
+    const issuesOf = (raw: unknown): string => {
+      const parsed = agentAnswerSchema.safeParse(raw);
+      return parsed.success ? 'parsed' : parsed.error.issues.map((issue) => `${issue.code}|${issue.path.join('.')}|${issue.message}`).join(';');
+    };
+    expect(issuesOf({ decision: 'close', explanation: 'x' })).toBe('custom|optionId|close needs the approved option id');
+    expect(issuesOf({ decision: 'unknown', optionId: APPROVED_ID, explanation: 'x' })).toBe('custom|optionId|unknown carries no option id');
+  });
+
+  it('refuses a runtime result whose prompt hash has anything before or after its 64 hex characters', () => {
+    expect(runtimeResultSchema.safeParse(answered({})).success).toBe(true);
+    for (const promptSha256 of [`x${PROMPT_SHA}`, `${PROMPT_SHA}x`]) expect(runtimeResultSchema.safeParse({ ...answered({}), promptSha256 }).success).toBe(false);
+  });
+
+  it('removes every zero-width character before a check reads the text, not only the first', () => {
+    expect(checkOf(`c${ZERO_WIDTH_SPACE}lo${WORD_JOINER}se it`, closeOn(APPROVED))).toBe('command-word');
+  });
+
+  it('refuses a longer set that ends with the allowed set name', () => {
+    expect(checkOf(`pause eu-${BULK} for now`, closeOn(APPROVED, [BULK, `eu-${BULK}`]))).toBe('set-name');
+  });
+
+  it('accepts a ratio of two digits before the point exactly as the record renders it', () => {
+    expect(UNSETTLED.laneTotals.hardBounceRatio).toMatch(/^\d{2}\.\d{2}%$/);
+    expect(checkOf(`this lane's hard-bounce ratio is ${UNSETTLED.laneTotals.hardBounceRatio}`, unknownOn(UNSETTLED))).toBe('ok');
+  });
+
+  it('removes a name that starts with digits but is not all digits', () => {
+    const record = recordFor(COMMITTED, bulkStory([{ bucketOffset: 0, count: 40, batch: '2026-import', permanentBounces: 15 }, { bucketOffset: 1, count: 160, batch: 'import-0901' }]), BULK);
+    expect(checkOf('batch 2026-import carried it', closeOn(record))).toBe('ok');
+  });
+
+  it('reads the word null in an unknown explanation as plain text', () => {
+    expect(checkOf('the table shows null for this lane', unknownOn(UNSETTLED))).toBe('ok');
+  });
+
+  // The batch named "example" is a whole token inside the from-domain, so removing it first would
+  // leave "mail7731." behind and its digits would read as a made-up count.
+  it('removes a from-domain holding digits whole, longest name first, before the number check', () => {
+    const record = recordFor(
+      COMMITTED,
+      {
+        lanes: [{ configurationSet: BULK, fromDomain: 'mail7731.example.com', groups: [{ bucketOffset: 0, count: 40, batch: CAUSE_BATCH, permanentBounces: 15 }, { bucketOffset: 1, count: 160, batch: 'example' }] }, QUIET_TRANSACTIONAL],
+        identities: [{ identity: 'example.com', dkimStatus: 'SUCCESS', dkimSigningEnabled: true }],
+      },
+      BULK,
+    );
+    expect(record.configurationRows.some((row) => row.fromDomain === 'mail7731.example.com')).toBe(true);
+    expect(checkOf('mail from mail7731.example.com bounced', closeOn(record))).toBe('ok');
+  });
+
+  it('leaves no check key on a reason that carries none', () => {
+    expect(Object.keys(classifyRuntimeOutcome({ kind: 'threw', callerAborted: false }, OUTCOME_CONTEXT)).join(',')).toBe('kind,reason');
   });
 });

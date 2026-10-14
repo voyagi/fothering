@@ -3,9 +3,10 @@ import fc from 'fast-check';
 import { createFixtureDecisionStore, createFixtureTableState } from '@fothering/providers/fixtures/ingest-ports';
 import type { FixtureTableState, UsageRecord } from '@fothering/providers/port-types';
 import * as counters from './counters.js';
-import { recordUsage, reserveInvocation } from './counters.js';
+import { recordUsage, reserveInvocation, type CounterReservation } from './counters.js';
 import { counterDayKey, incidentItemKey } from './evidence-record.js';
 import { MODEL_VALUES, TOKEN_RESERVATION_PER_INVOCATION } from './model-values.js';
+import { RETENTION_SECONDS } from './records.js';
 import { propertySeed } from './test/property-seed.js';
 
 const SEED = propertySeed();
@@ -126,6 +127,19 @@ describe('recordUsage adds actual usage to the counters its reservation made (D-
     expect(calls.length).toBe(0);
   });
 
+  it('names the refused field in the RangeError, so a log line says which count was wrong', async () => {
+    const store = { recordUsage: async () => 'recorded' as const };
+    const incidentId = incidentIdOf(1);
+    const cases = [
+      ['inputTokens', { usage: { inputTokens: -1, outputTokens: 0 }, modelCalls: 1 }],
+      ['outputTokens', { usage: { inputTokens: 0, outputTokens: -1 }, modelCalls: 1 }],
+      ['modelCalls', { usage: { inputTokens: 0, outputTokens: 0 }, modelCalls: -1 }],
+    ] as const;
+    for (const [name, values] of cases) {
+      await expect(recordUsage(store, { incidentId, reservedAtMs: NOW_MS, ...values })).rejects.toThrow(`${name} must be a whole number from 0 up`);
+    }
+  });
+
   it('records on the day counter its reservation used when the call ends after midnight UTC (orchestrator extra 2)', async () => {
     const { table, store } = storeOver();
     const incidentId = incidentIdOf(2);
@@ -146,6 +160,18 @@ describe('reserveInvocation holds both caps at the day boundaries (D-67, D-76)',
     await reserveTimes(store, incidentIdOf(1), MODEL_VALUES.perIncidentInvocations);
     await reserveTimes(store, incidentIdOf(2), MODEL_VALUES.perDayInvocations - MODEL_VALUES.perIncidentInvocations);
     expect(await reserveInvocation(store, { incidentId: incidentIdOf(1), nowMs: NOW_MS })).toEqual({ ok: false, reason: 'cap', items: ['incident', 'day'] });
+  });
+
+  it('asks the store to expire both counters RETENTION_SECONDS after the reservation, in epoch seconds', async () => {
+    const requests: CounterReservation[] = [];
+    const store = {
+      reserveInvocation: async (request: CounterReservation) => {
+        requests.push(request);
+        return { ok: true } as const;
+      },
+    };
+    await reserveInvocation(store, { incidentId: incidentIdOf(1), nowMs: NOW_MS });
+    expect(requests.map((request) => request.expiresAt)).toEqual([Math.floor(NOW_MS / 1000) + RETENTION_SECONDS]);
   });
 
   it('creates the day counter at one invocation and 64,512 token reservations on the first call of a UTC day (AC-E46)', async () => {
