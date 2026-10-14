@@ -63,8 +63,9 @@ const dnsAnswerSchema = z.union([
 ]);
 
 // D-62's rule order, so each label names the rule that decides it and a reader can check the label
-// against the rule rather than against the code under test.
-const D62_RULES = ['no-data', 'read-bound', 'not-settled', 'shared-cause', 'spread', 'not-closeable', 'approved'] as const;
+// against the rule rather than against the code under test. record-size is D-70's ceiling, which
+// overrides whatever D-62 decided once the assembled record is too large to send.
+const D62_RULES = ['no-data', 'read-bound', 'not-settled', 'shared-cause', 'spread', 'not-closeable', 'approved', 'record-size'] as const;
 
 const laneLabelSchema = z.strictObject({
   outcome: z.enum(DECISION_OUTCOMES),
@@ -105,7 +106,8 @@ const turnSchema = z.discriminatedUnion('kind', [
   z.strictObject({
     kind: z.literal('answer'),
     decision: z.enum(AGENT_DECISIONS),
-    optionId: z.union([z.strictObject({ from: z.literal('approved') }), z.string()]).optional(),
+    // alter: uppercase gives the near-match id AC-20 names, one that differs from the approved id by case only.
+    optionId: z.union([z.strictObject({ from: z.literal('approved'), alter: z.literal('uppercase').optional() }), z.string()]).optional(),
     explanation: z.string(),
   }),
   z.strictObject({ kind: z.literal('plain-text'), text: z.string() }),
@@ -138,8 +140,7 @@ const reviewSchema = z.strictObject({
 
 // AC-19's planting sites: four raw-text fields the parser strips (D-12) or reduces to codes (D-15), a
 // reply-shaped body field, and the batch tag value, which reaches the record by design.
-export const TWIN_FIELDS = ['diagnosticCode', 'smtpResponse', 'subject', 'header', 'replyBody', 'tagValue'] as const;
-export type TwinField = (typeof TWIN_FIELDS)[number];
+const TWIN_FIELDS = ['diagnosticCode', 'smtpResponse', 'subject', 'header', 'replyBody', 'tagValue'] as const;
 
 const twinSchema = z.strictObject({
   pair: z.string().regex(/^[a-z][a-z-]{0,31}$/),
@@ -148,14 +149,22 @@ const twinSchema = z.strictObject({
   text: oneLine,
 });
 
+// A11's ways for the agent to be unavailable, each set up by the runner around the real handler:
+// the invocation throws, the payload's hash is altered on the wire, detection's own deadline fires,
+// the runtime's loop deadline fires, the day counter is at its cap, or the stack runs with the switch unset.
+const AGENT_FAULTS = ['invoke-throws', 'hash-altered', 'detection-abort', 'runtime-deadline', 'day-cap', 'switch-unset'] as const;
+
 const variantSchema = z.strictObject({
   id: z.string().regex(/^[a-z0-9][a-z0-9-]{0,31}$/),
   incident: oneLine.optional(),
   response: responseSchema,
   turns: z.array(turnSchema).min(1),
   twin: twinSchema.optional(),
+  fault: z.enum(AGENT_FAULTS).optional(),
   /** The model calls the stored DECISION records, where a loop variant pins how many the loop took. */
   modelCalls: z.int().positive().optional(),
+  /** The invocations each labelled lane's incident counter holds after the cycle; 0 when none was reserved. */
+  invocations: count.optional(),
   scenarios: z.array(laneScenarioSchema).min(1).optional(),
   // A scenario override can move the code decision itself (F2 turns A6's refusal into an unknown), so
   // such a variant states its own labels instead of inheriting the case's.
@@ -323,6 +332,8 @@ export interface LaneObservation {
   explanation: string | undefined;
   /** The model calls the stored DECISION item records; undefined where no answer was stored. */
   modelCalls: number | undefined;
+  /** The incident counter's invocations; 0 when no reservation was ever made for the incident. */
+  invocations: number;
 }
 
 /** What one detection cycle left behind for a variant, read back from the table and the runtime. */

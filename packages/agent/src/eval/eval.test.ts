@@ -5,7 +5,14 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import type { RuntimeResult } from '@fothering/core/agent-answer';
 import { bucketStartMs } from '@fothering/core/buckets';
 import { REQUIRED_EVENT_TYPES } from '@fothering/core/closeability';
-import { evidenceRecordSchema, incidentIdFor, incidentItemKey, type EvidenceRecord } from '@fothering/core/evidence-record';
+import {
+  RECORD_BYTE_CEILING,
+  evidenceRecordSchema,
+  incidentIdFor,
+  incidentItemKey,
+  serializedRecordBytes,
+  type EvidenceRecord,
+} from '@fothering/core/evidence-record';
 import { findLane, parseLaneMap, type LaneMap } from '@fothering/core/lanes';
 import { PINNED_MODEL_VALUES } from '@fothering/core/model-values';
 import { scenarioEnvelopes, type LaneScenario } from '@fothering/core/test/event-arbitraries';
@@ -49,6 +56,8 @@ const COMMITTED_LANES = parseLaneMap(lanesJson);
 const CURRENT = { pinned: PINNED_MODEL_VALUES, promptSha256: SYSTEM_PROMPT_SHA256 };
 const FIXTURE_RUNTIME_ARN = 'arn:aws:bedrock-agentcore:eu-central-1:000000000000:runtime/fixture-runtime';
 const FIXTURE_USAGE = { inputTokens: 1_850, outputTokens: 96, totalTokens: 1_946 };
+// Written to the console inside every variant's capture, so a capture that misses the console fails.
+const CAPTURE_CONTROL = 'eval-capture-control';
 
 interface PlannedRun {
   evalCase: EvalCase;
@@ -229,7 +238,17 @@ async function observeLane(store: ReturnType<typeof buildDetectRoot>['ports']['d
   const parsed = evidenceRecordSchema.safeParse(evidence?.record);
   const decision = await store.getItem(incidentItemKey(incidentId, 'DECISION'), nowMs);
   const state = await store.getItem(incidentItemKey(incidentId, 'STATE'), nowMs);
-  return { configurationSet, record: parsed.success ? parsed.data : undefined, ...storedOf(decision, state) };
+  return { configurationSet, record: parsed.success ? parsed.data : undefined, ...storedOf(decision, state), invocations: 0 };
+}
+
+/** actionGate over one lane's stored items, the way phase 3's action function will call it. */
+interface GateCheck {
+  configurationSet: string;
+  storedClose: boolean;
+  /** The stored close names an option id inside its record's approved set. */
+  optionApproved: boolean;
+  recordApproved: boolean;
+  intent: boolean;
 }
 
 /** One variant's run: what the judge reads, plus what the boundary checks compare across runs. */
@@ -241,6 +260,13 @@ interface RunCapture {
   modelCalls: FixtureModelCall[];
   /** Raw envelopes that carried the twin's text into ingest. */
   plantedEnvelopes: number;
+  /** Every log line and dry-run line the ingest, detection and agent roots wrote. */
+  lines: string[];
+  /** Everything written to stdout, stderr or a console method while the variant ran. */
+  output: string;
+  gates: GateCheck[];
+  /** Calls that reached the runtime side of the agentCore row. */
+  runtimeCalls: number;
 }
 
 // Per variant: a fresh table, the scenario through the real ingest path, one detection cycle whose
@@ -287,7 +313,7 @@ async function runVariant(run: PlannedRun): Promise<RunCapture> {
     runtime: first === undefined ? undefined : { pinned: first.pinned, promptSha256: first.promptSha256 },
     failures: summary.failures,
   };
-  return { observation, table: tableOf(store), modelCalls, plantedEnvelopes };
+  return { observation, table: tableOf(store), modelCalls, plantedEnvelopes, lines: [], output: '', gates: [], runtimeCalls: 0 };
 }
 
 function tableOf(store: FixtureTableState): [string, unknown][] {
@@ -356,7 +382,7 @@ function without(object: Record<string, unknown>, key: string): Record<string, u
 
 describe('the eval case schema (AC-E51)', () => {
   it('accepts every case file in the fixtures folder, sorted by id', () => {
-    expect(CASES.map((evalCase) => evalCase.id).join(',')).toBe('a01,a02,a03,a04,a05,a06,a07,a08,a09,a10');
+    expect(CASES.map((evalCase) => evalCase.id).join(',')).toBe('a01,a02,a03,a04,a05,a06,a07,a08,a09,a10,a11');
   });
 
   it('accepts a captured response that carries its runtimeSessionId and capturedAt', () => {
@@ -398,16 +424,21 @@ describe('decision path coverage (AC-E52)', () => {
     expect(() => assertDecisionPathCoverage(CASES)).not.toThrow();
   });
 
-  it('holds R14 incidents A1 to A10 with F1 to F4, and A1 twelve twins and three loop variants', () => {
+  it('holds R14 incidents A1 to A10 with F1 to F4, A1 twins and loops, the A3 upgrade and A11, 46 variants in all', () => {
     const twins = ['diag', 'smtp', 'subject', 'header', 'reply', 'tag'].flatMap((field) => [`a01/twin-${field}-benign`, `a01/twin-${field}-planted`]);
+    const unavailable = ['invoke-throws', 'hash-altered', 'detection-abort', 'runtime-deadline', 'day-cap', 'switch-unset'];
+    const hostile = ['command', 'hxxps', 'www', 'set-name', 'command-alone', 'near-id', 'plain-twice', 'fourth-call'].map((name) => `hostile-${name}`);
+    const a11 = [...unavailable, ...hostile, 'no-token-instruction', 'record-too-large'].map((id) => `a11/${id}`);
     expect(RUNS.map((run) => `${run.evalCase.id}/${run.variant.id}`).join(',')).toBe(
       [
         'a01/base,a01/f1,a01/f3',
         ...twins,
         'a01/loop-plain,a01/loop-invalid,a01/loop-throttle',
-        'a02/base,a03/base,a03/f4,a04/base,a05/base,a06/base,a06/f2,a07/base,a08/base,a09/base,a10/base',
+        'a02/base,a03/base,a03/f4,a03/upgrade,a04/base,a05/base,a06/base,a06/f2,a07/base,a08/base,a09/base,a10/base',
+        ...a11,
       ].join(','),
     );
+    expect(RUNS).toHaveLength(46);
   });
 
   it('refuses a twin pair without its benign half, and a tag-value twin SES would refuse', () => {
@@ -475,6 +506,11 @@ describe('the code verdict reads FAIL when anything is off its label (controls)'
     const storedOne = { ...observation, lanes: observation.lanes.map((lane) => ({ ...lane, modelCalls: 1 })) };
     expect(judged(run.evalCase, pinsTwo, storedOne)).toBe('FAIL');
     expect(judged(run.evalCase, pinsTwo, { ...storedOne, lanes: storedOne.lanes.map((lane) => ({ ...lane, modelCalls: 2 })) })).toBe('PASS');
+  });
+
+  it('reads FAIL when an incident counter holds other invocations than the variant pins', () => {
+    expect(judged(run.evalCase, { ...run.variant, invocations: 0 })).toBe('FAIL');
+    expect(judged(run.evalCase, { ...run.variant, invocations: 1 })).toBe('PASS');
   });
 });
 
@@ -616,8 +652,9 @@ describe('the eval set through ingest, detection and the runtime (AC-23, R14)', 
       if (observation === undefined) throw new Error('the variant did not run');
       const evalResult = evalResultFor(run.evalCase, run.variant, observation);
       expect(evalResult.code, failureDetail(evalResult, observation)).toBe('PASS');
-      expect(evalResult.pinned).toEqual(PINNED_MODEL_VALUES);
-      expect(evalResult.promptSha256).toBe(SYSTEM_PROMPT_SHA256);
+      // A variant the runtime never answers (a refused reservation, a record never sent) carries no pinned values.
+      expect(evalResult.pinned ?? PINNED_MODEL_VALUES).toEqual(PINNED_MODEL_VALUES);
+      expect(evalResult.promptSha256 ?? SYSTEM_PROMPT_SHA256).toBe(SYSTEM_PROMPT_SHA256);
     });
   }
 
@@ -728,4 +765,126 @@ describe("A1's loop variants stay inside two model calls (AI-SPEC section 5, A1 
       expect(lane?.modelCalls).toBe(2);
     });
   }
+});
+
+function captureOf(captures: ReadonlyMap<PlannedRun, RunCapture>, run: PlannedRun): RunCapture {
+  const capture = captures.get(run);
+  if (capture === undefined) throw new Error(`${run.evalCase.id} ${run.variant.id} did not run`);
+  return capture;
+}
+
+function storedCode(outcome: StoredOutcome): string {
+  if (outcome.kind === 'validated') return `validated-${outcome.decision}`;
+  if (outcome.kind === 'not-sent') return 'not-sent';
+  return outcome.check === undefined ? `unavailable-${outcome.reason}` : `unavailable-${outcome.reason}-${outcome.check}`;
+}
+
+// Every text a variant scripts for the model to say: what a failed answer must never leave behind.
+function scriptedTexts(variant: EvalVariant): string[] {
+  return variant.turns.flatMap((turn) => (turn.kind === 'answer' ? [turn.explanation] : turn.kind === 'plain-text' ? [turn.text] : []));
+}
+
+function storesNoAnswer(run: PlannedRun): boolean {
+  return Object.values(run.variant.expected).every((outcome) => outcome.kind !== 'validated');
+}
+
+const A11_RUNS = RUNS.filter((run) => run.evalCase.id === 'a11');
+
+describe('every agent-unavailable, hostile and size path fails closed end to end (A11: AC-17, AC-20, AC-E34, AC-E35, AC-E39, AC-E40)', () => {
+  let captures = new Map<PlannedRun, RunCapture>();
+
+  beforeAll(async () => {
+    captures = await everyCapture();
+  }, 600_000);
+
+  for (const run of A11_RUNS) {
+    const [lane] = Object.values(run.variant.expected);
+    it(`${run.variant.id} stores ${lane === undefined ? 'nothing' : storedCode(lane)} with ${run.variant.invocations ?? 0} invocation counted`, () => {
+      const [observed] = captureOf(captures, run).observation.lanes;
+      const seen = observed === undefined ? 'no-lane' : `${storedCode(observed.stored)} invocations ${observed.invocations}`;
+      expect(seen).toBe(`${lane === undefined ? 'no-lane' : storedCode(lane)} invocations ${run.variant.invocations ?? 0}`);
+    });
+  }
+
+  it('day-cap, switch-unset and record-too-large never reach the runtime', () => {
+    const quiet = A11_RUNS.filter((run) => ['day-cap', 'switch-unset', 'record-too-large'].includes(run.variant.id));
+    expect(quiet.map((run) => `${run.variant.id}=${captureOf(captures, run).runtimeCalls}`).join(',')).toBe('day-cap=0,switch-unset=0,record-too-large=0');
+  });
+
+  it('day-cap stores a final cap-reached DECISION naming the day counter', () => {
+    const decisions = itemsWithSortKey(captureOf(captures, runOf('a11', 'day-cap')), 'DECISION') as { reason?: string; items?: string[] }[];
+    expect(decisions.map((item) => `${item.reason}:${item.items?.join('+')}`).join(',')).toBe('cap-reached:day');
+  });
+
+  it('switch-unset writes one dry-run invocation line and reserves no counter at all', () => {
+    const capture = captureOf(captures, runOf('a11', 'switch-unset'));
+    expect(capture.lines.filter((line) => line.includes('WOULD agentCore.invokeAgentRuntime')).length).toBe(1);
+    expect(itemsWithSortKey(capture, 'COUNTER').length).toBe(0);
+  });
+
+  it('record-too-large stores a record past the ceiling, reserves nothing and sends nothing', () => {
+    const capture = captureOf(captures, runOf('a11', 'record-too-large'));
+    const [lane] = capture.observation.lanes;
+    expect(lane?.record === undefined ? 0 : serializedRecordBytes(lane.record)).toBeGreaterThan(RECORD_BYTE_CEILING);
+    expect(itemsWithSortKey(capture, 'COUNTER').length).toBe(0);
+    expect(capture.lines.some((line) => line.includes('agentCore.invokeAgentRuntime'))).toBe(false);
+  });
+
+  it('the no-checked-token instruction is accepted, flagged instruction-words, and its intent is the code-approved one (AI-SPEC open item 5-5)', () => {
+    const run = runOf('a11', 'no-token-instruction');
+    const capture = captureOf(captures, run);
+    const result = evalResultFor(run.evalCase, run.variant, capture.observation);
+    const [gate] = capture.gates;
+    expect(result.flags.join(',')).toBe('instruction-words');
+    expect(formatReport([result], CURRENT)).toContain('flags instruction-words');
+    expect(gate === undefined ? 'no-gate' : `${gate.storedClose}/${gate.optionApproved}/${gate.intent}`).toBe('true/true/true');
+  });
+});
+
+describe('end-to-end sweeps over every variant of every case file', () => {
+  let captures = new Map<PlannedRun, RunCapture>();
+
+  beforeAll(async () => {
+    captures = await everyCapture();
+  }, 600_000);
+
+  it('gates every labelled lane of every variant (sweep control)', () => {
+    const short = RUNS.filter((run) => captureOf(captures, run).gates.length !== Object.keys(run.variant.labels ?? run.evalCase.labels).length);
+    expect(short.map((run) => `${run.evalCase.id}/${run.variant.id}`).join(',')).toBe('');
+  });
+
+  it('stores a close only on an approved option id, and actionGate yields an intent only for the validated close of an approved record (AC-P1, AC-P5)', () => {
+    const offending = RUNS.flatMap((run) =>
+      captureOf(captures, run)
+        .gates.filter((gate) => (gate.storedClose && !gate.optionApproved) || gate.intent !== (gate.storedClose && gate.recordApproved))
+        .map((gate) => `${run.evalCase.id}/${run.variant.id}/${gate.configurationSet}`),
+    );
+    expect(offending.join(',')).toBe('');
+  });
+
+  it('captures the process output and the log and dry-run lines of every variant (sweep control)', () => {
+    const blind = RUNS.filter((run) => {
+      const capture = captureOf(captures, run);
+      return !capture.output.includes(CAPTURE_CONTROL) || capture.lines.length === 0;
+    });
+    expect(blind.map((run) => `${run.evalCase.id}/${run.variant.id}`).join(',')).toBe('');
+  });
+
+  it('leaves no byte of a failed answer in a stored item, a log or dry-run line, or stdout and stderr (AC-P8)', () => {
+    const leaks = RUNS.filter(storesNoAnswer).flatMap((run) => {
+      const capture = captureOf(captures, run);
+      const surfaces = [JSON.stringify(capture.table), capture.lines.join('\n'), capture.output];
+      return scriptedTexts(run.variant)
+        .filter((text) => surfaces.some((surface) => surface.includes(text)))
+        .map(() => `${run.evalCase.id}/${run.variant.id}`);
+    });
+    expect(RUNS.filter(storesNoAnswer).length).toBeGreaterThan(15);
+    expect(leaks.join(',')).toBe('');
+  });
+
+  it('prints a report whose lines hold codes only, never a scripted paragraph', () => {
+    const report = formatReport(resultsOf(captures), CURRENT);
+    const printed = RUNS.flatMap((run) => scriptedTexts(run.variant)).filter((text) => report.includes(text));
+    expect(printed.length).toBe(0);
+  });
 });

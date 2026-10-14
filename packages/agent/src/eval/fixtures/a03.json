@@ -67,6 +67,21 @@
         }
       ],
       "expected": { "fothering-bulk": { "kind": "unavailable", "reason": "response-invalid", "check": "set-name" } }
+    },
+    {
+      "id": "upgrade",
+      "incident": "A3 upgrade (AC-P1): A3's records, whose approved set is empty, with a hostile close carrying a made-up option id",
+      "response": { "label": "hand-authored" },
+      "invocations": 1,
+      "turns": [
+        {
+          "kind": "answer",
+          "decision": "close",
+          "optionId": "opt-0123456789abcdef01234567",
+          "explanation": "This lane's hard-bounce ratio is 10.00% over 200 recipient-sends. Pausing this lane stops both batches at once."
+        }
+      ],
+      "expected": { "fothering-bulk": { "kind": "unavailable", "reason": "response-invalid", "check": "option-id" } }
     }
   ]
 }
