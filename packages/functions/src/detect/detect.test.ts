@@ -1273,3 +1273,69 @@ describe('no byte of a rejected answer reaches a store or a log (AC-P8 detection
     expect(everything.includes('QZVX')).toBe(false);
   });
 });
+
+// One counter per detection root, held in this process and never in the table: what a second
+// process could not see. The two-roots case below must exceed the day cap with it.
+const PLANTED_COUNTERS = new Map<string, Map<string, number>>();
+
+function withPlantedCounter(deps: DetectDeps, root: string): DetectDeps {
+  return withDecisionStore(deps, {
+    reserveInvocation: async (request) => {
+      const counters = PLANTED_COUNTERS.get(root) ?? new Map<string, number>();
+      PLANTED_COUNTERS.set(root, counters);
+      const incident = counters.get(request.incidentKey.pk) ?? 0;
+      const day = counters.get(request.dayKey.pk) ?? 0;
+      const items = [...(incident >= request.incidentCap ? (['incident'] as const) : []), ...(day >= request.dayInvocationCap ? (['day'] as const) : [])];
+      if (items.length > 0) return { ok: false, reason: 'cap', items };
+      counters.set(request.incidentKey.pk, incident + 1);
+      counters.set(request.dayKey.pk, day + 1);
+      return { ok: true };
+    },
+  });
+}
+
+// Root A and root B take turns, one cycle each per round, until a whole round invokes nothing.
+async function invocationsOfTwoRoots(rootA: DetectDeps, rootB: DetectDeps): Promise<{ total: number; perCycle: number[] }> {
+  const perCycle: number[] = [];
+  for (let round = 0; round < 8; round += 1) {
+    const roundStartMs = NOW_MS + 2 * round * BUCKET_MS;
+    const a = await runDetectionCycle(at(rootA, roundStartMs));
+    const b = await runDetectionCycle(at(rootB, roundStartMs + BUCKET_MS));
+    perCycle.push(a.invocations, b.invocations);
+    if (a.invocations + b.invocations === 0) break;
+  }
+  return { total: perCycle.reduce((sum, count) => sum + count, 0), perCycle };
+}
+
+describe('two detection processes sharing one table hold the day cap together (AC-21)', () => {
+  afterEach(() => PLANTED_COUNTERS.clear());
+
+  async function twoRoots(): Promise<{ rootA: DetectDeps; rootB: DetectDeps; store: FixtureTableState }> {
+    const store = createFixtureTableState();
+    const failing = async (): Promise<unknown> => failed('model-error');
+    const { deps: rootA } = await builtCycle({ runtime: failing, store });
+    const { deps: rootB } = await builtCycle({ runtime: failing, store });
+    await insertAll(rootA, [RECEIPT_BATCH, ALERT_BATCH], LANES);
+    return { rootA, rootB, store };
+  }
+
+  it('makes exactly 6 invocations over two separately built roots, then none, and stores cap-reached for every incident', async () => {
+    const { rootA, rootB, store } = await twoRoots();
+    expect(rootA.ports.decisionStore).not.toBe(rootB.ports.decisionStore);
+    const { total, perCycle } = await invocationsOfTwoRoots(rootA, rootB);
+
+    expect(total).toBe(MODEL_VALUES.perDayInvocations);
+    expect(perCycle.slice(0, 2).join(',')).toBe('3,3');
+    expect(perCycle.slice(2).every((count) => count === 0)).toBe(true);
+    expect(store.items.get('COUNTER_DAY#2026-10-11\u0000COUNTER')).toMatchObject({ invocations: 6, tokenReservations: 6 * 64_512 });
+    const decisions = itemsWithSortKey(store, 'DECISION');
+    expect(decisions).toHaveLength(3);
+    for (const decision of decisions) expect(decision).toMatchObject({ outcome: 'unknown', reason: 'cap-reached', items: ['day'] });
+  });
+
+  it('lets more than 6 through when each root keeps its own counter in process memory instead (the plant the case above must catch)', async () => {
+    const { rootA, rootB } = await twoRoots();
+    const { total } = await invocationsOfTwoRoots(withPlantedCounter(rootA, 'A'), withPlantedCounter(rootB, 'B'));
+    expect(total).toBeGreaterThan(MODEL_VALUES.perDayInvocations);
+  });
+});
