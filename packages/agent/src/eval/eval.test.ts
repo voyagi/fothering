@@ -1,10 +1,12 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { format } from 'node:util';
 import { beforeAll, describe, expect, it } from 'vitest';
-import type { RuntimeResult } from '@fothering/core/agent-answer';
-import { bucketStartMs } from '@fothering/core/buckets';
+import { actionGate, type RuntimeResult } from '@fothering/core/agent-answer';
+import { BUCKET_MS, bucketStartMs } from '@fothering/core/buckets';
 import { REQUIRED_EVENT_TYPES } from '@fothering/core/closeability';
+import { reserveInvocation } from '@fothering/core/counters';
 import {
   RECORD_BYTE_CEILING,
   evidenceRecordSchema,
@@ -14,10 +16,10 @@ import {
   type EvidenceRecord,
 } from '@fothering/core/evidence-record';
 import { findLane, parseLaneMap, type LaneMap } from '@fothering/core/lanes';
-import { PINNED_MODEL_VALUES } from '@fothering/core/model-values';
+import { MODEL_VALUES, PINNED_MODEL_VALUES } from '@fothering/core/model-values';
 import { scenarioEnvelopes, type LaneScenario } from '@fothering/core/test/event-arbitraries';
 import { runDetectionCycle } from '@fothering/functions/detect/detect';
-import { buildDetectRoot } from '@fothering/functions/detect/root';
+import { buildDetectRoot, type DetectDeps } from '@fothering/functions/detect/root';
 import { ingestEvent } from '@fothering/functions/ingest/ingest';
 import { buildIngestRoot } from '@fothering/functions/ingest/root';
 import {
@@ -87,7 +89,7 @@ function optionIdOf(turn: Extract<EvalTurn, { kind: 'answer' }>, record: Evidenc
   if (turn.optionId === undefined || typeof turn.optionId === 'string') return turn.optionId;
   const [option] = record.approvedOptions;
   if (option === undefined) throw new Error('a turn asks for the approved option id of a record that carries none');
-  return option.optionId;
+  return turn.optionId.alter === 'uppercase' ? option.optionId.toUpperCase() : option.optionId;
 }
 
 function fixtureTurnOf(turn: EvalTurn, record: EvidenceRecord): FixtureTurn {
@@ -195,9 +197,9 @@ function dnsRecordings(answers: EvalCase['dns']): Recording[] {
 }
 
 /** Ingests every scenario envelope and answers how many of them carried the twin's text. */
-async function ingestScenarios(run: PlannedRun, laneMap: LaneMap, store: FixtureTableState, nowMs: number): Promise<number> {
+async function ingestScenarios(run: PlannedRun, laneMap: LaneMap, store: FixtureTableState, nowMs: number, sink: (line: string) => void): Promise<number> {
   const custom = run.evalCase.laneMap === undefined ? {} : { laneMap };
-  const deps = buildIngestRoot({ runtimeContext: 'test', switchValue: undefined, fixtures: { store }, now: () => nowMs, ...custom });
+  const deps = buildIngestRoot({ runtimeContext: 'test', switchValue: undefined, fixtures: { store }, logSink: sink, dryRunSink: sink, now: () => nowMs, ...custom });
   const { twin } = run.variant;
   let planted = 0;
   for (const scenario of run.variant.scenarios ?? run.evalCase.scenarios) {
@@ -238,7 +240,9 @@ async function observeLane(store: ReturnType<typeof buildDetectRoot>['ports']['d
   const parsed = evidenceRecordSchema.safeParse(evidence?.record);
   const decision = await store.getItem(incidentItemKey(incidentId, 'DECISION'), nowMs);
   const state = await store.getItem(incidentItemKey(incidentId, 'STATE'), nowMs);
-  return { configurationSet, record: parsed.success ? parsed.data : undefined, ...storedOf(decision, state), invocations: 0 };
+  const counter = await store.getItem(incidentItemKey(incidentId, 'COUNTER'), nowMs);
+  const invocations = typeof counter?.invocations === 'number' ? counter.invocations : 0;
+  return { configurationSet, record: parsed.success ? parsed.data : undefined, ...storedOf(decision, state), invocations };
 }
 
 /** actionGate over one lane's stored items, the way phase 3's action function will call it. */
@@ -269,41 +273,138 @@ interface RunCapture {
   runtimeCalls: number;
 }
 
+type LineSink = (line: string) => void;
+type AgentFault = NonNullable<EvalVariant['fault']>;
+type Runtime = (payload: unknown) => Promise<RuntimeResult>;
+
+// The agent side of a variant: the real handler over the replaying model, or, for a stack deployed
+// with the switch unset, a deployed root whose model row is the dry-run recorder.
+function runtimeOf(fault: AgentFault | undefined, model: BedrockModelPort, sink: LineSink): Runtime {
+  const agentRoot =
+    fault === 'switch-unset'
+      ? buildAgentRoot({ runtimeContext: 'deployed', switchValue: undefined, dryRunSink: sink, logSink: sink })
+      : buildAgentRoot({ runtimeContext: 'test', switchValue: undefined, fixtures: { model }, dryRunSink: sink, logSink: sink });
+  // A pre-aborted signal stands in for the 80-second loop deadline, which a test cannot wait out.
+  const handler = createInvocationHandler(agentRoot, fault === 'runtime-deadline' ? { deadlineSignal: AbortSignal.abort() } : {});
+  if (fault === 'invoke-throws') {
+    return async () => {
+      throw new Error('the agent runtime invocation failed');
+    };
+  }
+  if (fault === 'hash-altered') return (payload) => handler(isRecordObject(payload) ? { ...payload, hash: '0'.repeat(64) } : payload);
+  return handler;
+}
+
+// The agentCore row of a stack deployed with the switch unset, on the test root, so its dry-run
+// recorder answers while no live client is ever built (detect.test.ts does the same).
+function withSwitchUnset(deps: DetectDeps, sink: LineSink): DetectDeps {
+  const deployed = buildDetectRoot({ runtimeContext: 'deployed', switchValue: undefined, dryRunSink: sink, logSink: sink });
+  const agentCore = deployed.kinds.agentCore;
+  return { ...deps, ports: { ...deps.ports, agentCore: deployed.ports.agentCore }, kinds: agentCore === undefined ? deps.kinds : { ...deps.kinds, agentCore } };
+}
+
+// Six invocations reserved today by earlier incidents, as many as D-76's day cap allows.
+async function spendTheDay(deps: DetectDeps, nowMs: number): Promise<void> {
+  for (let index = 0; index < MODEL_VALUES.perDayInvocations; index += 1) {
+    const incidentId = incidentIdFor('fothering-transactional', bucketStartMs(nowMs) - (index + 1) * BUCKET_MS);
+    const reserved = await reserveInvocation(deps.ports.decisionStore, { incidentId, nowMs });
+    if (!reserved.ok) throw new Error('the day counter refused a seeding reservation');
+  }
+}
+
+async function gateChecks(deps: DetectDeps, lanes: readonly LaneObservation[], labelled: readonly string[], nowMs: number): Promise<GateCheck[]> {
+  const store = deps.ports.decisionStore;
+  const loadRecord = async (incidentId: string) => (await store.getItem(incidentItemKey(incidentId, 'EVIDENCE'), nowMs))?.record as EvidenceRecord | undefined;
+  const checks: GateCheck[] = [];
+  for (const lane of lanes.filter((candidate) => labelled.includes(candidate.configurationSet))) {
+    const incidentId = incidentIdFor(lane.configurationSet, bucketStartMs(nowMs));
+    const decision = await store.getItem(incidentItemKey(incidentId, 'DECISION'), nowMs);
+    const storedClose = decision?.outcome === 'close';
+    const optionId = typeof decision?.optionId === 'string' ? decision.optionId : undefined;
+    const gate = await actionGate({ decision: storedClose ? { decision: 'close', optionId } : { decision: 'unknown' }, incidentId, laneMap: deps.laneMap, loadRecord });
+    checks.push({
+      configurationSet: lane.configurationSet,
+      storedClose,
+      optionApproved: storedClose && (lane.record?.approvedOptions.some((option) => option.optionId === optionId) ?? false),
+      recordApproved: lane.record?.decision.outcome === 'approved',
+      intent: gate.ok,
+    });
+  }
+  return checks;
+}
+
+// Both streams and every console method, the SDK's logger included, since it writes through console.
+async function capturingOutput<T>(work: () => Promise<T>): Promise<{ value: T; output: string }> {
+  const chunks: string[] = [];
+  const methods = ['log', 'info', 'warn', 'error', 'debug'] as const;
+  const originalConsole = methods.map((name) => [name, console[name]] as const);
+  const originalOut = process.stdout.write;
+  const originalErr = process.stderr.write;
+  const keep = (chunk: unknown): boolean => {
+    chunks.push(typeof chunk === 'string' ? chunk : Buffer.from(chunk as Uint8Array).toString('utf8'));
+    return true;
+  };
+  process.stdout.write = keep as typeof process.stdout.write;
+  process.stderr.write = keep as typeof process.stderr.write;
+  for (const name of methods) console[name] = (...args: unknown[]) => void chunks.push(format(...args));
+  try {
+    console.warn(CAPTURE_CONTROL);
+    const value = await work();
+    return { value, output: chunks.join('\n') };
+  } finally {
+    process.stdout.write = originalOut;
+    process.stderr.write = originalErr;
+    for (const [name, original] of originalConsole) console[name] = original;
+  }
+}
+
 // Per variant: a fresh table, the scenario through the real ingest path, one detection cycle whose
 // agentCore row hands the record to the real runtime handler, then the stored items read back.
-async function runVariant(run: PlannedRun): Promise<RunCapture> {
+async function runCycle(run: PlannedRun): Promise<Omit<RunCapture, 'output'>> {
   const nowMs = Date.parse(run.evalCase.now);
   const laneMap = run.evalCase.laneMap === undefined ? COMMITTED_LANES : parseLaneMap(run.evalCase.laneMap);
   const custom = run.evalCase.laneMap === undefined ? {} : { laneMap };
+  const { fault } = run.variant;
+  const lines: string[] = [];
+  const sink: LineSink = (line) => {
+    lines.push(line);
+  };
   const store = createFixtureTableState();
-  const plantedEnvelopes = await ingestScenarios(run, laneMap, store, nowMs);
+  const plantedEnvelopes = await ingestScenarios(run, laneMap, store, nowMs, sink);
 
   const modelCalls: FixtureModelCall[] = [];
-  const model = replayModel(run.variant.turns, modelCalls);
-  const handler = createInvocationHandler(buildAgentRoot({ runtimeContext: 'test', switchValue: undefined, fixtures: { model } }));
+  const runtime = runtimeOf(fault, replayModel(run.variant.turns, modelCalls), sink);
   const runtimeResults: RuntimeResult[] = [];
-  const deps = buildDetectRoot({
+  let runtimeCalls = 0;
+  const testRoot = buildDetectRoot({
     runtimeContext: 'test',
     switchValue: undefined,
     fixtures: {
       store,
       recordings: { ses: sesRecordings(run.evalCase.ses, laneMap), dns: dnsRecordings(run.evalCase.dns) },
       agentRuntime: async (payload) => {
-        const result = await handler(payload);
+        runtimeCalls += 1;
+        const result = await runtime(payload);
         runtimeResults.push(result);
         return result;
       },
     },
     liveConfig: { agentRuntimeArn: FIXTURE_RUNTIME_ARN },
+    logSink: sink,
+    dryRunSink: sink,
     now: () => nowMs,
     wait: async () => {},
+    ...(fault === 'detection-abort' ? { agentTimeoutSignal: () => AbortSignal.abort() } : {}),
     ...custom,
   });
+  const deps = fault === 'switch-unset' ? withSwitchUnset(testRoot, sink) : testRoot;
+  if (fault === 'day-cap') await spendTheDay(deps, nowMs);
   const summary = await runDetectionCycle(deps);
 
+  const labelled = Object.keys(run.variant.labels ?? run.evalCase.labels);
   const incidentLanes = summary.incidents.map((incident) => incident.configurationSet);
   const lanes: LaneObservation[] = [];
-  for (const configurationSet of [...new Set([...Object.keys(run.variant.labels ?? run.evalCase.labels), ...incidentLanes])].sort()) {
+  for (const configurationSet of [...new Set([...labelled, ...incidentLanes])].sort()) {
     lanes.push(await observeLane(deps.ports.decisionStore, configurationSet, nowMs));
   }
   const [first] = runtimeResults;
@@ -313,7 +414,13 @@ async function runVariant(run: PlannedRun): Promise<RunCapture> {
     runtime: first === undefined ? undefined : { pinned: first.pinned, promptSha256: first.promptSha256 },
     failures: summary.failures,
   };
-  return { observation, table: tableOf(store), modelCalls, plantedEnvelopes, lines: [], output: '', gates: [], runtimeCalls: 0 };
+  const gates = await gateChecks(deps, lanes, labelled, nowMs);
+  return { observation, table: tableOf(store), modelCalls, plantedEnvelopes, lines, gates, runtimeCalls };
+}
+
+async function runVariant(run: PlannedRun): Promise<RunCapture> {
+  const { value, output } = await capturingOutput(() => runCycle(run));
+  return { ...value, output };
 }
 
 function tableOf(store: FixtureTableState): [string, unknown][] {

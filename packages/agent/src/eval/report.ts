@@ -430,8 +430,14 @@ export function evalResultFor(evalCase: EvalCase, variant: EvalVariant, observat
     return lane !== undefined && expected !== undefined && matchesLabel(labels[set], lane.record) && outcomeCode(lane.stored) === outcomeCode(expected);
   });
   const callsHold = variant.modelCalls === undefined || labelledLanes.every((lane) => lane.modelCalls === variant.modelCalls);
+  const invocationsHold = variant.invocations === undefined || labelledLanes.every((lane) => lane.invocations === variant.invocations);
   const pass =
-    observation.failures === 0 && sameMembers(observation.incidentLanes, labelled) && labelledLanes.length === labelled.length && lanesHold && callsHold;
+    observation.failures === 0 &&
+    sameMembers(observation.incidentLanes, labelled) &&
+    labelledLanes.length === labelled.length &&
+    lanesHold &&
+    callsHold &&
+    invocationsHold;
   const { response } = variant;
   return {
     caseId: evalCase.id,
