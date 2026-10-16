@@ -70,6 +70,19 @@ const DIGIT_BATCH = recordFor(
   BULK,
 );
 
+// The approved story read with an SES identity, so the record carries configuration rows for NEWS.
+const WITH_IDENTITY = recordFor(
+  COMMITTED,
+  {
+    ...bulkStory([
+      { bucketOffset: 0, count: 40, batch: CAUSE_BATCH, permanentBounces: 15 },
+      { bucketOffset: 1, count: 160, batch: 'import-0901' },
+    ]),
+    identities: [{ identity: 'example.com', dkimStatus: 'SUCCESS', dkimSigningEnabled: true }],
+  },
+  BULK,
+);
+
 const F1 = `this lane's hard-bounce ratio is 7.50% (15 of 200 recipient-sends), carried by batch ${CAUSE_BATCH}`;
 
 function closeOn(record: EvidenceRecord, laneMapSets: readonly string[] = LANE_MAP_SETS): ExplanationContext {
@@ -140,7 +153,25 @@ describe('validateExplanation (D-78, R12)', () => {
       `see w${WORD_JOINER}ww.example.com`,
     ];
     for (const text of urls) expect(checkOf(text, closeOn(APPROVED))).toBe('url');
-    expect(checkOf(`mail from ${NEWS} reads fine`, closeOn(APPROVED))).toBe('ok');
+    expect(checkOf(`mail from ${NEWS} reads fine`, closeOn(WITH_IDENTITY))).toBe('ok');
+  });
+
+  it('allows a bare domain only when the record holds it, across case, width and zero-width tricks', () => {
+    expect(WITH_IDENTITY.configurationRows.some((row) => row.fromDomain === NEWS)).toBe(true);
+    const invented = [
+      'reset the lane at login-example.net',
+      'see example.org/reset for the fix',
+      'see EXAMPLE.ORG',
+      'see ｅｘａｍｐｌｅ.org',
+      `see exa${ZERO_WIDTH_SPACE}mple.org`,
+      'the fix is at mail.example.net.',
+    ];
+    for (const text of invented) expect(checkOf(text, closeOn(WITH_IDENTITY)), text).toBe('url');
+    expect(checkOf(`the from-domain is ${NEWS}.`, closeOn(WITH_IDENTITY))).toBe('ok');
+    expect(checkOf(`the from-domain is ${NEWS.toUpperCase()}, e.g. on this lane`, closeOn(WITH_IDENTITY))).toBe('ok');
+    // A record read without SES facts holds no from-domain, so naming one is a domain the model invented.
+    expect(checkOf(`the from-domain is ${NEWS}`, closeOn(APPROVED))).toBe('url');
+    expect(checkOf(F1, closeOn(APPROVED))).toBe('ok');
   });
 
   it('rejects any occurrence of close or reopen, in any case or width', () => {

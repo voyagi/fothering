@@ -148,10 +148,33 @@ function isOneParagraph(text: string): boolean {
 const SCHEME_URL = /[\p{L}\p{N}+.-]+:\/\//u;
 const DEFANGED_URL = /hxxp/;
 const WWW_TOKEN = /(?<![\p{L}\p{N}_-])www\./u;
+// Dotted labels ending in a label of two or more letters, so 7.50% and e.g. never read as a domain.
+const DOMAIN_TOKEN = /(?<![\p{L}\p{N}_.-])[\p{L}\p{N}-]+(?:\.[\p{L}\p{N}-]+)*\.\p{L}{2,}(?![\p{L}\p{N}_-])/gu;
 
-function holdsNoUrl(text: string): boolean {
+function recordDomains(record: EvidenceRecord): Set<string> {
+  const held = new Set<string>();
+  const walk = (value: unknown): void => {
+    if (typeof value === 'string') for (const [token] of folded(value).matchAll(DOMAIN_TOKEN)) held.add(token);
+    else if (Array.isArray(value)) value.forEach(walk);
+    else if (typeof value === 'object' && value !== null) Object.values(value).forEach(walk);
+  };
+  walk(record);
+  return held;
+}
+
+// D-78 allows a bare domain because a fix may name the operator's from-domain, so a domain is allowed
+// only when some string of the record holds that name. Tag values cannot hold a dot (SES_TAG_PATTERN),
+// so text planted in a tag can never make a domain of its own pass, nor can one the model invents.
+function namesOnlyRecordDomains(normal: string, record: EvidenceRecord): boolean {
+  const tokens = [...normal.matchAll(DOMAIN_TOKEN)];
+  if (tokens.length === 0) return true;
+  const held = recordDomains(record);
+  return tokens.every(([token]) => held.has(token));
+}
+
+function holdsNoUrl(text: string, context: ExplanationContext): boolean {
   const normal = folded(text);
-  return !SCHEME_URL.test(normal) && !DEFANGED_URL.test(normal) && !WWW_TOKEN.test(normal);
+  return !SCHEME_URL.test(normal) && !DEFANGED_URL.test(normal) && !WWW_TOKEN.test(normal) && namesOnlyRecordDomains(normal, context.record);
 }
 
 // The stem "clos" anywhere, so closed, closing, closure and disclose reject too: "closure" and
