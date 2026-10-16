@@ -77,7 +77,8 @@ export function plainTextTurn(text: string, usage: Usage): FixtureTurn {
 }
 
 // The SDK's own throttling class, the only error its retry strategy retries, so a test of the retry
-// path exercises the real classification rather than a look-alike.
+// path exercises the real classification rather than a look-alike. The live adapter throws the same
+// class for a throttled Converse (agent-adapters.ts), which the SDK leaves unmapped with stream off.
 export function throttledTurn(): FixtureTurn {
   return { events: [], error: () => new ModelThrottledError('the fixture model is throttled') };
 }

@@ -2,7 +2,17 @@ import * as dnsPromises from 'node:dns/promises';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import fc from 'fast-check';
 import { BedrockAgentCoreClient } from '@aws-sdk/client-bedrock-agentcore';
-import { BedrockModel, Message, TextBlock, type BedrockModelOptions, type ModelStreamEvent } from '@strands-agents/sdk';
+import {
+  Agent,
+  BedrockModel,
+  ConstantBackoff,
+  DefaultModelRetryStrategy,
+  Message,
+  ModelThrottledError,
+  TextBlock,
+  type BedrockModelOptions,
+  type ModelStreamEvent,
+} from '@strands-agents/sdk';
 import { MODEL_VALUES } from '@fothering/core/model-values';
 import { DynamoDBClient, TransactionCanceledException } from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocumentClient } from '@aws-sdk/lib-dynamodb';
@@ -46,6 +56,7 @@ import { AddressKeySecretError, createSecretsManagerAddressKey } from './address
 import { createSqsDeadLetter } from './dead-letter.js';
 import { createSesReads } from './ses-reads.js';
 import { createLiveAgentCore, createLiveBedrockModel } from './agent-adapters.js';
+import { PortBackedModel } from '../port-backed-model.js';
 import { NetworkGuardError } from '../test/guards.js';
 import {
   DNS_LOOKUP_TIMEOUT_MS,
@@ -1536,17 +1547,21 @@ interface CapturedBedrockSend {
 // BedrockModel builds its own runtime client and takes no prebuilt one (bedrock.d.ts 1.20.0), so the
 // capture replaces send on that client class's prototype, reached through a probe model's client
 // rather than an import of a package providers does not list. Nothing is signed or sent: the
-// replacement answers before any middleware runs.
-function captureBedrockRuntimeSends(): { sends: CapturedBedrockSend[]; restore: () => void } {
+// replacement answers before any middleware runs. Each failure given is thrown by one send, in order,
+// before the sends that answer.
+function captureBedrockRuntimeSends(failures: readonly Error[] = []): { sends: CapturedBedrockSend[]; restore: () => void } {
   const probe = new BedrockModel({ region: REGION, modelId: MODEL_VALUES.inferenceProfileId, clientConfig: { credentials: FAKE_CREDENTIALS } });
   const prototype = Object.getPrototypeOf((probe as unknown as { _client: object })._client) as Record<string, unknown>;
   const ownSend = Object.getOwnPropertyDescriptor(prototype, 'send');
   const sends: CapturedBedrockSend[] = [];
+  const pending = [...failures];
   prototype.send = async function send(
     this: CapturedBedrockSend['client'],
     command: { constructor: { name: string }; input: Record<string, unknown> },
   ): Promise<unknown> {
     sends.push({ name: command.constructor.name, input: command.input, client: this });
+    const failure = pending.shift();
+    if (failure !== undefined) throw failure;
     return structuredClone(CONVERSE_RESPONSE);
   };
   return {
@@ -1565,11 +1580,52 @@ describe('createLiveBedrockModel', () => {
     restoreSend = undefined;
   });
 
-  function capture(): CapturedBedrockSend[] {
-    const { sends, restore } = captureBedrockRuntimeSends();
+  function capture(failures: readonly Error[] = []): CapturedBedrockSend[] {
+    const { sends, restore } = captureBedrockRuntimeSends(failures);
     restoreSend = restore;
     return sends;
   }
+
+  // The shape the runtime client rejects with: an AWS service error carries its exception type as its name.
+  function awsServiceError(name: string): Error {
+    return Object.assign(new Error('the service refused the request'), { name, $fault: 'client' });
+  }
+
+  // Strands maps a throttle to its retry class only on a streamed response (bedrock.js 1.20.0 line
+  // 1401), so with stream off the adapter maps the client's ThrottlingException itself.
+  it('turns a throttled Converse into the SDK retry class, and passes every other error on unchanged', async () => {
+    const throttle = awsServiceError('ThrottlingException');
+    const unavailable = awsServiceError('ServiceUnavailableException');
+    capture([throttle, unavailable]);
+    const port = createLiveBedrockModel();
+
+    const throttled: unknown = await drainEvents(port.stream([userMessage('p')])).catch((error: unknown) => error);
+    expect(throttled).toBeInstanceOf(ModelThrottledError);
+    expect((throttled as Error).cause).toBe(throttle);
+    await expect(drainEvents(port.stream([userMessage('p')]))).rejects.toBe(unavailable);
+  });
+
+  // The same retry strategy the runtime handler builds, with no wait, over the live adapter: the
+  // throttled call is sent once more and the loop answers from the second.
+  it('lets the agent loop retry one throttled call through the live adapter', async () => {
+    const sends = capture([awsServiceError('ThrottlingException')]);
+    const model = new PortBackedModel({
+      port: createLiveBedrockModel(),
+      config: { modelId: MODEL_VALUES.inferenceProfileId, maxTokens: MODEL_VALUES.maxTokens },
+      ceiling: MODEL_VALUES.modelCallCeiling,
+      inputByteCeiling: MODEL_VALUES.inputTokenCeiling,
+    });
+    const agent = new Agent({
+      model,
+      tools: [],
+      printer: false,
+      retryStrategy: new DefaultModelRetryStrategy({ maxAttempts: MODEL_VALUES.throttleAttempts, backoff: new ConstantBackoff({ delayMs: 0 }) }),
+    });
+
+    await agent.invoke('p');
+    expect(sends.map((send) => send.name)).toEqual(['ConverseCommand', 'ConverseCommand']);
+    expect(model.calls).toBe(2);
+  });
 
   it('builds one BedrockModel on the first stream call, every option read from MODEL_VALUES', async () => {
     const sends = capture();

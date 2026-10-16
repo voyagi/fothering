@@ -1,7 +1,8 @@
 import { InvokeAgentRuntimeCommand, type BedrockAgentCoreClient } from '@aws-sdk/client-bedrock-agentcore';
-import { BedrockModel, type BedrockModelOptions } from '@strands-agents/sdk';
+import { BedrockModel, ModelThrottledError, type BedrockModelOptions, type ModelStreamEvent } from '@strands-agents/sdk';
 import { MODEL_VALUES } from '@fothering/core/model-values';
 import type { AgentCorePort, AgentRuntimeRequest, BedrockModelPort } from '../port-types.js';
+import { hasErrorName } from './error-name.js';
 import { lazyClient } from './lazy-client.js';
 
 // The only BedrockModel construction in the tree. Every option is pinned from MODEL_VALUES, because
@@ -22,13 +23,29 @@ function liveBedrockModelOptions(): BedrockModelOptions {
   };
 }
 
+const THROTTLING_EXCEPTION = 'ThrottlingException';
+
+// Strands 1.20.0 turns a throttle into ModelThrottledError, the only error its retry strategy
+// retries, just when the throttle arrives as an event of a streamed response (bedrock.js lines 1401
+// to 1404). With stream off, Converse rejects with the client's ThrottlingException and the SDK
+// rethrows it unchanged (bedrock.js lines 437 to 444), so without this the one throttling retry
+// MODEL_VALUES.throttleAttempts allows would never happen on the deployed path.
+async function* throttleAsModelError(events: AsyncIterable<ModelStreamEvent>): AsyncGenerator<ModelStreamEvent> {
+  try {
+    yield* events;
+  } catch (error) {
+    if (hasErrorName(error, THROTTLING_EXCEPTION)) throw new ModelThrottledError('the model provider throttled the request', { cause: error });
+    throw error;
+  }
+}
+
 /** `construct` exists for tests that count builds; the deployed path always builds the real model. */
 export function createLiveBedrockModel(
   construct: (options: BedrockModelOptions) => BedrockModelPort = (options) => new BedrockModel(options),
 ): BedrockModelPort {
   const model = lazyClient(() => construct(liveBedrockModelOptions()));
   return {
-    stream: (messages, options) => model().stream(messages, options),
+    stream: (messages, options) => throttleAsModelError(model().stream(messages, options)),
   };
 }
 
