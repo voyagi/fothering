@@ -104,8 +104,14 @@ export class RuntimeStack extends Stack {
     // Non-streaming Converse authorizes as InvokeModel alone. The runtime's role is read-only to the
     // construct, so these go on a policy the stack owns; it names no runtime id, so unlike the log
     // policy it could not form a cycle, and it stays separate so the snapshot reads model access apart
-    // from logging.
-    const profileArn = this.formatArn({ service: 'bedrock', resource: 'inference-profile', resourceName: MODEL_VALUES.inferenceProfileId });
+    // from logging. The profile is named in its source Region, the one the model adapter calls,
+    // never the stack's own, so a stack deployed elsewhere still grants the call the runtime makes.
+    const profileArn = this.formatArn({
+      service: 'bedrock',
+      region: MODEL_VALUES.sourceRegion,
+      resource: 'inference-profile',
+      resourceName: MODEL_VALUES.inferenceProfileId,
+    });
     new Policy(this, 'RuntimeModelPolicy', {
       roles: [role],
       statements: [

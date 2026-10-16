@@ -1,5 +1,11 @@
+import { App } from 'aws-cdk-lib';
+import { Template } from 'aws-cdk-lib/assertions';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { AGENTCORE_RUNTIME } from '@fothering/agent/listen-host';
+import { cdkJsonContext } from './cdk-context.js';
+import { RUNTIME_STACK_ID } from './create-app.js';
+import { RuntimeStack } from './runtime-stack.js';
+import { createStubAssets } from './stub-assets.js';
 import { expectTemplate, fixedNames, logicalIdOf, resourcesOfType, statementsByRole, synthStacks, type SynthesizedStacks } from './test/synth.js';
 
 interface PolicyStatementJson {
@@ -145,5 +151,24 @@ describe('RuntimeStack synth', () => {
     const policyIds = Object.keys(resourcesOfType(stacks.runtime, 'AWS::IAM::Policy'));
     expect(policyIds).toHaveLength(2);
     for (const policyId of policyIds) expect(runtime?.DependsOn ?? []).not.toContain(policyId);
+  });
+});
+
+// The model adapter calls Bedrock in the profile's source Region whatever Region the stack deploys
+// to, so the profile grant must name that Region too, or the first call is refused.
+describe('RuntimeStack synth in another Region', () => {
+  it('grants the profile in the Region the model adapter calls, not the stack Region', { timeout: 60_000 }, () => {
+    const assets = createStubAssets();
+    try {
+      const app = new App({ context: { ...cdkJsonContext }, outdir: assets.outdir });
+      const stack = new RuntimeStack(app, RUNTIME_STACK_ID, { env: { region: 'eu-west-1' }, agentAssetDir: assets.agentAssetDir });
+      const statements = Object.values(Template.fromStack(stack).findResources('AWS::IAM::Policy')).flatMap(
+        (policy) => (policy.Properties as { PolicyDocument: { Statement: PolicyStatementJson[] } }).PolicyDocument.Statement,
+      );
+      const profile = statements.find((statement) => statement.Action === 'bedrock:InvokeModel' && statement.Condition === undefined);
+      expect(profile?.Resource).toEqual(PROFILE_ARN);
+    } finally {
+      assets.remove();
+    }
   });
 });

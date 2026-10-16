@@ -579,6 +579,8 @@ describe('SES and DNS are read only in a cycle that opens an incident, within th
     const record = await recordOf(deps, INCIDENT_ID);
     expect(record.decision.reason).toBe('ses-facts-bound');
     expect(record.decision).toMatchObject({ outcome: 'unknown', bound: 'ses-facts-bound' });
+    // Nothing read means nothing can be closeable, even where the lane map and the events alone would allow it.
+    expect(record.decision.closeability).toEqual({ state: 'refused', reasons: [] });
     expect(record.configurationRows).toEqual([]);
     const sesFacts = ['unlisted-configuration-set', 'default-configuration-set', 'destination-missing-event-types'];
     expect(record.decision.closeability.reasons.filter((reason) => sesFacts.includes(reason))).toEqual([]);
@@ -1245,6 +1247,7 @@ describe('two overlapping cycles never attempt one incident twice (orchestrator 
     const finished = await slow;
 
     expect([finished.invocations, overlapping.invocations, counting.calls.count]).toEqual([1, 0, 2]);
+    expect([finished.failures, overlapping.failures]).toEqual([0, 0]);
     expect(overlapping.outcomes).toEqual([]);
     expect(await storedItem(deps, INCIDENT_ID, 'DECISION', NOW_MS + BUCKET_MS)).toMatchObject({ outcome: 'close', attempt: 2 });
   });
@@ -1349,5 +1352,234 @@ describe('two detection processes sharing one table hold the day cap together (A
     const { rootA, rootB } = await twoRoots();
     const { total } = await invocationsOfTwoRoots(withPlantedCounter(rootA, 'A'), withPlantedCounter(rootB, 'B'));
     expect(total).toBeGreaterThan(MODEL_VALUES.perDayInvocations);
+  });
+});
+
+// Each case pins one guard of the cycle that every case above still passes without: taking the guard
+// out turns its case red.
+describe('each guard of the detection cycle has a case that fails without it', () => {
+  const OTHER_ID = incidentIdFor(BULK, BUCKET_NOW_MS - BUCKET_MS);
+  const tableKey = (key: { pk: string; sk: string }): string => `${key.pk}\u0000${key.sk}`;
+
+  it('invokes nothing for an incident whose marker closed before the agent decided', async () => {
+    const counting = countingRuntime(closeRuntime);
+    const { deps } = await builtCycle({ runtime: counting.runtime });
+    const unset = { ...deps, agentRuntimeArn: undefined };
+    await runDetectionCycle(unset);
+    await runDetectionCycle(at(unset, QUIET_NOW_MS));
+    const closing = await runDetectionCycle(at(deps, CLOSE_NOW_MS));
+
+    expect((await markerOf(deps, BULK, CLOSE_NOW_MS))?.status).toBe('closed');
+    expect(await storedItem(deps, INCIDENT_ID, 'DECISION', CLOSE_NOW_MS)).toBeUndefined();
+    expect([closing.invocations, counting.calls.count, closing.outcomes.length]).toEqual([0, 0, 0]);
+  });
+
+  it('reads no SES or DNS and writes nothing for a lane whose marker a racing cycle claimed first (D-53)', async () => {
+    const counting = countingRuntime(closeRuntime);
+    const { deps, store } = await builtCycle({ runtime: counting.runtime });
+    let raced = false;
+    const racing = withDecisionStore(deps, {
+      putIfAbsent: async (item, nowMs) => {
+        if (!raced && item.sk === 'MARKER') {
+          raced = true;
+          await deps.ports.decisionStore.putIfAbsent({ ...item, incidentId: OTHER_ID }, nowMs);
+        }
+        return deps.ports.decisionStore.putIfAbsent(item, nowMs);
+      },
+    });
+    const counted = withReadLog(racing);
+    const summary = await runDetectionCycle(counted.deps);
+
+    expect(summary.incidents).toEqual([{ configurationSet: BULK, incidentId: OTHER_ID }]);
+    expect([counted.reads.sesReads, counted.reads.lookups.length, summary.incidentsOpened, counting.calls.count]).toEqual([0, 0, 0, 0]);
+    expect([itemsWithSortKey(store, 'STATE').length, itemsWithSortKey(store, 'EVIDENCE').length]).toEqual([0, 0]);
+  });
+
+  it('logs opening-failed and leaves the lane alone when claiming its marker throws', async () => {
+    const counting = countingRuntime(closeRuntime);
+    const { deps, store, lines } = await builtCycle({ runtime: counting.runtime });
+    const failing = withDecisionStore(deps, {
+      putIfAbsent: async (item, nowMs) => (item.sk === 'MARKER' ? Promise.reject(namedError('InternalServerError')) : deps.ports.decisionStore.putIfAbsent(item, nowMs)),
+    });
+    const summary = await runDetectionCycle(failing);
+
+    expect(lineOf(lines, 'opening-failed')).toEqual({ event: 'opening-failed', level: 'error', configurationSet: BULK, incidentId: INCIDENT_ID, errorName: 'InternalServerError' });
+    expect([summary.failures, summary.incidents.length, summary.sesReads, counting.calls.count]).toEqual([1, 0, 0, 0]);
+    expect([itemsWithSortKey(store, 'STATE').length, itemsWithSortKey(store, 'EVIDENCE').length]).toEqual([0, 0]);
+  });
+
+  it('invokes nothing when another cycle claims the same attempt between its STATE read and its claim', async () => {
+    const counting = countingRuntime(closeRuntime);
+    const { deps, store } = await builtCycle({ runtime: counting.runtime });
+    await runDetectionCycle({ ...deps, agentRuntimeArn: undefined });
+    let raced = false;
+    const racing = withDecisionStore(at(deps, NOW_MS + BUCKET_MS), {
+      updateIfVersion: async (key, expectedVersion, attributes, nowMs) => {
+        if (!raced && typeof attributes.agentClaim === 'object' && attributes.agentClaim !== null) {
+          raced = true;
+          await deps.ports.decisionStore.updateIfVersion(key, expectedVersion, { agentClaim: { attempt: 1, claimedAtMs: nowMs } }, nowMs);
+        }
+        return deps.ports.decisionStore.updateIfVersion(key, expectedVersion, attributes, nowMs);
+      },
+    });
+    const summary = await runDetectionCycle(racing);
+
+    expect(raced).toBe(true);
+    expect([summary.invocations, counting.calls.count, itemsWithSortKey(store, 'COUNTER').length]).toEqual([0, 0, 0]);
+    expect(summary.outcomes).toEqual([]);
+  });
+
+  it('counts no opening and attempts nothing when a racing cycle stored the evidence first (D-55)', async () => {
+    const counting = countingRuntime(closeRuntime);
+    const { deps, store, lines } = await builtCycle({ runtime: counting.runtime });
+    let raced = false;
+    const racing = withDecisionStore(deps, {
+      putIfAbsent: async (item, nowMs) => {
+        if (!raced && item.sk === 'EVIDENCE') {
+          raced = true;
+          await deps.ports.decisionStore.putIfAbsent(item, nowMs);
+        }
+        return deps.ports.decisionStore.putIfAbsent(item, nowMs);
+      },
+    });
+    const summary = await runDetectionCycle(racing);
+
+    expect(raced).toBe(true);
+    expect([summary.incidentsOpened, summary.invocations, counting.calls.count, itemsWithSortKey(store, 'EVIDENCE').length]).toEqual([0, 0, 0, 1]);
+    expect(lineOf(lines, 'incident-opened')).toBeUndefined();
+  });
+
+  it('starts no new lookup once one throws, and the opening fails whole with nothing written (D-58)', async () => {
+    const domains = Array.from({ length: 30 }, (_, index) => `c${index}.example.com`);
+    // c0 has no recording, so its lookup throws as a fault would.
+    const dnsRecordings = [...NEWS_DNS_RECORDINGS.filter((recording) => recording.operation === 'dns.resolveTxt'), ...missingMxFor(domains.slice(1))];
+    const counting = countingRuntime(closeRuntime);
+    const { deps, store, lines } = await builtCycle({ scenario: bulkWithDomains(domains, 160), dnsRecordings, runtime: counting.runtime });
+    const counted = withReadLog(deps);
+    const summary = await runDetectionCycle(counted.deps);
+
+    expect(counted.reads.lookups).toContain('MX c0.example.com');
+    expect(counted.reads.lookups.length).toBeLessThan(3 + domains.length);
+    expect(summary.dnsLookups).toBe(counted.reads.lookups.length);
+    expect([summary.failures, itemsWithSortKey(store, 'EVIDENCE').length, counting.calls.count]).toEqual([1, 0, 0]);
+    expect(lineOf(lines, 'opening-failed')).toMatchObject({ level: 'error', configurationSet: BULK, incidentId: INCIDENT_ID });
+  });
+
+  it('writes no evidence for an open incident whose opening failed once its lane no longer spikes', async () => {
+    const counting = countingRuntime(closeRuntime);
+    const { deps, store } = await builtCycle({ runtime: counting.runtime });
+    await runDetectionCycle(withSes(deps, { listEmailIdentities: async () => Promise.reject(namedError('ThrottlingException')) }));
+    const counted = withReadLog(at(deps, QUIET_NOW_MS));
+    const quiet = await runDetectionCycle(counted.deps);
+
+    expect(quiet.lanes.find((lane) => lane.configurationSet === BULK)?.verdict).not.toBe('spike');
+    expect([counted.reads.sesReads, itemsWithSortKey(store, 'EVIDENCE').length, counting.calls.count]).toEqual([0, 0, 0]);
+    expect(quiet.incidents).toEqual([{ configurationSet: BULK, incidentId: INCIDENT_ID }]);
+  });
+
+  it('leaves a lane alone for the rest of the cycle once its lifecycle step throws', async () => {
+    const counting = countingRuntime(closeRuntime);
+    const { deps, lines } = await builtCycle({ runtime: counting.runtime });
+    await runDetectionCycle({ ...deps, agentRuntimeArn: undefined });
+    const failing = withDecisionStore(at(deps, QUIET_NOW_MS), {
+      updateIfVersion: async (key, expectedVersion, attributes, nowMs) => {
+        if (key.pk === `INCIDENT#${INCIDENT_ID}`) throw namedError('InternalServerError');
+        return deps.ports.decisionStore.updateIfVersion(key, expectedVersion, attributes, nowMs);
+      },
+    });
+    const summary = await runDetectionCycle(failing);
+
+    expect(summary.failures).toBe(1);
+    expect(lineOf(lines, 'lifecycle-failed')).toMatchObject({ configurationSet: BULK, incidentId: INCIDENT_ID });
+    expect(lineOf(lines, 'agent-attempt-failed')).toBeUndefined();
+    expect(counting.calls.count).toBe(0);
+  });
+
+  it('leaves the marker open and logs no transition when another cycle moved STATE first', async () => {
+    const { deps, lines } = await builtCycle({ runtime: closeRuntime });
+    await runDetectionCycle(deps);
+    await runDetectionCycle(at(deps, QUIET_NOW_MS));
+    const stepsBefore = parsedLines(lines).filter((line) => line.event === 'incident-step').length;
+    const conflicting = withDecisionStore(at(deps, CLOSE_NOW_MS), {
+      updateIfVersion: async (key, expectedVersion, attributes, nowMs) =>
+        'state' in attributes ? ('conflict' as const) : deps.ports.decisionStore.updateIfVersion(key, expectedVersion, attributes, nowMs),
+    });
+    const summary = await runDetectionCycle(conflicting);
+
+    expect((await markerOf(deps, BULK, CLOSE_NOW_MS))?.status).toBe('open');
+    expect(parsedLines(lines).filter((line) => line.event === 'incident-step')).toHaveLength(stepsBefore);
+    expect(summary.incidents).toEqual([{ configurationSet: BULK, incidentId: INCIDENT_ID }]);
+  });
+
+  it('reports the marker another cycle reopened when its own close loses the versioned update', async () => {
+    const { deps } = await builtCycle({ runtime: closeRuntime });
+    await runDetectionCycle(deps);
+    await runDetectionCycle(at(deps, QUIET_NOW_MS));
+    let raced = false;
+    const racing = withDecisionStore(at(deps, CLOSE_NOW_MS), {
+      updateIfVersion: async (key, expectedVersion, attributes, nowMs) => {
+        if (!raced && key.sk === 'MARKER') {
+          raced = true;
+          await deps.ports.decisionStore.updateIfVersion(key, expectedVersion, { incidentId: OTHER_ID, status: 'open' }, nowMs);
+        }
+        return deps.ports.decisionStore.updateIfVersion(key, expectedVersion, attributes, nowMs);
+      },
+    });
+    const summary = await runDetectionCycle(racing);
+
+    expect(raced).toBe(true);
+    expect(summary.incidents).toEqual([{ configurationSet: BULK, incidentId: OTHER_ID }]);
+  });
+
+  it('logs usage-not-reserved at error level when the usage write finds no reservation to add to', async () => {
+    const { deps, lines } = await builtCycle({ runtime: closeRuntime });
+    await runDetectionCycle(withDecisionStore(deps, { recordUsage: async () => 'not-reserved' as const }));
+    expect(lineOf(lines, 'usage-not-reserved')).toEqual({ event: 'usage-not-reserved', level: 'error', configurationSet: BULK, incidentId: INCIDENT_ID, attempt: 1 });
+  });
+
+  it('logs agent-outcome-unsaved when another cycle moved STATE before the outcome write', async () => {
+    const { deps, lines } = await builtCycle({ runtime: async () => failed('model-error') });
+    const conflicting = withDecisionStore(deps, {
+      updateIfVersion: async (key, expectedVersion, attributes, nowMs) =>
+        'lastAgentOutcome' in attributes ? ('conflict' as const) : deps.ports.decisionStore.updateIfVersion(key, expectedVersion, attributes, nowMs),
+    });
+    await runDetectionCycle(conflicting);
+    expect(lineOf(lines, 'agent-outcome-unsaved')).toEqual({
+      event: 'agent-outcome-unsaved',
+      level: 'info',
+      configurationSet: BULK,
+      incidentId: INCIDENT_ID,
+      attempt: 1,
+      reason: 'agent-error',
+    });
+  });
+
+  it('reads a stored attempt that is not a whole number as no attempt, so the next session is a1', async () => {
+    const { deps } = await builtCycle({ runtime: closeRuntime });
+    await runDetectionCycle({ ...deps, agentRuntimeArn: undefined });
+    const state = await storedItem(deps, INCIDENT_ID, 'STATE');
+    const planted = { lastAgentOutcome: { reason: 'agent-error', attempt: 1.5 } };
+    expect(await deps.ports.decisionStore.updateIfVersion(incidentItemKey(INCIDENT_ID, 'STATE'), Number(state?.version), planted, NOW_MS)).toBe('updated');
+
+    const logged = withSessionLog(deps);
+    await runDetectionCycle(at(logged.deps, NOW_MS + BUCKET_MS));
+    expect(logged.sessions).toEqual(sessionsOf(1));
+  });
+
+  it('sends no stored record past RECORD_BYTE_CEILING, whatever reason it carries (AC-E35)', async () => {
+    const counting = countingRuntime(closeRuntime);
+    const { deps, store, lines } = await builtCycle({ runtime: counting.runtime });
+    await runDetectionCycle({ ...deps, agentRuntimeArn: undefined });
+    const key = tableKey(incidentItemKey(INCIDENT_ID, 'EVIDENCE'));
+    const item = store.items.get(key) as DecisionStoreItem;
+    const record = evidenceRecordSchema.parse(item.record);
+    const oversized = evidenceRecordSchema.parse({ ...record, rows: Array.from({ length: 60 }, () => record.rows).flat() });
+    expect(oversized.decision.reason).not.toBe('record-too-large');
+    expect(serializedRecordBytes(oversized)).toBeGreaterThan(RECORD_BYTE_CEILING);
+    store.items.set(key, { ...item, record: oversized });
+
+    const summary = await runDetectionCycle(at(deps, NOW_MS + BUCKET_MS));
+    expect([summary.invocations, counting.calls.count]).toEqual([0, 0]);
+    expect(lineOf(lines, 'agent-not-invoked')).toMatchObject({ incidentId: INCIDENT_ID, reason: 'record-too-large' });
   });
 });
