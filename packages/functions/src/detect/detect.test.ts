@@ -1063,7 +1063,7 @@ describe('detection retries only what D-77 lets it retry, within the caps (D-72,
       actual.assembleEvidenceRecord({ ...input, analysis: { ...input.analysis, rows: Array.from({ length: 60 }, () => input.analysis.rows).flat() } }),
     );
     const counting = countingRuntime(closeRuntime);
-    const { deps, store } = await builtCycle({ runtime: counting.runtime });
+    const { deps, store, lines } = await builtCycle({ runtime: counting.runtime });
     const summary = await runDetectionCycle(deps);
 
     const record = await recordOf(deps, INCIDENT_ID);
@@ -1071,6 +1071,13 @@ describe('detection retries only what D-77 lets it retry, within the caps (D-72,
     expect(serializedRecordBytes(record) > RECORD_BYTE_CEILING).toBe(true);
     expect([counting.calls.count, summary.invocations, itemsWithSortKey(store, 'COUNTER').length]).toEqual([0, 0, 0]);
     expect(summary.outcomes).toEqual([]);
+
+    // The incident stays open, and a later cycle over it repeats nothing: the opening line said it once.
+    const later = await runDetectionCycle(at(deps, NOW_MS + BUCKET_MS));
+    expect(later.incidents.map((incident) => incident.incidentId)).toEqual([INCIDENT_ID]);
+    const events = parsedLines(lines).map((line) => `${String(line.event)}:${String(line.reason)}`);
+    expect(events.filter((event) => event.startsWith('agent-not-invoked'))).toEqual([]);
+    expect(events.filter((event) => event.startsWith('incident-opened'))).toEqual(['incident-opened:record-too-large']);
   });
 
   it.each([
@@ -1581,5 +1588,20 @@ describe('each guard of the detection cycle has a case that fails without it', (
     const summary = await runDetectionCycle(at(deps, NOW_MS + BUCKET_MS));
     expect([summary.invocations, counting.calls.count]).toEqual([0, 0]);
     expect(lineOf(lines, 'agent-not-invoked')).toMatchObject({ incidentId: INCIDENT_ID, reason: 'record-too-large' });
+  });
+
+  it('logs an error line each cycle for a stored record it cannot parse, and invokes nothing', async () => {
+    const counting = countingRuntime(closeRuntime);
+    const { deps, store, lines } = await builtCycle({ runtime: counting.runtime });
+    await runDetectionCycle({ ...deps, agentRuntimeArn: undefined });
+    const key = tableKey(incidentItemKey(INCIDENT_ID, 'EVIDENCE'));
+    store.items.set(key, { ...(store.items.get(key) as DecisionStoreItem), record: { incidentId: INCIDENT_ID } });
+    lines.length = 0;
+
+    const summary = await runDetectionCycle(at(deps, NOW_MS + BUCKET_MS));
+    expect([summary.invocations, summary.failures, counting.calls.count]).toEqual([0, 1, 0]);
+    expect(parsedLines(lines).filter((line) => line.level === 'error')).toEqual([
+      { event: 'agent-attempt-failed', level: 'error', configurationSet: BULK, incidentId: INCIDENT_ID, errorName: 'StoredRecordInvalidError' },
+    ]);
   });
 });

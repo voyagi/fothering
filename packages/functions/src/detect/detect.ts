@@ -505,12 +505,21 @@ async function writeEvidence(deps: DetectDeps, views: readonly LaneView[], nowMs
   return opened;
 }
 
+function storedRecordInvalid(): Error {
+  const error = new Error('the stored evidence record fails the evidence record schema');
+  error.name = 'StoredRecordInvalidError';
+  return error;
+}
+
 // A racing cycle may have written the evidence first, so the agent always explains the stored record.
+// A stored record this code cannot parse throws, so every cycle that skips the incident for it logs
+// an error line the error-lines alarm counts, rather than skipping it in silence.
 async function storedRecordOf(deps: DetectDeps, incidentId: string, nowMs: number): Promise<EvidenceRecord | undefined> {
   const item = await deps.ports.decisionStore.getItem(incidentItemKey(incidentId, 'EVIDENCE'), nowMs);
   if (item === undefined) return undefined;
   const parsed = evidenceRecordSchema.safeParse(item.record);
-  return parsed.success ? parsed.data : undefined;
+  if (!parsed.success) throw storedRecordInvalid();
+  return parsed.data;
 }
 
 function runtimeArnOf(deps: DetectDeps): string | undefined {
@@ -750,7 +759,9 @@ async function agentStep(deps: DetectDeps, incidentId: string, cycleStartMs: num
   if ((await store.getItem(incidentItemKey(incidentId, 'DECISION'), turnMs)) !== undefined) return undefined;
   const incident = { configurationSet: record.lane.configurationSet, incidentId };
   if (tooLargeToSend(record)) {
-    deps.log.info({ event: 'agent-not-invoked', ...incident, reason: 'record-too-large' });
+    // A record assembled as record-too-large never changes and its incident-opened line already names
+    // the reason, so only a stored record grown past the ceiling since is logged, each cycle it is seen.
+    if (record.decision.reason !== 'record-too-large') deps.log.info({ event: 'agent-not-invoked', ...incident, reason: 'record-too-large' });
     return undefined;
   }
   if (turnMs - cycleStartMs > CYCLE_INVOKE_BUDGET_MS) {
