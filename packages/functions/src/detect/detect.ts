@@ -270,6 +270,10 @@ async function stepLane(deps: DetectDeps, folded: FoldedLane, nowMs: number, cou
   return view;
 }
 
+// The marker's expiry moves only when it closes or reopens, never while its incident stays open. The
+// evidence record, the decision and the incident counter keep the expiry of their own first write, so
+// past RETENTION_SECONDS the incident's record is gone whatever the marker says, and a lane still
+// spiking then opens a new incident with a fresh record (orchestrator extra 1, pinned in the tests).
 async function claimMarker(deps: DetectDeps, configurationSet: string, previous: Marker | undefined, incidentId: string, nowMs: number): Promise<boolean> {
   const store = deps.ports.decisionStore;
   if (previous === undefined) {
@@ -615,9 +619,11 @@ function claimOf(value: unknown): AgentClaim | undefined {
 
 // A claim with no outcome written over it is a cycle still invoking, or one that died. The function
 // timeout bounds every cycle, so a claim older than it is a dead cycle's and counts as spent; the
-// incident counter is what holds the cap either way.
+// incident counter is what holds the cap either way. A STATE an overlapping cycle closed after this
+// one stepped the lifecycle is not attempted, and the claim is conditional on the version read here,
+// so a close landing after this read makes the claim fail instead of invoking.
 function agentTurnOf(record: EvidenceRecord, item: DecisionStoreItem | undefined, turnMs: number): AgentTurn | 'in-flight' | undefined {
-  if (item === undefined || typeof item.version !== 'number') return undefined;
+  if (item === undefined || typeof item.version !== 'number' || stateOf(item)?.status !== 'open') return undefined;
   const claim = claimOf(item.agentClaim);
   if (claim !== undefined && turnMs < claim.claimedAtMs + DETECT_FUNCTION_TIMEOUT_MS) return 'in-flight';
   const lastOutcome = storedOutcomeOf(item.lastAgentOutcome);

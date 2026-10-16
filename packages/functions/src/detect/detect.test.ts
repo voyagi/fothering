@@ -1471,6 +1471,34 @@ describe('each guard of the detection cycle has a case that fails without it', (
     expect(summary.outcomes).toEqual([]);
   });
 
+  it('invokes nothing when another cycle closes the incident between its lifecycle step and its agent turn', async () => {
+    const counting = countingRuntime(closeRuntime);
+    const { deps, store } = await builtCycle({ runtime: counting.runtime });
+    await runDetectionCycle({ ...deps, agentRuntimeArn: undefined });
+    const stateKey = incidentItemKey(INCIDENT_ID, 'STATE');
+    let stateReads = 0;
+    let closed = false;
+    // The cycle's second STATE read is its agent turn's; the racing close lands just before it.
+    const racing = withDecisionStore(at(deps, NOW_MS + BUCKET_MS), {
+      getItem: async (key, nowMs) => {
+        if (key.pk === stateKey.pk && key.sk === stateKey.sk) {
+          stateReads += 1;
+          if (stateReads === 2) {
+            const current = await deps.ports.decisionStore.getItem(key, nowMs);
+            const state = { ...(current?.state as object), status: 'closed' };
+            closed = (await deps.ports.decisionStore.updateIfVersion(key, Number(current?.version), { state }, nowMs)) === 'updated';
+          }
+        }
+        return deps.ports.decisionStore.getItem(key, nowMs);
+      },
+    });
+    const summary = await runDetectionCycle(racing);
+
+    expect(closed).toBe(true);
+    expect([summary.invocations, counting.calls.count, itemsWithSortKey(store, 'COUNTER').length]).toEqual([0, 0, 0]);
+    expect(summary.outcomes).toEqual([]);
+  });
+
   it('counts no opening and attempts nothing when a racing cycle stored the evidence first (D-55)', async () => {
     const counting = countingRuntime(closeRuntime);
     const { deps, store, lines } = await builtCycle({ runtime: counting.runtime });
