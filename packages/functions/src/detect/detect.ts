@@ -1,6 +1,5 @@
 import {
   AGENT_UNAVAILABLE_REASONS,
-  INVALID_CHECKS,
   classifyRuntimeOutcome,
   runtimeResultSchema,
   type AgentAnswer,
@@ -573,7 +572,7 @@ interface AgentTurn {
   stateVersion: number;
   /** Invocations already spent on the incident, by its stored outcome and any claim whose cycle has surely ended. */
   attemptsMade: number;
-  lastOutcome: StoredAgentOutcome | undefined;
+  lastOutcome: StoredOutcomeRead | undefined;
   incident: { configurationSet: string; incidentId: string; attempt: number };
 }
 
@@ -583,6 +582,8 @@ interface StoredAgentOutcome {
   check?: InvalidCheck;
   attempt: number;
 }
+
+type StoredOutcomeRead = Pick<StoredAgentOutcome, 'reason' | 'attempt'>;
 
 /** STATE's agentClaim: the attempt a cycle took before reserving, so a second cycle cannot take the same one. */
 interface AgentClaim {
@@ -594,14 +595,13 @@ function wholeCountOf(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : undefined;
 }
 
-function storedOutcomeOf(value: unknown): StoredAgentOutcome | undefined {
+// Only the reason and the attempt are read back; the check is written for the table's reader alone.
+function storedOutcomeOf(value: unknown): StoredOutcomeRead | undefined {
   if (typeof value !== 'object' || value === null) return undefined;
-  const { reason, check, attempt } = value as Record<string, unknown>;
+  const { reason, attempt } = value as Record<string, unknown>;
   const count = wholeCountOf(attempt);
   const knownReason = AGENT_UNAVAILABLE_REASONS.find((candidate) => candidate === reason);
-  if (knownReason === undefined || count === undefined) return undefined;
-  const knownCheck = INVALID_CHECKS.find((candidate) => candidate === check);
-  return knownCheck === undefined ? { reason: knownReason, attempt: count } : { reason: knownReason, check: knownCheck, attempt: count };
+  return knownReason === undefined || count === undefined ? undefined : { reason: knownReason, attempt: count };
 }
 
 function claimOf(value: unknown): AgentClaim | undefined {
@@ -774,8 +774,9 @@ async function agentStep(deps: DetectDeps, incidentId: string, cycleStartMs: num
 }
 
 // An incident is attempted only by a cycle that found its record already stored or wrote it itself:
-// a cycle that lost the marker, or the record, to a racing cycle leaves the attempt to that cycle,
-// so two overlapping cycles over one new spike invoke once (AC-E11).
+// a cycle that lost the marker, or the record, to a racing cycle leaves the attempt to that cycle.
+// The lost-claim term is implied by the evidence flags (a lost claim sets neither) and stays to say
+// so. Two overlapping cycles invoke once (AC-E11) because of the attempt claim on STATE, not this.
 function mayAttempt(view: LaneView): boolean {
   return !view.failed && view.claim !== 'lost' && view.marker?.status === 'open' && (view.evidenceAtStart || view.evidenceWritten);
 }
