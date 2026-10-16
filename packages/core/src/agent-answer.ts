@@ -239,11 +239,17 @@ function recordFacts(record: EvidenceRecord): RecordFacts {
     else if (typeof value === 'object' && value !== null) Object.values(value).forEach(walk);
   };
   walk(record);
+  // The looked-up names (an SES identity, a MAIL FROM or _dmarc name) are domains the url check lets
+  // through and a code-written fix names, so their digits are no more a count than a tag value's are.
+  const lookupNames = record.configurationRows.flatMap((row) =>
+    row.lookups.flatMap((lookup) => (lookup.kind === 'dns' ? [lookup.name] : lookup.identity === null ? [] : [lookup.identity])),
+  );
   const names = [
     record.lane.configurationSet,
     record.lane.lane,
     ...record.rows.flatMap((row) => (row.value === null ? [] : [row.value])),
     ...record.configurationRows.map((row) => row.fromDomain),
+    ...lookupNames,
   ];
   const removable = [...new Set(names.map((name) => withoutZeroWidth(name.normalize('NFKC'))))].filter((name) => name !== '' && !DIGIT_ONLY.test(name));
   return { integers, percents, names: removable.sort((left, right) => right.length - left.length) };

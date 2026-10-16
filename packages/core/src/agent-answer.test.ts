@@ -237,6 +237,37 @@ describe('validateExplanation (D-78, R12)', () => {
     expect(checkOf(`batch x${CAUSE_BATCH} carried it`, closeOn(APPROVED))).toBe('number');
   });
 
+  it('removes the looked-up names the record holds, so a parent identity or MAIL FROM domain with digits passes', () => {
+    const record = recordFor(
+      COMMITTED,
+      {
+        lanes: [
+          {
+            configurationSet: BULK,
+            fromDomain: 'news.shop24.com',
+            groups: [
+              { bucketOffset: 0, count: 40, batch: CAUSE_BATCH, permanentBounces: 15 },
+              { bucketOffset: 1, count: 160, batch: 'import-0901' },
+            ],
+          },
+          QUIET_TRANSACTIONAL,
+        ],
+        identities: [
+          { identity: 'shop24.com', dkimStatus: 'SUCCESS', dkimSigningEnabled: true, mailFromDomain: 'bounce7.shop24.com', mailFromStatus: 'SUCCESS' },
+        ],
+      },
+      BULK,
+    );
+    const lookups = record.configurationRows.flatMap((row) => row.lookups);
+    expect(lookups).toContainEqual({ kind: 'ses', operation: 'GetEmailIdentity', identity: 'shop24.com' });
+    expect(lookups.some((lookup) => lookup.kind === 'dns' && lookup.name === 'bounce7.shop24.com')).toBe(true);
+    expect(canonicalJson(record)).not.toMatch(/[:[,](24|7)[,\]}]/);
+    expect(checkOf('DKIM comes from the identity shop24.com and reads present', closeOn(record))).toBe('ok');
+    expect(checkOf('the MAIL FROM domain bounce7.shop24.com reads present', closeOn(record))).toBe('ok');
+    expect(checkOf('shop24.com saw 24 bounces', closeOn(record))).toBe('number');
+    expect(checkOf('bounce7.shop24.com saw 7 bounces', closeOn(record))).toBe('number');
+  });
+
   it('never removes a digit-only record value, so a fabricated count equal to it still rejects', () => {
     expect(checkOf('500 recipients bounced', closeOn(DIGIT_BATCH))).toBe('number');
     expect(checkOf('batch 500 carried it', closeOn(DIGIT_BATCH))).toBe('number');
