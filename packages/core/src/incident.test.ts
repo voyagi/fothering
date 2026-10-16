@@ -1,3 +1,4 @@
+import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
 import { BUCKET_MS, LATENESS_HORIZON_MS, bucketStartMs } from './buckets.js';
 import { incidentIdFor } from './evidence-record.js';
@@ -10,6 +11,7 @@ import {
   type IncidentStep,
   type LifecycleVerdict,
 } from './incident.js';
+import { propertySeed } from './test/property-seed.js';
 import { spikeWindowFor, type BucketWindow } from './window-fold.js';
 
 const LANE = 'fothering-bulk';
@@ -190,5 +192,59 @@ describe('the lifecycle steps (D-54)', () => {
     const before = structuredClone(opened);
     stepIncident(opened, cycleAt(NOW_MS + BUCKET_MS, 'no-spike'));
     expect(opened).toEqual(before);
+  });
+});
+
+const LIFECYCLE_VERDICTS: readonly LifecycleVerdict[] = ['spike', 'no-spike', 'not-enough-volume', 'sends-pending'];
+
+function sameState(left: IncidentState, right: IncidentState): boolean {
+  return JSON.stringify({ ...left, version: 0 }) === JSON.stringify({ ...right, version: 0 });
+}
+
+describe('the lifecycle under any run of cycles (D-54 property)', () => {
+  // Each window's final verdict is fixed by its last bucket, as a re-read of a complete window is, and
+  // the gaps between cycles reach past the lateness horizon so complete windows really occur.
+  it('closes only on a complete pending window read not spike, moves the version with the state, and never lowers a counter', () => {
+    const horizonBuckets = (LATENESS_HORIZON_MS + BUCKET_MS) / BUCKET_MS;
+    let closes = 0;
+    fc.assert(
+      fc.property(
+        fc.array(fc.constantFrom(...LIFECYCLE_VERDICTS), { minLength: 1, maxLength: 64 }),
+        fc.array(fc.record({ gap: fc.integer({ min: 1, max: horizonBuckets * 2 }), verdict: fc.constantFrom(...LIFECYCLE_VERDICTS) }), { minLength: 1, maxLength: 40 }),
+        (finalTable, cycles) => {
+          const finalOf = (window: BucketWindow): LifecycleVerdict => finalTable[(window.toBucketMs / BUCKET_MS) % finalTable.length] ?? 'spike';
+          let state = openIncident(LANE, NOW_MS, OPENING_WINDOW);
+          let nowMs = NOW_MS;
+          for (const { gap, verdict } of cycles) {
+            nowMs += gap * BUCKET_MS;
+            const finalVerdicts = windowsNeedingFinalVerdict(state, nowMs).map((window) => ({ window, verdict: finalOf(window) }));
+            const before = structuredClone(state);
+            const { state: after } = stepIncident(state, cycleAt(nowMs, verdict, finalVerdicts));
+            expect(state).toEqual(before);
+            expect(after.version).toBe(before.version + (sameState(before, after) ? 0 : 1));
+            expect(after.falseSpikes - before.falseSpikes).toBeGreaterThanOrEqual(0);
+            expect(after.falseRecoveries - before.falseRecoveries).toBeGreaterThanOrEqual(0);
+            if (before.status === 'closed') {
+              expect(after).toEqual(before);
+            } else if (after.status === 'closed') {
+              closes += 1;
+              const pending = before.pendingRecovery;
+              expect(pending).not.toBeNull();
+              if (pending === null) return;
+              expect(nowMs).toBeGreaterThanOrEqual(lastBucketEnd(pending) + LATENESS_HORIZON_MS);
+              expect(finalOf(pending)).not.toBe('spike');
+            } else if (verdict === 'spike') {
+              expect(after.pendingRecovery).toBeNull();
+            } else {
+              expect(after.pendingRecovery).not.toBeNull();
+            }
+            state = after;
+          }
+        },
+      ),
+      { seed: propertySeed(), numRuns: 300 },
+    );
+    // A property that never saw a close would hold for a lifecycle that never closes.
+    expect(closes).toBeGreaterThan(0);
   });
 });

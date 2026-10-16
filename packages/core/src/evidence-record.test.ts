@@ -166,6 +166,23 @@ describe('canonical JSON (AC-E32, D-69)', () => {
     for (const record of RECORDS) expect(recordHash(keysReversed(record) as EvidenceRecord)).toBe(record.hash);
   });
 
+  // A JavaScript object always lists integer-like keys first, in numeric order, whatever order they
+  // were added in, so a sort that hands its result back to JSON.stringify as an object loses it.
+  it('orders integer-like keys by code unit like every other key, at every depth', () => {
+    expect(canonicalJson({ b: 1, 10: 2, 2: 3, a: { 1: 0, '0a': 1 } })).toBe('{"10":2,"2":3,"a":{"0a":1,"1":0},"b":1}');
+    const byCodeUnit = (left: string, right: string): number => (left < right ? -1 : left > right ? 1 : 0);
+    fc.assert(
+      fc.property(fc.dictionary(fc.oneof(fc.nat({ max: 5000 }).map(String), fc.string({ maxLength: 4 })), fc.integer()), (value) => {
+        const expected = `{${Object.keys(value)
+          .sort(byCodeUnit)
+          .map((key) => `${JSON.stringify(key)}:${String(value[key])}`)
+          .join(',')}}`;
+        expect(canonicalJson(value)).toBe(expected);
+      }),
+      { seed: propertySeed() },
+    );
+  });
+
   it('refuses a non-integer number anywhere, naming its path', () => {
     expect(() => canonicalJson({ a: { b: [1, 1.5] } })).toThrow('$.a.b[1]');
     expect(() => canonicalJson({ ratio: Number.NaN })).toThrow('$.ratio');

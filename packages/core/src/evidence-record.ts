@@ -15,31 +15,36 @@ import type { RecordKey } from './records.js';
 import { LANE_RATIO_LABELS, LANE_SHARE_LABEL, LANE_TRIGGERS, LANE_VERDICTS } from './verdicts.js';
 import { AUTH_CORROBORATION_CODES, type ConfigurationRecord } from './window-fold.js';
 
-function canonicalize(value: unknown, path: string): unknown {
+// The text is written here, member by member: a sorted object handed back to JSON.stringify would
+// list its integer-like keys first in numeric order, whatever order the sort put them in. Undefined,
+// function and symbol values read as JSON.stringify reads them: left out of an object, null in an array.
+function canonicalText(value: unknown, path: string): string | undefined {
   if (typeof value === 'number') {
     if (!Number.isSafeInteger(value)) {
       throw new TypeError(`canonical JSON holds safe integers only, and ${path} is not one`);
     }
-    return value;
+    return JSON.stringify(value);
   }
-  if (Array.isArray(value)) return value.map((item, index) => canonicalize(item, `${path}[${index}]`));
-  if (typeof value !== 'object' || value === null) return value;
+  if (Array.isArray(value)) return `[${value.map((item, index) => canonicalText(item, `${path}[${index}]`) ?? 'null').join(',')}]`;
+  if (typeof value !== 'object' || value === null) return JSON.stringify(value) as string | undefined;
   const withToJson = value as { toJSON?: () => unknown };
-  if (typeof withToJson.toJSON === 'function') return canonicalize(withToJson.toJSON(), path);
-  return Object.fromEntries(
-    Object.entries(value)
-      .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
-      .map(([key, nested]) => [key, canonicalize(nested, `${path}.${key}`)]),
-  );
+  if (typeof withToJson.toJSON === 'function') return canonicalText(withToJson.toJSON(), path);
+  const members = Object.entries(value)
+    .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
+    .flatMap(([key, nested]) => {
+      const text = canonicalText(nested, `${path}.${key}`);
+      return text === undefined ? [] : [`${JSON.stringify(key)}:${text}`];
+    });
+  return `{${members.join(',')}}`;
 }
 
 /**
- * Keys sorted by UTF-16 code unit at every depth (the order `<` compares strings in), no whitespace,
- * and integers only (D-69): a float would serialize differently across runtimes and a hash over it
- * would stop recomputing, so one is refused by name instead.
+ * Keys sorted by UTF-16 code unit at every depth (the order `<` compares strings in), integer-like
+ * keys included, no whitespace, and integers only (D-69): a float would serialize differently across
+ * runtimes and a hash over it would stop recomputing, so one is refused by name instead.
  */
 export function canonicalJson(value: unknown): string {
-  return JSON.stringify(canonicalize(value, '$')) ?? 'null';
+  return canonicalText(value, '$') ?? 'null';
 }
 
 function sha256Hex(text: string): string {
