@@ -229,7 +229,9 @@ export const PORT_TABLE = {
     live: ({ liveClients }) =>
       brandPort(
         createLiveAgentCore({
-          client: resolveLiveClient(liveClients.bedrockAgentCore, () => new BedrockAgentCoreClient({ region: LIVE_REGION })),
+          // One attempt: an SDK retry re-sends InvokeAgentRuntime, which runs the agent again on the one
+          // reservation detection made. The SDK's default is three (standard retry mode).
+          client: resolveLiveClient(liveClients.bedrockAgentCore, () => new BedrockAgentCoreClient({ region: LIVE_REGION, maxAttempts: 1 })),
         }),
         'live',
       ),

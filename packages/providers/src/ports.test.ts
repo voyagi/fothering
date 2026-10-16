@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { BedrockAgentCoreClient } from '@aws-sdk/client-bedrock-agentcore';
 import { Message, ModelThrottledError, TextBlock, type ContentBlock, type ModelStreamEvent } from '@strands-agents/sdk';
 import { pseudonymizeRecipient } from '@fothering/core/address';
 import { RECORD_BYTE_CEILING } from '@fothering/core/evidence-record';
@@ -442,6 +443,35 @@ describe('the expected-kind comparison against resolvePortTable directly', () =>
 
     expect(resolvePortTable({ runtimeContext: 'test', switchValue: undefined, table: planted }).kinds.eventStore?.queryLane).toBe('live');
     expect(compare(planted)).toThrow();
+  });
+});
+
+describe('the live agentCore row', () => {
+  interface CapturedClient {
+    config: { maxAttempts: () => Promise<number>; region: () => Promise<string> };
+  }
+
+  // The row's own client, caught at send: the replacement answers before any middleware runs, so
+  // nothing is signed or sent.
+  it('builds its client with one attempt, so the SDK never re-sends an invocation on one reservation', async () => {
+    const prototype = BedrockAgentCoreClient.prototype as unknown as Record<string, unknown>;
+    const ownSend = Object.getOwnPropertyDescriptor(prototype, 'send');
+    const clients: CapturedClient[] = [];
+    prototype.send = async function send(this: CapturedClient): Promise<unknown> {
+      clients.push(this);
+      return { contentType: 'application/json', response: { transformToString: async () => '{}' } };
+    };
+    try {
+      const port = PORT_TABLE.agentCore.live({ liveConfig: {}, liveClients: {}, now: Date.now });
+      await port.invokeAgentRuntime({ runtimeArn: RUNTIME_ARN, sessionId: `fothering-${'0'.repeat(32)}-a1`, payload: {} });
+    } finally {
+      if (ownSend === undefined) delete prototype.send;
+      else Object.defineProperty(prototype, 'send', ownSend);
+    }
+
+    expect(clients).toHaveLength(1);
+    await expect(clients[0]?.config.maxAttempts()).resolves.toBe(1);
+    await expect(clients[0]?.config.region()).resolves.toBe('eu-central-1');
   });
 });
 
