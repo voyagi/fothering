@@ -1,7 +1,36 @@
-import { ArnFormat, RemovalPolicy, Stack } from 'aws-cdk-lib';
+import { ArnFormat, Duration, RemovalPolicy, Stack } from 'aws-cdk-lib';
+import { Alarm, ComparisonOperator, TreatMissingData, type IMetric } from 'aws-cdk-lib/aws-cloudwatch';
 import { Effect, PolicyStatement, Role, ServicePrincipal } from 'aws-cdk-lib/aws-iam';
 import { Architecture, Code, Runtime } from 'aws-cdk-lib/aws-lambda';
-import { LogGroup, RetentionDays, type ILogGroup } from 'aws-cdk-lib/aws-logs';
+import { FilterPattern, LogGroup, MetricFilter, RetentionDays, type ILogGroup } from 'aws-cdk-lib/aws-logs';
+
+export const ALARM_PERIOD = Duration.minutes(5);
+
+// Every alarm fires on a single occurrence within one period and acts on nothing: the operator reads
+// the alarm state, and no action exists yet for it to take.
+export function alarmOnAny(stack: Stack, id: string, metric: IMetric): Alarm {
+  return new Alarm(stack, id, {
+    metric,
+    threshold: 1,
+    evaluationPeriods: 1,
+    comparisonOperator: ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
+    treatMissingData: TreatMissingData.NOT_BREACHING,
+  });
+}
+
+// Counts every error-level line of a function's log group and alarms on one. The handlers write their
+// JSON lines straight to stdout, which Lambda's Node.js logging page leaves unprefixed (it prefixes
+// console output), so the filter reads each line's own level field.
+export function alarmOnErrorLines(stack: Stack, name: string, logGroup: ILogGroup): Alarm {
+  const errorLines = new MetricFilter(stack, `${name}ErrorLines`, {
+    logGroup,
+    filterPattern: FilterPattern.stringValue('$.level', '=', 'error'),
+    metricNamespace: 'Fothering',
+    metricName: `${name}ErrorLines`,
+    metricValue: '1',
+  });
+  return alarmOnAny(stack, `${name}ErrorLinesAlarm`, errorLines.metric({ period: ALARM_PERIOD, statistic: 'Sum' }));
+}
 
 // Scoped to the log streams of the one group the stack created for this role, never the group
 // wildcard a managed execution policy would grant.

@@ -9,7 +9,7 @@ import type { Construct } from 'constructs';
 import type { LaneMap } from '@fothering/core/lanes';
 import { DETECT_FUNCTION_TIMEOUT_MS } from '@fothering/core/model-values';
 import { liveSwitchEnvironment } from './live-switch.js';
-import { createFunctionRole, functionBase } from './log-statements.js';
+import { ALARM_PERIOD, alarmOnAny, alarmOnErrorLines, createFunctionRole, functionBase } from './log-statements.js';
 
 export interface DetectionStackProps extends StackProps {
   readonly laneMap: LaneMap;
@@ -76,5 +76,12 @@ export class DetectionStack extends Stack {
       schedule: Schedule.rate(Duration.minutes(5)),
       targets: [new LambdaFunctionTarget(detectFunction)],
     });
+
+    // A cycle that throws whole counts as a function error. A step the cycle contains (a lifecycle,
+    // an opening, an agent attempt, a missing runtime ARN) logs an error-level line and returns, so
+    // without the second alarm every incident could fail to open, or never reach the agent, while
+    // the errors alarm stays green.
+    alarmOnAny(this, 'DetectErrorsAlarm', detectFunction.metricErrors({ period: ALARM_PERIOD, statistic: 'Sum' }));
+    alarmOnErrorLines(this, 'Detect', detectRole.logGroup);
   }
 }

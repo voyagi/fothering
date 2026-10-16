@@ -117,6 +117,27 @@ describe('DetectionStack synth', () => {
     stacks.detection.resourceCountIs('AWS::Lambda::Permission', 1);
   });
 
+  it('alarms on a function error and on any error-level line, acting on nothing', () => {
+    stacks.detection.resourceCountIs('AWS::CloudWatch::Alarm', 2);
+    stacks.detection.hasResourceProperties('AWS::CloudWatch::Alarm', {
+      Namespace: 'AWS/Lambda',
+      MetricName: 'Errors',
+      Dimensions: [{ Name: 'FunctionName', Value: { Ref: detectFunction().logicalId } }],
+      Threshold: 1,
+      EvaluationPeriods: 1,
+      TreatMissingData: 'notBreaching',
+    });
+    stacks.detection.hasResourceProperties('AWS::Logs::MetricFilter', {
+      FilterPattern: '{ $.level = "error" }',
+      MetricTransformations: [{ MetricNamespace: 'Fothering', MetricName: 'DetectErrorLines', MetricValue: '1' }],
+    });
+    stacks.detection.hasResourceProperties('AWS::CloudWatch::Alarm', { Namespace: 'Fothering', MetricName: 'DetectErrorLines', Threshold: 1 });
+    for (const alarm of Object.values(resourcesOfType(stacks.detection, 'AWS::CloudWatch::Alarm'))) {
+      expect(alarm.Properties?.AlarmActions).toBeUndefined();
+      expect(alarm.Properties?.OKActions).toBeUndefined();
+    }
+  });
+
   it('logs to a stack-created group kept 30 days and deleted with the stack', () => {
     const logGroupId = logicalIdOf(stacks.detection, 'AWS::Logs::LogGroup');
     expect(detectFunction().properties.LoggingConfig.LogGroup).toEqual({ Ref: logGroupId });

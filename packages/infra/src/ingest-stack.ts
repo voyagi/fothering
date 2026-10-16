@@ -1,11 +1,9 @@
 import { CfnOutput, Duration, RemovalPolicy, Stack, type StackProps } from 'aws-cdk-lib';
-import { Alarm, ComparisonOperator, TreatMissingData, type IMetric } from 'aws-cdk-lib/aws-cloudwatch';
 import { AttributeType, BillingMode, ProjectionType, Table } from 'aws-cdk-lib/aws-dynamodb';
 import { Rule } from 'aws-cdk-lib/aws-events';
 import { LambdaFunction as LambdaFunctionTarget } from 'aws-cdk-lib/aws-events-targets';
 import { Effect, PolicyStatement } from 'aws-cdk-lib/aws-iam';
 import { Function as LambdaFunction } from 'aws-cdk-lib/aws-lambda';
-import { FilterPattern, MetricFilter } from 'aws-cdk-lib/aws-logs';
 import { Secret } from 'aws-cdk-lib/aws-secretsmanager';
 import { Queue, QueueEncryption } from 'aws-cdk-lib/aws-sqs';
 import type { Construct } from 'constructs';
@@ -13,7 +11,7 @@ import { PARTITION_KEY, RECIPIENT_INDEX_NAME, RECIPIENT_KEY, SORT_KEY, TTL_ATTRI
 import type { LaneMap } from '@fothering/core/lanes';
 import { DETAIL_TYPE_BY_EVENT_TYPE } from '@fothering/core/ses-events';
 import { liveSwitchEnvironment } from './live-switch.js';
-import { createFunctionRole, functionBase } from './log-statements.js';
+import { ALARM_PERIOD, alarmOnAny, alarmOnErrorLines, createFunctionRole, functionBase } from './log-statements.js';
 
 // The six of the SES detail-types EventBridge carries that a lane's health is read from, taken from
 // the map the event parser checks each envelope against, so the rule forwards exactly the types the
@@ -25,8 +23,6 @@ const SES_DETAIL_TYPES = Object.values(DETAIL_TYPE_BY_EVENT_TYPE);
 // The address key is one JSON secret: CDK generates the first version's key into the k1 field of
 // this template, and the first version has been active since epoch 0.
 const ADDRESS_KEY_TEMPLATE = JSON.stringify({ current: 'k1', activeFrom: { k1: 0 } });
-
-const ALARM_PERIOD = Duration.minutes(5);
 
 export interface IngestStackProps extends StackProps {
   readonly laneMap: LaneMap;
@@ -137,45 +133,25 @@ export class IngestStack extends Stack {
 
     // Lambda drops an event that failed its retries with no record, and the queue alarm never sees
     // it, so a failing ingest function would be silent without this one.
-    this.alarmOnAny('IngestErrorsAlarm', ingestFunction.metricErrors({ period: ALARM_PERIOD, statistic: 'Sum' }));
+    alarmOnAny(this, 'IngestErrorsAlarm', ingestFunction.metricErrors({ period: ALARM_PERIOD, statistic: 'Sum' }));
     // The errors alarm fires on a failed attempt, even one a retry then fixes; this one fires on an
     // event that is gone. It also sees the drops the errors alarm cannot: Lambda counts a throttled
     // request as neither an invocation nor an error, so an event still throttled when its 6 hours
     // run out, or one met by a reserved concurrency of 0, is dropped without a single error
     // (Lambda metrics page, AsyncEventsDropped).
-    this.alarmOnAny('IngestDroppedEventsAlarm', ingestFunction.metric('AsyncEventsDropped', { period: ALARM_PERIOD, statistic: 'Sum' }));
-    this.alarmOnAny(
+    alarmOnAny(this, 'IngestDroppedEventsAlarm', ingestFunction.metric('AsyncEventsDropped', { period: ALARM_PERIOD, statistic: 'Sum' }));
+    alarmOnAny(
+      this,
       'DeadLetterDepthAlarm',
       queue.metricApproximateNumberOfMessagesVisible({ period: ALARM_PERIOD, statistic: 'Maximum' }),
     );
     // A schema failure or an unstorable send time is logged at error level and the handler returns
     // without throwing, so none of the three alarms above counts it and the event is gone: an SES
     // format change that failed every event would leave them all green. This one counts every
-    // error-level line, so a failure that also throws shows here and under the errors alarm. The
-    // handler writes its JSON lines straight to stdout, which Lambda's Node.js logging page leaves
-    // unprefixed (it prefixes console output), so the filter reads each line's own level field.
-    const errorLines = new MetricFilter(this, 'IngestErrorLines', {
-      logGroup: ingestRole.logGroup,
-      filterPattern: FilterPattern.stringValue('$.level', '=', 'error'),
-      metricNamespace: 'Fothering',
-      metricName: 'IngestErrorLines',
-      metricValue: '1',
-    });
-    this.alarmOnAny('IngestErrorLinesAlarm', errorLines.metric({ period: ALARM_PERIOD, statistic: 'Sum' }));
+    // error-level line, so a failure that also throws shows here and under the errors alarm.
+    alarmOnErrorLines(this, 'Ingest', ingestRole.logGroup);
 
     new CfnOutput(this, 'ForgetFunctionName', { value: forgetFunction.functionName });
-  }
-
-  // Every alarm here fires on a single occurrence within one period and acts on nothing: the
-  // operator reads the alarm state, and no action exists yet for it to take.
-  private alarmOnAny(id: string, metric: IMetric): Alarm {
-    return new Alarm(this, id, {
-      metric,
-      threshold: 1,
-      evaluationPeriods: 1,
-      comparisonOperator: ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
-      treatMissingData: TreatMissingData.NOT_BREACHING,
-    });
   }
 
   private createTable(): Table {
