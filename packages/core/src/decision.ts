@@ -346,8 +346,10 @@ const QUESTION_CLOSE = 'Which lane, if any, should be paused?';
 
 /**
  * Names the decided lane and every other spiking lane by its lane-map set name as committed (AC-E28),
- * with the rows code found cause or elevated and the lane's closeability refusals. The lane names and
- * refusals always fit; the rows share what is left of the limit.
+ * with the rows code found cause or elevated and the lane's closeability refusals. The rows share what
+ * the limit leaves after the lane names and refusals. The lane map caps neither its lane count nor the
+ * set names below 64 characters, so with several spiking lanes even those can pass the limit: the lane
+ * list is then cut, and the opening and the closing question still frame the text.
  */
 export function questionFor(decision: CycleDecision, analyses: readonly LaneAnalysis[]): string {
   const opening = `Fothering decided unknown for ${decision.configurationSet} (${decision.reason}).`;
@@ -363,7 +365,9 @@ export function questionFor(decision: CycleDecision, analyses: readonly LaneAnal
     const listed = findings.length === 0 ? 'no cause or elevated row' : listWithin(findings, perLane, 'rows');
     return `${head} ${listed}${tail}`;
   });
-  return capped([opening, ...segments, QUESTION_CLOSE].join(' '));
+  const room = TEXT_LIMIT - QUESTION_CLOSE.length - 1;
+  const body = [opening, ...segments].join(' ');
+  return `${body.length <= room ? body : body.slice(0, room)} ${QUESTION_CLOSE}`;
 }
 
 function required(value: string | undefined, what: string, fromDomain: string): string {

@@ -681,7 +681,8 @@ async function dryRunAttempt(deps: DetectDeps, turn: AgentTurn, runtimeArn: stri
 }
 
 // The usage write comes after the outcome is stored, so a usage write that throws can neither lose a
-// stored decision nor leave the incident to be invoked again for the same attempt.
+// stored decision nor leave the incident to be invoked again for the same attempt. It runs even when
+// storing the outcome throws, so the tokens a real invocation spent always reach the counters.
 async function recordSpentUsage(deps: DetectDeps, turn: AgentTurn, result: RuntimeResult | undefined): Promise<void> {
   if (result === undefined || result.status === 'dry-run') return;
   const usageInput = { incidentId: turn.incident.incidentId, reservedAtMs: turn.turnMs, usage: result.usage, modelCalls: result.modelCalls };
@@ -696,18 +697,21 @@ async function invokeAndStore(deps: DetectDeps, turn: AgentTurn, runtimeArn: str
   const result = parsedResult(outcome);
   const classified = classifyRuntimeOutcome(outcome, { record, laneMapSets: deps.laneMap.lanes.map((lane) => lane.configurationSet) });
   let cycleResult: CycleResult;
-  if (classified.kind === 'validated' && result?.status === 'answered') {
-    await storeDecision(deps, turn, classified.answer, result);
-    deps.log.info({ event: 'agent-decided', ...incident, ...resultFields(result) });
-    cycleResult = classified.answer.decision;
-  } else {
-    const reason = classified.kind === 'unavailable' ? classified.reason : 'response-invalid';
-    const check = classified.kind === 'unavailable' ? classified.check : undefined;
-    await storeOutcome(deps, turn, check === undefined ? { reason, attempt: incident.attempt } : { reason, check, attempt: incident.attempt });
-    deps.log.info({ event: 'agent-unavailable', ...incident, reason, ...(check === undefined ? {} : { check }), ...resultFields(result) });
-    cycleResult = reason;
+  try {
+    if (classified.kind === 'validated' && result?.status === 'answered') {
+      await storeDecision(deps, turn, classified.answer, result);
+      deps.log.info({ event: 'agent-decided', ...incident, ...resultFields(result) });
+      cycleResult = classified.answer.decision;
+    } else {
+      const reason = classified.kind === 'unavailable' ? classified.reason : 'response-invalid';
+      const check = classified.kind === 'unavailable' ? classified.check : undefined;
+      await storeOutcome(deps, turn, check === undefined ? { reason, attempt: incident.attempt } : { reason, check, attempt: incident.attempt });
+      deps.log.info({ event: 'agent-unavailable', ...incident, reason, ...(check === undefined ? {} : { check }), ...resultFields(result) });
+      cycleResult = reason;
+    }
+  } finally {
+    await recordSpentUsage(deps, turn, result);
   }
-  await recordSpentUsage(deps, turn, result);
   return cycleResult;
 }
 

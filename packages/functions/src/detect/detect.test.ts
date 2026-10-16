@@ -1122,6 +1122,18 @@ describe('detection retries only what D-77 lets it retry, within the caps (D-72,
     await runDetectionCycle(at(logged.deps, NOW_MS + BUCKET_MS));
     expect(logged.sessions).toEqual(sessionsOf(2));
   });
+
+  it('records the spent usage even when storing the DECISION throws after a real invocation', async () => {
+    const { deps, store } = await builtCycle({ runtime: closeRuntime });
+    const putIfAbsent: DecisionStorePort['putIfAbsent'] = async (item, nowMs) =>
+      item.sk === 'DECISION' ? Promise.reject(namedError('InternalServerError')) : deps.ports.decisionStore.putIfAbsent(item, nowMs);
+    const summary = await runDetectionCycle(withDecisionStore(deps, { putIfAbsent }));
+
+    expect([summary.invocations, summary.failures]).toEqual([1, 1]);
+    const counters = itemsWithSortKey(store, 'COUNTER');
+    expect(counters).toHaveLength(2);
+    for (const item of counters) expect(item).toMatchObject({ invocations: 1, inputTokens: 1_850, outputTokens: 96, modelCalls: 1 });
+  });
 });
 
 describe('a deployed stack with the switch unset reserves nothing, and invokes once it goes live (SPEC R11, D-77)', () => {

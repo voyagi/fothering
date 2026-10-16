@@ -15,6 +15,7 @@ import {
   type LaneAnalysis,
   type SharedCause,
 } from './decision.js';
+import { REFUSAL_REASONS } from './closeability.js';
 import { FIX_KINDS, RECORD_BYTE_CEILING, canonicalJson, serializedRecordBytes, type EvidenceRecord } from './evidence-record.js';
 import type { DnsTxtOutcome, IdentityAuthFacts } from './evidence-rows.js';
 import { parseLaneMap, type LaneMap } from './lanes.js';
@@ -475,6 +476,20 @@ describe('the question names what code found (D-64, AC-E28)', () => {
     const question = questionFor(decision, analyses);
     expect(question).toContain(DIGEST);
     expect(question).toContain(BULK);
+  });
+
+  // The lane map caps neither its lane count nor, below 64 characters, a set name, so four spiking
+  // lanes with every refusal already pass the limit on their names and refusals alone.
+  it('still ends on the closing question when the lane names alone pass the limit', () => {
+    const sets = ['a', 'b', 'c', 'd'].map((letter) => letter.repeat(64));
+    const closeability = { state: 'refused', reasons: [...REFUSAL_REASONS] } as const;
+    const analyses = sets.map((set) => ({ lane: { configurationSet: set }, rows: [], configurationRows: [], closeability }) as unknown as LaneAnalysis);
+    const [decided = '', ...others] = sets;
+    const decision = { configurationSet: decided, reason: 'spread', otherSpikingLanes: others } as unknown as CycleDecision;
+    const question = questionFor(decision, analyses);
+    expect(question).toMatch(PRINTABLE_TEXT);
+    expect(question.startsWith(`Fothering decided unknown for ${decided} (spread).`)).toBe(true);
+    expect(question.endsWith(' Which lane, if any, should be paused?')).toBe(true);
   });
 
   it('keeps a mixed-case set name byte for byte', () => {

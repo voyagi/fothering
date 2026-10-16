@@ -29,7 +29,8 @@ export class DetectionStack extends Stack {
     super(scope, id, props);
 
     // A transaction's Update items authorize as UpdateItem, so the counter reservation needs no
-    // action of its own. Detection never deletes and never scans. The SES reads are the four
+    // action of its own (https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/transaction-apis-iam.html,
+    // read 2026-10-16). Detection never deletes and never scans. The SES reads are the four
     // readSesFacts makes; nothing here can change SES state.
     const detectRole = createFunctionRole(this, 'Detect', [
       new PolicyStatement({
