@@ -165,6 +165,9 @@ describe('validateExplanation (D-78, R12)', () => {
       'see ｅｘａｍｐｌｅ.org',
       `see exa${ZERO_WIDTH_SPACE}mple.org`,
       'the fix is at mail.example.net.',
+      'the fix is at example.xn--p1ai',
+      `write to postmaster@${NEWS} about it`,
+      'write to ops＠example.org',
     ];
     for (const text of invented) expect(checkOf(text, closeOn(WITH_IDENTITY)), text).toBe('url');
     expect(checkOf(`the from-domain is ${NEWS}.`, closeOn(WITH_IDENTITY))).toBe('ok');

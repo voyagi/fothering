@@ -148,8 +148,12 @@ function isOneParagraph(text: string): boolean {
 const SCHEME_URL = /[\p{L}\p{N}+.-]+:\/\//u;
 const DEFANGED_URL = /hxxp/;
 const WWW_TOKEN = /(?<![\p{L}\p{N}_-])www\./u;
-// Dotted labels ending in a label of two or more letters, so 7.50% and e.g. never read as a domain.
-const DOMAIN_TOKEN = /(?<![\p{L}\p{N}_.-])[\p{L}\p{N}-]+(?:\.[\p{L}\p{N}-]+)*\.\p{L}{2,}(?![\p{L}\p{N}_-])/gu;
+// Dotted labels ending in a label of two or more letters, or a punycode one, so 7.50% and e.g. never
+// read as a domain.
+const DOMAIN_TOKEN = /(?<![\p{L}\p{N}_.-])[\p{L}\p{N}-]+(?:\.[\p{L}\p{N}-]+)*\.(?:\p{L}{2,}|xn--[\p{L}\p{N}-]+)(?![\p{L}\p{N}_-])/gu;
+// No record name can hold an at sign (tag values, hosts and set names exclude it), so any address shape
+// is one the model wrote.
+const EMAIL_ADDRESS = /[\p{L}\p{N}._%+-]@[\p{L}\p{N}-]+\./u;
 
 function recordDomains(record: EvidenceRecord): Set<string> {
   const held = new Set<string>();
@@ -174,7 +178,13 @@ function namesOnlyRecordDomains(normal: string, record: EvidenceRecord): boolean
 
 function holdsNoUrl(text: string, context: ExplanationContext): boolean {
   const normal = folded(text);
-  return !SCHEME_URL.test(normal) && !DEFANGED_URL.test(normal) && !WWW_TOKEN.test(normal) && namesOnlyRecordDomains(normal, context.record);
+  return (
+    !SCHEME_URL.test(normal) &&
+    !DEFANGED_URL.test(normal) &&
+    !WWW_TOKEN.test(normal) &&
+    !EMAIL_ADDRESS.test(normal) &&
+    namesOnlyRecordDomains(normal, context.record)
+  );
 }
 
 // The stem "clos" anywhere, so closed, closing, closure and disclose reject too: "closure" and
