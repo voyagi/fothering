@@ -78,7 +78,8 @@ export class DetectionStack extends Stack {
     });
 
     // A cycle that throws whole counts as a function error. A step the cycle contains (a lifecycle,
-    // an opening, an agent attempt, a missing runtime ARN) logs an error-level line and returns, so
+    // an opening, an agent attempt, a missing runtime ARN, a runtime that refuses the record or answers
+    // outside the runtime result) logs an error-level line and returns, so
     // without the second alarm every incident could fail to open, or never reach the agent, while
     // the errors alarm stays green.
     alarmOnAny(this, 'DetectErrorsAlarm', detectFunction.metricErrors({ period: ALARM_PERIOD, statistic: 'Sum' }));

@@ -46,3 +46,9 @@ evidence record and not from the agent.
 The table and the logs hold only the reason, the check that failed and the attempt number. No text
 from a rejected answer is stored or logged, so nothing the model wrote reaches the operator unless
 it passed every check.
+
+Most `agent-unavailable` log lines are informational. Three are written at error level, so the
+detection error-lines alarm fires: the deployment left out the runtime's ARN, the runtime refused the
+evidence record, or it answered with something that is not a runtime result at all. Detection only
+sends a record it built and checked itself, so the last two mean the runtime stack and the detection
+stack were deployed from code that reads the record differently. Deploy both from the same commit.

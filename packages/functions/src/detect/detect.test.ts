@@ -1143,6 +1143,41 @@ describe('detection retries only what D-77 lets it retry, within the caps (D-72,
     expect(counters).toHaveLength(2);
     for (const item of counters) expect(item).toMatchObject({ invocations: 1, inputTokens: 1_850, outputTokens: 96, modelCalls: 1 });
   });
+
+  it('names both errors when storing the DECISION and recording usage both throw, so the usage write never hides the first', async () => {
+    const { deps, lines } = await builtCycle({ runtime: closeRuntime });
+    const putIfAbsent: DecisionStorePort['putIfAbsent'] = async (item, nowMs) =>
+      item.sk === 'DECISION' ? Promise.reject(namedError('ProvisionedThroughputExceededException')) : deps.ports.decisionStore.putIfAbsent(item, nowMs);
+    const recordUsage = async (): Promise<never> => Promise.reject(namedError('InternalServerError'));
+    const summary = await runDetectionCycle(withDecisionStore(deps, { putIfAbsent, recordUsage }));
+
+    expect(summary.failures).toBe(2);
+    const failureNames = parsedLines(lines).filter((line) => line.event === 'agent-attempt-failed').map((line) => line.errorName);
+    expect(failureNames).toEqual(['InternalServerError', 'ProvisionedThroughputExceededException']);
+  });
+});
+
+describe('a runtime that breaks the result contract writes an error line the error-lines alarm counts', () => {
+  const refusal: RuntimeResult = {
+    status: 'refused',
+    reason: 'hash-mismatch',
+    pinned: PINNED_MODEL_VALUES,
+    promptSha256: PROMPT_SHA256,
+    usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
+    modelCalls: 0,
+  };
+  const cases: [string, (payload: unknown) => Promise<unknown>, Record<string, unknown>][] = [
+    ['a refused record', async () => refusal, { level: 'error', reason: 'agent-error', status: 'refused' }],
+    ['a body that is not a runtime result', async () => ({ status: 'answered' }), { level: 'error', reason: 'response-invalid', check: 'runtime-result' }],
+    ['a failed model call', async () => failed('model-error'), { level: 'info', reason: 'agent-error', status: 'failed' }],
+    ['a rejected answer', async () => answered({ decision: 'close', optionId: PLANTED, explanation: EXPLANATION }), { level: 'info', check: 'option-id' }],
+  ];
+
+  it.each(cases)('logs %s at the level its cause calls for', async (_name, runtime, expected) => {
+    const { deps, lines } = await builtCycle({ runtime });
+    await runDetectionCycle(deps);
+    expect(lineOf(lines, 'agent-unavailable')).toMatchObject(expected);
+  });
 });
 
 describe('a deployed stack with the switch unset reserves nothing, and invokes once it goes live (SPEC R11, D-77)', () => {

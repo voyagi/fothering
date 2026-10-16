@@ -4,6 +4,7 @@ import {
   runtimeResultSchema,
   type AgentAnswer,
   type AgentUnavailableReason,
+  type ClassifiedOutcome,
   type InvalidCheck,
   type RuntimeOutcome,
   type RuntimeResult,
@@ -700,7 +701,36 @@ async function recordSpentUsage(deps: DetectDeps, turn: AgentTurn, result: Runti
   }
 }
 
-async function invokeAndStore(deps: DetectDeps, turn: AgentTurn, runtimeArn: string): Promise<CycleResult> {
+// After a decision or outcome write threw: the usage still goes to the counters, and a usage write that
+// throws as well gets a failure line of its own, so it never replaces the error that cost the write.
+async function recordUsageAfterThrow(deps: DetectDeps, turn: AgentTurn, result: RuntimeResult | undefined, counts: CycleCounts): Promise<void> {
+  try {
+    await recordSpentUsage(deps, turn, result);
+  } catch (usageError) {
+    logFailure(deps, counts, 'agent-attempt-failed', turn.incident, usageError);
+  }
+}
+
+// Detection sends only a record it built and parsed itself, so a refusal, or a body that is not a
+// runtime result at all, means the runtime reads the evidence record or the result differently: two
+// stacks deployed from different commits. No retry clears that, so it is an error line the error-lines
+// alarm counts, where a failed call or a rejected answer stays an info line.
+function contractBroken(result: RuntimeResult | undefined, check: InvalidCheck | undefined): boolean {
+  return result?.status === 'refused' || check === 'runtime-result';
+}
+
+async function storeUnavailable(deps: DetectDeps, turn: AgentTurn, classified: ClassifiedOutcome, result: RuntimeResult | undefined): Promise<CycleResult> {
+  const { incident } = turn;
+  const reason = classified.kind === 'unavailable' ? classified.reason : 'response-invalid';
+  const check = classified.kind === 'unavailable' ? classified.check : undefined;
+  await storeOutcome(deps, turn, check === undefined ? { reason, attempt: incident.attempt } : { reason, check, attempt: incident.attempt });
+  const entry = { event: 'agent-unavailable', ...incident, reason, ...(check === undefined ? {} : { check }), ...resultFields(result) };
+  if (contractBroken(result, check)) deps.log.error(entry);
+  else deps.log.info(entry);
+  return reason;
+}
+
+async function invokeAndStore(deps: DetectDeps, turn: AgentTurn, runtimeArn: string, counts: CycleCounts): Promise<CycleResult> {
   const { record, incident } = turn;
   const outcome = await invokeRuntime(deps, runtimeArn, record, incident.attempt);
   const result = parsedResult(outcome);
@@ -712,15 +742,13 @@ async function invokeAndStore(deps: DetectDeps, turn: AgentTurn, runtimeArn: str
       deps.log.info({ event: 'agent-decided', ...incident, ...resultFields(result) });
       cycleResult = classified.answer.decision;
     } else {
-      const reason = classified.kind === 'unavailable' ? classified.reason : 'response-invalid';
-      const check = classified.kind === 'unavailable' ? classified.check : undefined;
-      await storeOutcome(deps, turn, check === undefined ? { reason, attempt: incident.attempt } : { reason, check, attempt: incident.attempt });
-      deps.log.info({ event: 'agent-unavailable', ...incident, reason, ...(check === undefined ? {} : { check }), ...resultFields(result) });
-      cycleResult = reason;
+      cycleResult = await storeUnavailable(deps, turn, classified, result);
     }
-  } finally {
-    await recordSpentUsage(deps, turn, result);
+  } catch (error) {
+    await recordUsageAfterThrow(deps, turn, result, counts);
+    throw error;
   }
+  await recordSpentUsage(deps, turn, result);
   return cycleResult;
 }
 
@@ -743,7 +771,7 @@ async function attemptAgent(deps: DetectDeps, turn: AgentTurn, counts: CycleCoun
     return 'agent-error';
   }
   counts.invocations += 1;
-  return invokeAndStore(deps, turn, runtimeArn);
+  return invokeAndStore(deps, turn, runtimeArn, counts);
 }
 
 // A record past the ceiling is never sent (AC-E35): the runtime would refuse it, after a reservation.
