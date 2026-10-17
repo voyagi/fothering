@@ -186,7 +186,7 @@ describe('the SES percentage link rule (AC-54, AC-E44, AC-P18)', () => {
     expect(caseFindings(sesPercentageLinkRule, 'ses-percentage-link', [
       '<p>SES reviews an account at a bounce rate of 5%.</p>',
       '<li>SES reviews an account at 5 % bounces.</li>',
-      '<td>SES review threshold 5.0%</td>',
+      '<table><tr><td>SES review threshold 5.0%</td></tr></table>',
       `<p>SES may pause at 0.1 percent complaints.</p><p><a href="${REPUTATION}">reputation page</a></p>`,
     ])).not.toEqual([]);
   });
@@ -328,6 +328,41 @@ describe('the third-party reference rule (AC-59 static half, AC-E49)', () => {
       'tokens.css': '@font-face { src: url("/_astro/red-hat-text.woff2"); } .x { background: url(data:image/png;base64,AAAA); }',
     });
     expect(thirdPartyReferenceRule(clean, context)).toEqual([]);
+  });
+});
+
+describe('the rules over the less common shapes', () => {
+  it('fails a third-party url() in an inline style element and in a style attribute, and a preload link to another host', () => {
+    const findings = thirdPartyReferenceRule(siteOf({
+      'style/index.html': page('<style>.a { background: url("https://cdn.example.net/a.png"); }</style><p>x</p>'),
+      'attr/index.html': page('<p style="background: url(//cdn.example.net/b.png)">x</p>'),
+      'preload/index.html': page('<p>x</p>', '<title>t</title><link rel="preload" as="font" href="https://fonts.gstatic.com/a.woff2">'),
+    }), context);
+    expect(findings.map((finding) => finding.route).sort()).toEqual(['/attr/', '/preload/', '/style/']);
+  });
+
+  it('fails an input with no type, an inline gtag call, a link to an analytics host and a built script naming a tag manager', () => {
+    const findings = formsCookiesAnalyticsRule(siteOf({
+      'untyped/index.html': page('<input name="q">'),
+      'inline/index.html': page('<script>gtag("config", "G-1");</script>'),
+      'link/index.html': page('<p>x</p>', '<title>t</title><link rel="preconnect" href="https://plausible.io">'),
+      '_astro/tag.js': 'const s = "https://www.googletagmanager.com/gtm.js";',
+    }), context);
+    expect(findings.map((finding) => finding.route).sort()).toEqual(['/inline/', '/link/', '/untyped/', 'file:_astro/tag.js']);
+    expect(findings.find((finding) => finding.route === '/untyped/')?.text).toBe('an input of type text');
+  });
+
+  it('reports a hit deep in a long page as an excerpt marked at both ends, and clips a long element', () => {
+    const filler = 'the lane stays open while the guard reads its events. '.repeat(4);
+    const site = casesSite([`<p>${filler}Your SES bounce rate went up. ${filler}</p>`, `<p>${filler}SES reviews an account at 5% bounces. ${filler}</p>`]);
+    const wording = sesRateWordingRule(site, context)[0]?.text ?? '';
+    expect(wording.startsWith('...') && wording.endsWith('...')).toBe(true);
+    expect(sesPercentageLinkRule(site, context)[0]?.text.endsWith('...')).toBe(true);
+  });
+
+  it('reports a list item holding a quoting paragraph once, at the paragraph', () => {
+    const findings = sesPercentageLinkRule(casesSite(['<ul><li><p>SES reviews an account at 5% bounces.</p></li></ul>']), context);
+    expect(findings).toHaveLength(1);
   });
 });
 

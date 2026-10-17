@@ -1,4 +1,5 @@
-import { existsSync, mkdtempSync, rmSync, statSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -12,7 +13,8 @@ import {
 } from './dev-browser.js';
 import { startPreviewServer, type PreviewServer } from './preview-server.js';
 import { filesIn, loadBuiltSite, NoBuiltPagesError, routeOf, type BuiltSite } from '../checks/built-site.js';
-import { isRegisteredRule, runBuiltChecks, type BudgetViolation, type CheckContext, type Finding } from '../checks/rules.js';
+import { checkFileBudget, isRegisteredRule, runBuiltChecks, type BudgetViolation, type CheckContext, type Finding } from '../checks/rules.js';
+import { BANNED_NAMES, CONSOLE_DELETE_PHRASES, REPLY_PROMISE_PHRASES, REPUTATION_PAGE_URL } from '../site/content.js';
 
 export interface ThemeSetup {
   readonly name: string;
@@ -438,14 +440,41 @@ export interface SecondBuildRun {
   readonly output: string;
 }
 
-export function compareBuilds(_first: string, _second: string): string[] {
-  return [];
+const OUTPUT_TAIL = 400;
+// sitemap.xml and robots.txt arrive with a later plan and are compared once they exist.
+const COMPARED_FILES = new Set(['sitemap.xml', 'robots.txt']);
+
+function comparedFiles(folder: string): Set<string> {
+  if (!existsSync(folder)) return new Set();
+  return new Set(filesIn(folder).filter((file) => file.endsWith('.html') || COMPARED_FILES.has(file)));
+}
+
+export function compareBuilds(first: string, second: string): string[] {
+  const firstFiles = comparedFiles(first);
+  const secondFiles = comparedFiles(second);
+  const reasons: string[] = [];
+  for (const file of firstFiles) {
+    if (!secondFiles.has(file)) reasons.push(E2E_MESSAGES.buildMissing(file, second));
+  }
+  for (const file of secondFiles) {
+    if (!firstFiles.has(file)) reasons.push(E2E_MESSAGES.buildMissing(file, first));
+  }
+  for (const file of firstFiles) {
+    if (secondFiles.has(file) && !readFileSync(join(first, file)).equals(readFileSync(join(second, file)))) reasons.push(E2E_MESSAGES.buildDiffers(file));
+  }
+  return reasons;
 }
 
 // The one place the rules' context is built, so the e2e step and the built-checks subcommand can
 // never judge the same build differently.
 export function loadCheckContext(repoRoot: string): CheckContext {
-  return Object.freeze({ repoRoot });
+  return Object.freeze({
+    repoRoot,
+    reputationPageUrl: REPUTATION_PAGE_URL,
+    replyPromisePhrases: REPLY_PROMISE_PHRASES,
+    consoleDeletePhrases: CONSOLE_DELETE_PHRASES,
+    bannedNames: BANNED_NAMES,
+  });
 }
 
 type Judged = { readonly ok: true; readonly pages: number; readonly findings: readonly Finding[] } | { readonly ok: false; readonly reason: string };
@@ -522,20 +551,86 @@ export interface SiteE2eOptions {
   readonly secondBuild?: (outDir: string) => SecondBuildRun;
 }
 
+const printOutput = (print: (line: string) => void, output: string): void => {
+  for (const line of output.split(/\r?\n/)) {
+    if (line.trim() !== '') print(line);
+  }
+};
+
+// Any exit other than 0 fails the step, exit 2 included: that is the scan saying it could not run,
+// and a scan that did not run never passes a build (AC-60, AC-E50).
+function clientSecretsStep(script: string, dist: string, print: (line: string) => void): string | null {
+  const run = spawnSync(process.execPath, [script, dist], { encoding: 'utf8', shell: false });
+  printOutput(print, `${run.stdout ?? ''}${run.stderr ?? ''}`);
+  return run.status === 0 ? null : E2E_MESSAGES.clientSecrets(run.status);
+}
+
+function fileBudgetStep(dist: string, budget: NonNullable<SiteE2eOptions['fileBudget']>): string | null {
+  const files = filesIn(dist).map((path) => ({ path, bytes: statSync(join(dist, path)).size }));
+  const reasons = budget(files).map((violation) =>
+    violation.kind === 'count' ? E2E_MESSAGES.tooManyFiles(violation.count, violation.limit) : E2E_MESSAGES.fileTooLarge(violation.path, violation.bytes, violation.limit));
+  return reasons.length === 0 ? null : reasons.join('; ');
+}
+
+// The same commit built a second time with Astro's --outDir, into the git-ignored root dist folder.
+function astroSecondBuild(repoRoot: string): (outDir: string) => SecondBuildRun {
+  return (outDir) => {
+    const run = spawnSync(process.execPath, [join(repoRoot, 'scripts', 'astro.mjs'), 'build', '--outDir', outDir], {
+      cwd: join(repoRoot, 'packages', 'web'),
+      encoding: 'utf8',
+      shell: false,
+      maxBuffer: 64 * 1024 * 1024,
+    });
+    return { status: run.status, output: `${run.stdout ?? ''}${run.stderr ?? ''}${run.error === undefined ? '' : run.error.message}` };
+  };
+}
+
+function secondBuildStep(options: SiteE2eOptions, dist: string): string | null {
+  const outDir = join(options.repoRoot, 'dist', 'site-second-build');
+  const remove = (): void => rmSync(outDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
+  remove();
+  try {
+    const run = (options.secondBuild ?? astroSecondBuild(options.repoRoot))(outDir);
+    if (run.status !== 0) return E2E_MESSAGES.secondBuildFailed(run.status, run.output.trim().slice(-OUTPUT_TAIL));
+    const reasons = compareBuilds(dist, outDir);
+    return reasons.length === 0 ? null : reasons.join('; ');
+  } finally {
+    remove();
+  }
+}
+
+// D-151's order. The size budget arrives in 05-09 and the rendered checks in 05-08, each as a step
+// here; a failing step stops the run with its reason, and the last line is PASS or FAIL.
 export function runSiteE2e(options: SiteE2eOptions): Promise<number> {
   const print = options.print ?? ((line: string) => console.log(line));
   const dist = join(options.repoRoot, 'packages', 'web', 'dist');
-  const fail = (reason: string): Promise<number> => {
-    print(E2E_MESSAGES.fail(reason));
+  if (!existsSync(dist) || !statSync(dist).isDirectory()) {
+    print(E2E_MESSAGES.fail(E2E_MESSAGES.noDist(dist)));
     return Promise.resolve(1);
+  }
+  let pages = 0;
+  const builtChecks = (): string | null => {
+    const judged = judgeBuiltSite(dist, options.repoRoot);
+    if (!judged.ok) return judged.reason;
+    pages = judged.pages;
+    for (const finding of judged.findings) print(findingLine(finding));
+    const first = judged.findings[0];
+    return first === undefined ? null : E2E_MESSAGES.findings(judged.findings.length, findingLine(first));
   };
-  if (!existsSync(dist) || !statSync(dist).isDirectory()) return fail(E2E_MESSAGES.noDist(dist));
-  const judged = judgeBuiltSite(dist, options.repoRoot);
-  if (!judged.ok) return fail(judged.reason);
-  for (const finding of judged.findings) print(findingLine(finding));
-  const first = judged.findings[0];
-  if (first !== undefined) return fail(E2E_MESSAGES.findings(judged.findings.length, findingLine(first)));
-  print(E2E_MESSAGES.step('built-checks'));
-  print(E2E_MESSAGES.pass(judged.pages, 1));
+  const steps: readonly (readonly [string, () => string | null])[] = [
+    ['client-secrets', () => clientSecretsStep(options.clientSecretsScript ?? join(options.repoRoot, 'scripts', 'check-client-secrets.mjs'), dist, print)],
+    ['file-budget', () => fileBudgetStep(dist, options.fileBudget ?? checkFileBudget)],
+    ['built-checks', builtChecks],
+    ['second-build', () => secondBuildStep(options, dist)],
+  ];
+  for (const [name, run] of steps) {
+    const reason = run();
+    if (reason !== null) {
+      print(E2E_MESSAGES.fail(reason));
+      return Promise.resolve(1);
+    }
+    print(E2E_MESSAGES.step(name));
+  }
+  print(E2E_MESSAGES.pass(pages, steps.length));
   return Promise.resolve(0);
 }

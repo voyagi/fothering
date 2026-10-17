@@ -28,7 +28,16 @@ npm test            # unit and property tests
 npm run lint        # whole-repo lint
 npm run gate        # type check, complexity, duplication, boundaries, env file
 npm run verify:ship # everything above, in order, with one verdict
-npm run permissions:snapshot # rewrite packages/infra/permissions.json after a role change
+npm run permissions:snapshot # rewrite packages/infra/permissions.json and resources.json after a role or resource change
+```
+
+The site checks read the built output, so build first:
+
+```sh
+npm run build                     # the Lambda bundles, the synth and the site
+npm run test:e2e                  # built-page and rendered checks over packages/web/dist
+npm run a11y:live                 # WCAG 2.2 AA audit of the built site
+npm run preview -w @fothering/web # serve the built site on 127.0.0.1
 ```
 
 `packages/infra/permissions.json` lists every permission the two stacks give their three roles, and
@@ -152,7 +161,7 @@ synth test pins the settings.
 - `packages/functions` - the ingest and forget Lambda entries
 - `packages/agent` - the no-model AgentCore runtime entry
 - `packages/infra` - the CDK app and stacks
-- `packages/web` - the judge-facing site (later phase)
+- `packages/web` - the Astro static site: landing, replay, privacy and AI, deploy, accessibility statement
 - `docs/adr` - architecture decisions
 
 ## Licence

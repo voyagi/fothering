@@ -749,6 +749,38 @@ describe('the built checks through the CLI and the e2e step (D-150, D-151)', () 
     expect(lines.at(-1)).toBe(E2E_MESSAGES.fail(E2E_MESSAGES.fileTooLarge('index.html', 26_214_400, 26_214_400)));
   });
 
+  it('runSiteE2e fails a dist of 20,000 files or more by name', async () => {
+    const tree = plantSite({ 'index.html': page('<p>clean</p>') });
+    const { code, lines } = await e2e(tree, { fileBudget: () => [{ kind: 'count', count: 20_000, limit: 20_000 }] });
+    expect(code).toBe(1);
+    expect(lines.at(-1)).toBe(E2E_MESSAGES.fail(E2E_MESSAGES.tooManyFiles(20_000, 20_000)));
+  });
+
+  it('built-checks refuses a missing dist and a dist with no HTML page by name', async () => {
+    const missing = join(clean.root, 'no-dist');
+    expect((await builtChecks(missing)).out).toEqual([E2E_MESSAGES.checksFail(E2E_MESSAGES.noDist(missing))]);
+    const empty = plantSite({ 'tokens.css': ':root {}' });
+    const result = await builtChecks(empty.dist);
+    expect(result.code).toBe(1);
+    expect(result.out).toEqual([E2E_MESSAGES.checksFail(E2E_MESSAGES.noPages(empty.dist))]);
+  });
+
+  it('built-checks with --allow alone passes the allowed findings and prints the expected-red verdict', async () => {
+    const { code, out } = await builtChecks(dashed.dist, '--allow', 'dash, ses-rate-wording');
+    expect(code).toBe(0);
+    expect(out.at(-1)).toBe(E2E_MESSAGES.expectPass(2));
+  });
+
+  it('the CLI runs e2e only with the global npm folder, and reports its missing dist', async () => {
+    const refused = cliIo();
+    expect(await main(['e2e', '--repo-root', clean.root], refused.io)).toBe(1);
+    expect(refused.err).toEqual([A11Y_MESSAGES.missingOption('--global-modules')]);
+    const missing = join(clean.root, 'no-such-repo');
+    const run = cliIo();
+    expect(await main(['e2e', '--repo-root', missing, '--global-modules', missing], run.io)).toBe(1);
+    expect(run.out).toEqual([E2E_MESSAGES.fail(E2E_MESSAGES.noDist(join(missing, 'packages', 'web', 'dist')))]);
+  });
+
   it('holds no catalogue message with the uppercase skip word', () => {
     const samples: { readonly [K in keyof typeof E2E_MESSAGES]: Parameters<(typeof E2E_MESSAGES)[K]> } = {
       step: ['x'], fail: ['x'], pass: [1, 4], noDist: ['d'], noPages: ['d'], finding: ['dash', '/', 't'], findings: [1, 'x'],
