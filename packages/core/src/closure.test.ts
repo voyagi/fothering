@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { ACTION_FUNCTION_TIMEOUT_MS } from './close-values.js';
+import {
+  ACTION_FUNCTION_TIMEOUT_MS,
+  EMAIL_SEND_ATTEMPTS,
+  HOLD_CHECK_DELAY_MS,
+  HOLD_MS,
+  LANE_HOUR_ATTEMPT_CAP,
+  RECORD_MAX_AGE_MS,
+  REOPEN_FUNCTION_TIMEOUT_MS,
+} from './close-values.js';
 import {
   CLOSURE_LOG_OUTCOMES,
   CLOSURE_LOG_REASONS,
@@ -20,6 +28,30 @@ function claim(): Closure {
 }
 
 const EMAIL = { kind: 'closed', attempts: 1, claimedAtMs: CLAIMED_AT_MS, sentAtMs: CLAIMED_AT_MS, messageId: 'fixture-message-1', failed: false } as const;
+
+// The spec's own numbers (R2, R3, D-98, AC-E29) and the two timeouts the stacks read: a change to any of
+// them is a decision, so it has to change this pin too.
+describe('the close values hold the numbers D-97 declares', () => {
+  it('pins every value once', () => {
+    expect({
+      HOLD_MS,
+      HOLD_CHECK_DELAY_MS,
+      RECORD_MAX_AGE_MS,
+      LANE_HOUR_ATTEMPT_CAP,
+      EMAIL_SEND_ATTEMPTS,
+      ACTION_FUNCTION_TIMEOUT_MS,
+      REOPEN_FUNCTION_TIMEOUT_MS,
+    }).toEqual({
+      HOLD_MS: 60_000,
+      HOLD_CHECK_DELAY_MS: 300_000,
+      RECORD_MAX_AGE_MS: 3_600_000,
+      LANE_HOUR_ATTEMPT_CAP: 4,
+      EMAIL_SEND_ATTEMPTS: 3,
+      ACTION_FUNCTION_TIMEOUT_MS: 300_000,
+      REOPEN_FUNCTION_TIMEOUT_MS: 30_000,
+    });
+  });
+});
 
 describe('closureItemSchema holds codes, set names, integer times and counts only (D-90)', () => {
   it('parses the claim item closureClaimItem builds', () => {

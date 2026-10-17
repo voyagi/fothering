@@ -57,7 +57,6 @@ function distinct<T extends string>(values: readonly T[]): T[] {
 // cap-reached is the DECISION item's own reason for a cap-ended agent (D-92); it reaches a closure
 // as no-close but stays loggable as itself.
 export const CLOSURE_LOG_REASONS = distinct([...ACTION_REFUSALS, ...REOPEN_REFUSALS, ...EMAIL_REFUSALS, ...REFUSAL_REASONS, 'cap-reached'] as const);
-export type ClosureLogReason = (typeof CLOSURE_LOG_REASONS)[number];
 
 export const CLOSURE_LOG_OUTCOMES = distinct([...CLOSURE_OUTCOMES, ...REOPEN_RESULTS] as const);
 
