@@ -656,8 +656,8 @@ describe('a sendEmail dry-run line (AC-P9)', () => {
   it('records model and runtime calls as the model id with two counts, and the runtime ARN with a payload length', async () => {
     const lines: string[] = [];
     const log = createDryRunLog({ sink: (line) => lines.push(line), addressKey: createFixtureAddressKey(), now: () => 1 });
-    await log.would('bedrockModel.stream', 'eu.anthropic.claude-sonnet-5', {
-      modelId: 'eu.anthropic.claude-sonnet-5',
+    await log.would('bedrockModel.stream', 'eu.anthropic.claude-sonnet-4-6', {
+      modelId: 'eu.anthropic.claude-sonnet-4-6',
       messageCount: 1,
       promptBytes: 42,
       prompt: 'Jane said hello',
@@ -668,7 +668,7 @@ describe('a sendEmail dry-run line (AC-P9)', () => {
       payload: { note: 'Jane said hello' },
     });
     expect(lines).toEqual([
-      '(dry-run) WOULD bedrockModel.stream eu.anthropic.claude-sonnet-5 {"messageCount":1,"modelId":"eu.anthropic.claude-sonnet-5","promptBytes":42}',
+      '(dry-run) WOULD bedrockModel.stream eu.anthropic.claude-sonnet-4-6 {"messageCount":1,"modelId":"eu.anthropic.claude-sonnet-4-6","promptBytes":42}',
       '(dry-run) WOULD agentCore.invokeAgentRuntime arn:aws:bedrock-agentcore:eu-central-1:000000000000:runtime/fothering {"payloadLength":26,"runtimeArn":"arn:aws:bedrock-agentcore:eu-central-1:000000000000:runtime/fothering"}',
     ]);
   });
@@ -677,10 +677,10 @@ describe('a sendEmail dry-run line (AC-P9)', () => {
     const lines: string[] = [];
     const log = createDryRunLog({ sink: (line) => lines.push(line), addressKey: createFixtureAddressKey(), now: () => 1 });
     for (const request of [
-      { modelId: 'eu.anthropic.claude-sonnet-5', messageCount: 1.5, promptBytes: 42 },
-      { modelId: 'eu.anthropic.claude-sonnet-5', messageCount: 1, promptBytes: PLANTED_SENTENCE },
+      { modelId: 'eu.anthropic.claude-sonnet-4-6', messageCount: 1.5, promptBytes: 42 },
+      { modelId: 'eu.anthropic.claude-sonnet-4-6', messageCount: 1, promptBytes: PLANTED_SENTENCE },
     ]) {
-      const refusal = await log.would('bedrockModel.stream', 'eu.anthropic.claude-sonnet-5', request).catch((error: unknown) => error);
+      const refusal = await log.would('bedrockModel.stream', 'eu.anthropic.claude-sonnet-4-6', request).catch((error: unknown) => error);
       expect((refusal as Error).message).toBe('refusing to record bedrockModel.stream: the request does not have the shape its line records');
     }
     expect(lines).toEqual([]);
@@ -927,8 +927,8 @@ describe('the pinned model values (D-68, D-75, D-76)', () => {
 
   it('reports the model id, the profile id, the max tokens and the thinking setting as the pinned four', () => {
     expect(PINNED_MODEL_VALUES).toEqual({
-      modelId: 'anthropic.claude-sonnet-5',
-      profileId: 'eu.anthropic.claude-sonnet-5',
+      modelId: 'anthropic.claude-sonnet-4-6',
+      profileId: 'eu.anthropic.claude-sonnet-4-6',
       maxTokens: 1_024,
       thinking: 'disabled',
     });
@@ -961,7 +961,7 @@ describe('the bedrockModel row streams Strands events (D-71)', () => {
       events.push(event);
     }
     expect(lines).toHaveLength(1);
-    expect(lines[0]?.startsWith('(dry-run) WOULD bedrockModel.stream eu.anthropic.claude-sonnet-5 {')).toBe(true);
+    expect(lines[0]?.startsWith('(dry-run) WOULD bedrockModel.stream eu.anthropic.claude-sonnet-4-6 {')).toBe(true);
     expect(order[0]).toBe('line');
     expect(events).toEqual(plainTextTurn('the answer', USAGE).events);
   });
@@ -983,7 +983,7 @@ describe('the bedrockModel row streams Strands events (D-71)', () => {
 
     expect(await drain(stream)).toEqual([]);
     expect(lines).toHaveLength(1);
-    const [, summaryJson] = /^\(dry-run\) WOULD bedrockModel\.stream eu\.anthropic\.claude-sonnet-5 (\{.*\})$/.exec(lines[0] ?? '') ?? [];
+    const [, summaryJson] = /^\(dry-run\) WOULD bedrockModel\.stream eu\.anthropic\.claude-sonnet-4-6 (\{.*\})$/.exec(lines[0] ?? '') ?? [];
     const summary = JSON.parse(summaryJson ?? '{}') as Record<string, unknown>;
     expect(Object.keys(summary).sort()).toEqual(['messageCount', 'modelId', 'promptBytes']);
     expect(summary).toEqual({

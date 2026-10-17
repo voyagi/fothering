@@ -156,7 +156,7 @@ describe('PortBackedModel bounds each call input (AI-SPEC section 4 byte guard)'
 describe('PortBackedModel keeps the reported values true', () => {
   it('returns the pinned config, accepts an equal update and refuses a different one naming only the key', () => {
     const model = wrap(createFixtureModel([]));
-    expect(model.getConfig()).toEqual({ modelId: 'eu.anthropic.claude-sonnet-5', maxTokens: 1_024 });
+    expect(model.getConfig()).toEqual({ modelId: 'eu.anthropic.claude-sonnet-4-6', maxTokens: 1_024 });
 
     expect(() => model.updateConfig({ maxTokens: 1_024 })).not.toThrow();
     const refusal = (() => {

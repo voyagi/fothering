@@ -137,7 +137,7 @@ describe('tracer, agent half: the runtime explains the evidence record and retur
     expect(check.ok).toBe(true);
     expect((result.answer as { optionId?: string }).optionId).toBe(approvedIdOf(record));
     expect(result.pinned).toEqual(PINNED_MODEL_VALUES);
-    expect(result.pinned).toEqual({ modelId: 'anthropic.claude-sonnet-5', profileId: 'eu.anthropic.claude-sonnet-5', maxTokens: 1024, thinking: 'disabled' });
+    expect(result.pinned).toEqual({ modelId: 'anthropic.claude-sonnet-4-6', profileId: 'eu.anthropic.claude-sonnet-4-6', maxTokens: 1024, thinking: 'disabled' });
     expect(result.promptSha256).toBe(SYSTEM_PROMPT_SHA256);
     expect(result.promptSha256).toBe(createHash('sha256').update(SYSTEM_PROMPT, 'utf8').digest('hex'));
     expect(result.usage).toEqual(USAGE);
@@ -351,7 +351,7 @@ describe('the deployed runtime with the switch unset answers dry-run', () => {
 
     expect(runtimeResultSchema.parse(result)).toEqual({ status: 'dry-run', pinned: PINNED_MODEL_VALUES, promptSha256: SYSTEM_PROMPT_SHA256 });
     expect(lines).toHaveLength(1);
-    expect(lines[0]?.startsWith('(dry-run) WOULD bedrockModel.stream eu.anthropic.claude-sonnet-5 ')).toBe(true);
+    expect(lines[0]?.startsWith('(dry-run) WOULD bedrockModel.stream eu.anthropic.claude-sonnet-4-6 ')).toBe(true);
     expect(lines[0]).toContain('"messageCount":1');
   });
 

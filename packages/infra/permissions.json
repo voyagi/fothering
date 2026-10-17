@@ -275,9 +275,9 @@
     "kind": "permission",
     "effect": "Allow",
     "action": "bedrock:InvokeModel",
-    "resource": "\"arn:aws:bedrock:eu-central-1::foundation-model/anthropic.claude-sonnet-5\"",
+    "resource": "\"arn:aws:bedrock:eu-central-1::foundation-model/anthropic.claude-sonnet-4-6\"",
     "principal": null,
-    "condition": "{\"StringEquals\":{\"bedrock:InferenceProfileArn\":{\"Fn::Join\":[\"\",[\"arn:aws:bedrock:eu-central-1:\",{\"Ref\":\"AWS::AccountId\"},\":inference-profile/eu.anthropic.claude-sonnet-5\"]]}}}"
+    "condition": "{\"StringEquals\":{\"bedrock:InferenceProfileArn\":{\"Fn::Join\":[\"\",[\"arn:aws:bedrock:eu-central-1:\",{\"Ref\":\"AWS::AccountId\"},\":inference-profile/eu.anthropic.claude-sonnet-4-6\"]]}}}"
   },
   {
     "stack": "FotheringRuntime",
@@ -285,9 +285,9 @@
     "kind": "permission",
     "effect": "Allow",
     "action": "bedrock:InvokeModel",
-    "resource": "\"arn:aws:bedrock:eu-north-1::foundation-model/anthropic.claude-sonnet-5\"",
+    "resource": "\"arn:aws:bedrock:eu-north-1::foundation-model/anthropic.claude-sonnet-4-6\"",
     "principal": null,
-    "condition": "{\"StringEquals\":{\"bedrock:InferenceProfileArn\":{\"Fn::Join\":[\"\",[\"arn:aws:bedrock:eu-central-1:\",{\"Ref\":\"AWS::AccountId\"},\":inference-profile/eu.anthropic.claude-sonnet-5\"]]}}}"
+    "condition": "{\"StringEquals\":{\"bedrock:InferenceProfileArn\":{\"Fn::Join\":[\"\",[\"arn:aws:bedrock:eu-central-1:\",{\"Ref\":\"AWS::AccountId\"},\":inference-profile/eu.anthropic.claude-sonnet-4-6\"]]}}}"
   },
   {
     "stack": "FotheringRuntime",
@@ -295,9 +295,9 @@
     "kind": "permission",
     "effect": "Allow",
     "action": "bedrock:InvokeModel",
-    "resource": "\"arn:aws:bedrock:eu-south-1::foundation-model/anthropic.claude-sonnet-5\"",
+    "resource": "\"arn:aws:bedrock:eu-south-1::foundation-model/anthropic.claude-sonnet-4-6\"",
     "principal": null,
-    "condition": "{\"StringEquals\":{\"bedrock:InferenceProfileArn\":{\"Fn::Join\":[\"\",[\"arn:aws:bedrock:eu-central-1:\",{\"Ref\":\"AWS::AccountId\"},\":inference-profile/eu.anthropic.claude-sonnet-5\"]]}}}"
+    "condition": "{\"StringEquals\":{\"bedrock:InferenceProfileArn\":{\"Fn::Join\":[\"\",[\"arn:aws:bedrock:eu-central-1:\",{\"Ref\":\"AWS::AccountId\"},\":inference-profile/eu.anthropic.claude-sonnet-4-6\"]]}}}"
   },
   {
     "stack": "FotheringRuntime",
@@ -305,9 +305,9 @@
     "kind": "permission",
     "effect": "Allow",
     "action": "bedrock:InvokeModel",
-    "resource": "\"arn:aws:bedrock:eu-south-2::foundation-model/anthropic.claude-sonnet-5\"",
+    "resource": "\"arn:aws:bedrock:eu-south-2::foundation-model/anthropic.claude-sonnet-4-6\"",
     "principal": null,
-    "condition": "{\"StringEquals\":{\"bedrock:InferenceProfileArn\":{\"Fn::Join\":[\"\",[\"arn:aws:bedrock:eu-central-1:\",{\"Ref\":\"AWS::AccountId\"},\":inference-profile/eu.anthropic.claude-sonnet-5\"]]}}}"
+    "condition": "{\"StringEquals\":{\"bedrock:InferenceProfileArn\":{\"Fn::Join\":[\"\",[\"arn:aws:bedrock:eu-central-1:\",{\"Ref\":\"AWS::AccountId\"},\":inference-profile/eu.anthropic.claude-sonnet-4-6\"]]}}}"
   },
   {
     "stack": "FotheringRuntime",
@@ -315,9 +315,9 @@
     "kind": "permission",
     "effect": "Allow",
     "action": "bedrock:InvokeModel",
-    "resource": "\"arn:aws:bedrock:eu-west-1::foundation-model/anthropic.claude-sonnet-5\"",
+    "resource": "\"arn:aws:bedrock:eu-west-1::foundation-model/anthropic.claude-sonnet-4-6\"",
     "principal": null,
-    "condition": "{\"StringEquals\":{\"bedrock:InferenceProfileArn\":{\"Fn::Join\":[\"\",[\"arn:aws:bedrock:eu-central-1:\",{\"Ref\":\"AWS::AccountId\"},\":inference-profile/eu.anthropic.claude-sonnet-5\"]]}}}"
+    "condition": "{\"StringEquals\":{\"bedrock:InferenceProfileArn\":{\"Fn::Join\":[\"\",[\"arn:aws:bedrock:eu-central-1:\",{\"Ref\":\"AWS::AccountId\"},\":inference-profile/eu.anthropic.claude-sonnet-4-6\"]]}}}"
   },
   {
     "stack": "FotheringRuntime",
@@ -325,9 +325,9 @@
     "kind": "permission",
     "effect": "Allow",
     "action": "bedrock:InvokeModel",
-    "resource": "\"arn:aws:bedrock:eu-west-3::foundation-model/anthropic.claude-sonnet-5\"",
+    "resource": "\"arn:aws:bedrock:eu-west-3::foundation-model/anthropic.claude-sonnet-4-6\"",
     "principal": null,
-    "condition": "{\"StringEquals\":{\"bedrock:InferenceProfileArn\":{\"Fn::Join\":[\"\",[\"arn:aws:bedrock:eu-central-1:\",{\"Ref\":\"AWS::AccountId\"},\":inference-profile/eu.anthropic.claude-sonnet-5\"]]}}}"
+    "condition": "{\"StringEquals\":{\"bedrock:InferenceProfileArn\":{\"Fn::Join\":[\"\",[\"arn:aws:bedrock:eu-central-1:\",{\"Ref\":\"AWS::AccountId\"},\":inference-profile/eu.anthropic.claude-sonnet-4-6\"]]}}}"
   },
   {
     "stack": "FotheringRuntime",
@@ -335,7 +335,7 @@
     "kind": "permission",
     "effect": "Allow",
     "action": "bedrock:InvokeModel",
-    "resource": "{\"Fn::Join\":[\"\",[\"arn:aws:bedrock:eu-central-1:\",{\"Ref\":\"AWS::AccountId\"},\":inference-profile/eu.anthropic.claude-sonnet-5\"]]}",
+    "resource": "{\"Fn::Join\":[\"\",[\"arn:aws:bedrock:eu-central-1:\",{\"Ref\":\"AWS::AccountId\"},\":inference-profile/eu.anthropic.claude-sonnet-4-6\"]]}",
     "principal": null,
     "condition": null
   },

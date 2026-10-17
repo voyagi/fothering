@@ -390,7 +390,7 @@ describe('the agent bundle answers the AgentCore contract with the real handler 
       expect(await b.json()).toEqual(dryRun);
       // The child writes its line before it answers, but the pipe may deliver it a moment later.
       const dryRunLines = (): number =>
-        output.split('\n').filter((line) => line.startsWith('(dry-run) WOULD bedrockModel.stream eu.anthropic.claude-sonnet-5 ')).length;
+        output.split('\n').filter((line) => line.startsWith('(dry-run) WOULD bedrockModel.stream eu.anthropic.claude-sonnet-4-6 ')).length;
       for (let waitedMs = 0; dryRunLines() < 2 && waitedMs < 5000; waitedMs += 100) {
         await new Promise((resolveDelay) => setTimeout(resolveDelay, 100));
       }

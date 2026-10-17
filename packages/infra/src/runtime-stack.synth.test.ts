@@ -17,9 +17,9 @@ interface PolicyStatementJson {
 
 // Spelled out here rather than built from model-values.ts, so the test stays an oracle independent of
 // the code it checks.
-const PROFILE_ARN = { 'Fn::Join': ['', ['arn:aws:bedrock:eu-central-1:', { Ref: 'AWS::AccountId' }, ':inference-profile/eu.anthropic.claude-sonnet-5']] };
+const PROFILE_ARN = { 'Fn::Join': ['', ['arn:aws:bedrock:eu-central-1:', { Ref: 'AWS::AccountId' }, ':inference-profile/eu.anthropic.claude-sonnet-4-6']] };
 const FOUNDATION_MODEL_ARNS = ['eu-central-1', 'eu-north-1', 'eu-south-1', 'eu-south-2', 'eu-west-1', 'eu-west-3'].map(
-  (region) => `arn:aws:bedrock:${region}::foundation-model/anthropic.claude-sonnet-5`,
+  (region) => `arn:aws:bedrock:${region}::foundation-model/anthropic.claude-sonnet-4-6`,
 );
 
 describe('RuntimeStack synth', () => {
@@ -94,7 +94,7 @@ describe('RuntimeStack synth', () => {
     for (const statement of statements) expect(statement.effect).toBe('Allow');
   });
 
-  it('invokes only the EU Claude Sonnet 5 profile, and its foundation model in the six destination Regions only through that profile', () => {
+  it('invokes only the EU Claude Sonnet 4.6 profile, and its foundation model in the six destination Regions only through that profile', () => {
     const modelStatements = policyStatements().filter((statement) => [statement.Action].flat().includes('bedrock:InvokeModel'));
     expect(modelStatements).toHaveLength(2);
     for (const statement of modelStatements) {
