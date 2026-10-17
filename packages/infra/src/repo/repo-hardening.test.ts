@@ -220,7 +220,8 @@ describe('repo hardening: every gate, config and document ships what it claims',
       expect(manifest.dependencies ?? {}, `packages/${ws} lists vitest as a production dependency`).not.toHaveProperty('vitest');
     }
     expect(ci).toContain('packages/*/package.json');
-    // The site is planned under apps/, so the client scan must read those manifests too.
+    // The site, packages/web, reaches the client scan through its scripts.build; apps/* stays in
+    // the glob so a workspace added there is scanned too.
     expect(ci).toContain('packages/*/package.json apps/*/package.json');
     expect(ci).toContain('check-client-secrets.mjs');
 
