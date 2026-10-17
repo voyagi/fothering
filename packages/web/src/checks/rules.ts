@@ -771,44 +771,213 @@ export function noEllipsisRule(site: BuiltSite, _context: CheckContext): Finding
 export const REPLAY_ROUTE = '/replay/';
 export const REPLAY_WORD_CAP = 238;
 
-export function countWords(_text: string): number {
-  return 0;
+const COUNTED_KINDS = ['summary', 'step', 'tag', 'caption'] as const;
+const COUNTED = 'data-wordcount';
+const STEPS = 'data-steps';
+const outsideSvg = (element: BuiltElement): string => textOf(element, (node) => node.tag === 'svg');
+
+const replayPage = (site: BuiltSite): BuiltPage | undefined => site.pages.find((page) => page.route === REPLAY_ROUTE);
+
+// The other replay rules stay silent while the page is absent, so a build without it reports one
+// finding, under replay-page, rather than one per rule.
+function onReplay(site: BuiltSite, rule: RuleId, findings: (page: BuiltPage) => string[]): Finding[] {
+  const replay = replayPage(site);
+  return replay === undefined ? [] : findings(replay).map((text) => ({ rule, route: REPLAY_ROUTE, text }));
 }
 
-export function countReplayWords(_page: BuiltPage): number {
-  return 0;
+export function replayPageRule(site: BuiltSite, _context: CheckContext): Finding[] {
+  return replayPage(site) === undefined ? [{ rule: 'replay-page', route: REPLAY_ROUTE, text: `the build has no replay page at ${REPLAY_ROUTE}` }] : [];
 }
 
-export function replayPageRule(_site: BuiltSite, _context: CheckContext): Finding[] {
-  return [];
+// AC-E9: the reader has stripped tags and decoded entities, so a word is what lies between runs of
+// whitespace (JavaScript's \s takes in the non-breaking space), and an identifier with dots or
+// hyphens stays one word.
+export function countWords(text: string): number {
+  const normalized = text.replace(/\s+/g, ' ').trim();
+  return normalized === '' ? 0 : normalized.split(' ').length;
 }
 
-export function replayWordCountRule(_site: BuiltSite, _context: CheckContext): Finding[] {
-  return [];
+// A counted element inside another counted element is counted once, with its outermost container.
+function outermostCounted(root: BuiltElement): BuiltElement[] {
+  const found: BuiltElement[] = [];
+  const visit = (element: BuiltElement): void => {
+    if (element.attrs[COUNTED] !== undefined) {
+      found.push(element);
+      return;
+    }
+    for (const child of element.children) {
+      if (typeof child !== 'string') visit(child);
+    }
+  };
+  visit(root);
+  return found;
 }
 
-export function replaySummaryRule(_site: BuiltSite, _context: CheckContext): Finding[] {
-  return [];
+export function countReplayWords(page: BuiltPage): number {
+  return outermostCounted(page.root).reduce((sum, element) => sum + countWords(outsideSvg(element)), 0);
 }
 
-export function replayLanesRule(_site: BuiltSite, _context: CheckContext): Finding[] {
-  return [];
+function wordCountFindings(page: BuiltPage): string[] {
+  const counted = page.markers.get(COUNTED) ?? [];
+  if (counted.length === 0) return [`the replay page has no counted element (${COUNTED})`];
+  const kinds = counted.map((element) => element.attrs[COUNTED] ?? '');
+  const texts = kinds.filter((kind) => !(COUNTED_KINDS as readonly string[]).includes(kind))
+    .map((kind) => `${COUNTED}="${kind}" is not one of ${COUNTED_KINDS.join(', ')}`);
+  for (const kind of COUNTED_KINDS) {
+    if (!kinds.includes(kind)) texts.push(`the replay page counts no ${kind} (${COUNTED}="${kind}")`);
+  }
+  const words = countReplayWords(page);
+  if (words > REPLAY_WORD_CAP) texts.push(`the replay counts ${String(words)} words, ${String(REPLAY_WORD_CAP)} at most`);
+  return texts;
 }
 
-export function provenanceWordingRule(_site: BuiltSite, _context: CheckContext): Finding[] {
-  return [];
+// AC-11: the summary, the four step containers, the tag and the caption, SVG text excluded.
+export function replayWordCountRule(site: BuiltSite, _context: CheckContext): Finding[] {
+  return onReplay(site, 'replay-word-count', wordCountFindings);
 }
 
-export function providerLabelRule(_site: BuiltSite, _context: CheckContext): Finding[] {
-  return [];
+function parentsOf(root: BuiltElement): Map<BuiltElement, BuiltElement> {
+  const parents = new Map<BuiltElement, BuiltElement>();
+  walk(root, (element) => {
+    for (const child of element.children) {
+      if (typeof child !== 'string') parents.set(child, element);
+    }
+  });
+  return parents;
 }
 
-export function replayPanelsRule(_site: BuiltSite, _context: CheckContext): Finding[] {
-  return [];
+function ancestorWith(element: BuiltElement, parents: ReadonlyMap<BuiltElement, BuiltElement>, test: (node: BuiltElement) => boolean): BuiltElement | undefined {
+  for (let node = parents.get(element); node !== undefined; node = parents.get(node)) {
+    if (test(node)) return node;
+  }
+  return undefined;
 }
 
-export function typeTokenUseRule(_site: BuiltSite, _context: CheckContext): Finding[] {
-  return [];
+const countedAs = (page: BuiltPage, kind: string): BuiltElement[] => (page.markers.get(COUNTED) ?? []).filter((element) => element.attrs[COUNTED] === kind);
+
+function summaryFindings(page: BuiltPage, view: ReplayView): string[] {
+  const summaries = countedAs(page, 'summary');
+  const [summary] = summaries;
+  if (summary === undefined) return [`the replay page has no summary (${COUNTED}="summary")`];
+  if (summaries.length > 1) return [`the replay page has ${String(summaries.length)} summaries, 1 expected`];
+  const texts: string[] = [];
+  if (ancestorWith(summary, parentsOf(page.root), (node) => node.attrs[STEPS] !== undefined) !== undefined) {
+    texts.push('the summary sits inside a step panel, so it does not show on every step');
+  }
+  const text = outsideSvg(summary);
+  const [, , pause, reopen] = view.summary;
+  if (!text.includes(view.tag.lane)) texts.push(`the summary does not name the lane ${view.tag.lane}`);
+  if (!text.includes(view.tag.cause)) texts.push(`the summary does not name the cause ${view.tag.cause}`);
+  if (pause !== undefined && !text.includes(pause.text)) texts.push(`the summary does not name the pause with its read-back: "${pause.text}"`);
+  if (reopen !== undefined && !text.includes(reopen.text)) texts.push(`the summary does not name the reopen with its read-back: "${reopen.text}"`);
+  return texts;
+}
+
+// AC-5: one summary, outside every step panel, naming the lane, the cause, the pause with its
+// read-back and the reopen with its read-back.
+export function replaySummaryRule(site: BuiltSite, context: CheckContext): Finding[] {
+  return onReplay(site, 'replay-summary', (page) => summaryFindings(page, context.replay));
+}
+
+const panelsOf = (page: BuiltPage): BuiltElement[] => countedAs(page, 'step');
+
+function lanesFindings(page: BuiltPage, view: ReplayView): string[] {
+  const panels = panelsOf(page);
+  const expected: readonly (readonly [string, string])[] = [['3', view.lanesLines.paused], ['4', view.lanesLines.reopened]];
+  return expected.flatMap(([step, line]) => {
+    const panel = panels.find((element) => element.attrs[STEPS] === step);
+    if (panel === undefined) return [`the replay page has no step ${step} panel`];
+    return outsideSvg(panel).includes(line) ? [] : [`step ${step} does not read "${line}" outside the drawing`];
+  });
+}
+
+// AC-9: steps 3 and 4 name the paused lane and every other artifact lane as open in page text,
+// never only in the drawing, so the lanes line carries the lane schedule.
+export function replayLanesRule(site: BuiltSite, context: CheckContext): Finding[] {
+  return onReplay(site, 'replay-lanes', (page) => lanesFindings(page, context.replay));
+}
+
+const CAPTURE_WORDS = /\b(?:record(?:ed|ing)|captur(?:e|ed|es|ing))\b/gi;
+const LABEL_ATTRS = ['aria-label', 'alt', 'title'] as const;
+const FIXTURE_PROVENANCES: ReadonlySet<Provenance> = new Set(['doc-derived', 'generated']);
+
+function labelTexts(page: BuiltPage): string[] {
+  const labels: string[] = [];
+  walk(page.root, (element) => {
+    for (const name of LABEL_ATTRS) {
+      const value = element.attrs[name];
+      if (value !== undefined) labels.push(value);
+    }
+  });
+  return labels;
+}
+
+function wordingFindings(page: BuiltPage, provenance: Provenance): string[] {
+  const texts = [page.text, ...labelTexts(page)].flatMap((text) =>
+    [...text.matchAll(CAPTURE_WORDS)].map((match) => `the replay page says "${excerpt(text, match.index, match[0].length)}" about a ${provenance} artifact`));
+  const { timeWording } = PROVENANCE_LABELS[provenance];
+  if (!page.textOutsideSvg.includes(timeWording)) texts.push(`the replay page does not carry the time wording "${timeWording}"`);
+  return texts;
+}
+
+// AC-16, AC-P1, AC-P4: a fixture is never called recorded or captured anywhere on the replay, in
+// text or in a label, and its times are called illustrative. A simulator or live artifact carries
+// its own label map wording.
+export function provenanceWordingRule(site: BuiltSite, context: CheckContext): Finding[] {
+  if (!FIXTURE_PROVENANCES.has(context.provenance)) return [];
+  return onReplay(site, 'provenance-wording', (page) => wordingFindings(page, context.provenance));
+}
+
+const UNCONFIRMED = /\bunconfirmed\b/i;
+
+function providerFindings(page: BuiltPage, view: ReplayView): string[] {
+  const expected = view.schedule.rows.filter((row) => row.dimension === 'Provider');
+  const marked = page.markers.get('data-provider-row') ?? [];
+  if (marked.length !== expected.length) return [`the replay page marks ${String(marked.length)} provider row(s); the artifact has ${String(expected.length)}`];
+  // Rows render in the artifact's order, so the nth marked row is the nth provider row.
+  return expected.flatMap((row, index) => {
+    const element = marked[index];
+    if (element === undefined) return [];
+    const text = clip(outsideSvg(element));
+    if (row.sourceUrl === undefined) return UNCONFIRMED.test(text) ? [] : [`the provider row "${text}" has no confirming source and no unconfirmed label`];
+    return linksTo(element, row.sourceUrl) ? [] : [`the provider row "${text}" shows its confirming source ${row.sourceUrl} as plain text, not a link`];
+  });
+}
+
+// AC-18 and AC-P13: an unconfirmed provider mapping says so, and a confirmed one links its source.
+export function providerLabelRule(site: BuiltSite, context: CheckContext): Finding[] {
+  return onReplay(site, 'provider-label', (page) => providerFindings(page, context.replay));
+}
+
+const HIDING_ATTRS = ['hidden', 'aria-hidden'] as const;
+const hidingAttr = (element: BuiltElement): string | undefined => HIDING_ATTRS.find((name) => element.attrs[name] !== undefined && element.attrs[name] !== 'false');
+
+function panelFindings(page: BuiltPage): string[] {
+  const panels = panelsOf(page);
+  if (panels.length !== COUNTED_KINDS.length) return [`the replay page has ${String(panels.length)} step panels, 4 expected`];
+  const steps = panels.map((panel) => panel.attrs[STEPS] ?? '');
+  const texts = steps.join(', ') === '1, 2, 3, 4' ? [] : [`the step panels read ${steps.join(', ')} in HTML order; 1, 2, 3, 4 expected`];
+  const parents = parentsOf(page.root);
+  panels.forEach((panel, index) => {
+    const hider = hidingAttr(panel) === undefined ? ancestorWith(panel, parents, (node) => hidingAttr(node) !== undefined) : panel;
+    const attr = hider === undefined ? undefined : hidingAttr(hider);
+    if (hider !== undefined && attr !== undefined) texts.push(`step panel ${steps[index] ?? ''} is hidden from the accessibility tree by ${attr} on <${hider.tag}>`);
+  });
+  return texts;
+}
+
+// AC-E7 and AC-10's static half: the four panels sit in the HTML in step order and nothing in the
+// markup hides them, so CSS alone decides what shows and removing the js class shows all four.
+export function replayPanelsRule(site: BuiltSite, _context: CheckContext): Finding[] {
+  return onReplay(site, 'replay-panels', panelFindings);
+}
+
+// AC-63's use half. tokens.css itself writes var(--text-small) for the compact alias, which is a
+// declaration, so only the other sheets count as using a name.
+export function typeTokenUseRule(site: BuiltSite, _context: CheckContext): Finding[] {
+  const sheets = site.css.filter((file) => file.file !== TOKENS_FILE).map((file) => file.text);
+  return R14_TYPE_TOKENS.filter(([name]) => !sheets.some((css) => new RegExp(`var\\(\\s*${escapeRegExp(name)}\\s*[,)]`).test(css)))
+    .map(([name]) => ({ rule: 'type-token-use' as const, route: fileRoute('*.css'), text: `the built CSS never uses ${name} through var()` }));
 }
 
 // Workers limits: 20,000 files per version on the Free plan and 25 MiB per file (AC-62).
