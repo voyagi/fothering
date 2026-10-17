@@ -230,6 +230,14 @@ describe('validateExplanation (D-78, R12)', () => {
     expect(checkOf('pause fothering for now', closeOn(APPROVED, nested))).toBe('set-name');
   });
 
+  it('finds a set name only as a whole token, so a short set name inside an ordinary word passes', () => {
+    const withNews = [BULK, 'news'];
+    expect(checkOf('newsletter traffic rose on this lane', closeOn(APPROVED, withNews))).toBe('ok');
+    expect(checkOf('newsletter traffic rose on this lane', unknownOn(UNSETTLED, withNews))).toBe('ok');
+    expect(checkOf('pause news for now', closeOn(APPROVED, withNews))).toBe('set-name');
+    expect(checkOf('pause NEWS for now', unknownOn(UNSETTLED, withNews))).toBe('set-name');
+  });
+
   it('rejects the R2 phrases with any whitespace run and case', () => {
     for (const text of ['the SES  bounce\nrate is up', 'your Bounce Rate is up', 'the ses complaint\trate is up']) {
       expect(checkOf(text, closeOn(APPROVED))).toBe('phrase');

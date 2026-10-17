@@ -204,10 +204,10 @@ function holdsNoCommandWord(text: string, context: ExplanationContext): boolean 
   return !normal.includes('clos') && !normal.includes('reopen');
 }
 
+// Whole-token occurrences only, so a short set name (news) never matches inside an ordinary word
+// (newsletter).
 function occurrences(text: string, needle: string): number[] {
-  const found: number[] = [];
-  for (let at = text.indexOf(needle); at !== -1; at = text.indexOf(needle, at + 1)) found.push(at);
-  return found;
+  return [...text.matchAll(wholeToken(needle))].map((match) => match.index);
 }
 
 // An other set is judged by where each of its occurrences sits rather than on a text with the allowed
@@ -271,11 +271,17 @@ function escapeRegExp(text: string): string {
   return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
+// One boundary for every name match: a letter, digit, underscore or hyphen on either side makes the
+// name part of a longer token.
+function wholeToken(name: string): RegExp {
+  return new RegExp(`(?<![\\p{L}\\p{N}_-])${escapeRegExp(name)}(?![\\p{L}\\p{N}_-])`, 'gu');
+}
+
 // 4b-Q, an additive implementation detail of D-78 and not a rule change: exact whole-token copies of
 // the record's own names are removed before the number check, so a cause batch written with digits
 // still passes. A digit-only value is never removed, or a fabricated count equal to it would vanish.
 function withoutRecordNames(text: string, names: readonly string[]): string {
-  return names.reduce((rest, name) => rest.replace(new RegExp(`(?<![\\p{L}\\p{N}_-])${escapeRegExp(name)}(?![\\p{L}\\p{N}_-])`, 'gu'), ' '), text);
+  return names.reduce((rest, name) => rest.replace(wholeToken(name), ' '), text);
 }
 
 const NUMBER_TOKEN = /\p{Nd}+(?:,\p{Nd}{3})*(?:\.\p{Nd}+)?%?/gu;
