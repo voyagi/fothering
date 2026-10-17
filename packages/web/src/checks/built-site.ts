@@ -65,7 +65,7 @@ const NOT_RENDERED = new Set(['script', 'style', 'template']);
 const REFERENCE_ATTRS = new Set(['href', 'src', 'srcset', 'data', 'poster']);
 
 export function normalizeText(text: string): string {
-  return text.replace(/[\s ]+/g, ' ').trim();
+  return text.replace(/[\s\u00a0]+/g, ' ').trim();
 }
 
 export function textOf(element: BuiltElement, skip: (element: BuiltElement) => boolean = () => false): string {

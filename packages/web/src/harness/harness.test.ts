@@ -603,7 +603,7 @@ describe('the built checks through the CLI and the e2e step (D-150, D-151)', () 
     for (const tree of trees) tree.remove();
   });
 
-  const dashed = plantSite({ 'index.html': page('<p>closed — one lane</p>'), 'replay/index.html': page('<p>clean - text</p>') });
+  const dashed = plantSite({ 'index.html': page('<p>closed \u2014 one lane</p>'), 'replay/index.html': page('<p>clean - text</p>') });
   const clean = plantSite({ 'index.html': page('<p>closed - one lane</p>') });
 
   async function builtChecks(dist: string, ...flags: string[]): Promise<{ code: number; out: string[] }> {
@@ -616,13 +616,13 @@ describe('the built checks through the CLI and the e2e step (D-150, D-151)', () 
   it('built-checks over a dist holding an em dash returns 1 and prints the route and the text', async () => {
     const { code, out } = await builtChecks(dashed.dist);
     expect(code).toBe(1);
-    expect(out.some((line) => line.startsWith('[built-checks] dash /: ') && line.includes('closed — one lane'))).toBe(true);
+    expect(out.some((line) => line.startsWith('[built-checks] dash /: ') && line.includes('closed \u2014 one lane'))).toBe(true);
   });
 
   it('built-checks through the real entry, scripts/site-tool.mjs, exits 1 over the em-dash dist naming the route and the text', () => {
     const run = spawnSync(process.execPath, [join(REPO_ROOT, 'scripts', 'site-tool.mjs'), 'built-checks', '--dist', dashed.dist], { cwd: REPO_ROOT, encoding: 'utf8' });
     expect(run.status, run.stderr).toBe(1);
-    expect(run.stdout).toMatch(/^\[built-checks\] dash \/: .*closed — one lane/m);
+    expect(run.stdout).toMatch(/^\[built-checks\] dash \/: .*closed \u2014 one lane/m);
     expect(run.stdout).toContain(E2E_MESSAGES.checksFail(''));
   });
 

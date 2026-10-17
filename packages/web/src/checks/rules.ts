@@ -36,7 +36,7 @@ function matchesIn(rule: RuleId, route: string, text: string, pattern: RegExp): 
 
 // U+2012 figure dash to U+2015 horizontal bar. The reader decodes entities, so &mdash; and &#8211;
 // arrive here as the characters themselves.
-const DASHES = /[‒-―]/;
+const DASHES = /[\u2012-\u2015]/;
 
 export function dashRule(site: BuiltSite, _context: CheckContext): Finding[] {
   return site.pages.flatMap((page) => matchesIn('dash', page.route, page.text, DASHES));
