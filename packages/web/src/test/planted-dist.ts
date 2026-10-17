@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { NOT_FOUND_ROUTE, routeOf } from '../checks/built-site.js';
 import { LANDING_SECTIONS, LIMITS_FIXED_ROWS, LIMITS_REPLAY_ROW, NO_MEASURED_NUMBER_SENTENCE, type LandingSectionId } from '../site/content.js';
 import { PROVENANCE_LABELS } from '../site/labels.js';
-import { loadReplayArtifact } from '../site/replay-view.js';
+import { buildReplayView, loadReplayArtifact, type ReplayView } from '../site/replay-view.js';
 import { renderRobots, renderSitemap } from '../site/route-list.js';
 import { HEAD_SCRIPT, renderTokensCss } from '../theme/head-script.js';
 
@@ -121,15 +121,82 @@ export function sheetHead(route: string, options: SheetHead = {}): string {
   return (options.theme ?? THEME_HEAD) + SHEET_HEAD_ITEMS.filter((item) => !omitted.has(item)).map((item) => items[item]).join('');
 }
 
-// A planted build every head, file and landing rule passes, so a case can plant one fault and see
-// only the rule it aims at fire.
+export const REPLAY_VIEW: ReplayView = buildReplayView(loadReplayArtifact(join(REPO_ROOT, 'packages', 'web')));
+
+// The view marks code spans with backticks; the page renders each as code.
+export const codeSpans = (text: string): string => text.replace(/`([^`]+)`/g, '<code>$1</code>');
+
+export function replaySummary(view: ReplayView = REPLAY_VIEW): string {
+  return `<ol data-wordcount="summary">${view.summary.map((item) => `<li><time>${item.time}</time> ${codeSpans(item.text)}</li>`).join('')}</ol>`;
+}
+
+function providerCell(row: ReplayView['schedule']['rows'][number]): string {
+  if (row.sourceUrl !== undefined) return `<a href="${row.sourceUrl}">${codeSpans(row.label)}</a>`;
+  return `${codeSpans(row.label)}${row.unconfirmed ? ' <span>unconfirmed</span>' : ''}`;
+}
+
+function scheduleRows(view: ReplayView): string {
+  return view.schedule.rows.map((row) => {
+    const marker = row.dimension === 'Provider' ? ' data-provider-row' : '';
+    return `<tr${marker}><th scope="row">${providerCell(row)}</th><td>${row.countText}</td><td>${row.verdict}</td><td>${row.threshold}</td></tr>`;
+  }).join('');
+}
+
+const paragraphs = (texts: readonly string[]): string => texts.map((text) => `<p>${codeSpans(text)}</p>`).join('');
+
+// The four panels as the replay rules read them: one counted container per step, marked by its
+// number, in step order.
+export function replayPanels(view: ReplayView = REPLAY_VIEW): string[] {
+  const [one, two, three, four] = view.steps;
+  const panel = (step: ReplayView['steps'][number] | undefined, inner: string): string =>
+    `<section data-wordcount="step" data-steps="${String(step?.number ?? '')}"><h2>${step?.heading ?? ''}</h2>${inner}</section>`;
+  const schedule = `<table><caption>${view.schedule.caption}</caption><tr><th scope="col">Dimension</th><th scope="col">Count</th><th scope="col">Verdict</th><th scope="col">Threshold</th></tr>${scheduleRows(view)}</table>`;
+  const email = `<div><p>Subject: ${view.email.subject}</p><p data-model-role>${view.email.disclosure}</p><p><b>Why.</b> ${view.email.why}</p><p><b>Reopen.</b> ${view.email.reopen}</p></div>`;
+  return [
+    panel(one, paragraphs(one?.paragraphs ?? [])),
+    panel(two, `${schedule}<p data-model-role>${view.schedule.modelRole}</p>`),
+    panel(three, `${paragraphs(three?.paragraphs ?? [])}<p>${view.lanesLines.paused}</p>`),
+    panel(four, `${email}<pre><code>${view.reopenCommand}</code></pre>${paragraphs(four?.paragraphs ?? [])}<p>${view.lanesLines.reopened}</p>`),
+  ];
+}
+
+export function replayTag(view: ReplayView = REPLAY_VIEW): string {
+  const { tag } = view;
+  return `<div data-wordcount="tag"><p>${tag.legend}</p><p>${tag.lane}</p><p>${tag.stamp}</p><dl><dt>Cause</dt><dd>${tag.cause}</dd><dt>Read back</dt><dd>${tag.replayReadBack}</dd><dt>Reopens</dt><dd>${tag.reopens}</dd></dl><p>${tag.number}</p></div>`;
+}
+
+export interface ReplayParts {
+  readonly summary?: string;
+  readonly panels?: readonly string[];
+  readonly tag?: string;
+  readonly caption?: string;
+  readonly intro?: string;
+  readonly extra?: string;
+}
+
+// The replay every replay rule passes, with any one part replaced.
+export function replayBody(parts: ReplayParts = {}, view: ReplayView = REPLAY_VIEW): string {
+  const caption = parts.caption ?? `<p data-wordcount="caption">${view.caption}</p>`;
+  return `<main data-replay><h1>${view.h1}</h1>${parts.intro ?? `<p>${view.intro}</p>`}${parts.summary ?? replaySummary(view)}`
+    + `<div>${parts.tag ?? replayTag(view)}${caption}</div>${(parts.panels ?? replayPanels(view)).join('')}${parts.extra ?? ''}</main>`;
+}
+
+// The six R14 type steps, each used once through var(), the way the shared sheet uses them.
+export const TYPE_TOKEN_CSS = ['--text-lede', '--text-intro', '--text-narrative-headline', '--text-small', '--text-mono-value', '--text-schedule-compact']
+  .map((name, index) => `.t${String(index)} { font-size: var(${name}); }`).join('\n');
+
+const REPLAY_FILE = 'replay/index.html';
+
+// A planted build every head, file, landing and replay rule passes, so a case can plant one fault
+// and see only the rule it aims at fire. It always holds the replay page, as the real build does.
 export function completeSite(bodies: Readonly<Record<string, string>>, heads: Readonly<Record<string, SheetHead>> = {}): Record<string, string> {
   const files: Record<string, string> = {};
   const paths: string[] = [];
-  for (const [file, body] of Object.entries(bodies)) {
+  const withReplay = REPLAY_FILE in bodies ? bodies : { ...bodies, [REPLAY_FILE]: '' };
+  for (const [file, body] of Object.entries(withReplay)) {
     const route = routeOf(file);
-    const landing = route === '/' ? landingBody() : '';
-    files[file] = page(`${THEME_SWITCH}${landing}${body}`, sheetHead(route, heads[file]));
+    const lead = route === '/' ? landingBody() : file === REPLAY_FILE ? replayBody() : '';
+    files[file] = page(`${THEME_SWITCH}${lead}${body}`, sheetHead(route, heads[file]));
     if (route !== NOT_FOUND_ROUTE) paths.push(route);
   }
   return {
@@ -137,6 +204,7 @@ export function completeSite(bodies: Readonly<Record<string, string>>, heads: Re
     'sitemap.xml': renderSitemap(paths.map((path) => ({ path, indexable: true }))),
     'robots.txt': renderRobots(),
     'tokens.css': renderTokensCss(),
+    '_astro/site.css': TYPE_TOKEN_CSS,
     '_headers': HEADERS_TEXT,
   };
 }

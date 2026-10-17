@@ -12,6 +12,7 @@ import {
   THEME_RADIO_LIMIT,
 } from '../site/content.js';
 import { PROVENANCE_LABELS } from '../site/labels.js';
+import type { ReplayView } from '../site/replay-view.js';
 import { sitemapUrls, type SiteRoute } from '../site/route-list.js';
 import { scriptHash } from '../theme/head-script.js';
 import { NOT_FOUND_ROUTE as NOT_FOUND_PAGE, textOf, walk, type BuiltElement, type BuiltPage, type BuiltSite } from './built-site.js';
@@ -43,6 +44,14 @@ export const RULE_IDS = Object.freeze([
   'landing-sections',
   'limits',
   'no-ellipsis',
+  'replay-page',
+  'replay-word-count',
+  'replay-summary',
+  'replay-lanes',
+  'provenance-wording',
+  'provider-label',
+  'replay-panels',
+  'type-token-use',
 ] as const);
 
 export type RuleId = (typeof RULE_IDS)[number];
@@ -71,6 +80,8 @@ export interface CheckContext {
   readonly headScript: string;
   // The committed replay artifact's provenance, which names the limits table's replay state.
   readonly provenance: Provenance;
+  // The replay view of that artifact, which the replay rules hold the built page to.
+  readonly replay: ReplayView;
 }
 
 const EXCERPT_RADIUS = 40;
@@ -757,6 +768,49 @@ export function noEllipsisRule(site: BuiltSite, _context: CheckContext): Finding
     TRUNCATIONS.filter(([pattern]) => pattern.test(file.text)).map(([, what]) => ({ rule: 'no-ellipsis' as const, route: fileRoute(file.file), text: `the CSS truncates text with ${what}` })));
 }
 
+export const REPLAY_ROUTE = '/replay/';
+export const REPLAY_WORD_CAP = 238;
+
+export function countWords(_text: string): number {
+  return 0;
+}
+
+export function countReplayWords(_page: BuiltPage): number {
+  return 0;
+}
+
+export function replayPageRule(_site: BuiltSite, _context: CheckContext): Finding[] {
+  return [];
+}
+
+export function replayWordCountRule(_site: BuiltSite, _context: CheckContext): Finding[] {
+  return [];
+}
+
+export function replaySummaryRule(_site: BuiltSite, _context: CheckContext): Finding[] {
+  return [];
+}
+
+export function replayLanesRule(_site: BuiltSite, _context: CheckContext): Finding[] {
+  return [];
+}
+
+export function provenanceWordingRule(_site: BuiltSite, _context: CheckContext): Finding[] {
+  return [];
+}
+
+export function providerLabelRule(_site: BuiltSite, _context: CheckContext): Finding[] {
+  return [];
+}
+
+export function replayPanelsRule(_site: BuiltSite, _context: CheckContext): Finding[] {
+  return [];
+}
+
+export function typeTokenUseRule(_site: BuiltSite, _context: CheckContext): Finding[] {
+  return [];
+}
+
 // Workers limits: 20,000 files per version on the Free plan and 25 MiB per file (AC-62).
 const MAX_FILES = 20_000;
 const MAX_FILE_BYTES = 25 * 1024 * 1024;
@@ -802,6 +856,14 @@ const RULES: Readonly<Record<RuleId, Rule>> = {
   'landing-sections': landingSectionsRule,
   'limits': limitsRule,
   'no-ellipsis': noEllipsisRule,
+  'replay-page': replayPageRule,
+  'replay-word-count': replayWordCountRule,
+  'replay-summary': replaySummaryRule,
+  'replay-lanes': replayLanesRule,
+  'provenance-wording': provenanceWordingRule,
+  'provider-label': providerLabelRule,
+  'replay-panels': replayPanelsRule,
+  'type-token-use': typeTokenUseRule,
 };
 
 // Every rule runs over the whole site and every hit is kept, so one report names them all.

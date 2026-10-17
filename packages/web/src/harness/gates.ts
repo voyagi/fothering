@@ -15,7 +15,7 @@ import { startPreviewServer, type PreviewServer } from './preview-server.js';
 import { filesIn, loadBuiltSite, NoBuiltPagesError, routeOf, type BuiltSite } from '../checks/built-site.js';
 import { checkFileBudget, isRegisteredRule, runBuiltChecks, type BudgetViolation, type CheckContext, type Finding } from '../checks/rules.js';
 import { BANNED_NAMES, CONSOLE_DELETE_PHRASES, REPLY_PROMISE_PHRASES, REPUTATION_PAGE_URL } from '../site/content.js';
-import { loadReplayArtifact } from '../site/replay-view.js';
+import { buildReplayView, loadReplayArtifact } from '../site/replay-view.js';
 import { ROUTES, SITE_ORIGIN, sitemapUrls } from '../site/route-list.js';
 import { HEAD_SCRIPT, themedValue, TOKENS } from '../theme/head-script.js';
 
@@ -961,6 +961,7 @@ export function compareBuilds(first: string, second: string): string[] {
 // The one place the rules' context is built, so the e2e step and the built-checks subcommand can
 // never judge the same build differently.
 export function loadCheckContext(repoRoot: string): CheckContext {
+  const artifact = loadReplayArtifact(join(repoRoot, 'packages', 'web'));
   return Object.freeze({
     repoRoot,
     reputationPageUrl: REPUTATION_PAGE_URL,
@@ -970,7 +971,8 @@ export function loadCheckContext(repoRoot: string): CheckContext {
     siteOrigin: SITE_ORIGIN,
     routes: ROUTES,
     headScript: HEAD_SCRIPT,
-    provenance: loadReplayArtifact(join(repoRoot, 'packages', 'web')).provenance,
+    provenance: artifact.provenance,
+    replay: buildReplayView(artifact),
   });
 }
 

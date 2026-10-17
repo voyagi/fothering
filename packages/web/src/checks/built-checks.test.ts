@@ -11,12 +11,18 @@ import {
   page,
   plantDist,
   REPLAY_LIMITS_STATE,
+  REPLAY_VIEW,
+  replayBody,
+  replayPanels,
+  replaySummary,
   REPO_ROOT,
   SHEET_HEAD_ITEMS,
   THEME_HEAD,
   THEME_SWITCH,
+  TYPE_TOKEN_CSS,
   type PlantedDist,
 } from '../test/planted-dist.js';
+import type { ReplayView } from '../site/replay-view.js';
 import { loadCheckContext } from '../harness/gates.js';
 import { HEAD_SCRIPT, headScriptHash, renderTokensCss } from '../theme/head-script.js';
 import { BANNED_NAMES, CONSOLE_DELETE_PHRASES, LANDING_SECTIONS, LEDE_TERMS, LIMITS_FIXED_ROWS, REPLY_PROMISE_PHRASES } from '../site/content.js';
@@ -27,6 +33,8 @@ import {
   bannedNameRule,
   checkFileBudget,
   consoleDeleteRule,
+  countReplayWords,
+  countWords,
   dashRule,
   exactThirtyDaysRule,
   formsCookiesAnalyticsRule,
@@ -38,7 +46,15 @@ import {
   noInlineStyleRule,
   pageMetadataRule,
   preR6WordsRule,
+  provenanceWordingRule,
+  providerLabelRule,
   regionClaimRule,
+  REPLAY_ROUTE,
+  replayLanesRule,
+  replayPageRule,
+  replayPanelsRule,
+  replaySummaryRule,
+  replayWordCountRule,
   replyPromiseRule,
   robotsRule,
   RULE_IDS,
@@ -51,6 +67,7 @@ import {
   themeTokenBlocksRule,
   thirdPartyReferenceRule,
   typeTokenDeclaredRule,
+  typeTokenUseRule,
   unitFigureRule,
   type Finding,
 } from './rules.js';
@@ -173,12 +190,13 @@ describe('runBuiltChecks', () => {
     expect([...rules].filter((rule) => ['page-metadata', 'sitemap', 'robots'].includes(rule)).sort()).toEqual(['page-metadata', 'robots', 'sitemap']);
   });
 
-  it('holds exactly the twenty-five rule ids the plans name', () => {
+  it('holds exactly the thirty-three rule ids the plans name', () => {
     expect([...RULE_IDS].sort()).toEqual([
       'banned-name', 'console-delete', 'dash', 'exact-30-days', 'forms-cookies-analytics', 'head-script-order', 'landing-sections', 'lede', 'limits',
-      'no-ellipsis', 'no-inline-style', 'page-metadata', 'pre-r6-words', 'region-claim', 'reply-promise', 'robots', 'script-hash',
+      'no-ellipsis', 'no-inline-style', 'page-metadata', 'pre-r6-words', 'provenance-wording', 'provider-label', 'region-claim', 'replay-lanes',
+      'replay-page', 'replay-panels', 'replay-summary', 'replay-word-count', 'reply-promise', 'robots', 'script-hash',
       'ses-percentage-link', 'ses-rate-wording', 'sitemap', 'switch-markup', 'theme-token-blocks', 'third-party-reference', 'type-token-declared',
-      'unit-figure',
+      'type-token-use', 'unit-figure',
     ]);
   });
 
@@ -636,7 +654,7 @@ describe('the script hash rule (D-149, C6, T-05-21, T-05-24)', () => {
   it('fails a build with no _headers and one whose _headers has no script-src', () => {
     expect(texts(scriptHashRule(siteOf(withFile('_headers', null)), context))).toEqual(['dist/_headers is missing']);
     const findings = scriptHashRule(siteOf(withFile('_headers', '/*\n  X-Frame-Options: DENY\n')), context);
-    expect(findings.map((finding) => finding.route)).toEqual(['/']);
+    expect(findings.map((finding) => finding.route)).toEqual(['/', REPLAY_ROUTE]);
   });
 });
 
@@ -905,6 +923,244 @@ describe('the no-ellipsis rule (UI-SPEC E14)', () => {
   it('passes CSS that wraps rather than truncates', () => {
     const site = siteOf({ ...completeSite(ONE_SHEET), '_astro/a.css': '.a { overflow-wrap: anywhere; text-overflow: clip; }' });
     expect(noEllipsisRule(site, context)).toEqual([]);
+  });
+});
+
+const REPLAY_PAGE_RULES = ['replay-page', 'replay-word-count', 'replay-summary', 'replay-lanes', 'provenance-wording', 'provider-label', 'replay-panels'];
+const replaySite = (body: string): BuiltSite => siteOf({ 'replay/index.html': page(body) });
+const replayTexts = (rule: RuleFunction, body: string, ruleContext = context): string[] => {
+  const findings = rule(replaySite(body), ruleContext);
+  expect(findings.every((finding) => finding.route === REPLAY_ROUTE)).toBe(true);
+  return texts(findings);
+};
+const words = (count: number): string => Array.from({ length: count }, (_, index) => `w${String(index)}`).join(' ');
+const summaryOf = (items: readonly string[]): string => `<ol data-wordcount="summary">${items.map((item) => `<li>${item}</li>`).join('')}</ol>`;
+const [PANEL_1 = '', PANEL_2 = '', PANEL_3 = '', PANEL_4 = ''] = replayPanels();
+
+describe('the replay page rule (D-150 tracer)', () => {
+  it('reports a build without /replay/ once, under replay-page, and no other replay rule', () => {
+    const findings = runBuiltChecks(siteOf({ 'index.html': page('<p>landing</p>') }), context).filter((finding) => REPLAY_PAGE_RULES.includes(finding.rule));
+    expect(findings).toEqual([{ rule: 'replay-page', route: REPLAY_ROUTE, text: 'the build has no replay page at /replay/' }]);
+  });
+
+  it('passes a build that holds the replay page', () => {
+    expect(replayPageRule(replaySite(replayBody()), context)).toEqual([]);
+  });
+});
+
+describe('the replay word count rule (AC-11, AC-E9)', () => {
+  it('splits on whitespace, so a dotted or hyphenated identifier is one word', () => {
+    expect(countWords('SendingOptions.SendingEnabled batch=2026-10-14-b')).toBe(2);
+    expect(countWords('  a\n b' + String.fromCharCode(0xa0) + ' c ')).toBe(3);
+    expect(countWords('')).toBe(0);
+  });
+
+  it('counts the marked elements after tag stripping and entity decoding, SVG text and unmarked text excluded', () => {
+    const body = '<p>outside words here</p>'
+      + '<p data-wordcount="summary"><code>SendingOptions.<wbr>SendingEnabled</code>&nbsp;and <span>batch=2026-10-14-b</span></p>'
+      + '<p data-wordcount="tag">a&amp;b c</p><p data-wordcount="caption">x</p>'
+      + '<section data-wordcount="step"><h2>t</h2><svg><text>not counted at all</text></svg><p>u</p></section>';
+    const [built] = replaySite(body).pages;
+    expect(built === undefined ? -1 : countReplayWords(built)).toBe(8);
+  });
+
+  it('passes the planted replay', () => {
+    expect(replayTexts(replayWordCountRule, replayBody())).toEqual([]);
+  });
+
+  const capped = (stepWords: number): string =>
+    `<p data-wordcount="summary">a</p><p data-wordcount="tag">b</p><p data-wordcount="caption">c</p><section data-wordcount="step"><p>${words(stepWords)}</p></section>`;
+
+  it('passes 238 counted words', () => {
+    expect(replayTexts(replayWordCountRule, capped(235))).toEqual([]);
+  });
+
+  it('fails 239 counted words', () => {
+    expect(replayTexts(replayWordCountRule, capped(236))).toEqual(['the replay counts 239 words, 238 at most']);
+  });
+
+  it('fails a replay page with no counted element', () => {
+    expect(replayTexts(replayWordCountRule, '<main><p>no markers</p></main>')).toEqual(['the replay page has no counted element (data-wordcount)']);
+  });
+
+  it('fails a replay page that counts no tag', () => {
+    expect(replayTexts(replayWordCountRule, capped(1).replace('data-wordcount="tag"', 'data-other'))).toEqual(['the replay page counts no tag (data-wordcount="tag")']);
+  });
+
+  it('fails a counted marker outside the four kinds', () => {
+    expect(replayTexts(replayWordCountRule, `${capped(1)}<p data-wordcount="intro">z</p>`)).toEqual(['data-wordcount="intro" is not one of summary, step, tag, caption']);
+  });
+});
+
+describe('the replay summary rule (AC-5)', () => {
+  const items = REPLAY_VIEW.summary.map((item) => `${item.time} ${item.text}`);
+
+  it('passes the planted summary outside every step panel', () => {
+    expect(replayTexts(replaySummaryRule, replayBody())).toEqual([]);
+  });
+
+  it('fails a summary inside a step panel', () => {
+    const panels = [PANEL_1.replace('</section>', `${replaySummary()}</section>`), PANEL_2, PANEL_3, PANEL_4];
+    expect(replayTexts(replaySummaryRule, replayBody({ summary: '', panels }))).toEqual(['the summary sits inside a step panel, so it does not show on every step']);
+  });
+
+  it('fails a summary that does not name the lane', () => {
+    const summary = summaryOf(items.map((item) => item.replaceAll(REPLAY_VIEW.tag.lane, 'another-lane')));
+    expect(replayTexts(replaySummaryRule, replayBody({ summary }))).toEqual([`the summary does not name the lane ${REPLAY_VIEW.tag.lane}`]);
+  });
+
+  it('fails a summary that does not name the cause', () => {
+    const summary = summaryOf(items.filter((_, index) => index !== 1));
+    expect(replayTexts(replaySummaryRule, replayBody({ summary }))).toEqual([`the summary does not name the cause ${REPLAY_VIEW.tag.cause}`]);
+  });
+
+  it('fails a summary that names the pause without its read-back', () => {
+    const summary = summaryOf(items.map((item, index) => (index === 2 ? 'Paused' : item)));
+    expect(replayTexts(replaySummaryRule, replayBody({ summary }))).toEqual([`the summary does not name the pause with its read-back: "${REPLAY_VIEW.summary[2]?.text ?? ''}"`]);
+  });
+
+  it('fails a summary that names the reopen without its read-back', () => {
+    const summary = summaryOf(items.map((item, index) => (index === 3 ? 'Reopened by command' : item)));
+    expect(replayTexts(replaySummaryRule, replayBody({ summary }))).toEqual([`the summary does not name the reopen with its read-back: "${REPLAY_VIEW.summary[3]?.text ?? ''}"`]);
+  });
+
+  it('fails a replay page with no summary and one with two', () => {
+    expect(replayTexts(replaySummaryRule, replayBody({ summary: '' }))).toEqual(['the replay page has no summary (data-wordcount="summary")']);
+    expect(replayTexts(replaySummaryRule, replayBody({ summary: `${replaySummary()}${replaySummary()}` }))).toEqual(['the replay page has 2 summaries, 1 expected']);
+  });
+});
+
+describe('the replay lanes rule (AC-9)', () => {
+  const { paused, reopened } = REPLAY_VIEW.lanesLines;
+  const [firstOpen = ''] = REPLAY_VIEW.lanesLines.paused.split('Open: ')[1]?.split(', ') ?? [];
+
+  it('passes steps 3 and 4 naming the paused lane and every other lane as open', () => {
+    expect(replayTexts(replayLanesRule, replayBody())).toEqual([]);
+  });
+
+  it('fails step 3 when it misses an open lane', () => {
+    const panels = [PANEL_1, PANEL_2, PANEL_3.replace(paused, paused.replace(`${firstOpen}, `, '')), PANEL_4];
+    expect(replayTexts(replayLanesRule, replayBody({ panels }))).toEqual([`step 3 does not read "${paused}" outside the drawing`]);
+  });
+
+  it('fails step 4 when it misses the closed lane', () => {
+    const panels = [PANEL_1, PANEL_2, PANEL_3, PANEL_4.replace(reopened, reopened.replace(`Reopened: ${REPLAY_VIEW.tag.lane}. `, ''))];
+    expect(replayTexts(replayLanesRule, replayBody({ panels }))).toEqual([`step 4 does not read "${reopened}" outside the drawing`]);
+  });
+
+  it('fails a lanes line that sits only in SVG text', () => {
+    const panels = [PANEL_1, PANEL_2, PANEL_3.replace(`<p>${paused}</p>`, `<svg><text>${paused}</text></svg>`), PANEL_4];
+    expect(replayTexts(replayLanesRule, replayBody({ panels }))).toEqual([`step 3 does not read "${paused}" outside the drawing`]);
+  });
+
+  it('fails a replay page with no step 3 panel', () => {
+    expect(replayTexts(replayLanesRule, replayBody({ panels: [PANEL_1, PANEL_2, PANEL_4] }))).toEqual(['the replay page has no step 3 panel']);
+  });
+});
+
+describe('the provenance wording rule (AC-16, AC-P1, AC-P4)', () => {
+  const caption = (text: string): string => `<p data-wordcount="caption">${text}</p>`;
+
+  it('passes the planted replay of the generated artifact', () => {
+    expect(context.provenance).toBe('generated');
+    expect(replayTexts(provenanceWordingRule, replayBody())).toEqual([]);
+  });
+
+  it.each(['recorded', 'recording', 'captured', 'capture'])('fails a generated replay whose caption says %s', (word) => {
+    const found = replayTexts(provenanceWordingRule, replayBody({ caption: caption(`Fixture ${word} in eu-central-1. Times are illustrative.`) }));
+    expect(found).toHaveLength(1);
+    expect(found[0]).toContain(word);
+  });
+
+  it('fails a doc-derived replay whose control label says captured', () => {
+    const found = replayTexts(provenanceWordingRule, replayBody({ extra: '<button aria-label="Replay the captured run">Replay</button>' }), { ...context, provenance: 'doc-derived' });
+    expect(found).toHaveLength(1);
+    expect(found[0]).toContain('captured');
+  });
+
+  it('leaves the wording of a live replay to its own label', () => {
+    expect(replayTexts(provenanceWordingRule, replayBody({ caption: caption('Recorded from a live run in eu-central-1.') }), { ...context, provenance: 'live' })).toEqual([]);
+  });
+
+  it('fails a generated replay that never calls its times illustrative', () => {
+    const body = replayBody({ intro: '<p>One incident, four steps.</p>', caption: caption('Generated fixture. Not a live account.') });
+    expect(replayTexts(provenanceWordingRule, body)).toEqual(['the replay page does not carry the time wording "Times are illustrative."']);
+  });
+});
+
+describe('the provider label rule (AC-18, AC-P13)', () => {
+  const SOURCE = 'https://provider.test/postmaster';
+  const sourced: ReplayView = {
+    ...REPLAY_VIEW,
+    schedule: { ...REPLAY_VIEW.schedule, rows: REPLAY_VIEW.schedule.rows.map((row) => (row.dimension === 'Provider' ? { ...row, unconfirmed: false, sourceUrl: SOURCE } : row)) },
+  };
+
+  it('passes a provider row with no confirming source that reads unconfirmed', () => {
+    expect(REPLAY_VIEW.schedule.rows.filter((row) => row.dimension === 'Provider' && row.unconfirmed)).toHaveLength(1);
+    expect(replayTexts(providerLabelRule, replayBody())).toEqual([]);
+  });
+
+  it('fails a provider row with no confirming source and no unconfirmed label', () => {
+    const panels = [PANEL_1, PANEL_2.replace(' <span>unconfirmed</span>', ''), PANEL_3, PANEL_4];
+    const found = replayTexts(providerLabelRule, replayBody({ panels }));
+    expect(found).toHaveLength(1);
+    expect(found[0]).toMatch(/^the provider row ".+" has no confirming source and no unconfirmed label$/);
+  });
+
+  it('passes a provider row whose confirming source renders as a link', () => {
+    expect(replayTexts(providerLabelRule, replayBody({}, sourced), { ...context, replay: sourced })).toEqual([]);
+  });
+
+  it('fails a provider row whose confirming source renders as plain text', () => {
+    const [, two = ''] = replayPanels(sourced);
+    const plain = two.replace(new RegExp(`<a href="${SOURCE}">(.*?)</a>`), `$1 ${SOURCE}`);
+    expect(plain).not.toBe(two);
+    const found = replayTexts(providerLabelRule, replayBody({ panels: [PANEL_1, plain, PANEL_3, PANEL_4] }, sourced), { ...context, replay: sourced });
+    expect(found).toHaveLength(1);
+    expect(found[0]).toMatch(new RegExp(`^the provider row ".+" shows its confirming source ${SOURCE} as plain text, not a link$`));
+  });
+
+  it('fails a page that marks fewer provider rows than the artifact holds', () => {
+    const panels = [PANEL_1, PANEL_2.replace(' data-provider-row', ''), PANEL_3, PANEL_4];
+    expect(replayTexts(providerLabelRule, replayBody({ panels }))).toEqual(['the replay page marks 0 provider row(s); the artifact has 1']);
+  });
+});
+
+describe('the replay panels rule (AC-E7, AC-10 static half)', () => {
+  it('passes four panels in step order with nothing hiding them', () => {
+    expect(replayTexts(replayPanelsRule, replayBody())).toEqual([]);
+  });
+
+  it.each(['hidden', 'aria-hidden="true"'])('fails a step panel carrying %s', (attribute) => {
+    const panels = [PANEL_1, PANEL_2.replace('data-steps="2"', `data-steps="2" ${attribute}`), PANEL_3, PANEL_4];
+    const name = attribute.split('=')[0] ?? '';
+    expect(replayTexts(replayPanelsRule, replayBody({ panels }))).toEqual([`step panel 2 is hidden from the accessibility tree by ${name} on <section>`]);
+  });
+
+  it('fails step panels inside a hidden wrapper', () => {
+    const panels = [`<div hidden>${PANEL_1}`, PANEL_2, PANEL_3, `${PANEL_4}</div>`];
+    expect(replayTexts(replayPanelsRule, replayBody({ panels }))).toEqual([1, 2, 3, 4].map((step) => `step panel ${String(step)} is hidden from the accessibility tree by hidden on <div>`));
+  });
+
+  it('fails panels out of step order in the HTML', () => {
+    expect(replayTexts(replayPanelsRule, replayBody({ panels: [PANEL_1, PANEL_3, PANEL_2, PANEL_4] }))).toEqual(['the step panels read 1, 3, 2, 4 in HTML order; 1, 2, 3, 4 expected']);
+  });
+
+  it('fails a replay page with three step panels', () => {
+    expect(replayTexts(replayPanelsRule, replayBody({ panels: [PANEL_1, PANEL_2, PANEL_3] }))).toEqual(['the replay page has 3 step panels, 4 expected']);
+  });
+});
+
+describe('the type token use rule (AC-63 use half)', () => {
+  it('passes built CSS that uses all six R14 names through var()', () => {
+    expect(typeTokenUseRule(siteOf(completeSite(ONE_SHEET)), context)).toEqual([]);
+  });
+
+  // tokens.css itself writes var(--text-small) for the compact alias; a use there is a declaration.
+  it.each(['--text-lede', '--text-intro', '--text-narrative-headline', '--text-small', '--text-mono-value', '--text-schedule-compact'])('fails built CSS that declares %s and never uses it', (name) => {
+    const css = TYPE_TOKEN_CSS.replace(`var(${name})`, '1rem');
+    expect(css).not.toBe(TYPE_TOKEN_CSS);
+    expect(texts(typeTokenUseRule(siteOf({ ...completeSite(ONE_SHEET), '_astro/site.css': css }), context))).toEqual([`the built CSS never uses ${name} through var()`]);
   });
 });
 
