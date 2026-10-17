@@ -3,7 +3,14 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { PROVENANCES } from './records.js';
-import { assertPublishable, replayArtifactHash, replayArtifactSchema, type ReplayArtifact } from './replay-artifact.js';
+import {
+  assertPublishable,
+  issuePath,
+  replayArtifactHash,
+  replayArtifactSchema,
+  reportIssue,
+  type ReplayArtifact,
+} from './replay-artifact.js';
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 const ARTIFACT_FILE = join(REPO_ROOT, 'packages', 'web', 'src', 'fixtures', 'replay-incident.json');
@@ -218,5 +225,64 @@ describe('assertPublishable', () => {
     const artifact = liveCopy();
     const manifest = { ...completeManifest(artifact), sesMessageIds: [], requestIds: [], accountId: '1' };
     expect(errorsOf(assertPublishable(artifact, manifest))).toHaveLength(3);
+  });
+
+  it('names a missing manifest field and an unknown manifest key', () => {
+    const artifact = liveCopy();
+    const { accountId: _dropped, ...withoutAccount } = completeManifest(artifact);
+    expect(errorsOf(assertPublishable(artifact, { ...withoutAccount, note: 'x' }))).toEqual([
+      expect.stringMatching(/^provenance is live but capture-manifest\.json accountId: is missing\./),
+      expect.stringMatching(/^provenance is live but capture-manifest\.json holds the unknown key note\./),
+    ]);
+  });
+});
+
+describe('reportIssue and issuePath', () => {
+  function reports(candidate: unknown): ReturnType<typeof reportIssue>[] {
+    const result = replayArtifactSchema.safeParse(candidate, { reportInput: true });
+    return result.success ? [] : result.error.issues.map(reportIssue);
+  }
+
+  it('joins keys with dots and indexes with brackets', () => {
+    expect(issuePath(['events', 3, 'provenance'])).toBe('events[3].provenance');
+    expect(issuePath([])).toBe('');
+  });
+
+  it('reports a wrong literal, a non-integer, null and an array by what was found', () => {
+    const artifact = shipped();
+    expect(reports({ ...artifact, schemaVersion: 2 })).toEqual([{ path: 'schemaVersion', problem: '2 is not 1', fix: 'Use that value' }]);
+    expect(reports({ ...artifact, window: { ...artifact.window, sends: 412.5 } })).toEqual([
+      { path: 'window.sends', problem: 'expected an integer, found a number', fix: 'Write it as that type' },
+    ]);
+    expect(reports({ ...artifact, closedLane: null })).toEqual([{ path: 'closedLane', problem: 'expected a string, found null', fix: 'Write it as that type' }]);
+    expect(reports({ ...artifact, closedLane: ['fothering-bulk'] })).toEqual([
+      { path: 'closedLane', problem: 'expected a string, found an array', fix: 'Write it as that type' },
+    ]);
+  });
+
+  it('reports an empty list, an empty text, an unknown key, a format and a cross-field rule', () => {
+    const artifact = shipped();
+    expect(reports({ ...artifact, events: [] })).toEqual([{ path: 'events', problem: 'is empty', fix: 'Add at least one entry' }]);
+    expect(reports({ ...artifact, agent: { ...artifact.agent, paragraph: '' } })[0]).toMatchObject({ path: 'agent.paragraph', fix: 'Correct the value' });
+    expect(reports({ ...artifact, rate: '7.5' })).toEqual([{ path: '', problem: 'holds the unknown key rate', fix: 'Remove it' }]);
+    expect(reports({ ...artifact, email: { ...artifact.email, sentAtUtc: 'soon' } })).toEqual([
+      { path: 'email.sentAtUtc', problem: 'must be an ISO 8601 UTC time such as 2026-10-14T14:01:00Z', fix: 'Correct the value' },
+    ]);
+    expect(reports({ ...artifact, closedLane: 'fothering-other' })).toEqual([
+      { path: 'closedLane', problem: '"fothering-other" is not one of the artifact\'s lanes', fix: 'Correct the value' },
+    ]);
+  });
+});
+
+describe('canonical JSON', () => {
+  it('refuses a non-integer number rather than hashing a printed float', () => {
+    const artifact = shipped();
+    expect(() => replayArtifactHash({ ...artifact, window: { ...artifact.window, sends: 1.5 } })).toThrow(RangeError);
+  });
+
+  it('leaves out an absent optional field, so it hashes like a copy without the key', () => {
+    const artifact = shipped();
+    const { holdCheck: _dropped, ...withoutHold } = artifact;
+    expect(replayArtifactHash({ ...artifact, holdCheck: undefined })).toBe(replayArtifactHash(withoutHold));
   });
 });
