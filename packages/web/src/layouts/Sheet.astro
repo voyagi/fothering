@@ -1,0 +1,26 @@
+---
+import { headMeta, type SheetRoute } from '../site/route-list.ts';
+
+interface Props {
+  route: SheetRoute;
+}
+
+const head = headMeta(Astro.props.route);
+---
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light dark" />
+    <title>{head.title}</title>
+    {head.metas.map((attrs) => <meta {...attrs} />)}
+    {head.links.map((attrs) => <link {...attrs} />)}
+  </head>
+  <body>
+    <a href="#main">Skip to main content</a>
+    <main id="main" tabindex="-1">
+      <slot />
+    </main>
+  </body>
+</html>

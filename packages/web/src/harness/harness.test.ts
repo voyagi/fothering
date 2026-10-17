@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { afterAll, describe, expect, it, vi } from 'vitest';
 import { main, PROCESS_IO, waitForSignal, type CliIo } from './cli.js';
 import { DRIVER_JOB_TOKEN, runDriver, stageAxeSource, writeDriver } from './dev-browser.js';
-import { page, plantDist } from '../test/planted-dist.js';
+import { completeSite, page, plantDist } from '../test/planted-dist.js';
 import {
   A11Y_MESSAGES,
   ACCEPTED_INCOMPLETE,
@@ -607,8 +607,8 @@ describe('the built checks through the CLI and the e2e step (D-150, D-151)', () 
     for (const tree of trees) tree.remove();
   });
 
-  const dashed = plantSite({ 'index.html': page('<p>closed \u2014 one lane</p>'), 'replay/index.html': page('<p>clean - text</p>') });
-  const clean = plantSite({ 'index.html': page('<p>closed - one lane</p>') });
+  const dashed = plantSite(completeSite({ 'index.html': '<p>closed \u2014 one lane</p>', 'replay/index.html': '<p>clean - text</p>' }));
+  const clean = plantSite(completeSite({ 'index.html': '<p>closed - one lane</p>' }));
 
   async function builtChecks(dist: string, ...flags: string[]): Promise<{ code: number; out: string[] }> {
     const { io, out } = cliIo();
@@ -671,7 +671,7 @@ describe('the built checks through the CLI and the e2e step (D-150, D-151)', () 
   });
 
   it('--expect dash over a dist with an em dash and a reply promise names reply-promise as unexpected, and --allow reply-promise passes it', async () => {
-    const both = plantSite({ 'index.html': page('<p>closed &mdash; one lane</p><p>Reply to approve the pause.</p>') });
+    const both = plantSite(completeSite({ 'index.html': '<p>closed &mdash; one lane</p><p>Reply to approve the pause.</p>' }));
     const strict = await builtChecks(both.dist, '--expect', 'dash');
     expect(strict.code).toBe(1);
     expect(strict.out).toContain(E2E_MESSAGES.checksFail(E2E_MESSAGES.unexpected('reply-promise', 1)));
@@ -698,7 +698,7 @@ describe('the built checks through the CLI and the e2e step (D-150, D-151)', () 
   }
 
   it('runSiteE2e runs the client-secret scan, the file budget, the built checks and the second build in order, then passes', async () => {
-    const tree = plantSite({ 'index.html': page('<p>closed - one lane</p>'), 'tokens.css': ':root {}' });
+    const tree = plantSite({ ...completeSite({ 'index.html': '<p>closed - one lane</p>' }), 'tokens.css': ':root {}' });
     const { code, lines } = await e2e(tree);
     expect(code).toBe(0);
     const steps = lines.filter((line) => line.startsWith('[e2e] step '));
@@ -717,7 +717,7 @@ describe('the built checks through the CLI and the e2e step (D-150, D-151)', () 
   });
 
   it('runSiteE2e fails when the second build differs from the first in one byte, naming the file', async () => {
-    const tree = plantSite({ 'index.html': page('<p>clean</p>'), 'replay/index.html': page('<p>replay</p>') });
+    const tree = plantSite(completeSite({ 'index.html': '<p>clean</p>', 'replay/index.html': '<p>replay</p>' }));
     const differing = copyBuild(tree.dist, (outDir) => writeFileSync(join(outDir, 'replay', 'index.html'), `${page('<p>replay</p>')} `));
     const { code, lines } = await e2e(tree, { secondBuild: differing });
     expect(code).toBe(1);
@@ -726,7 +726,7 @@ describe('the built checks through the CLI and the e2e step (D-150, D-151)', () 
   });
 
   it('runSiteE2e fails when the second build does not finish', async () => {
-    const tree = plantSite({ 'index.html': page('<p>clean</p>') });
+    const tree = plantSite(completeSite({ 'index.html': '<p>clean</p>' }));
     const { code, lines } = await e2e(tree, { secondBuild: () => ({ status: 3, output: 'astro said no' }) });
     expect(code).toBe(1);
     expect(lines.at(-1)).toBe(E2E_MESSAGES.fail(E2E_MESSAGES.secondBuildFailed(3, 'astro said no')));

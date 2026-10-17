@@ -44,6 +44,8 @@ export interface BuiltSite {
   readonly css: readonly BuiltFile[];
   readonly scripts: readonly BuiltFile[];
   readonly headers: string | null;
+  readonly sitemap: string | null;
+  readonly robots: string | null;
 }
 
 export const NOT_FOUND_ROUTE = '404 page';
@@ -183,18 +185,24 @@ function readPage(dist: string, file: string): BuiltPage {
 
 const readText = (dist: string, file: string): BuiltFile => ({ file, text: readFileSync(join(dist, file), 'utf8') });
 
+function readOptional(dist: string, file: string): string | null {
+  const path = join(dist, file);
+  return existsSync(path) ? readFileSync(path, 'utf8') : null;
+}
+
 export function loadBuiltSite(dist: string): BuiltSite {
   const files = filesIn(dist);
   // Reported in route order, the order the audit and the sitemap use.
   const pages = files.filter((file) => file.endsWith('.html')).map((file) => readPage(dist, file))
     .sort((left, right) => (left.route < right.route ? -1 : left.route > right.route ? 1 : 0));
   if (pages.length === 0) throw new NoBuiltPagesError(dist);
-  const headersPath = join(dist, '_headers');
   return {
     dist,
     pages,
     css: files.filter((file) => file.endsWith('.css')).map((file) => readText(dist, file)),
     scripts: files.filter((file) => /\.(?:js|mjs)$/.test(file)).map((file) => readText(dist, file)),
-    headers: existsSync(headersPath) ? readFileSync(headersPath, 'utf8') : null,
+    headers: readOptional(dist, '_headers'),
+    sitemap: readOptional(dist, 'sitemap.xml'),
+    robots: readOptional(dist, 'robots.txt'),
   };
 }

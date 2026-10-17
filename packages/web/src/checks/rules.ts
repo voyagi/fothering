@@ -5,8 +5,8 @@ import {
   REGION_CLAIM_PATTERNS,
   THEME_RADIO_LIMIT,
 } from '../site/content.js';
-import type { SiteRoute } from '../site/route-list.js';
-import { textOf, walk, type BuiltElement, type BuiltPage, type BuiltSite } from './built-site.js';
+import { sitemapUrls, type SiteRoute } from '../site/route-list.js';
+import { NOT_FOUND_ROUTE as NOT_FOUND_PAGE, textOf, walk, type BuiltElement, type BuiltPage, type BuiltSite } from './built-site.js';
 
 // Later plans' expected-red tracers name these ids, so an id is never renamed once a plan names it.
 export const RULE_IDS = Object.freeze([
@@ -22,6 +22,9 @@ export const RULE_IDS = Object.freeze([
   'pre-r6-words',
   'forms-cookies-analytics',
   'third-party-reference',
+  'page-metadata',
+  'sitemap',
+  'robots',
 ] as const);
 
 export type RuleId = (typeof RULE_IDS)[number];
@@ -278,16 +281,101 @@ export function thirdPartyReferenceRule(site: BuiltSite, _context: CheckContext)
   return [...onPages, ...inCss];
 }
 
-export function pageMetadataRule(_site: BuiltSite, _context: CheckContext): Finding[] {
-  return [];
+const REQUIRED_METAS: readonly (readonly [string, string])[] = [
+  ['name', 'description'],
+  ['property', 'og:title'],
+  ['property', 'og:description'],
+  ['property', 'og:type'],
+  ['name', 'twitter:card'],
+];
+
+// A drawing's SVG <title> is its accessible name, not the page's title.
+function headTitle(page: BuiltPage): string {
+  let title = '';
+  walk(page.root, (element) => {
+    if (title === '' && element.tag === 'title' && !element.inSvg) title = textOf(element);
+  });
+  return title;
 }
 
-export function sitemapRule(_site: BuiltSite, _context: CheckContext): Finding[] {
-  return [];
+const metaContent = (page: BuiltPage, key: string, value: string): string => (page.metas.find((meta) => meta[key] === value)?.content ?? '').trim();
+
+export function pageMetadataRule(site: BuiltSite, _context: CheckContext): Finding[] {
+  const rule = 'page-metadata' as const;
+  const findings: Finding[] = [];
+  const firstWith = { title: new Map<string, string>(), description: new Map<string, string>() };
+  const noteShared = (kind: keyof typeof firstWith, value: string, route: string): void => {
+    if (value === '') return;
+    const first = firstWith[kind].get(value);
+    if (first === undefined) firstWith[kind].set(value, route);
+    else findings.push({ rule, route, text: `the ${kind} "${clip(value)}" is also the ${kind} of ${first}` });
+  };
+  for (const page of site.pages) {
+    const title = headTitle(page);
+    if (title === '') findings.push({ rule, route: page.route, text: 'the page has no title' });
+    for (const [key, value] of REQUIRED_METAS) {
+      if (metaContent(page, key, value) === '') findings.push({ rule, route: page.route, text: `the page has no meta ${key}="${value}" with content` });
+    }
+    noteShared('title', title, page.route);
+    noteShared('description', metaContent(page, 'name', 'description'), page.route);
+  }
+  return findings;
 }
 
-export function robotsRule(_site: BuiltSite, _context: CheckContext): Finding[] {
-  return [];
+// Workers answers /404 and /404/ with the 404 page and redirects /404.html there.
+const NOT_FOUND_PATHS: ReadonlySet<string> = new Set(['/404', '/404/', '/404.html']);
+
+function sitemapPaths(urls: readonly string[], origin: string, report: (text: string) => void): Map<string, number> {
+  const counts = new Map<string, number>();
+  for (const url of urls) {
+    if (!url.startsWith(`${origin}/`)) {
+      report(`${clip(url)} is not an absolute URL on ${origin}`);
+      continue;
+    }
+    const path = url.slice(origin.length);
+    counts.set(path, (counts.get(path) ?? 0) + 1);
+  }
+  return counts;
+}
+
+// The sitemap and the built pages are compared as sets from the same build, so a page added
+// without its route-list entry, or an entry with no page, fails here (AC-E39).
+export function sitemapRule(site: BuiltSite, context: CheckContext): Finding[] {
+  const rule = 'sitemap' as const;
+  const route = fileRoute('sitemap.xml');
+  if (site.sitemap === null) return [{ rule, route, text: 'dist/sitemap.xml is missing' }];
+  const urls = sitemapUrls(site.sitemap);
+  if (urls.length === 0) return [{ rule, route, text: 'the sitemap lists zero URLs' }];
+  const findings: Finding[] = [];
+  const report = (text: string): void => {
+    findings.push({ rule, route, text });
+  };
+  const counts = sitemapPaths(urls, context.siteOrigin, report);
+  const notIndexable = new Set(context.routes.filter((entry) => !entry.indexable).map((entry) => entry.path));
+  const built = new Set(site.pages.map((page) => page.route).filter((path) => path !== NOT_FOUND_PAGE && !notIndexable.has(path)));
+  for (const [path, count] of counts) {
+    if (count > 1) report(`the sitemap lists ${path} ${count} times`);
+    if (NOT_FOUND_PATHS.has(path)) report(`the sitemap lists the 404 page at ${path}`);
+    else if (!built.has(path)) report(`the sitemap lists ${path}, which the build lacks`);
+  }
+  for (const path of built) {
+    if (!counts.has(path)) findings.push({ rule, route: path, text: `${path} is a built route missing from the sitemap` });
+  }
+  return findings;
+}
+
+export function robotsRule(site: BuiltSite, context: CheckContext): Finding[] {
+  const rule = 'robots' as const;
+  const route = fileRoute('robots.txt');
+  if (site.robots === null) return [{ rule, route, text: 'dist/robots.txt is missing' }];
+  const lines = site.robots.split(/\r?\n/).map((line) => line.trim());
+  const sitemapUrl = `${context.siteOrigin}/sitemap.xml`;
+  const required: readonly (readonly [RegExp, string])[] = [
+    [/^user-agent:\s*\*$/i, 'robots.txt has no "User-agent: *" line'],
+    [/^allow:\s*\/$/i, 'robots.txt has no "Allow: /" line'],
+    [new RegExp(`^sitemap:\\s*${escapeRegExp(sitemapUrl)}$`, 'i'), `robots.txt does not name the sitemap at ${sitemapUrl}`],
+  ];
+  return required.filter(([pattern]) => !lines.some((line) => pattern.test(line))).map(([, text]) => ({ rule, route, text }));
 }
 
 // Workers limits: 20,000 files per version on the Free plan and 25 MiB per file (AC-62).
@@ -322,6 +410,9 @@ const RULES: Readonly<Record<RuleId, Rule>> = {
   'pre-r6-words': preR6WordsRule,
   'forms-cookies-analytics': formsCookiesAnalyticsRule,
   'third-party-reference': thirdPartyReferenceRule,
+  'page-metadata': pageMetadataRule,
+  'sitemap': sitemapRule,
+  'robots': robotsRule,
 };
 
 // Every rule runs over the whole site and every hit is kept, so one report names them all.

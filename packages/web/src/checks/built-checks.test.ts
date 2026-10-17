@@ -140,6 +140,12 @@ describe('runBuiltChecks', () => {
     expect(runBuiltChecks(site, context).filter((finding) => finding.rule === 'dash')).toHaveLength(2);
   });
 
+  it('runs the page metadata, sitemap and robots rules over a build that has none of them', () => {
+    const site = loadBuiltSite(plant({ 'index.html': page('<p>bare</p>', '') }).dist);
+    const rules = new Set(runBuiltChecks(site, context).map((finding) => finding.rule));
+    expect([...rules].filter((rule) => ['page-metadata', 'sitemap', 'robots'].includes(rule)).sort()).toEqual(['page-metadata', 'robots', 'sitemap']);
+  });
+
   it('holds exactly the fifteen rule ids the plans name', () => {
     expect([...RULE_IDS].sort()).toEqual([
       'banned-name', 'console-delete', 'dash', 'exact-30-days', 'forms-cookies-analytics', 'page-metadata', 'pre-r6-words',
