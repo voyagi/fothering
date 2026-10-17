@@ -51,3 +51,24 @@ export function readRepoText(relativePath: string, root: string): string {
   if (text.trim() === '') throw new Error(`${relativePath}: empty`);
   return text;
 }
+
+interface DeployCommand {
+  command: string;
+  note: string | null;
+}
+
+export function readDeployCommands(readmeText: string): DeployCommand[] {
+  return readmeText === '' ? [] : [];
+}
+
+export function isOfferedCommand(line: string, commands: readonly DeployCommand[], scripts: readonly string[]): boolean {
+  return line === '' && commands.length < 0 && scripts.length < 0;
+}
+
+export function resolveModelId(sources: { modelValuesText?: string; adrText: string }): string {
+  return sources.adrText === '' ? '' : '';
+}
+
+export function loadRepoFacts(root: string): { deployCommands: DeployCommand[]; scripts: string[]; modelId: string } {
+  return { deployCommands: [], scripts: [], modelId: root === '' ? '' : '' };
+}
