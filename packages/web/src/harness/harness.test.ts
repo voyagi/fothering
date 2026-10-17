@@ -5,16 +5,20 @@ import { fileURLToPath } from 'node:url';
 import { afterAll, describe, expect, it, vi } from 'vitest';
 import { main, PROCESS_IO, waitForSignal, type CliIo } from './cli.js';
 import { DRIVER_JOB_TOKEN, runDriver, stageAxeSource, writeDriver } from './dev-browser.js';
+import { page, plantDist } from '../test/planted-dist.js';
 import {
   A11Y_MESSAGES,
   ACCEPTED_INCOMPLETE,
   AXE_CONFIG,
+  E2E_MESSAGES,
   auditReasons,
   axeReasons,
   keyboardVerdict,
+  loadCheckContext,
   overflowVerdict,
   routesFromDist,
   runA11yLive,
+  runSiteE2e,
   type AuditLine,
   type AxeReport,
   type FocusStop,
@@ -584,5 +588,77 @@ describe('cli main', () => {
       expect(await main(argv, io), argv.join(' ')).toBe(1);
       expect(err, argv.join(' ')).toEqual([message]);
     }
+  });
+});
+
+describe('the built checks through the CLI and the e2e step (D-150, D-151)', () => {
+  const trees: ReturnType<typeof plantDist>[] = [];
+  const plantSite = (files: Record<string, string>): ReturnType<typeof plantDist> => {
+    const tree = plantDist(files);
+    trees.push(tree);
+    return tree;
+  };
+  afterAll(() => {
+    for (const tree of trees) tree.remove();
+  });
+
+  const dashed = plantSite({ 'index.html': page('<p>closed — one lane</p>'), 'replay/index.html': page('<p>clean - text</p>') });
+  const clean = plantSite({ 'index.html': page('<p>closed - one lane</p>') });
+
+  async function builtChecks(dist: string, ...flags: string[]): Promise<{ code: number; out: string[] }> {
+    const { io, out } = cliIo();
+    const code = await main(['built-checks', '--repo-root', dashed.root, '--dist', dist, ...flags], io);
+    allOutput.push(...out);
+    return { code, out };
+  }
+
+  it('built-checks over a dist holding an em dash returns 1 and prints the route and the text', async () => {
+    const { code, out } = await builtChecks(dashed.dist);
+    expect(code).toBe(1);
+    expect(out.some((line) => line.startsWith('[built-checks] dash /: ') && line.includes('closed — one lane'))).toBe(true);
+  });
+
+  it('built-checks over a clean dist returns 0', async () => {
+    const { code, out } = await builtChecks(clean.dist);
+    expect(code).toBe(0);
+    expect(out.at(-1)).toBe(E2E_MESSAGES.checksPass(1));
+  });
+
+  it('runSiteE2e over a missing dist returns 1 with its catalogue message', async () => {
+    const lines: string[] = [];
+    const missing = join(clean.root, 'no-such-repo');
+    expect(await runSiteE2e({ repoRoot: missing, globalModules: missing, print: (line) => lines.push(line) })).toBe(1);
+    expect(lines).toEqual([E2E_MESSAGES.fail(E2E_MESSAGES.noDist(join(missing, 'packages', 'web', 'dist')))]);
+  });
+
+  it('--expect dash over the em-dash dist returns 0', async () => {
+    expect((await builtChecks(dashed.dist, '--expect', 'dash')).code).toBe(0);
+  });
+
+  it('--expect dash over the clean dist returns 1 naming dash as expected with no finding', async () => {
+    const { code, out } = await builtChecks(clean.dist, '--expect', 'dash');
+    expect(code).toBe(1);
+    expect(out).toContain(E2E_MESSAGES.checksFail(E2E_MESSAGES.expectedMissing('dash')));
+  });
+
+  it('--expect no-such-rule returns 1 naming the unregistered id', async () => {
+    const { code, out } = await builtChecks(dashed.dist, '--expect', 'no-such-rule');
+    expect(code).toBe(1);
+    expect(out).toContain(E2E_MESSAGES.checksFail(E2E_MESSAGES.unregistered('no-such-rule')));
+  });
+
+  it('the e2e step and the built-checks subcommand judge one build with equal contexts', async () => {
+    expect(loadCheckContext(dashed.root)).toEqual(loadCheckContext(dashed.root));
+    const e2eLines: string[] = [];
+    expect(await runSiteE2e({ repoRoot: dashed.root, globalModules: dashed.root, print: (line) => e2eLines.push(line) })).toBe(1);
+    const { out } = await builtChecks(dashed.dist);
+    const findingLines = (lines: readonly string[]): string[] => lines.filter((line) => line.startsWith('[built-checks] dash '));
+    expect(findingLines(e2eLines)).toEqual(findingLines(out));
+    expect(findingLines(out)).toHaveLength(1);
+    allOutput.push(...e2eLines);
+  });
+
+  it('prints the uppercase skip word in no line of any run so far', () => {
+    expect(allOutput.filter((line) => SKIP_WORD.test(line))).toEqual([]);
   });
 });

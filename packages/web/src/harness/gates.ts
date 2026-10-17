@@ -11,6 +11,7 @@ import {
   type DriverRun,
 } from './dev-browser.js';
 import { startPreviewServer, type PreviewServer } from './preview-server.js';
+import type { CheckContext } from '../checks/rules.js';
 
 export interface ThemeSetup {
   readonly name: string;
@@ -419,4 +420,34 @@ export async function runA11yLive(options: A11yLiveOptions): Promise<number> {
     staged.remove();
     rmSync(workDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
   }
+}
+
+export const E2E_MESSAGES = Object.freeze({
+  step: (name: string) => `[e2e] step ${name}: ok`,
+  fail: (reason: string) => `[e2e] FAIL: ${reason}`,
+  pass: (pages: number, steps: number) => `[e2e] PASS: ${steps} step(s) ok over ${pages} built page(s)`,
+  noDist: (dist: string) => `${dist} does not exist; run npm run build first, so the e2e step did not run`,
+  noPages: (dist: string) => `${dist} holds no built HTML page, so the built checks did not run`,
+  finding: (rule: string, route: string, text: string) => `[built-checks] ${rule} ${route}: ${text}`,
+  findings: (count: number, first: string) => `the built checks reported ${count} finding(s); first: ${first}`,
+  checksPass: (pages: number) => `[built-checks] PASS: ${pages} built page(s), 0 findings`,
+  expectPass: (pages: number) => `[built-checks] PASS: ${pages} built page(s), every finding expected or allowed and every expected rule found`,
+  checksFail: (reason: string) => `[built-checks] FAIL: ${reason}`,
+  unregistered: (id: string) => `${id} is not a registered rule`,
+  unexpected: (id: string, count: number) => `${count} finding(s) of rule ${id}, which is neither expected nor allowed`,
+  expectedMissing: (id: string) => `rule ${id} is expected and has no finding`,
+});
+
+export function loadCheckContext(repoRoot: string): CheckContext {
+  return { repoRoot };
+}
+
+export interface SiteE2eOptions {
+  readonly repoRoot: string;
+  readonly globalModules: string;
+  readonly print?: (line: string) => void;
+}
+
+export function runSiteE2e(_options: SiteE2eOptions): Promise<number> {
+  return Promise.resolve(0);
 }
