@@ -237,20 +237,94 @@ export interface StorageReading {
 
 export const SITE_FAMILIES = Object.freeze(['Red Hat Display', 'Red Hat Text', 'Red Hat Mono']);
 
-export function switchVerdict(_reading: SwitchReading): Verdict {
-  return { ok: true };
+const THEME_ORDER = ['device', 'light', 'dark'];
+const PINNED_CHOICES = ['light', 'dark'];
+// AC-E29 names these three stored values; each must leave Device checked.
+const INVALID_STORED = ['blue', '', 'DARK'];
+const STORAGE_KEYS: ReadonlySet<string> = new Set(['fothering-theme', 'fothering-flow']);
+
+const verdictOf = (reasons: readonly string[]): Verdict => (reasons.length === 0 ? { ok: true } : { ok: false, reason: reasons.join('; ') });
+const sameOrder = (order: readonly string[]): boolean => order.join(',') === THEME_ORDER.join(',');
+
+function choiceReasons(chosen: readonly ChosenTheme[]): string[] {
+  return PINNED_CHOICES.flatMap((choice) => {
+    const entry = chosen.find((item) => item.choice === choice);
+    if (entry === undefined) return [E2E_MESSAGES.choiceMissing(choice)];
+    if (entry.stored !== choice) return [E2E_MESSAGES.choiceNotStored(choice, entry.stored)];
+    return entry.reloadedTheme === choice && entry.reloadedChecked === choice ? [] : [E2E_MESSAGES.choiceNotKept(choice, entry.reloadedTheme, entry.reloadedChecked)];
+  });
 }
 
-export function fontsVerdict(_reading: FontsReading): Verdict {
-  return { ok: true };
+function orderReasons(reading: SwitchReading): string[] {
+  const reasons = sameOrder(reading.domOrder) ? [] : [E2E_MESSAGES.domOrder(reading.domOrder)];
+  if (reading.boxOrders.length === 0) return [...reasons, E2E_MESSAGES.noBoxOrder()];
+  return [...reasons, ...reading.boxOrders.filter((box) => !sameOrder(box.order)).map((box) => E2E_MESSAGES.boxOrder(box.width, box.order))];
 }
 
-export function requestsVerdict(_reading: RequestsReading): Verdict {
-  return { ok: true };
+// AC-41, AC-E29, AC-E30: every way the switch can fail on one route is named, so one run shows them all.
+export function switchVerdict(reading: SwitchReading): Verdict {
+  const reasons: string[] = [];
+  if (reading.deviceStored !== null) reasons.push(E2E_MESSAGES.deviceStored(reading.deviceStored));
+  reasons.push(...choiceReasons(reading.chosen));
+  const { light, dark } = reading.osFlip;
+  if (light !== groundFor('light') || dark !== groundFor('dark')) reasons.push(E2E_MESSAGES.osNotFollowed(light, dark, groundFor('light'), groundFor('dark')));
+  for (const value of INVALID_STORED) {
+    const entry = reading.invalid.find((item) => item.stored === value);
+    if (entry === undefined) reasons.push(E2E_MESSAGES.invalidMissing(value));
+    else if (entry.checked !== 'device') reasons.push(E2E_MESSAGES.invalidChecked(value, entry.checked));
+  }
+  reasons.push(...orderReasons(reading));
+  if (reading.arrow.before === reading.arrow.after) reasons.push(E2E_MESSAGES.arrowStill(reading.arrow.after));
+  return verdictOf(reasons);
 }
 
-export function storageVerdict(_reading: StorageReading): Verdict {
-  return { ok: true };
+// D-135: check() can answer true for a family with no face at all, so a loaded face is required
+// too, and a family the site never declares must read absent or the check proves nothing.
+export function fontsVerdict(reading: FontsReading): Verdict {
+  const reasons = SITE_FAMILIES.flatMap((family) => {
+    const entry = reading.families.find((item) => item.family === family);
+    if (entry === undefined) return [E2E_MESSAGES.fontMissing(family)];
+    if (!entry.loaded) return [E2E_MESSAGES.fontNotLoaded(family)];
+    return entry.check ? [] : [E2E_MESSAGES.fontCheckFalse(family)];
+  });
+  if (reading.control.present) reasons.push(E2E_MESSAGES.fontControl(reading.control.family));
+  return verdictOf(reasons);
+}
+
+function originOf(url: string): string {
+  try {
+    return new URL(url).origin;
+  } catch {
+    return url;
+  }
+}
+
+// AC-57 and AC-E52: origins compare as a sorted set, so the order requests arrive in never
+// changes the verdict or its wording.
+export function requestsVerdict(reading: RequestsReading): Verdict {
+  if (reading.requests.length === 0) return { ok: false, reason: E2E_MESSAGES.noRequests() };
+  const page = originOf(reading.page);
+  const foreign = [...new Set(reading.requests.map(originOf))].filter((origin) => origin !== page).sort();
+  return foreign.length === 0 ? { ok: true } : { ok: false, reason: E2E_MESSAGES.foreignRequest(page, foreign) };
+}
+
+// D-141: the two localStorage keys are the site's only stored state; sessionStorage holds none.
+export function storageVerdict(reading: StorageReading): Verdict {
+  const outside = [...reading.local.filter((key) => !STORAGE_KEYS.has(key)), ...reading.session.map((key) => `session:${key}`)];
+  return outside.length === 0 ? { ok: true } : { ok: false, reason: E2E_MESSAGES.storageKeys(outside) };
+}
+
+const NOT_FOUND_LOAD = /^Failed to load resource: the server responded with a status of 404\b/;
+
+// Chromium logs the unknown address's own 404 as a console error; that answer is the 404 page
+// working (AC-52), while a 404 for any other resource is a broken page.
+export function isExpectedNotFound(record: { readonly text: string; readonly url: string }): boolean {
+  if (!NOT_FOUND_LOAD.test(record.text)) return false;
+  try {
+    return new URL(record.url).pathname === UNKNOWN_PATH;
+  } catch {
+    return false;
+  }
 }
 
 export function overflowVerdict(scrollWidth: number, viewportWidth: number): Verdict {
@@ -846,24 +920,100 @@ function judgeCheck(check: RenderedCheck, text: string | undefined): { verdict: 
   return judged ?? { verdict: { ok: false, reason: E2E_MESSAGES.renderedMalformed(text) }, detail: '' };
 }
 
-const consoleText = (text: string): string => {
-  const parsed = parseJson(text.slice('CONSOLE '.length));
-  return isObject(parsed) && typeof parsed.text === 'string' ? parsed.text : text;
+const isNullableString = (value: unknown): boolean => value === null || typeof value === 'string';
+const isOrder = (value: unknown): boolean => isObject(value) && typeof value.width === 'number' && isStringList(value.order);
+
+function isSwitchReading(value: unknown): value is SwitchReading {
+  if (!isObject(value) || !isNullableString(value.deviceStored) || !isObject(value.osFlip) || !isObject(value.arrow)) return false;
+  const { chosen, invalid, osFlip, arrow } = value;
+  return Array.isArray(chosen) && chosen.every((item) => isObject(item) && typeof item.choice === 'string' && isNullableString(item.stored) && isNullableString(item.reloadedTheme) && isNullableString(item.reloadedChecked))
+    && typeof osFlip.light === 'string' && typeof osFlip.dark === 'string'
+    && Array.isArray(invalid) && invalid.every((item) => isObject(item) && typeof item.stored === 'string' && isNullableString(item.checked))
+    && isStringList(value.domOrder) && Array.isArray(value.boxOrders) && value.boxOrders.every(isOrder)
+    && isNullableString(arrow.before) && isNullableString(arrow.after);
+}
+
+const isFontsReading = (value: unknown): value is FontsReading => isObject(value) && Array.isArray(value.families)
+  && value.families.every((item) => isObject(item) && typeof item.family === 'string' && typeof item.loaded === 'boolean' && typeof item.check === 'boolean')
+  && isObject(value.control) && typeof value.control.family === 'string' && typeof value.control.present === 'boolean';
+const isRequestsReading = (value: unknown): value is RequestsReading => isObject(value) && typeof value.page === 'string' && isStringList(value.requests);
+const isStorageReading = (value: unknown): value is StorageReading => isObject(value) && isStringList(value.local) && isStringList(value.session);
+
+const ROUTE_CHECKS = ['SWITCH', 'FONTS', 'REQUESTS'] as const;
+type RouteCheck = (typeof ROUTE_CHECKS)[number];
+
+const ROUTE_JUDGES: Readonly<Record<RouteCheck, (value: unknown) => Verdict | null>> = {
+  SWITCH: (value) => (isSwitchReading(value) ? switchVerdict(value) : null),
+  FONTS: (value) => (isFontsReading(value) ? fontsVerdict(value) : null),
+  REQUESTS: (value) => (isRequestsReading(value) ? requestsVerdict(value) : null),
 };
 
-function judgeRendered(run: DriverRun, print: (line: string) => void): string | null {
+function routeDetail(check: RouteCheck, routes: readonly string[], requests: number): string {
+  const where = routes.join(', ');
+  if (check === 'SWITCH') return `Device removes the key, Light and Dark persist, invalid values leave Device, order and ArrowRight hold on ${where}`;
+  if (check === 'FONTS') return `${SITE_FAMILIES.join(', ')} loaded from the site and the control family absent on ${where}`;
+  return `${requests} request(s), every one from the page's own origin, on ${where}`;
+}
+
+// One verdict per route-wide check: each expected route needs its own line, and every failing
+// route is named in the one failure line.
+function judgeRouteCheck(check: RouteCheck, lines: readonly string[], routes: readonly string[]): { verdict: Verdict; detail: string } {
+  const byRoute = new Map<string, unknown>();
+  const reasons: string[] = [];
+  let requests = 0;
+  for (const text of lines) {
+    const value = parseJson(text.slice(check.length + 1));
+    if (isObject(value) && typeof value.route === 'string') byRoute.set(value.route, value);
+    else reasons.push(E2E_MESSAGES.renderedMalformed(text));
+  }
+  for (const route of routes) {
+    const value = byRoute.get(route);
+    if (value === undefined) {
+      reasons.push(E2E_MESSAGES.renderedMissingRoute(check, route));
+      continue;
+    }
+    const verdict = ROUTE_JUDGES[check](value);
+    if (verdict === null) reasons.push(E2E_MESSAGES.renderedMalformed(`${check} ${JSON.stringify(value)}`));
+    else if (!verdict.ok) reasons.push(`${route}: ${verdict.reason}`);
+    if (check === 'REQUESTS' && isRequestsReading(value)) requests += value.requests.length;
+  }
+  return { verdict: verdictOf(reasons), detail: routeDetail(check, routes, requests) };
+}
+
+function judgeStorage(text: string | undefined): { verdict: Verdict; detail: string } {
+  if (text === undefined) return { verdict: { ok: false, reason: E2E_MESSAGES.renderedMissing('STORAGE') }, detail: '' };
+  const value = parseJson(text.slice('STORAGE '.length));
+  if (!isStorageReading(value)) return { verdict: { ok: false, reason: E2E_MESSAGES.renderedMalformed(text) }, detail: '' };
+  const keys = [...value.local, ...value.session.map((key) => `session:${key}`)];
+  return { verdict: storageVerdict(value), detail: `keys after using the switch: ${keys.join(', ') || 'none'}` };
+}
+
+const consoleRecord = (text: string): { readonly text: string; readonly url: string } => {
+  const parsed = parseJson(text.slice('CONSOLE '.length));
+  if (!isObject(parsed) || typeof parsed.text !== 'string') return { text, url: '' };
+  return { text: parsed.text, url: typeof parsed.url === 'string' ? parsed.url : '' };
+};
+
+function judgeRendered(run: DriverRun, routes: readonly string[], print: (line: string) => void): string | null {
   const printed = printedLines(run);
   const [stopped] = driverRunFailures(run, RENDERED_LABEL, printed);
   if (stopped !== undefined) return stopped;
   const records = new Map<string, string>();
+  const routeLines = new Map<string, string[]>(ROUTE_CHECKS.map((check) => [check, []]));
   const consoleErrors: string[] = [];
   for (const text of printed) {
     const kind = text.split(' ', 1)[0] ?? '';
-    if (kind === 'CONSOLE') consoleErrors.push(consoleText(text));
-    else if ((RENDERED_CHECKS as readonly string[]).includes(kind)) records.set(kind, text);
+    if (kind === 'CONSOLE') {
+      const record = consoleRecord(text);
+      if (!isExpectedNotFound(record)) consoleErrors.push(record.text);
+    }
+    else if ((RENDERED_CHECKS as readonly string[]).includes(kind) || kind === 'STORAGE') records.set(kind, text);
+    else routeLines.get(kind)?.push(text);
   }
   const results: (readonly [string, { verdict: Verdict; detail: string }])[] = [
     ...RENDERED_CHECKS.map((check) => [check, judgeCheck(check, records.get(check))] as const),
+    ...ROUTE_CHECKS.map((check) => [check, judgeRouteCheck(check, routeLines.get(check) ?? [], routes)] as const),
+    ['STORAGE', judgeStorage(records.get('STORAGE'))],
     ['CONSOLE', { verdict: consoleVerdict(consoleErrors), detail: 'no console error, no Content Security Policy violation' }],
   ];
   const failed: string[] = [];
@@ -879,22 +1029,43 @@ function judgeRendered(run: DriverRun, print: (line: string) => void): string | 
   return first === undefined ? null : E2E_MESSAGES.renderedFailures(failed.length, first);
 }
 
-// D-132's rendered layer, run on the landing page under the built _headers (C5, C6): a stored Dark
-// before first paint, Device following the OS live, the Dark pin (AC-E28) and every console error.
-async function renderedStep(options: SiteE2eOptions, print: (line: string) => void): Promise<string | null> {
+// D-132's rendered layer under the built _headers (C5, C6): on the landing page a stored Dark
+// before first paint, Device following the OS live and the Dark pin (AC-E28); on every built route
+// and the 404 page the switch, the faces and the request origins; then the storage keys and every
+// console error.
+async function renderedStep(options: SiteE2eOptions, dist: string, print: (line: string) => void): Promise<string | null> {
   const driver = locateDriver(options.globalModules, join(options.repoRoot, 'scripts', 'site.devbrowser.js'));
   if (typeof driver === 'string') return driver;
+  const routes = [...routesFromDist(dist), UNKNOWN_PATH];
   const served = await withPreview(options.repoRoot, 'fothering-e2e-', async (server, workDir) => {
-    const written = writeDriver(driver.templatePath, { base: server.url, route: '/' }, join(workDir, 'site.js'));
+    const written = writeDriver(driver.templatePath, { base: server.url, route: '/', routes, widths: AXE_CONFIG.widths, families: SITE_FAMILIES }, join(workDir, 'site.js'));
     if (!written.ok) return A11Y_MESSAGES.templateTokens(driver.templatePath, written.tokens);
     const run = await runDriver({ launcher: driver.launcher, driverPath: written.path, timeoutSeconds: DRIVER_TIMEOUT_SECONDS });
-    return judgeRendered(run, print);
+    return judgeRendered(run, routes, print);
   });
   return served.ok ? served.value : served.reason;
 }
 
-// D-151's order. The size budget arrives in 05-09 as a step here; a failing step stops the run
-// with its reason, and the last line is PASS or FAIL.
+// size-limit reads the size-limit field of packages/web/package.json from its working folder and
+// finds its file plugin in the root package (RESEARCH A6).
+function sizeLimitRun(repoRoot: string): () => SizeRun {
+  return () => {
+    const run = spawnSync(process.execPath, [join(repoRoot, 'node_modules', 'size-limit', 'bin.js')], {
+      cwd: join(repoRoot, 'packages', 'web'),
+      encoding: 'utf8',
+      shell: false,
+    });
+    return { status: run.status, output: `${run.stdout ?? ''}${run.stderr ?? ''}${run.error === undefined ? '' : run.error.message}` };
+  };
+}
+
+function sizeStep(options: SiteE2eOptions, print: (line: string) => void): string | null {
+  const run = (options.sizeLimit ?? sizeLimitRun(options.repoRoot))();
+  printOutput(print, run.output);
+  return run.status === 0 ? null : E2E_MESSAGES.sizeLimit(run.status);
+}
+
+// D-151's order; a failing step stops the run with its reason, and the last line is PASS or FAIL.
 export async function runSiteE2e(options: SiteE2eOptions): Promise<number> {
   const print = options.print ?? ((line: string) => console.log(line));
   const dist = join(options.repoRoot, 'packages', 'web', 'dist');
@@ -914,9 +1085,10 @@ export async function runSiteE2e(options: SiteE2eOptions): Promise<number> {
   const steps: readonly (readonly [string, () => string | null | Promise<string | null>])[] = [
     ['client-secrets', () => clientSecretsStep(options.clientSecretsScript ?? join(options.repoRoot, 'scripts', 'check-client-secrets.mjs'), dist, print)],
     ['file-budget', () => fileBudgetStep(dist, options.fileBudget ?? checkFileBudget)],
+    ['size', () => sizeStep(options, print)],
     ['built-checks', builtChecks],
     ['second-build', () => secondBuildStep(options, dist)],
-    ['rendered', () => renderedStep(options, print)],
+    ['rendered', () => renderedStep(options, dist, print)],
   ];
   for (const [name, run] of steps) {
     const reason = await run();

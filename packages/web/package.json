@@ -19,5 +19,12 @@
   },
   "devDependencies": {
     "@astrojs/check": "0.9.10"
-  }
+  },
+  "size-limit": [
+    {
+      "name": "client scripts",
+      "path": "dist/_astro/*.js",
+      "limit": "2 kB"
+    }
+  ]
 }

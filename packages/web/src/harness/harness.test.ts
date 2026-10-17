@@ -20,6 +20,7 @@ import {
   consoleVerdict,
   deviceVerdict,
   fontsVerdict,
+  isExpectedNotFound,
   keyboardVerdict,
   loadCheckContext,
   overflowVerdict,
@@ -628,6 +629,14 @@ describe('the rendered theme verdicts (D-131, AC-42, AC-E28, C5)', () => {
     expect(consoleVerdict([csp])).toEqual({ ok: false, reason: E2E_MESSAGES.cspViolation(csp) });
     expect(consoleVerdict(['Uncaught TypeError: x is not a function'])).toEqual({ ok: false, reason: E2E_MESSAGES.consoleError('Uncaught TypeError: x is not a function') });
   });
+
+  it('only the 404 page answering the unknown address is an expected 404 console line', () => {
+    const notFound = 'Failed to load resource: the server responded with a status of 404 (Not Found)';
+    expect(isExpectedNotFound({ text: notFound, url: `http://127.0.0.1:4000${UNKNOWN_PATH}` })).toBe(true);
+    expect(isExpectedNotFound({ text: notFound, url: 'http://127.0.0.1:4000/_astro/missing.css' })).toBe(false);
+    expect(isExpectedNotFound({ text: notFound, url: '' })).toBe(false);
+    expect(isExpectedNotFound({ text: 'Uncaught TypeError: x is not a function', url: `http://127.0.0.1:4000${UNKNOWN_PATH}` })).toBe(false);
+  });
 });
 
 const THEME_ORDER = ['device', 'light', 'dark'];
@@ -1065,7 +1074,7 @@ describe('the built checks through the CLI and the e2e step (D-150, D-151)', () 
   it('the size step passes on a size-limit exit of 0 and prints what it measured', async () => {
     const { code, lines } = await e2e(renderedTree());
     expect(code).toBe(0);
-    expect(lines).toContain('Size:       688 B brotlied');
+    expect(lines.filter((line) => line.trim() === 'Size:       688 B brotlied')).toHaveLength(1);
     expect(lines).toContain(E2E_MESSAGES.step('size'));
   });
 
@@ -1104,6 +1113,16 @@ describe('the built checks through the CLI and the e2e step (D-150, D-151)', () 
     const foreign = (route: string): RequestsReading => ({ ...healthyRequests(route), requests: [...healthyRequests(route).requests, 'https://fonts.gstatic.com/s/x.woff2'] });
     const requestsFail = await e2e(renderedTree(), {}, { lines: siteLines({}, [], { REQUESTS: foreign }) });
     expect(requestsFail.lines).toContain(E2E_MESSAGES.renderedFailed('REQUESTS', `/: ${E2E_MESSAGES.foreignRequest(BASE, ['https://fonts.gstatic.com'])}; ${UNKNOWN_PATH}: ${E2E_MESSAGES.foreignRequest(BASE, ['https://fonts.gstatic.com'])}`));
+  });
+
+  it('the rendered step passes the 404 console line of the unknown address and fails a 404 of any other resource', async () => {
+    const notFound = 'Failed to load resource: the server responded with a status of 404 (Not Found)';
+    const line = (url: string): string => `CONSOLE ${JSON.stringify({ type: 'error', text: notFound, url })}`;
+    const expected = await e2e(renderedTree(), {}, { lines: [...siteLines(), line(`http://127.0.0.1:4000${UNKNOWN_PATH}`)] });
+    expect(expected.code).toBe(0);
+    const missing = await e2e(renderedTree(), {}, { lines: [...siteLines(), line('http://127.0.0.1:4000/_astro/missing.css')] });
+    expect(missing.code).toBe(1);
+    expect(missing.lines).toContain(E2E_MESSAGES.renderedFailed('CONSOLE', E2E_MESSAGES.consoleError(notFound)));
   });
 
   it('the rendered step fails a route with no switch, fonts or requests line, and a storage key outside the two', async () => {
