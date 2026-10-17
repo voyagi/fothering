@@ -213,7 +213,9 @@ function namesNoOtherSet(text: string, context: ExplanationContext): boolean {
   });
 }
 
-const BANNED_PHRASES = ['ses bounce rate', 'ses complaint rate', 'your bounce rate'] as const;
+// The prompt's own ban, whole: "bounce rate" and "complaint rate" with any word before them, which
+// also covers the SES and "your" forms.
+const BANNED_PHRASES = ['bounce rate', 'complaint rate'] as const;
 
 function holdsNoBannedPhrase(text: string): boolean {
   const normal = folded(text).replace(/\s+/g, ' ');

@@ -212,6 +212,13 @@ describe('validateExplanation (D-78, R12)', () => {
     }
   });
 
+  // The system prompt bans "bounce rate" and "complaint rate" whole: a lane ratio called a bounce
+  // rate reads like the SES account metric, with or without "ses" or "your" before it.
+  it('rejects bounce rate and complaint rate with any word before them, and passes the lane ratio wording', () => {
+    for (const text of ['the bounce rate rose', 'your complaint rate']) expect(checkOf(text, closeOn(APPROVED)), text).toBe('phrase');
+    expect(checkOf("this lane's hard-bounce ratio", closeOn(APPROVED))).toBe('ok');
+  });
+
   it('accepts only integers the record holds and percentages exactly as it renders them (AC-E42)', () => {
     expect(checkOf('7.50% of 200 recipient-sends', closeOn(APPROVED))).toBe('ok');
     expect(checkOf('about 8%', closeOn(APPROVED))).toBe('number');
