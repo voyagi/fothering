@@ -236,7 +236,9 @@ ol.procedure { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); 
 /* Row 3: the refusals, each struck through by the circle-slash. */
 .refusals { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: var(--space-40); }
 ul.refuse { margin: 0; padding: 0; list-style: none; border-top: var(--w-outline) solid var(--ink); }
-.refuse li { display: grid; grid-template-columns: 32px minmax(0, 1fr); gap: var(--space-md); padding: var(--space-md) 0; border-bottom: var(--w-rule) solid var(--rule); }
+/* Each item's rule runs the full column under the outline rule; only its sentence keeps the measure. */
+.refuse li { display: grid; grid-template-columns: 32px minmax(0, 1fr); gap: var(--space-md); max-inline-size: none; padding: var(--space-md) 0; border-bottom: var(--w-rule) solid var(--rule); }
+.refuse li > span { max-inline-size: var(--measure); }
 .refuse svg { width: 22px; height: 22px; margin-top: 2px; }
 
 /* Row 4: the ruled limits table, a schedule without the outline. */
