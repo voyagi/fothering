@@ -1,14 +1,33 @@
 import { describe, expect, it } from 'vitest';
-import { HOLD_MS } from '@fothering/core/close-values';
+import { ACTION_FUNCTION_TIMEOUT_MS, HOLD_MS } from '@fothering/core/close-values';
+import { closureClaimItem } from '@fothering/core/closure';
 import { createFixtureTableState } from '@fothering/providers/fixtures/ingest-ports';
-import type { DecisionStorePort } from '@fothering/providers/port-types';
-import { SES_READ_SPACING_MS } from '@fothering/providers/ses-facts';
-import { BAD_BATCH, BULK, NOW_MS, buildTestActionRoot, closeRuntime, incidentIdOf, seedIncidents, storedClosure } from '../test/close-scenario.js';
+import type { DecisionStoreItem, DecisionStorePort, FixtureSesState, FixtureTableState, Recording } from '@fothering/providers/port-types';
+import { MAX_IDENTITY_READS, SES_READ_SPACING_MS } from '@fothering/providers/ses-facts';
+import {
+  BAD_BATCH,
+  BULK,
+  COMPLETE_SES_RECORDINGS,
+  NOW_MS,
+  RECEIPT_BATCH,
+  TRANSACTIONAL,
+  buildTestActionRoot,
+  closeRuntime,
+  decidingRuntime,
+  incidentIdOf,
+  plantClosure,
+  plantDecision,
+  seedIncidents,
+  storedClosure,
+  type TestActionRootInput,
+} from '../test/close-scenario.js';
 import { runActionCycle } from './action.js';
-import type { ActionDeps } from './root.js';
+import { buildActionRoot, type ActionDeps } from './root.js';
 
 const ACT_MS = NOW_MS + 60_000;
 const INCIDENT_ID = incidentIdOf(BULK, NOW_MS);
+const RECEIPT_INCIDENT_ID = incidentIdOf(TRANSACTIONAL, NOW_MS);
+const PAUSE_LINE = '(dry-run) WOULD ses.pauseConfigurationSet fothering-bulk {"configurationSet":"fothering-bulk"}';
 
 // A deps copy that writes each wait and each outcome write into the fixture SES's own call log, so one
 // list shows the order of the spacing, the put, the read-back and the write. The write is logged when
@@ -55,5 +74,331 @@ describe('a stored close becomes one pause, reported only after the read-back (R
       'get-resolved:fothering-bulk',
       'write:paused',
     ]);
+  });
+});
+
+const failingRuntime = async (): Promise<unknown> => {
+  throw new Error('the fake runtime fails every invocation');
+};
+
+interface Scenario {
+  store: FixtureTableState;
+  root: (input?: Partial<TestActionRootInput>) => ReturnType<typeof buildTestActionRoot>;
+}
+
+async function seeded(runtime = closeRuntime, scenarios = [BAD_BATCH], options: { agentDryRun?: boolean } = {}): Promise<Scenario> {
+  const store = createFixtureTableState();
+  await seedIncidents({ store, runtime, scenarios, nowMs: NOW_MS, ...options });
+  return { store, root: (input = {}) => buildTestActionRoot({ store, now: () => ACT_MS, ...input }) };
+}
+
+function putsOf(state: FixtureSesState): string[] {
+  return state.calls.filter((call) => call.startsWith('put-issued'));
+}
+
+function at(deps: ActionDeps, nowMs: number): ActionDeps {
+  return { ...deps, now: () => nowMs };
+}
+
+// The order AC-1 requires, pair by pair: a later entry present with its predecessor absent or after it
+// is a violation, so a paused write issued before the read-back resolved is always reported.
+const PAUSE_ORDER = ['put-issued:fothering-bulk:false', 'put-resolved:fothering-bulk:false', 'get-issued:fothering-bulk', 'get-resolved:fothering-bulk', 'write:paused'];
+
+function orderViolations(calls: readonly string[]): string[] {
+  const violations: string[] = [];
+  for (let index = 1; index < PAUSE_ORDER.length; index += 1) {
+    const before = PAUSE_ORDER[index - 1] ?? '';
+    const after = PAUSE_ORDER[index] ?? '';
+    const beforeAt = calls.indexOf(before);
+    const afterAt = calls.indexOf(after);
+    if (afterAt !== -1 && (beforeAt === -1 || beforeAt > afterAt)) violations.push(`${after} without ${before} before it`);
+  }
+  return violations;
+}
+
+describe('every way the put or the read-back can end is failure or unknown, never success (AC-2, AC-E1)', () => {
+  it.each([
+    ['a read-back answering true after an accepted put', 'pause-failed', true, true],
+    ['a read-back that throws', 'pause-unknown', 'throw', 'threw'],
+    ['a read-back holding no SendingEnabled', 'pause-unknown', 'missing', 'missing'],
+  ] as const)('records %s as %s', async (_case, outcome, answer, readBack) => {
+    const { root } = await seeded();
+    const { deps, sesState } = root();
+    sesState.getAnswers.set(BULK, answer);
+
+    await runActionCycle(orderRecorded(deps, sesState.calls));
+
+    const closure = await storedClosure(deps, INCIDENT_ID, ACT_MS);
+    expect(closure?.outcome).toBe(outcome);
+    expect(closure).toMatchObject({ readBack, holdEndMs: null });
+    expect(putsOf(sesState)).toEqual(['put-issued:fothering-bulk:false']);
+    expect(sesState.calls).not.toContain('write:paused');
+  });
+
+  it('keeps the put state and the read-back apart, so an accepted put can read back as sending (AC-3)', async () => {
+    const { root } = await seeded();
+    const { deps, sesState } = root();
+    sesState.getAnswers.set(BULK, true);
+
+    await runActionCycle(deps);
+
+    expect(sesState.sendingEnabled.get(BULK)).toBe(false);
+    expect((await storedClosure(deps, INCIDENT_ID, ACT_MS))?.readBack).toBe(true);
+  });
+
+  it('records a put that throws as pause-failed with no read-back issued', async () => {
+    const { root } = await seeded();
+    const { deps, sesState } = root();
+    sesState.putFaults.set(BULK, 'throw');
+
+    await runActionCycle(orderRecorded(deps, sesState.calls));
+
+    const closure = await storedClosure(deps, INCIDENT_ID, ACT_MS);
+    expect(closure?.outcome).toBe('pause-failed');
+    expect(closure?.readBack).toBeNull();
+    expect(sesState.calls.filter((call) => call.startsWith('get-issued'))).toEqual([]);
+    expect(sesState.calls).not.toContain('write:paused');
+  });
+
+  it('reports a planted log that writes paused on the put resolving, and nothing over the real run', async () => {
+    const { root } = await seeded();
+    const { deps, sesState } = root();
+    await runActionCycle(orderRecorded(deps, sesState.calls));
+
+    expect(orderViolations(sesState.calls)).toEqual([]);
+    const planted = ['put-issued:fothering-bulk:false', 'put-resolved:fothering-bulk:false', 'write:paused', 'get-issued:fothering-bulk'];
+    expect(orderViolations(planted)).toEqual(['write:paused without get-resolved:fothering-bulk before it']);
+  });
+
+  it.each([
+    ['pause-failed', (state: FixtureSesState) => state.putFaults.set(BULK, 'throw')],
+    ['pause-unknown', (state: FixtureSesState) => state.getAnswers.set(BULK, 'throw')],
+  ] as const)('makes no second put for an incident whose closure ended %s (AC-E2)', async (outcome, script) => {
+    const { root } = await seeded();
+    const { deps, sesState } = root();
+    script(sesState);
+    await runActionCycle(deps);
+    const laterMs = ACT_MS + ACTION_FUNCTION_TIMEOUT_MS + 60_000;
+    await runActionCycle(at(deps, laterMs));
+
+    expect((await storedClosure(deps, INCIDENT_ID, laterMs))?.outcome).toBe(outcome);
+    expect(putsOf(sesState)).toHaveLength(1);
+  });
+});
+
+describe('a claim another run left behind is taken over, finished or left alone by its age (D-91)', () => {
+  const staleClaimMs = ACT_MS - ACTION_FUNCTION_TIMEOUT_MS;
+
+  it('claims a stale claim with no pause requested again and pauses once', async () => {
+    const { root } = await seeded();
+    const { deps, sesState } = root();
+    await plantClosure(deps, closureClaimItem({ incidentId: INCIDENT_ID, configurationSet: BULK, decisionOutcome: 'close', nowMs: staleClaimMs }), staleClaimMs);
+
+    await runActionCycle(deps);
+
+    expect(await storedClosure(deps, INCIDENT_ID, ACT_MS)).toMatchObject({ outcome: 'paused', claimedAtMs: ACT_MS });
+    expect(putsOf(sesState)).toHaveLength(1);
+  });
+
+  it('ends a stale claim whose pause was requested as pause-unknown with no put', async () => {
+    const { root } = await seeded();
+    const { deps, sesState } = root();
+    const claim = closureClaimItem({ incidentId: INCIDENT_ID, configurationSet: BULK, decisionOutcome: 'close', nowMs: staleClaimMs });
+    await plantClosure(deps, { ...claim, pauseRequestedAtMs: staleClaimMs + 2_000 }, staleClaimMs);
+
+    await runActionCycle(deps);
+
+    expect(await storedClosure(deps, INCIDENT_ID, ACT_MS)).toMatchObject({ outcome: 'pause-unknown', readBack: null });
+    expect(sesState.calls).toEqual([]);
+  });
+
+  it('leaves a claim younger than the timeout alone with no SES call at all', async () => {
+    const { root } = await seeded();
+    const { deps, sesState } = root({ recordings: [] });
+    const claim = closureClaimItem({ incidentId: INCIDENT_ID, configurationSet: BULK, decisionOutcome: 'close', nowMs: ACT_MS - 1_000 });
+    await plantClosure(deps, claim, ACT_MS - 1_000);
+
+    const summary = await runActionCycle(deps);
+
+    expect(await storedClosure(deps, INCIDENT_ID, ACT_MS)).toEqual(claim);
+    expect(sesState.calls).toEqual([]);
+    expect(summary.acted).toEqual([]);
+  });
+});
+
+describe('a decision that is not a close pauses nothing (D-92)', () => {
+  it('ends an agent unknown as refused no-close with no put', async () => {
+    const { root } = await seeded(decidingRuntime, [RECEIPT_BATCH]);
+    const { deps, sesState } = root();
+
+    await runActionCycle(deps);
+
+    expect(await storedClosure(deps, RECEIPT_INCIDENT_ID, ACT_MS)).toMatchObject({
+      outcome: 'refused',
+      reason: 'no-close',
+      decisionOutcome: 'unknown',
+      configurationSet: TRANSACTIONAL,
+      sesFacts: 'read',
+    });
+    expect(putsOf(sesState)).toEqual([]);
+  });
+
+  it('ends a cap-reached DECISION the same way', async () => {
+    const { root } = await seeded(failingRuntime);
+    const { deps, sesState } = root();
+    await plantDecision(deps, INCIDENT_ID, { outcome: 'unknown', reason: 'cap-reached', items: ['incident'] }, NOW_MS);
+
+    await runActionCycle(deps);
+
+    expect(await storedClosure(deps, INCIDENT_ID, ACT_MS)).toMatchObject({ outcome: 'refused', reason: 'no-close', decisionOutcome: 'unknown' });
+    expect(putsOf(sesState)).toEqual([]);
+  });
+
+  it('writes no closure for an incident whose agent row resolved dry-run, which stored no DECISION', async () => {
+    const { root } = await seeded(closeRuntime, [BAD_BATCH], { agentDryRun: true });
+    const { deps, sesState } = root();
+
+    const summary = await runActionCycle(deps);
+
+    expect(await storedClosure(deps, INCIDENT_ID, ACT_MS)).toBeUndefined();
+    expect(summary.acted).toEqual([]);
+    expect(sesState.calls).toEqual([]);
+  });
+});
+
+function withoutListIdentities(): Recording[] {
+  return COMPLETE_SES_RECORDINGS.filter((recording) => recording.operation !== 'ses.listEmailIdentities');
+}
+
+function withIdentityCount(count: number): Recording[] {
+  const identities = Array.from({ length: count }, (_, index) => `sender${index}.example.com`);
+  return [{ operation: 'ses.listEmailIdentities', request: null, response: identities }, ...withoutListIdentities()];
+}
+
+function countingIdentityLists(deps: ActionDeps): { deps: ActionDeps; lists: { count: number } } {
+  const lists = { count: 0 };
+  const ses = deps.ports.ses;
+  const counted = {
+    ...ses,
+    listEmailIdentities: () => {
+      lists.count += 1;
+      return ses.listEmailIdentities();
+    },
+  };
+  return { deps: { ...deps, ports: { ...deps.ports, ses: counted } }, lists };
+}
+
+describe('the SES facts are read once per run and an unread set refuses the close (D-89 step 2)', () => {
+  it('refuses an approved close as ses-facts-unavailable when a fact read throws', async () => {
+    const { root } = await seeded();
+    const { deps, sesState } = root({ recordings: withoutListIdentities() });
+
+    await runActionCycle(deps);
+
+    expect(await storedClosure(deps, INCIDENT_ID, ACT_MS)).toMatchObject({ outcome: 'refused', reason: 'ses-facts-unavailable', sesFacts: 'failed' });
+    expect(putsOf(sesState)).toEqual([]);
+  });
+
+  it('refuses an approved close as ses-facts-bound past MAX_IDENTITY_READS identities', async () => {
+    const { root } = await seeded();
+    const { deps, sesState } = root({ recordings: withIdentityCount(MAX_IDENTITY_READS + 1) });
+
+    await runActionCycle(deps);
+
+    expect(await storedClosure(deps, INCIDENT_ID, ACT_MS)).toMatchObject({ outcome: 'refused', reason: 'ses-facts-bound', sesFacts: 'bound' });
+    expect(putsOf(sesState)).toEqual([]);
+  });
+
+  it('ends an agent unknown with failing facts as no-close, recording the failed read', async () => {
+    const { root } = await seeded(decidingRuntime, [RECEIPT_BATCH]);
+    const { deps } = root({ recordings: withoutListIdentities() });
+
+    await runActionCycle(deps);
+
+    expect(await storedClosure(deps, RECEIPT_INCIDENT_ID, ACT_MS)).toMatchObject({ outcome: 'refused', reason: 'no-close', sesFacts: 'failed' });
+  });
+
+  it('reads the identity list once for two incidents acted on in one run', async () => {
+    const { root } = await seeded(decidingRuntime, [BAD_BATCH, RECEIPT_BATCH]);
+    const built = root();
+    const { deps, lists } = countingIdentityLists(built.deps);
+
+    const summary = await runActionCycle(deps);
+
+    expect(summary.acted).toEqual(
+      expect.arrayContaining([
+        { incidentId: INCIDENT_ID, outcome: 'paused' },
+        { incidentId: RECEIPT_INCIDENT_ID, outcome: 'refused' },
+      ]),
+    );
+    expect(lists.count).toBe(1);
+  });
+});
+
+// The fixture table is the only place a stored record can be changed after the fact: an EVIDENCE item
+// carries no version, so no port write can reach it, which is the property the gate relies on.
+function tamperEvidenceHash(store: FixtureTableState, incidentId: string): void {
+  const evidence = [...store.items.values()].find(
+    (item): item is DecisionStoreItem => (item as DecisionStoreItem).pk === `INCIDENT#${incidentId}` && (item as DecisionStoreItem).sk === 'EVIDENCE',
+  );
+  if (evidence === undefined) throw new Error('no EVIDENCE item was seeded');
+  (evidence.record as { hash: string }).hash = 'f'.repeat(64);
+}
+
+describe('the gate runs through the real act', () => {
+  it('refuses a tampered evidence hash as hash-mismatch with no put (T-03-02)', async () => {
+    const { store, root } = await seeded();
+    const { deps, sesState } = root();
+    tamperEvidenceHash(store, INCIDENT_ID);
+
+    await runActionCycle(deps);
+
+    expect(await storedClosure(deps, INCIDENT_ID, ACT_MS)).toMatchObject({ outcome: 'refused', reason: 'hash-mismatch' });
+    expect(putsOf(sesState)).toEqual([]);
+  });
+});
+
+// The pause and send of a deployed root with the switch unset, on a copy of a test root's deps, so the
+// dry-run recorder runs while no live client is ever built.
+function withDryRunWrites(deps: ActionDeps, lines: string[]): ActionDeps {
+  const deployed = buildActionRoot({ runtimeContext: 'deployed', switchValue: undefined, dryRunSink: (line) => lines.push(line) });
+  const ses = { ...deps.ports.ses, pauseConfigurationSet: deployed.ports.ses.pauseConfigurationSet, sendEmail: deployed.ports.ses.sendEmail };
+  const deployedSes = deployed.kinds.ses;
+  return { ...deps, ports: { ...deps.ports, ses }, kinds: deployedSes === undefined ? deps.kinds : { ...deps.kinds, ses: deployedSes } };
+}
+
+describe('a pause that resolves dry-run claims nothing it did not do (D-120, AC-24 dry-run half)', () => {
+  it('writes one would-pause line and outcome dry-run, with no read-back and no pause request', async () => {
+    const { root } = await seeded();
+    const { deps, sesState } = root();
+    const lines: string[] = [];
+
+    await runActionCycle(orderRecorded(withDryRunWrites(deps, lines), sesState.calls));
+
+    expect(await storedClosure(deps, INCIDENT_ID, ACT_MS)).toMatchObject({ outcome: 'dry-run', pauseRequestedAtMs: null, readBack: null, holdEndMs: null });
+    expect(lines).toEqual([PAUSE_LINE]);
+    expect(sesState.calls.filter((call) => call.startsWith('get-issued') || call.startsWith('put-'))).toEqual([]);
+    expect(sesState.calls.filter((call) => call === 'write:paused' || call === 'write:closed')).toEqual([]);
+  });
+});
+
+describe('no closure item and no log line carries an address or a recipient hash (AC-P9)', () => {
+  it('stores and logs codes, ids and set names only', async () => {
+    const { store, root } = await seeded(decidingRuntime, [BAD_BATCH, RECEIPT_BATCH]);
+    const lines: string[] = [];
+    const { deps } = root({ logSink: (line) => lines.push(line) });
+
+    await runActionCycle(deps);
+
+    const items = [...store.items.values()] as DecisionStoreItem[];
+    const hashes = [...new Set(items.flatMap((item) => (typeof item.recipientHmac === 'string' ? [item.recipientHmac] : [])))];
+    const closures = items.filter((item) => item.sk === 'CLOSURE').map((item) => JSON.stringify(item));
+    expect(closures).toHaveLength(2);
+    expect(hashes.length).toBeGreaterThan(0);
+    expect(lines.length).toBeGreaterThan(0);
+    for (const text of [...closures, ...lines]) {
+      expect(text).not.toContain('@');
+      expect(hashes.filter((hash) => text.includes(hash))).toEqual([]);
+    }
   });
 });

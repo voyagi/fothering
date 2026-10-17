@@ -1,17 +1,18 @@
 import type { RuntimeResult } from '@fothering/core/agent-answer';
 import { bucketStartMs } from '@fothering/core/buckets';
 import { closureKey, parseClosure, type Closure } from '@fothering/core/closure';
-import { incidentIdFor, type EvidenceRecord } from '@fothering/core/evidence-record';
+import { incidentIdFor, incidentItemKey, type EvidenceRecord } from '@fothering/core/evidence-record';
 import { parseLaneMap, type LaneMap } from '@fothering/core/lanes';
 import type { LogSink } from '@fothering/core/log';
 import { PINNED_MODEL_VALUES } from '@fothering/core/model-values';
+import { expiresAtFor } from '@fothering/core/records';
 import { scenarioRecords, type LaneScenario } from '@fothering/core/test/event-arbitraries';
 import { TEST_ADDRESS_KEY_SET } from '@fothering/providers/fixtures/ingest-ports';
 import { createFixtureSesState } from '@fothering/providers/fixtures/later-ports';
 import type { DryRunSink, FixtureSesState, FixtureTableState, Recording } from '@fothering/providers/port-types';
 import { buildActionRoot, type ActionDeps } from '../action/root.js';
 import { runDetectionCycle, type DetectionCycleSummary } from '../detect/detect.js';
-import { buildDetectRoot } from '../detect/root.js';
+import { buildDetectRoot, type DetectDeps } from '../detect/root.js';
 import lanesJson from '../../../../lanes.json' with { type: 'json' };
 import completeSesConfig from '../../../providers/src/fixtures/ses-config/complete.json' with { type: 'json' };
 
@@ -82,6 +83,16 @@ export interface SeedInput {
   scenarios: readonly LaneScenario[];
   nowMs: number;
   laneMap?: LaneMap;
+  /** The agentCore row of a deployed root with the switch unset, so detection stores no DECISION (agent-dry-run). */
+  agentDryRun?: boolean;
+}
+
+// A deployed root builds no live client until a port method runs, and the dry-run recorder runs none.
+function withDryRunAgent(deps: DetectDeps): DetectDeps {
+  const deployed = buildDetectRoot({ runtimeContext: 'deployed', switchValue: undefined, dryRunSink: () => {} });
+  const agentCore = deployed.kinds.agentCore;
+  const kinds = agentCore === undefined ? deps.kinds : { ...deps.kinds, agentCore };
+  return { ...deps, ports: { ...deps.ports, agentCore: deployed.ports.agentCore }, kinds };
 }
 
 /** Inserts each scenario's records and runs one detection cycle over the shared table. */
@@ -99,7 +110,7 @@ export async function seedIncidents(input: SeedInput): Promise<DetectionCycleSum
   for (const scenario of input.scenarios) {
     for (const record of scenarioRecords(scenario, input.nowMs, laneMap, TEST_ADDRESS_KEY_SET)) await deps.ports.eventStore.putIfAbsent(record);
   }
-  return runDetectionCycle(deps);
+  return runDetectionCycle(input.agentDryRun === true ? withDryRunAgent(deps) : deps);
 }
 
 export interface TestActionRootInput {
@@ -143,4 +154,15 @@ export async function storedClosure(deps: ActionDeps, incidentId: string, nowMs:
 
 export function incidentIdOf(configurationSet: string, nowMs: number): string {
   return incidentIdFor(configurationSet, bucketStartMs(nowMs));
+}
+
+// Planted variants go in through the decision store port, so they pass the same key and value checks
+// a real write does.
+export async function plantClosure(deps: ActionDeps, item: Closure, nowMs: number): Promise<void> {
+  if ((await deps.ports.decisionStore.putIfAbsent(item, nowMs)) !== 'written') throw new Error('a closure is already stored for that incident');
+}
+
+export async function plantDecision(deps: ActionDeps, incidentId: string, attributes: Readonly<Record<string, unknown>>, nowMs: number): Promise<void> {
+  const item = { ...incidentItemKey(incidentId, 'DECISION'), attempt: 1, decidedAtMs: nowMs, expiresAt: expiresAtFor(nowMs), ...attributes };
+  if ((await deps.ports.decisionStore.putIfAbsent(item, nowMs)) !== 'written') throw new Error('a DECISION is already stored for that incident');
 }
