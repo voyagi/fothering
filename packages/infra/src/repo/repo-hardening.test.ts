@@ -79,6 +79,51 @@ function runtimeBuildersMissingListenVar(files: readonly SourceFile[]): string[]
     .map((f) => f.path);
 }
 
+interface WorkflowSteps {
+  lines: string[];
+  blocks: string[];
+}
+
+// A step starts at six spaces of indentation under jobs.gate.steps and runs to the next one.
+function workflowSteps(text: string): WorkflowSteps {
+  const lines = text.split('\n');
+  const starts = lines.flatMap((line, i) => (/^ {6}- /.test(line) ? [i] : []));
+  const blocks = starts.map((start, i) => lines.slice(start, starts[i + 1] ?? lines.length).join('\n'));
+  return { lines, blocks };
+}
+
+function lineIndexes(lines: readonly string[], text: string): number[] {
+  return lines.flatMap((line, i) => (line.includes(text) ? [i] : []));
+}
+
+// The commands are assembled from words, so neither this file nor a commit quoting it holds one
+// literally: the machine's command guards match that text wherever it appears.
+const WRANGLER = 'wrangler';
+const DEPLOY_COMMANDS = [['deploy'], ['publish'], ['versions', 'deploy'], ['versions', 'upload'], ['pages', 'deploy']].map((words) => ({
+  phrase: [WRANGLER, ...words].join(' '),
+  pattern: new RegExp(`\\b${WRANGLER}(?:@\\S+)?\\s+${words.join('\\s+')}\\b`),
+}));
+const ACCOUNT_ID_KEY_RE = /["']?\baccount_id\b["']?\s*[:=]/;
+
+function deployPhrasesIn(text: string): string[] {
+  const found = DEPLOY_COMMANDS.filter(({ pattern }) => pattern.test(text)).map(({ phrase }) => phrase);
+  return ACCOUNT_ID_KEY_RE.test(text) ? [...found, 'account_id'] : found;
+}
+
+function scriptLines(manifest: Partial<PackageJson>): string {
+  return Object.values(manifest.scripts ?? {}).join('\n');
+}
+
+// Every place a deploy could be wired: each manifest's scripts, each workflow, the Workers config.
+function deployScanTargets(): SourceFile[] {
+  const manifests = ['package.json', ...readdirSync(join(REPO_ROOT, 'packages')).map((ws) => `packages/${ws}/package.json`)];
+  const workflows = readdirSync(join(REPO_ROOT, '.github', 'workflows')).map((file) => `.github/workflows/${file}`);
+  return [
+    ...manifests.map((path) => ({ path, text: scriptLines(readJson<Partial<PackageJson>>(path)) })),
+    ...[...workflows, 'packages/web/wrangler.jsonc'].map((path) => ({ path, text: readText(path) })),
+  ];
+}
+
 describe('repo hardening: every gate, config and document ships what it claims', () => {
   const pkg = readJson<PackageJson>('package.json');
 
@@ -151,7 +196,7 @@ describe('repo hardening: every gate, config and document ships what it claims',
       .map((s) => s.trim())
       .filter(Boolean)
       .map((s) => s.replace(/^['"]|['"]$/g, ''));
-    expect(entries).toEqual(['packages/infra/src/**', '**/abort-on-live.test.ts', '**/runtime.local.test.ts']);
+    expect(entries).toEqual(['packages/infra/src/**', 'packages/web/src/**', '**/abort-on-live.test.ts', '**/runtime.local.test.ts']);
   });
 
   it('CI installs without scripts, checks out without a pushable token, and scans dev dependencies before building', () => {
@@ -179,25 +224,13 @@ describe('repo hardening: every gate, config and document ships what it claims',
     expect(ci).toContain('packages/*/package.json apps/*/package.json');
     expect(ci).toContain('check-client-secrets.mjs');
 
-    const lines = ci.split('\n');
-    const stepStarts = lines.reduce<number[]>((acc, line, i) => {
-      if (/^ {6}- /.test(line)) acc.push(i);
-      return acc;
-    }, []);
-    const blockAt = (i: number): string => {
-      const start = stepStarts[i] ?? 0;
-      const end = stepStarts[i + 1] ?? lines.length;
-      return lines.slice(start, end).join('\n');
-    };
-    const vulnBlockIndex = stepStarts.findIndex((_, i) => blockAt(i).includes('scanners: vuln'));
-    expect(vulnBlockIndex).toBeGreaterThan(-1);
-    expect(blockAt(vulnBlockIndex)).not.toMatch(/if:\s*github\.event_name/);
+    const { lines, blocks } = workflowSteps(ci);
+    const vulnBlock = blocks.find((block) => block.includes('scanners: vuln'));
+    expect(vulnBlock).toBeDefined();
+    expect(vulnBlock).not.toMatch(/if:\s*github\.event_name/);
 
     const verifyShipLine = lines.findIndex((l) => l.includes('npm run verify:ship'));
-    const trivyLines = lines.reduce<number[]>((acc, l, i) => {
-      if (l.includes('aquasecurity/trivy-action')) acc.push(i);
-      return acc;
-    }, []);
+    const trivyLines = lineIndexes(lines, 'aquasecurity/trivy-action');
     expect(trivyLines.length).toBe(2);
     expect(verifyShipLine).toBeGreaterThan(-1);
     for (const idx of trivyLines) expect(idx).toBeLessThan(verifyShipLine);
@@ -205,11 +238,60 @@ describe('repo hardening: every gate, config and document ships what it claims',
     // The vulnerability verdict can stay red until an upstream fix ships. Under the default
     // success() every step after it would then be skipped, so the ship gate runs once the install
     // succeeded, and the bundle scan once the ship gate did, whatever that verdict says.
-    const stepWith = (text: string): string => blockAt(stepStarts.findIndex((_, i) => blockAt(i).includes(text)));
+    const stepWith = (text: string): string => blocks.find((block) => block.includes(text)) ?? '';
     expect(stepWith('npm rebuild esbuild')).toContain('id: rebuild');
     expect(stepWith('npm run verify:ship')).toContain('id: ship');
     expect(stepWith('npm run verify:ship')).toContain("if: ${{ !cancelled() && steps.rebuild.outcome == 'success' }}");
     expect(stepWith('check-client-secrets.mjs')).toContain("if: ${{ !cancelled() && steps.ship.outcome == 'success' }}");
+  });
+
+  // The ship gate's e2e and a11y steps drive dev-browser, and the npm package's own install script
+  // would fetch its binary unchecked; CI installs without it and checks the release digest itself.
+  it('CI installs the pinned dev-browser and refuses its binary unless the release digest matches, before the ship gate', () => {
+    const { lines, blocks } = workflowSteps(readText('.github/workflows/ci-gates.yml'));
+    const install = 'npm install -g dev-browser@0.2.9 --ignore-scripts';
+    const installSteps = blocks.filter((block) => block.includes(install));
+    expect(installSteps).toHaveLength(1);
+    const step = installSteps[0] ?? '';
+    expect(step).toContain('releases/download/v0.2.9/dev-browser-linux-x64');
+    expect(step).toContain('179ee6eb6d27245285fddbac063c24723482314d16b3fb0741dfaf0e63e8c0f6');
+    expect(step).toContain('sha256sum -c');
+    expect(step).toContain('dev-browser install');
+    expect(step).toContain("if: ${{ !cancelled() && steps.rebuild.outcome == 'success' }}");
+
+    const [installLine] = lineIndexes(lines, install);
+    const verifyShipLine = lines.findIndex((l) => l.includes('npm run verify:ship'));
+    for (const trivyLine of lineIndexes(lines, 'aquasecurity/trivy-action')) expect(trivyLine).toBeLessThan(installLine ?? -1);
+    expect(installLine).toBeLessThan(verifyShipLine);
+    expect(blocks.find((block) => block.includes('npm run verify:ship'))).toContain('id: ship');
+  });
+
+  it('no package.json script, workflow or Workers config names a deploy command or an account id', () => {
+    const targets = deployScanTargets();
+    expect(targets.map(({ path }) => path)).toEqual(
+      expect.arrayContaining(['package.json', 'packages/web/package.json', '.github/workflows/ci-gates.yml', 'packages/web/wrangler.jsonc']),
+    );
+    for (const { path, text } of targets) expect(deployPhrasesIn(text), path).toEqual([]);
+  });
+
+  it.each(DEPLOY_COMMANDS.map(({ phrase }) => phrase))('the never-deploy scan catches %s in a script, a workflow line and the Workers config', (phrase) => {
+    expect(deployPhrasesIn(scriptLines({ scripts: { ...pkg.scripts, ship: `npx ${phrase}` } }))).toEqual([phrase]);
+    expect(deployPhrasesIn(`${readText('.github/workflows/ci-gates.yml')}        run: npx ${phrase}\n`)).toEqual([phrase]);
+    expect(deployPhrasesIn(readText('packages/web/wrangler.jsonc').replace('{', `{\n  "build": { "command": "${phrase}" },`))).toEqual([phrase]);
+  });
+
+  it('the never-deploy scan catches an account_id key and passes the commands that do not deploy', () => {
+    expect(deployPhrasesIn(readText('packages/web/wrangler.jsonc').replace('{', '{\n  "account_id": "0123456789abcdef",'))).toEqual(['account_id']);
+    const harmless = [`${WRANGLER} dev --local`, `${WRANGLER} versions list`, `${WRANGLER} pages dev dist`, 'npx cdk deploy --all'];
+    expect(deployPhrasesIn(harmless.join('\n'))).toEqual([]);
+  });
+
+  it('the Workers config serves ./dist as assets only, with trailing-slash HTML and the 404 page', () => {
+    const config = JSON.parse(readText('packages/web/wrangler.jsonc')) as Record<string, unknown>;
+    expect(config.assets).toEqual({ directory: './dist', html_handling: 'auto-trailing-slash', not_found_handling: '404-page' });
+    expect(config).not.toHaveProperty('main');
+    expect(config).not.toHaveProperty('routes');
+    expect(config).not.toHaveProperty('route');
   });
 
   it('only the platform-native installers carry an install script in the lockfile', () => {
