@@ -71,4 +71,7 @@ function main() {
   return runStryker();
 }
 
-process.exit(main());
+// exitCode, not process.exit(): stdout is a pipe under verify-ship, and on POSIX a pipe write is
+// asynchronous, so exiting at once can drop the SKIPPED line before it is written (Node's
+// "A note on process I/O"). Nothing is left running once main returns, so the process ends here.
+process.exitCode = main();
