@@ -7,6 +7,8 @@ import { afterAll, describe, expect, it, vi } from 'vitest';
 import { main, PROCESS_IO, waitForSignal, type CliIo } from './cli.js';
 import { DRIVER_JOB_TOKEN, runDriver, stageAxeSource, writeDriver } from './dev-browser.js';
 import { completeSite, page, plantDist } from '../test/planted-dist.js';
+import { loadBuiltSite } from '../checks/built-site.js';
+import { PROVENANCE_LABELS } from '../site/labels.js';
 import { renderSitemap, SITE_ORIGIN } from '../site/route-list.js';
 import { themedValue, TOKENS } from '../theme/head-script.js';
 import {
@@ -17,9 +19,14 @@ import {
   auditReasons,
   axeReasons,
   compareBuilds,
+  causeCopyVerdict,
   consoleVerdict,
   copyBuild,
   countAccepted,
+  noScriptVerdict,
+  provenanceCopyVerdict,
+  REPLAY_INVALID_HASHES,
+  replayVerdict,
   flowTabVerdict,
   flowVerdict,
   HANG_WIDTHS,
@@ -57,6 +64,8 @@ import {
   type LinesReading,
   type FontsReading,
   type KeyboardReport,
+  type NoScriptReading,
+  type ReplayReading,
   type RequestsReading,
   type SecondBuildRun,
   type SiteE2eOptions,
@@ -1117,6 +1126,186 @@ describe('hangVerdict (UI-SPEC 8.1, the tag hung from the stem)', () => {
   });
 });
 
+const controlBoxes = (shift = 0): Box[] => [0, 1, 2, 3, 4, 5].map((index) => box(10 + 100 * index + shift, 40, 90 + 100 * index + shift, 88));
+const healthyReplay =(width: number): ReplayReading => ({
+  route: '/replay/',
+  width,
+  boxes: [controlBoxes(), controlBoxes(), controlBoxes(0.5), controlBoxes()],
+  afterNext: [2, 3, 4],
+  afterFourth: 4,
+  previousDisabledFirst: true,
+  nextDisabledLast: true,
+  deepLinks: [1, 2, 3, 4].map((step) => ({ hash: `#step-${String(step)}`, shown: step })),
+  invalid: REPLAY_INVALID_HASHES.map((hash) => ({ hash, shown: 1 })),
+  sameStepMutations: 0,
+  historyBefore: 3,
+  historyAfter: 3,
+  arrow: { before: 1, after: 2 },
+  radio: { before: 2, after: 2 },
+  modifiers: ['Alt', 'Control', 'Meta', 'Shift'].map((modifier) => ({ modifier, before: 2, after: 2 })),
+});
+const replayReason = (reading: ReplayReading): string => {
+  const verdict = replayVerdict(reading);
+  return verdict.ok ? '' : verdict.reason;
+};
+
+describe('replayVerdict (AC-4, AC-6, AC-7, AC-10, AC-E5, AC-E6, AC-E30)', () => {
+  it('passes a healthy replay run at 320 and 1440', () => {
+    expect(replayVerdict(healthyReplay(320))).toEqual({ ok: true });
+    expect(replayVerdict(healthyReplay(1440))).toEqual({ ok: true });
+  });
+
+  it('fails three Next activations from step 1 that do not reach step 4', () => {
+    expect(replayReason({ ...healthyReplay(320), afterNext: [2, 3, 3] })).toBe(E2E_MESSAGES.replayNext(320, [2, 3, 3]));
+  });
+
+  it('fails Previous enabled on step 1', () => {
+    expect(replayReason({ ...healthyReplay(1440), previousDisabledFirst: false })).toBe(E2E_MESSAGES.replayPreviousEnabled(1440));
+  });
+
+  it('fails Next enabled on step 4', () => {
+    expect(replayReason({ ...healthyReplay(1440), nextDisabledLast: false })).toBe(E2E_MESSAGES.replayNextEnabled(1440));
+  });
+
+  it('fails a fourth Next activation that changes the step', () => {
+    expect(replayReason({ ...healthyReplay(320), afterFourth: 1 })).toBe(E2E_MESSAGES.replayFourth(320, 1));
+  });
+
+  it('fails a control box that moves more than 1 px between steps, and passes one that moves 1 px', () => {
+    const moved = { ...healthyReplay(320), boxes: [controlBoxes(), controlBoxes(), controlBoxes(), controlBoxes(1.5)] };
+    expect(replayReason(moved).split('; ')[0]).toBe(E2E_MESSAGES.replayBoxMoved(320, 'Previous', 4, 1.5));
+    expect(replayVerdict({ ...healthyReplay(320), boxes: [controlBoxes(), controlBoxes(1), controlBoxes(), controlBoxes()] })).toEqual({ ok: true });
+  });
+
+  it('fails a run that measured fewer than six boxes on a step', () => {
+    expect(replayReason({ ...healthyReplay(320), boxes: [controlBoxes(), controlBoxes().slice(1), controlBoxes(), controlBoxes()] })).toBe(E2E_MESSAGES.replayBoxesMissing(320));
+  });
+
+  it('fails a deep link that shows another step, and a deep link the run never loaded', () => {
+    const wrong = { ...healthyReplay(1440), deepLinks: [1, 2, 3, 4].map((step) => ({ hash: `#step-${String(step)}`, shown: step === 3 ? 1 : step })) };
+    expect(replayReason(wrong)).toBe(E2E_MESSAGES.replayDeepLink(1440, '#step-3', 1));
+    expect(replayReason({ ...healthyReplay(1440), deepLinks: healthyReplay(1440).deepLinks.slice(0, 3) })).toBe(E2E_MESSAGES.replayDeepLinkMissing(1440, '#step-4'));
+  });
+
+  it('fails an invalid hash that shows a step other than 1, and one the run never loaded', () => {
+    const wrong = { ...healthyReplay(320), invalid: REPLAY_INVALID_HASHES.map((hash) => ({ hash, shown: hash === '#step-01' ? 0 : 1 })) };
+    expect(replayReason(wrong)).toBe(E2E_MESSAGES.replayInvalidHash(320, '#step-01', 0));
+    expect(replayReason({ ...healthyReplay(320), invalid: healthyReplay(320).invalid.filter((item) => item.hash !== '') })).toBe(E2E_MESSAGES.replayDeepLinkMissing(320, ''));
+  });
+
+  it('fails a same-step hashchange that records a DOM mutation', () => {
+    expect(replayReason({ ...healthyReplay(1440), sameStepMutations: 3 })).toBe(E2E_MESSAGES.replaySameStep(1440, 3));
+  });
+
+  it('fails stepping that grows history.length', () => {
+    expect(replayReason({ ...healthyReplay(1440), historyAfter: 6 })).toBe(E2E_MESSAGES.replayHistory(1440, 3, 6));
+  });
+
+  it('fails ArrowRight on a step button that does not move one step', () => {
+    expect(replayReason({ ...healthyReplay(320), arrow: { before: 1, after: 1 } })).toBe(E2E_MESSAGES.replayArrow(320, 1, 1));
+  });
+
+  it('fails ArrowRight in the theme radios that moves the step', () => {
+    expect(replayReason({ ...healthyReplay(320), radio: { before: 2, after: 3 } })).toBe(E2E_MESSAGES.replayArrowRadio(320, 2, 3));
+  });
+
+  it('fails a modifier-held arrow that moves the step', () => {
+    const modifiers = healthyReplay(1440).modifiers.map((item) => (item.modifier === 'Control' ? { ...item, after: 3 } : item));
+    expect(replayReason({ ...healthyReplay(1440), modifiers })).toBe(E2E_MESSAGES.replayArrowModifier(1440, 'Control', 2, 3));
+  });
+});
+
+const healthyNoScript =(width: number): NoScriptReading => ({
+  route: '/replay/',
+  width,
+  panels: ['1', '2', '3', '4'],
+  controls: 0,
+  boardParts: [{ steps: '1 2 4', displayed: false }, { steps: '1 2', displayed: false }, { steps: '3', displayed: true }],
+  tagShown: true,
+});
+const noScriptReason = (reading: NoScriptReading): string => {
+  const verdict = noScriptVerdict(reading);
+  return verdict.ok ? '' : verdict.reason;
+};
+
+describe('noScriptVerdict (AC-10, AC-E7)', () => {
+  it('passes every panel shown in order, no control and the board at the paused step', () => {
+    expect(noScriptVerdict(healthyNoScript(320))).toEqual({ ok: true });
+  });
+
+  it('fails a panel not displayed', () => {
+    expect(noScriptReason({ ...healthyNoScript(320), panels: ['1', '3', '4'] })).toBe(E2E_MESSAGES.noScriptPanels(320, ['1', '3', '4']));
+  });
+
+  it('fails panels out of order', () => {
+    expect(noScriptReason({ ...healthyNoScript(1440), panels: ['2', '1', '3', '4'] })).toBe(E2E_MESSAGES.noScriptPanels(1440, ['2', '1', '3', '4']));
+  });
+
+  it('fails a step control displayed', () => {
+    expect(noScriptReason({ ...healthyNoScript(1440), controls: 2 })).toBe(E2E_MESSAGES.noScriptControls(1440, 2));
+  });
+
+  it('fails a board that does not show the paused step', () => {
+    const boardParts = [{ steps: '1 2 4', displayed: true }, { steps: '3', displayed: false }];
+    expect(noScriptReason({ ...healthyNoScript(320), boardParts })).toBe([E2E_MESSAGES.noScriptBoard(320, '1 2 4', true), E2E_MESSAGES.noScriptBoard(320, '3', false)].join('; '));
+  });
+
+  it('fails a run with no board part and one with the tag hidden', () => {
+    expect(noScriptReason({ ...healthyNoScript(320), boardParts: [] })).toBe(E2E_MESSAGES.noScriptNoBoard(320));
+    expect(noScriptReason({ ...healthyNoScript(320), tagShown: false })).toBe(E2E_MESSAGES.noScriptTag(320));
+  });
+});
+
+describe('the copy-build verdicts (AC-14, AC-17)', () => {
+  const trees: ReturnType<typeof plantDist>[] = [];
+  afterAll(() => {
+    for (const tree of trees) tree.remove();
+  });
+  const builtOf = (files: Record<string, string>): ReturnType<typeof loadBuiltSite> => {
+    const tree = plantDist(files);
+    trees.push(tree);
+    return loadBuiltSite(tree.dist);
+  };
+  const SIMULATOR = PROVENANCE_LABELS['simulator-captured'].stamp;
+  const tagged = (stamp: string, cause = 'batch=new-value'): string => `<article data-tag><span class="stamp">${stamp}</span><dd>${cause}</dd></article>`;
+  const stepTwo = (cause: string): string => `<section data-wordcount="step" data-steps="2"><p>${cause}</p></section>`;
+
+  it('passes a copy whose landing tag and replay stamp read the simulator stamp', () => {
+    const site = builtOf({ 'index.html': page(tagged(SIMULATOR)), 'replay/index.html': page(tagged(SIMULATOR)) });
+    expect(provenanceCopyVerdict(site, SIMULATOR)).toEqual({ ok: true });
+  });
+
+  it('fails a copy whose replay stamp kept the fixture stamp', () => {
+    const site = builtOf({ 'index.html': page(tagged(SIMULATOR)), 'replay/index.html': page(tagged('FIXTURE RUN')) });
+    expect(provenanceCopyVerdict(site, SIMULATOR)).toEqual({ ok: false, reason: E2E_MESSAGES.copyStamp('/replay/', 'FIXTURE RUN', SIMULATOR) });
+  });
+
+  it('fails a copy whose landing carries no stamp', () => {
+    const site = builtOf({ 'index.html': page('<p>no tag</p>'), 'replay/index.html': page(tagged(SIMULATOR)) });
+    expect(provenanceCopyVerdict(site, SIMULATOR)).toEqual({ ok: false, reason: E2E_MESSAGES.copyStampMissing('/') });
+  });
+
+  it('passes a copy showing the new cause on the landing tag and in step 2, and the old value nowhere', () => {
+    const site = builtOf({ 'index.html': page(tagged(SIMULATOR)), 'replay/index.html': page(stepTwo('batch=new-value')) });
+    expect(causeCopyVerdict(site, { oldValue: 'old-value', newCause: 'batch=new-value' })).toEqual({ ok: true });
+  });
+
+  it('fails a copy whose step 2 lacks the new cause', () => {
+    const site = builtOf({ 'index.html': page(tagged(SIMULATOR)), 'replay/index.html': page(stepTwo('batch=other')) });
+    expect(causeCopyVerdict(site, { oldValue: 'old-value', newCause: 'batch=new-value' })).toEqual({ ok: false, reason: E2E_MESSAGES.copyCauseMissing('/replay/ step 2', 'batch=new-value') });
+  });
+
+  it('fails a copy whose landing tag lacks the new cause', () => {
+    const site = builtOf({ 'index.html': page(tagged(SIMULATOR, 'batch=other')), 'replay/index.html': page(stepTwo('batch=new-value')) });
+    expect(causeCopyVerdict(site, { oldValue: 'old-value', newCause: 'batch=new-value' })).toEqual({ ok: false, reason: E2E_MESSAGES.copyCauseMissing('the landing tag', 'batch=new-value') });
+  });
+
+  it('fails a copy that still shows the old cause value on any page', () => {
+    const site = builtOf({ 'index.html': page(tagged(SIMULATOR)), 'replay/index.html': page(`${stepTwo('batch=new-value')}<p>old-value</p>`) });
+    expect(causeCopyVerdict(site, { oldValue: 'old-value', newCause: 'batch=new-value' })).toEqual({ ok: false, reason: E2E_MESSAGES.copyOldCause('/replay/', 'old-value') });
+  });
+});
+
 describe('copyBuild (AC-12, AC-E10 build half)', () => {
   it('builds a project copy with an artifact whose provenance is measured and fails naming the field and the file, leaving no folder', () => {
     const artifact = JSON.parse(readFileSync(join(REPO_ROOT, 'packages', 'web', 'src', 'fixtures', 'replay-incident.json'), 'utf8')) as { events: { provenance: string }[] };
@@ -1594,6 +1783,12 @@ describe('the built checks through the CLI and the e2e step (D-150, D-151)', () 
       flowNoControl: [320], flowControlWithoutMotion: [320], flowSmallControl: [320, 40, 40], flowStillRunning: [320, 1], flowLabel: [320, ['Stop flow']],
       flowReloadRuns: [320, 1], flowReduced: [320, 1], flowStoredRunning: [320], flowStoredStopped: [320, 1], flowTabUnreached: [320], flowTabLate: [320],
       copyBuildPassed: [], copyBuildUnnamed: ['x'], copyBuildLeft: ['d'], tagStuck: [1280, 5], tagMeetsValve: [1280], noHungTag: [],
+      replayNext: [320, [2, 3]], replayFourth: [320, 1], replayPreviousEnabled: [320], replayNextEnabled: [320], replayBoxesMissing: [320],
+      replayBoxMoved: [320, 'Next', 2, 3], replayDeepLink: [320, '#step-2', 1], replayDeepLinkMissing: [320, '#step-2'], replayInvalidHash: [320, '#step-0', 2],
+      replaySameStep: [320, 1], replayHistory: [320, 2, 3], replayArrow: [320, 1, 1], replayArrowRadio: [320, 2, 3], replayArrowModifier: [320, 'Alt', 2, 3],
+      noScriptPanels: [320, ['1']], noScriptControls: [320, 1], noScriptBoard: [320, '3', false], noScriptNoBoard: [320], noScriptTag: [320],
+      copyStampMissing: ['/'], copyStamp: ['/', 'FIXTURE RUN', 'SIMULATOR RUN'], copyCauseMissing: ['/', 'batch=x'], copyOldCause: ['/', 'x'],
+      copyVariantFailed: ['cause', 1, 'x'], copyVariantUnjudged: ['cause'],
     };
     const rendered = Object.entries(samples).map(([key, args]) => (E2E_MESSAGES[key as keyof typeof E2E_MESSAGES] as (...a: unknown[]) => string)(...args));
     expect(rendered).toHaveLength(Object.keys(E2E_MESSAGES).length);

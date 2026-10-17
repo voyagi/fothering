@@ -494,6 +494,61 @@ export function hangVerdict(reading: HangReading): Verdict {
   return verdictOf(reasons);
 }
 
+// AC-E5: every one of these must show step 1, the empty hash included.
+export const REPLAY_INVALID_HASHES = Object.freeze(['#step-0', '#step-5', '#step-01', '#step-1x', '#step-', '']);
+export const REPLAY_CONTROLS = Object.freeze(['Previous', 'Next', 'step 1', 'step 2', 'step 3', 'step 4']);
+
+export interface StepMove {
+  readonly before: number;
+  readonly after: number;
+}
+
+// Steps are read as the one step panel shown, 0 when none or several show.
+export interface ReplayReading {
+  readonly route: string;
+  readonly width: number;
+  // The six control boxes on steps 1 to 4, in REPLAY_CONTROLS order, read at the top of the page.
+  readonly boxes: readonly (readonly Box[])[];
+  readonly afterNext: readonly number[];
+  readonly afterFourth: number;
+  readonly previousDisabledFirst: boolean;
+  readonly nextDisabledLast: boolean;
+  readonly deepLinks: readonly { readonly hash: string; readonly shown: number }[];
+  readonly invalid: readonly { readonly hash: string; readonly shown: number }[];
+  readonly sameStepMutations: number;
+  readonly historyBefore: number;
+  readonly historyAfter: number;
+  readonly arrow: StepMove;
+  readonly radio: StepMove;
+  readonly modifiers: readonly (StepMove & { readonly modifier: string })[];
+}
+
+export function replayVerdict(_reading: ReplayReading): Verdict {
+  return { ok: true };
+}
+
+export interface NoScriptReading {
+  readonly route: string;
+  readonly width: number;
+  // The steps of the panels displayed, in DOM order.
+  readonly panels: readonly string[];
+  readonly controls: number;
+  readonly boardParts: readonly { readonly steps: string; readonly displayed: boolean }[];
+  readonly tagShown: boolean;
+}
+
+export function noScriptVerdict(_reading: NoScriptReading): Verdict {
+  return { ok: true };
+}
+
+export function provenanceCopyVerdict(_site: BuiltSite, _stamp: string): Verdict {
+  return { ok: true };
+}
+
+export function causeCopyVerdict(_site: BuiltSite, _cause: { readonly oldValue: string; readonly newCause: string }): Verdict {
+  return { ok: true };
+}
+
 const NOT_FOUND_LOAD = /^Failed to load resource: the server responded with a status of 404\b/;
 
 // Chromium logs the unknown address's own 404 as a console error; that answer is the 404 page
@@ -926,6 +981,31 @@ export const E2E_MESSAGES = Object.freeze({
   tagStuck: (width: number, stem: number) => `at ${width} px the lockout tag shows ${stem} px of stem below the closed valve, 12 at least, so it reads as stuck, not hung`,
   tagMeetsValve: (width: number) => `at ${width} px the lockout tag's tilted top edge reaches the closed valve`,
   noHungTag: () => 'no route hung a lockout tag from a closed valve, so the stem check measured nothing',
+  replayNext: (width: number, shown: readonly number[]) => `at ${width} px three Next activations from step 1 showed ${shown.join(', ') || 'nothing'}; 2, 3, 4 expected`,
+  replayFourth: (width: number, shown: number) => `at ${width} px a fourth Next activation from step 1 showed step ${shown}, 4 expected`,
+  replayPreviousEnabled: (width: number) => `at ${width} px Previous is enabled on step 1`,
+  replayNextEnabled: (width: number) => `at ${width} px Next is enabled on step 4`,
+  replayBoxesMissing: (width: number) => `at ${width} px the run did not measure all six control boxes on all four steps`,
+  replayBoxMoved: (width: number, control: string, step: number, delta: number) => `at ${width} px the ${control} box moves ${delta} px on step ${step}, 1 at most`,
+  replayDeepLink: (width: number, hash: string, shown: number) => `at ${width} px loading ${hash} showed step ${shown}`,
+  replayDeepLinkMissing: (width: number, hash: string) => `at ${width} px the run never loaded ${JSON.stringify(hash)}`,
+  replayInvalidHash: (width: number, hash: string, shown: number) => `at ${width} px loading ${JSON.stringify(hash)} showed step ${shown}, 1 expected`,
+  replaySameStep: (width: number, count: number) => `at ${width} px a hashchange to the shown step changed ${count} node(s)`,
+  replayHistory: (width: number, before: number, after: number) => `at ${width} px stepping changed history.length from ${before} to ${after}`,
+  replayArrow: (width: number, before: number, after: number) => `at ${width} px ArrowRight on a step button went from step ${before} to ${after}, one step on expected`,
+  replayArrowRadio: (width: number, before: number, after: number) => `at ${width} px ArrowRight in the theme radios moved the replay from step ${before} to ${after}`,
+  replayArrowModifier: (width: number, modifier: string, before: number, after: number) => `at ${width} px ${modifier}+ArrowRight moved the replay from step ${before} to ${after}`,
+  noScriptPanels: (width: number, panels: readonly string[]) => `at ${width} px with the js class removed the panels shown read ${panels.join(', ') || 'none'}; 1, 2, 3, 4 expected`,
+  noScriptControls: (width: number, count: number) => `at ${width} px with the js class removed ${count} step control(s) still show`,
+  noScriptBoard: (width: number, steps: string, displayed: boolean) => `at ${width} px with the js class removed the board part for steps ${steps} is ${displayed ? 'shown' : 'hidden'}, against the paused step`,
+  noScriptNoBoard: (width: number) => `at ${width} px with the js class removed the run measured no board part`,
+  noScriptTag: (width: number) => `at ${width} px with the js class removed the lockout tag does not show`,
+  copyStampMissing: (route: string) => `${route} carries no provenance stamp in the project copy`,
+  copyStamp: (route: string, found: string, expected: string) => `the stamp on ${route} reads ${found}, ${expected} expected for the copy's provenance`,
+  copyCauseMissing: (where: string, cause: string) => `${where} does not show the copy's cause ${cause}`,
+  copyOldCause: (route: string, value: string) => `${route} still shows the old cause value ${value}`,
+  copyVariantFailed: (id: string, status: number | null, tail: string) => `the ${id} project copy build exited ${String(status)}${tail === '' ? '' : `: ${tail}`}`,
+  copyVariantUnjudged: (id: string) => `the ${id} project copy built and nothing judged it`,
 });
 
 export interface SecondBuildRun {
