@@ -18,10 +18,12 @@ await page.evaluate((stored) => {
 
 const axeSource = await readFile(JOB.axeFile);
 
+// The unknown path expects 404, so the 404 page is audited like any sheet; any other status
+// prints the bare record and the harness names the mismatch.
 for (const route of JOB.routes) {
   const response = await page.goto(JOB.base + route, { waitUntil: 'load' });
   const status = response === null ? 0 : response.status();
-  if (status !== 200) {
+  if (status !== (JOB.expectedStatus[route] || 200)) {
     console.log('AUDIT ' + JSON.stringify({ route, status }));
     continue;
   }

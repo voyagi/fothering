@@ -311,8 +311,8 @@ describe('runA11yLive refuses every empty or broken run by name', () => {
     const planted = plantRepo();
     const { code, lines } = await audit(planted);
     expect(code).toBe(0);
-    expect(lines).toContain(A11Y_MESSAGES.routePassed('/about/', 'device 1440px', 1));
-    expect(lines).toContain(A11Y_MESSAGES.routePassed('/no-such-sheet/', 'device 1440px', 1));
+    expect(lines).toContain(A11Y_MESSAGES.routePassed('/about/', 'device 1440px', 200, 1));
+    expect(lines).toContain(A11Y_MESSAGES.routePassed('/no-such-sheet/', 'device 1440px', 404, 1));
     expect(lines).toContain(A11Y_MESSAGES.acceptedNone());
     expect(lines.at(-1)).toBe(A11Y_MESSAGES.pass(3, 2, 3, 0));
     expect(lines.filter((line) => line.endsWith('Tab stop(s)'))).toHaveLength(18);
@@ -376,7 +376,7 @@ const CATALOGUE_SAMPLES: CatalogueSamples = {
   radioStops: ['theme', 3],
   tabOrder: ['a', 'b'],
   noIndicator: ['<a>'],
-  routePassed: ['/', 'r', 1],
+  routePassed: ['/', 'r', 200, 1],
   routeFailed: ['/', 'r', ['x']],
   selectedRules: [['target-size']],
   acceptedNone: [],

@@ -1,0 +1,8 @@
+---
+import Sheet from '../layouts/Sheet.astro';
+import { NOT_FOUND_ROUTE } from '../site/route-list.ts';
+---
+<Sheet route={NOT_FOUND_ROUTE}>
+  <h1>No sheet at this address</h1>
+  <a href="/">Open the first sheet</a>
+</Sheet>

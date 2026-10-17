@@ -15,7 +15,7 @@ import { startPreviewServer, type PreviewServer } from './preview-server.js';
 import { filesIn, loadBuiltSite, NoBuiltPagesError, routeOf, type BuiltSite } from '../checks/built-site.js';
 import { checkFileBudget, isRegisteredRule, runBuiltChecks, type BudgetViolation, type CheckContext, type Finding } from '../checks/rules.js';
 import { BANNED_NAMES, CONSOLE_DELETE_PHRASES, REPLY_PROMISE_PHRASES, REPUTATION_PAGE_URL } from '../site/content.js';
-import { ROUTES, SITE_ORIGIN } from '../site/route-list.js';
+import { ROUTES, SITE_ORIGIN, sitemapUrls } from '../site/route-list.js';
 
 export interface ThemeSetup {
   readonly name: string;
@@ -137,7 +137,7 @@ export const A11Y_MESSAGES = Object.freeze({
   radioStops: (group: string, stops: number) => `the radio group "${group}" took ${stops} Tab stops, 1 expected`,
   tabOrder: (expected: string, actual: string) => `Tab order ${actual} differs from DOM order ${expected}`,
   noIndicator: (stop: string) => `${stop} shows no visible focus indicator`,
-  routePassed: (route: string, run: string, stops: number) => `[a11y] ${route} ${run}: ok, 0 violations, ${stops} Tab stop(s)`,
+  routePassed: (route: string, run: string, status: number, stops: number) => `[a11y] ${route} ${run}: ok, status ${status}, 0 violations, ${stops} Tab stop(s)`,
   routeFailed: (route: string, run: string, reasons: readonly string[]) => `[a11y] ${route} ${run}: failed: ${reasons.join('; ')}`,
   selectedRules: (ruleIds: readonly string[]) => `[a11y] the five tags select ${ruleIds.length} axe rule(s): ${ruleIds.join(', ')}`,
   acceptedNone: () => '[a11y] accepted incomplete list: empty, 0 matched',
@@ -208,8 +208,8 @@ export function axeReasons(axe: AxeReport, accepted: ReadonlyMap<string, number>
   return reasons;
 }
 
-export function auditReasons(line: AuditLine, width: number, accepted: ReadonlyMap<string, number>): string[] {
-  if (line.status !== 200) return [A11Y_MESSAGES.status(line.status, 200)];
+export function auditReasons(line: AuditLine, width: number, accepted: ReadonlyMap<string, number>, expectedStatus = 200): string[] {
+  if (line.status !== expectedStatus) return [A11Y_MESSAGES.status(line.status, expectedStatus)];
   if (line.axe === undefined || line.keyboard === undefined || line.overflow === undefined) return [A11Y_MESSAGES.axeAbsent()];
   const reasons = axeReasons(line.axe, accepted);
   if (line.overflow.innerWidth !== width) reasons.push(A11Y_MESSAGES.viewport(line.overflow.innerWidth, width));
@@ -230,10 +230,12 @@ function isAxeReport(value: unknown): boolean {
     && isItemList(value.violations) && isItemList(value.incomplete);
 }
 
+// The driver prints a bare route and status when a page answers other than expected, and the
+// full record when it audited the page, whatever its status: the 404 page is audited at 404.
 function isAuditLine(value: unknown): value is AuditLine {
   if (!isObject(value) || typeof value.route !== 'string' || typeof value.status !== 'number') return false;
-  if (value.status !== 200) return true;
   const { keyboard, overflow } = value;
+  if (value.axe === undefined && keyboard === undefined && overflow === undefined) return true;
   return isAxeReport(value.axe)
     && isObject(keyboard) && isStopList(keyboard.focusables) && isStopList(keyboard.walk) && isStopList(keyboard.positiveTabindex)
     && isObject(overflow) && typeof overflow.scrollWidth === 'number' && typeof overflow.innerWidth === 'number';
@@ -284,10 +286,28 @@ export interface A11yLiveOptions {
   readonly outerTimeoutMs?: number;
 }
 
+// D-131: the 404 page is audited where a visitor meets it, at an address no sheet has, because
+// /404.html itself redirects under auto-trailing-slash.
+export const UNKNOWN_PATH = '/no-such-sheet/';
+const EXPECTED_STATUS: Readonly<Record<string, number>> = Object.freeze({ [UNKNOWN_PATH]: 404 });
+
 interface Prepared {
-  readonly routes: readonly string[];
+  // The built routes, then the unknown path; the landing page leads so the driver pins the theme there.
+  readonly audited: readonly string[];
   readonly launcher: string;
   readonly templatePath: string;
+}
+
+// Compared as sets (D-131), so a page built without its sitemap entry, or an entry with no page,
+// stops the audit before any browser starts.
+function sitemapDifference(dist: string, routes: readonly string[]): string | null {
+  const sitemapPath = join(dist, 'sitemap.xml');
+  if (!existsSync(sitemapPath)) return A11Y_MESSAGES.noSitemap(dist);
+  const listed = new Set(sitemapUrls(readFileSync(sitemapPath, 'utf8')).map((url) => (url.startsWith(`${SITE_ORIGIN}/`) ? url.slice(SITE_ORIGIN.length) : url)));
+  const built = new Set(routes);
+  const builtOnly = routes.filter((route) => !listed.has(route));
+  const sitemapOnly = [...listed].filter((route) => !built.has(route));
+  return builtOnly.length === 0 && sitemapOnly.length === 0 ? null : A11Y_MESSAGES.sitemapDiffers(builtOnly, sitemapOnly);
 }
 
 function prepare(options: A11yLiveOptions, themes: readonly ThemeSetup[], widths: readonly number[]): Prepared | string {
@@ -297,11 +317,14 @@ function prepare(options: A11yLiveOptions, themes: readonly ThemeSetup[], widths
   if (!existsSync(dist) || !statSync(dist).isDirectory()) return A11Y_MESSAGES.noDist(dist);
   const routes = routesFromDist(dist);
   if (routes.length === 0) return A11Y_MESSAGES.noRoutes(dist);
+  if (!existsSync(join(dist, '404.html'))) return A11Y_MESSAGES.noNotFoundPage(dist);
+  const difference = sitemapDifference(dist, routes);
+  if (difference !== null) return difference;
   const located = locateDevBrowser(options.globalModules);
   if (!located.ok) return located.reason === 'missing' ? A11Y_MESSAGES.devBrowserMissing(located.path) : A11Y_MESSAGES.devBrowserVersion(located.found);
   const templatePath = options.templatePath ?? join(options.repoRoot, 'scripts', 'a11y.devbrowser.js');
   if (!existsSync(templatePath)) return A11Y_MESSAGES.templateMissing(templatePath);
-  return { routes, launcher: located.launcher, templatePath };
+  return { audited: [...routes, UNKNOWN_PATH], launcher: located.launcher, templatePath };
 }
 
 interface AuditContext {
@@ -319,7 +342,8 @@ async function auditOne(context: AuditContext, theme: ThemeSetup, width: number)
   const label = `${theme.name} ${width}px`;
   const job = {
     base: context.server.url,
-    routes: context.prepared.routes,
+    routes: context.prepared.audited,
+    expectedStatus: EXPECTED_STATUS,
     width,
     height: VIEWPORT_HEIGHT,
     theme: theme.name,
@@ -342,7 +366,7 @@ async function auditOne(context: AuditContext, theme: ThemeSetup, width: number)
     ...(context.outerTimeoutMs === undefined ? {} : { outerTimeoutMs: context.outerTimeoutMs }),
   });
   const { failures, lines } = readRun(run, label);
-  for (const route of context.prepared.routes) {
+  for (const route of context.prepared.audited) {
     if (!lines.has(route)) failures.push(A11Y_MESSAGES.missingRoute(label, route));
   }
   for (const failure of failures) context.print(`[a11y] ${failure}`);
@@ -351,15 +375,15 @@ async function auditOne(context: AuditContext, theme: ThemeSetup, width: number)
     for (const item of line.axe?.incomplete ?? []) {
       if (context.accepted.has(item.id)) context.accepted.set(item.id, (context.accepted.get(item.id) ?? 0) + item.nodes.length);
     }
-    const reasons = auditReasons(line, width, context.accepted);
+    const reasons = auditReasons(line, width, context.accepted, EXPECTED_STATUS[route] ?? 200);
     if (reasons.length === 0) {
-      context.print(A11Y_MESSAGES.routePassed(route, label, line.keyboard?.walk.length ?? 0));
+      context.print(A11Y_MESSAGES.routePassed(route, label, line.status, line.keyboard?.walk.length ?? 0));
     } else {
       context.print(A11Y_MESSAGES.routeFailed(route, label, reasons));
       failures.push(`${route} ${label}: ${reasons.join('; ')}`);
     }
   }
-  return { failures, audits: context.prepared.routes.length };
+  return { failures, audits: context.prepared.audited.length };
 }
 
 export async function runA11yLive(options: A11yLiveOptions): Promise<number> {
@@ -409,7 +433,7 @@ export async function runA11yLive(options: A11yLiveOptions): Promise<number> {
       return 1;
     }
     const matched = [...accepted.values()].reduce((sum, count) => sum + count, 0);
-    print(A11Y_MESSAGES.pass(prepared.routes.length, widths.length, themes.length, matched));
+    print(A11Y_MESSAGES.pass(prepared.audited.length, widths.length, themes.length, matched));
     return 0;
   } finally {
     await server?.close();
