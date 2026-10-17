@@ -2,10 +2,16 @@ import type { Provenance } from '@fothering/core/records';
 import {
   ANALYTICS_PATTERNS,
   EXACT_30_DAY_PATTERNS,
+  LANDING_SECTIONS,
+  LEDE_TERMS,
+  LIMITS_FIXED_ROWS,
+  LIMITS_REPLAY_ROW,
+  NO_MEASURED_NUMBER_SENTENCE,
   PRE_R6_PATTERNS,
   REGION_CLAIM_PATTERNS,
   THEME_RADIO_LIMIT,
 } from '../site/content.js';
+import { PROVENANCE_LABELS } from '../site/labels.js';
 import { sitemapUrls, type SiteRoute } from '../site/route-list.js';
 import { scriptHash } from '../theme/head-script.js';
 import { NOT_FOUND_ROUTE as NOT_FOUND_PAGE, textOf, walk, type BuiltElement, type BuiltPage, type BuiltSite } from './built-site.js';
@@ -643,20 +649,112 @@ export function switchMarkupRule(site: BuiltSite, _context: CheckContext): Findi
   return site.pages.flatMap((page) => switchFindings(page).map((text) => ({ rule: 'switch-markup' as const, route: page.route, text })));
 }
 
-export function ledeRule(_site: BuiltSite, _context: CheckContext): Finding[] {
-  return [];
+const LANDING_ROUTE = '/';
+
+// A rule about the landing reports its absence rather than passing a build that has no landing.
+function onLanding(site: BuiltSite, rule: RuleId, findings: (page: BuiltPage) => string[]): Finding[] {
+  const landing = site.pages.find((page) => page.route === LANDING_ROUTE);
+  const texts = landing === undefined ? [`the build has no landing page at ${LANDING_ROUTE}`] : findings(landing);
+  return texts.map((text) => ({ rule, route: LANDING_ROUTE, text }));
 }
 
-export function landingSectionsRule(_site: BuiltSite, _context: CheckContext): Finding[] {
-  return [];
+// A letter, digit or underscore on either side means the term sits inside a longer word, so agents
+// and reagent do not name agent. The reader has already collapsed spaces and line breaks to one.
+const WORD_CHAR = '[\\p{L}\\p{N}_]';
+const wholePhrase = (term: string): RegExp =>
+  new RegExp(`(?<!${WORD_CHAR})${term.split(/\s+/).map(escapeRegExp).join(' ')}(?!${WORD_CHAR})`, 'u');
+
+function ledeFindings(page: BuiltPage): string[] {
+  const ledes = page.markers.get('data-lede') ?? [];
+  const [lede] = ledes;
+  if (lede === undefined) return ['the landing has no data-lede element'];
+  if (ledes.length > 1) return [`the landing has ${ledes.length} data-lede elements, 1 expected`];
+  const text = textOf(lede);
+  if (text === '') return ['the lede element is empty'];
+  return LEDE_TERMS.filter((term) => !wholePhrase(term).test(text)).map((term) => `the lede does not name ${term} as a whole phrase`);
 }
 
-export function limitsRule(_site: BuiltSite, _context: CheckContext): Finding[] {
-  return [];
+// AC-2, AC-E1 to AC-E3: matched on the lede's rendered text, so entities, non-breaking spaces,
+// line breaks and inline elements between the words never decide the verdict.
+export function ledeRule(site: BuiltSite, _context: CheckContext): Finding[] {
+  return onLanding(site, 'lede', ledeFindings);
 }
 
-export function noEllipsisRule(_site: BuiltSite, _context: CheckContext): Finding[] {
-  return [];
+const hasMarker = (element: BuiltElement, marker: string): boolean => some(element, (node) => node.attrs[marker] !== undefined);
+
+function sectionFindings(page: BuiltPage): string[] {
+  const texts: string[] = [];
+  for (const section of LANDING_SECTIONS) {
+    const count = elementsIn(page.root, section.level).filter((heading) => textOf(heading) === section.heading).length;
+    if (count === 0) texts.push(`the landing has no ${section.level} reading "${section.heading}"`);
+    else if (count > 1) texts.push(`the landing has ${count} ${section.level} headings reading "${section.heading}", 1 expected`);
+  }
+  const tables = elementsIn(page.root, 'table');
+  const others = tables.filter((table) => !hasMarker(table, 'data-limits-row')).length;
+  if (others > 0) texts.push(`the landing holds ${others} table${others === 1 ? '' : 's'} besides the limits table`);
+  if (tables.length - others > 1) texts.push(`the landing holds ${tables.length - others} limits tables, 1 expected`);
+  return texts;
+}
+
+// AC-1 and AC-P15: the four headed sections, and no comparison table beside the limits table.
+export function landingSectionsRule(site: BuiltSite, _context: CheckContext): Finding[] {
+  return onLanding(site, 'landing-sections', sectionFindings);
+}
+
+function markedIn(root: BuiltElement, marker: string): BuiltElement[] {
+  const found: BuiltElement[] = [];
+  walk(root, (element) => {
+    if (element.attrs[marker] !== undefined) found.push(element);
+  });
+  return found;
+}
+
+const LIMITS_PARTS = [LIMITS_REPLAY_ROW.id, ...LIMITS_FIXED_ROWS.map((row) => row.id)];
+
+function rowState(row: BuiltElement): string {
+  const [state] = markedIn(row, 'data-limits-state');
+  return state === undefined ? '' : textOf(state);
+}
+
+function limitsFindings(page: BuiltPage, provenance: Provenance): string[] {
+  const sections = page.markers.get('data-limits') ?? [];
+  const [section] = sections;
+  if (section === undefined) return ['the landing has no limits section (data-limits)'];
+  if (sections.length > 1) return [`the landing has ${sections.length} limits sections, 1 expected`];
+  const texts = textOf(section).includes(NO_MEASURED_NUMBER_SENTENCE) ? [] : ['the limits section does not say that this site carries no measured number'];
+  const rows = markedIn(section, 'data-limits-row');
+  const idOf = (row: BuiltElement): string => row.attrs['data-limits-row'] ?? '';
+  for (const part of LIMITS_PARTS) {
+    const count = rows.filter((row) => idOf(row) === part).length;
+    if (count === 0) texts.push(`the limits section has no row for ${part}`);
+    else if (count > 1) texts.push(`the limits section has ${count} rows for ${part}, 1 expected`);
+  }
+  for (const row of rows) {
+    if (!LIMITS_PARTS.includes(idOf(row))) texts.push(`the limits section has a row for ${idOf(row) || 'an unnamed part'}, which is not a listed part`);
+    if (rowState(row) === '') texts.push(`the limits row ${idOf(row)} has no state`);
+  }
+  const replay = rows.find((row) => idOf(row) === LIMITS_REPLAY_ROW.id);
+  const expected = PROVENANCE_LABELS[provenance].limitsState;
+  const state = replay === undefined ? '' : rowState(replay);
+  if (state !== '' && state !== expected) texts.push(`the replay row reads ${state}; the label map gives ${expected} for a ${provenance} artifact`);
+  return texts;
+}
+
+// AC-3: one row per part, each with a state, the replay row's state from the label map for the
+// committed artifact, and the sentence that the site carries no measured number.
+export function limitsRule(site: BuiltSite, context: CheckContext): Finding[] {
+  return onLanding(site, 'limits', (page) => limitsFindings(page, context.provenance));
+}
+
+const TRUNCATIONS: readonly (readonly [RegExp, string])[] = [
+  [/text-overflow\s*:[^;}]*\bellipsis\b/i, 'text-overflow: ellipsis'],
+  [/(?:^|[\s;{])(?:-webkit-)?line-clamp\s*:/i, 'a line clamp'],
+];
+
+// UI-SPEC E14: long text wraps; nothing on the site is cut short behind an ellipsis.
+export function noEllipsisRule(site: BuiltSite, _context: CheckContext): Finding[] {
+  return site.css.flatMap((file) =>
+    TRUNCATIONS.filter(([pattern]) => pattern.test(file.text)).map(([, what]) => ({ rule: 'no-ellipsis' as const, route: fileRoute(file.file), text: `the CSS truncates text with ${what}` })));
 }
 
 // Workers limits: 20,000 files per version on the Free plan and 25 MiB per file (AC-62).
