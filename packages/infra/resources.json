@@ -1,0 +1,140 @@
+[
+  {
+    "stack": "FotheringIngest",
+    "logicalId": "AddressKey1F8FD90D",
+    "type": "AWS::SecretsManager::Secret",
+    "deletionPolicy": "Delete"
+  },
+  {
+    "stack": "FotheringIngest",
+    "logicalId": "DeadLetterDepthAlarm627D0251",
+    "type": "AWS::CloudWatch::Alarm",
+    "deletionPolicy": "Delete"
+  },
+  {
+    "stack": "FotheringIngest",
+    "logicalId": "DeadLetterQueue9F481546",
+    "type": "AWS::SQS::Queue",
+    "deletionPolicy": "Delete"
+  },
+  {
+    "stack": "FotheringIngest",
+    "logicalId": "EventStore165FCE28",
+    "type": "AWS::DynamoDB::Table",
+    "deletionPolicy": "Delete"
+  },
+  {
+    "stack": "FotheringIngest",
+    "logicalId": "ForgetFunction7BD0205A",
+    "type": "AWS::Lambda::Function",
+    "deletionPolicy": "Delete"
+  },
+  {
+    "stack": "FotheringIngest",
+    "logicalId": "ForgetLogsE8A7F87C",
+    "type": "AWS::Logs::LogGroup",
+    "deletionPolicy": "Delete"
+  },
+  {
+    "stack": "FotheringIngest",
+    "logicalId": "ForgetRole9C1F5950",
+    "type": "AWS::IAM::Role",
+    "deletionPolicy": "Delete"
+  },
+  {
+    "stack": "FotheringIngest",
+    "logicalId": "ForgetRoleDefaultPolicy081F7691",
+    "type": "AWS::IAM::Policy",
+    "deletionPolicy": "Delete"
+  },
+  {
+    "stack": "FotheringIngest",
+    "logicalId": "IngestDroppedEventsAlarmC9CA4258",
+    "type": "AWS::CloudWatch::Alarm",
+    "deletionPolicy": "Delete"
+  },
+  {
+    "stack": "FotheringIngest",
+    "logicalId": "IngestErrorLinesAlarm0B006E66",
+    "type": "AWS::CloudWatch::Alarm",
+    "deletionPolicy": "Delete"
+  },
+  {
+    "stack": "FotheringIngest",
+    "logicalId": "IngestErrorLinesF709B981",
+    "type": "AWS::Logs::MetricFilter",
+    "deletionPolicy": "Delete"
+  },
+  {
+    "stack": "FotheringIngest",
+    "logicalId": "IngestErrorsAlarm406C4623",
+    "type": "AWS::CloudWatch::Alarm",
+    "deletionPolicy": "Delete"
+  },
+  {
+    "stack": "FotheringIngest",
+    "logicalId": "IngestFunction4B2F2EB2",
+    "type": "AWS::Lambda::Function",
+    "deletionPolicy": "Delete"
+  },
+  {
+    "stack": "FotheringIngest",
+    "logicalId": "IngestFunctionEventInvokeConfig1E836ADD",
+    "type": "AWS::Lambda::EventInvokeConfig",
+    "deletionPolicy": "Delete"
+  },
+  {
+    "stack": "FotheringIngest",
+    "logicalId": "IngestLogs7327CBDC",
+    "type": "AWS::Logs::LogGroup",
+    "deletionPolicy": "Delete"
+  },
+  {
+    "stack": "FotheringIngest",
+    "logicalId": "IngestRoleAF8AE6D8",
+    "type": "AWS::IAM::Role",
+    "deletionPolicy": "Delete"
+  },
+  {
+    "stack": "FotheringIngest",
+    "logicalId": "IngestRoleDefaultPolicy36CB560D",
+    "type": "AWS::IAM::Policy",
+    "deletionPolicy": "Delete"
+  },
+  {
+    "stack": "FotheringIngest",
+    "logicalId": "SesEventsAllowEventRuleFotheringIngestIngestFunction8EAD9661D7AFFE5E",
+    "type": "AWS::Lambda::Permission",
+    "deletionPolicy": "Delete"
+  },
+  {
+    "stack": "FotheringIngest",
+    "logicalId": "SesEventsED116675",
+    "type": "AWS::Events::Rule",
+    "deletionPolicy": "Delete"
+  },
+  {
+    "stack": "FotheringRuntime",
+    "logicalId": "Runtime99E3DDFA",
+    "type": "AWS::BedrockAgentCore::Runtime",
+    "deletionPolicy": "Delete"
+  },
+  {
+    "stack": "FotheringRuntime",
+    "logicalId": "RuntimeLogPolicy777DE39A",
+    "type": "AWS::IAM::Policy",
+    "deletionPolicy": "Delete"
+  },
+  {
+    "stack": "FotheringRuntime",
+    "logicalId": "RuntimeLogs92941AA6",
+    "type": "AWS::Logs::LogGroup",
+    "deletionPolicy": "Delete"
+  },
+  {
+    "stack": "FotheringRuntime",
+    "logicalId": "RuntimeRoleFD8790A4",
+    "type": "AWS::IAM::Role",
+    "deletionPolicy": "Delete"
+  }
+]
