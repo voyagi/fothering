@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs';
+import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -342,8 +342,20 @@ export interface LinesReading {
   readonly lines: readonly string[];
 }
 
-export function lineVerdict(_readings: readonly LinesReading[]): Verdict {
-  return { ok: true };
+const MAX_LINE_CHARACTERS = 80;
+const GRAPHEMES = new Intl.Segmenter('en', { granularity: 'grapheme' });
+
+// AC-E54: a character is a grapheme cluster, so an emoji or a letter with its combining mark is one.
+export function graphemeCount(line: string): number {
+  return [...GRAPHEMES.segment(line.trimEnd())].length;
+}
+
+// AC-64 and AC-E53: a run that measured no prose block proves nothing, so it fails.
+export function lineVerdict(readings: readonly LinesReading[]): Verdict {
+  if (readings.reduce((sum, reading) => sum + reading.blocks, 0) === 0) return { ok: false, reason: E2E_MESSAGES.noProseBlocks() };
+  const reasons = readings.flatMap((reading) =>
+    reading.lines.filter((line) => graphemeCount(line) > MAX_LINE_CHARACTERS).map((line) => E2E_MESSAGES.lineTooLong(reading.route, graphemeCount(line), line.trimEnd())));
+  return verdictOf(reasons);
 }
 
 export interface IdentifierReading {
@@ -351,8 +363,10 @@ export interface IdentifierReading {
   readonly lines: readonly string[];
 }
 
-export function identifierBreakVerdict(_reading: IdentifierReading): Verdict {
-  return { ok: true };
+// AC-E55: every line of an identifier but the last must end right after a dot.
+export function identifierBreakVerdict(reading: IdentifierReading): Verdict {
+  const lines = reading.lines.map((line) => line.trim());
+  return lines.slice(0, -1).every((line) => line.endsWith('.')) ? { ok: true } : { ok: false, reason: E2E_MESSAGES.identifierBreak(reading.text, lines) };
 }
 
 export interface Box {
@@ -372,8 +386,21 @@ export interface OverlapReading {
   readonly drawings: readonly DrawingReading[];
 }
 
-export function overlapVerdict(_reading: OverlapReading): Verdict {
-  return { ok: true };
+// Boxes that only touch do not overlap; a text box may sit half a pixel past its drawing for
+// sub-pixel rounding, and a whole pixel past it fails.
+const overlaps = (first: Box, second: Box): boolean =>
+  first.left < second.right && first.right > second.left && first.top < second.bottom && first.bottom > second.top;
+const EDGE_TOLERANCE = 0.5;
+const outside = (inner: Box, outer: Box): boolean =>
+  inner.left < outer.left - EDGE_TOLERANCE || inner.top < outer.top - EDGE_TOLERANCE || inner.right > outer.right + EDGE_TOLERANCE || inner.bottom > outer.bottom + EDGE_TOLERANCE;
+
+// AC-65: the hung tag covers no drawing text, and no drawing text leaves its drawing.
+export function overlapVerdict(reading: OverlapReading): Verdict {
+  const reasons = reading.drawings.flatMap((drawing) => drawing.texts.flatMap((text) => [
+    ...(reading.tag !== null && overlaps(reading.tag, text.box) ? [E2E_MESSAGES.tagOverlap(text.text)] : []),
+    ...(outside(text.box, drawing.box) ? [E2E_MESSAGES.textOutside(text.text)] : []),
+  ]));
+  return verdictOf(reasons);
 }
 
 export interface FlowControlBox {
@@ -399,8 +426,33 @@ export interface FlowReading {
   readonly storedStopped: number;
 }
 
-export function flowVerdict(_reading: FlowReading): Verdict {
-  return { ok: true };
+const MIN_CONTROL = 44;
+const RUN_FLOW = 'Run flow';
+
+function stopReasons(reading: FlowReading): string[] {
+  const { width, afterClick, afterReload } = reading;
+  const reasons: string[] = [];
+  if (afterClick.running > 0) reasons.push(E2E_MESSAGES.flowStillRunning(width, afterClick.running));
+  if (afterClick.labels.length === 0 || afterClick.labels.some((label) => label !== RUN_FLOW)) reasons.push(E2E_MESSAGES.flowLabel(width, afterClick.labels));
+  if (afterReload.running > 0) reasons.push(E2E_MESSAGES.flowReloadRuns(width, afterReload.running));
+  return reasons;
+}
+
+// AC-43, AC-44, AC-E31, AC-E32 and WCAG 2.2.2. Whether a route moves is read from the page's running
+// animations, never from a marker, so a moving drawing with no visible Stop flow cannot pass.
+export function flowVerdict(reading: FlowReading): Verdict {
+  const { width, movingOnLoad, controls } = reading;
+  const reasons: string[] = [];
+  if (movingOnLoad && controls.length === 0) reasons.push(E2E_MESSAGES.flowNoControl(width));
+  if (!movingOnLoad && controls.length > 0) reasons.push(E2E_MESSAGES.flowControlWithoutMotion(width));
+  for (const control of controls) {
+    if (control.width < MIN_CONTROL || control.height < MIN_CONTROL) reasons.push(E2E_MESSAGES.flowSmallControl(width, control.width, control.height));
+  }
+  if (movingOnLoad && controls.length > 0) reasons.push(...stopReasons(reading));
+  if (reading.reduced > 0) reasons.push(E2E_MESSAGES.flowReduced(width, reading.reduced));
+  if (movingOnLoad && reading.storedRunningReduced === 0) reasons.push(E2E_MESSAGES.flowStoredRunning(width));
+  if (reading.storedStopped > 0) reasons.push(E2E_MESSAGES.flowStoredStopped(width, reading.storedStopped));
+  return verdictOf(reasons);
 }
 
 export interface FlowTabReading {
@@ -408,8 +460,13 @@ export interface FlowTabReading {
   readonly flows: readonly { readonly flowStep: number | null; readonly nextStep: number | null }[];
 }
 
-export function flowTabVerdict(_reading: FlowTabReading): Verdict {
-  return { ok: true };
+// AC-E33: a Stop flow control is reached by Tab before the first focusable of the next section.
+export function flowTabVerdict(reading: FlowTabReading): Verdict {
+  const reasons = reading.flows.flatMap(({ flowStep, nextStep }) => {
+    if (flowStep === null) return [E2E_MESSAGES.flowTabUnreached(reading.width)];
+    return nextStep !== null && flowStep > nextStep ? [E2E_MESSAGES.flowTabLate(reading.width)] : [];
+  });
+  return verdictOf(reasons);
 }
 
 const NOT_FOUND_LOAD = /^Failed to load resource: the server responded with a status of 404\b/;
@@ -1031,8 +1088,50 @@ export interface CopyBuildRun {
   readonly folder: string;
 }
 
+// What a project copy needs to build. The copy sits in the git-ignored root dist folder, at the
+// depth of packages/web, so relative paths and the walk up to node_modules resolve as they do there.
+const PROJECT_FILES = ['astro.config.mjs', 'package.json', 'tsconfig.json', 'public', 'src'];
+
 export function copyBuild(options: CopyBuildOptions): CopyBuildRun {
-  return { status: 0, output: '', folder: join(options.repoRoot, 'dist', `site-copy-${options.id ?? 'stub'}`) };
+  const folder = join(options.repoRoot, 'dist', `site-copy-${options.id ?? String(process.pid)}`);
+  const remove = (): void => rmSync(folder, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  remove();
+  try {
+    for (const item of PROJECT_FILES) cpSync(join(options.repoRoot, 'packages', 'web', item), join(folder, item), { recursive: true });
+    writeFileSync(join(folder, options.swap.path), options.swap.text);
+    const run = spawnSync(process.execPath, [join(options.repoRoot, 'scripts', 'astro.mjs'), 'build'], {
+      cwd: folder,
+      encoding: 'utf8',
+      shell: false,
+      maxBuffer: 64 * 1024 * 1024,
+    });
+    return { status: run.status, output: `${run.stdout ?? ''}${run.stderr ?? ''}${run.error === undefined ? '' : run.error.message}`, folder };
+  } finally {
+    remove();
+  }
+}
+
+const BROKEN_ARTIFACT = 'src/fixtures/replay-incident.json';
+const NAMES_ARTIFACT = /replay-incident\.json: events\[\d+\]|replay-incident\.json:[^\n]*\bprovenance\b/;
+
+// AC-12 and AC-E10: the committed artifact with its first event's provenance set to a value the
+// schema lacks must stop the site build, and the build must say which file and field.
+function realBrokenArtifactBuild(repoRoot: string): () => CopyBuildRun {
+  return () => {
+    const artifact = JSON.parse(readFileSync(join(repoRoot, 'packages', 'web', BROKEN_ARTIFACT), 'utf8')) as { events: { provenance: string }[] };
+    const [first] = artifact.events;
+    if (first !== undefined) first.provenance = 'measured';
+    return copyBuild({ repoRoot, swap: { path: BROKEN_ARTIFACT, text: `${JSON.stringify(artifact, null, 2)}\n` }, id: 'broken-artifact' });
+  };
+}
+
+function copyBuildStep(options: SiteE2eOptions, print: (line: string) => void): string | null {
+  const run = (options.brokenArtifactBuild ?? realBrokenArtifactBuild(options.repoRoot))();
+  const named = run.output.split(/\r?\n/).filter((line) => NAMES_ARTIFACT.test(line));
+  for (const line of named) print(line);
+  if (existsSync(run.folder)) return E2E_MESSAGES.copyBuildLeft(run.folder);
+  if (run.status === 0) return E2E_MESSAGES.copyBuildPassed();
+  return named.length > 0 ? null : E2E_MESSAGES.copyBuildUnnamed(run.output.trim().slice(-OUTPUT_TAIL));
 }
 
 const RENDERED_LABEL = 'rendered';
@@ -1077,6 +1176,9 @@ const isRequestsReading = (value: unknown): value is RequestsReading => isObject
 const isStorageReading = (value: unknown): value is StorageReading => isObject(value) && isStringList(value.local) && isStringList(value.session);
 
 const ROUTE_CHECKS = ['SWITCH', 'FONTS', 'REQUESTS'] as const;
+// Measured over every route: the flow and Tab walk at both widths, prose lines at 1440, the tag and
+// drawing labels at 320.
+const MEASURE_CHECKS = ['FLOW', 'TABFLOW', 'LINES', 'NARROW'] as const;
 type RouteCheck = (typeof ROUTE_CHECKS)[number];
 
 const ROUTE_JUDGES: Readonly<Record<RouteCheck, (value: unknown) => Verdict | null>> = {
@@ -1125,6 +1227,109 @@ function judgeStorage(text: string | undefined): { verdict: Verdict; detail: str
   return { verdict: storageVerdict(value), detail: `keys after using the switch: ${keys.join(', ') || 'none'}` };
 }
 
+const isNumber = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value);
+const isBox = (value: unknown): value is Box => isObject(value) && isNumber(value.left) && isNumber(value.top) && isNumber(value.right) && isNumber(value.bottom);
+const isFlowState = (value: unknown): value is FlowState => isObject(value) && isNumber(value.running) && isStringList(value.labels);
+const isLinesReading = (value: unknown): value is LinesReading => isObject(value) && typeof value.route === 'string' && isNumber(value.blocks) && isStringList(value.lines);
+const isDrawing = (value: unknown): value is DrawingReading => isObject(value) && isBox(value.box)
+  && Array.isArray(value.texts) && value.texts.every((text) => isObject(text) && typeof text.text === 'string' && isBox(text.box));
+const isIdentifier = (value: unknown): value is IdentifierReading => isObject(value) && typeof value.text === 'string' && isStringList(value.lines);
+
+interface NarrowReading extends OverlapReading {
+  readonly route: string;
+  readonly identifiers: readonly IdentifierReading[];
+}
+
+const isNarrowReading = (value: unknown): value is NarrowReading => isObject(value) && typeof value.route === 'string' && (value.tag === null || isBox(value.tag))
+  && Array.isArray(value.drawings) && value.drawings.every(isDrawing) && Array.isArray(value.identifiers) && value.identifiers.every(isIdentifier);
+const isFlowReading = (value: unknown): value is FlowReading => isObject(value) && typeof value.route === 'string' && isNumber(value.width)
+  && typeof value.movingOnLoad === 'boolean' && Array.isArray(value.controls)
+  && value.controls.every((control) => isObject(control) && typeof control.label === 'string' && isNumber(control.width) && isNumber(control.height))
+  && isFlowState(value.afterClick) && isFlowState(value.afterReload) && isNumber(value.reduced) && isNumber(value.storedRunningReduced) && isNumber(value.storedStopped);
+const isFlowTabReading = (value: unknown): value is FlowTabReading & { readonly route: string } => isObject(value) && typeof value.route === 'string' && isNumber(value.width)
+  && Array.isArray(value.flows) && value.flows.every((flow) => isObject(flow) && (flow.flowStep === null || isNumber(flow.flowStep)) && (flow.nextStep === null || isNumber(flow.nextStep)));
+
+type CheckResult = { verdict: Verdict; detail: string };
+
+// Parses a check's lines into a map by key, naming every malformed line.
+function readKeyed<T>(check: string, lines: readonly string[], accept: (value: unknown) => value is T, keyOf: (value: T) => string): { byKey: Map<string, T>; reasons: string[] } {
+  const byKey = new Map<string, T>();
+  const reasons: string[] = [];
+  for (const text of lines) {
+    const value = parseJson(text.slice(check.length + 1));
+    if (accept(value)) byKey.set(keyOf(value), value);
+    else reasons.push(E2E_MESSAGES.renderedMalformed(text));
+  }
+  return { byKey, reasons };
+}
+
+const widthKey = (route: string, width: number): string => `${route} at ${String(width)} px`;
+
+function judgeLines(lines: readonly string[], routes: readonly string[]): CheckResult {
+  const { byKey, reasons } = readKeyed('LINES', lines, isLinesReading, (value) => value.route);
+  const readings: LinesReading[] = [];
+  for (const route of routes) {
+    const reading = byKey.get(route);
+    if (reading === undefined) reasons.push(E2E_MESSAGES.renderedMissingRoute('LINES', route));
+    else readings.push(reading);
+  }
+  const verdict = lineVerdict(readings);
+  if (!verdict.ok) reasons.push(verdict.reason);
+  const blocks = readings.reduce((sum, reading) => sum + reading.blocks, 0);
+  const longest = Math.max(0, ...readings.flatMap((reading) => reading.lines.map(graphemeCount)));
+  return { verdict: verdictOf(reasons), detail: `${blocks} prose block(s) measured at 1440 px, the longest line ${longest} characters` };
+}
+
+function judgeNarrow(lines: readonly string[], routes: readonly string[]): CheckResult {
+  const { byKey, reasons } = readKeyed('NARROW', lines, isNarrowReading, (value) => value.route);
+  let texts = 0;
+  let identifiers = 0;
+  for (const route of routes) {
+    const reading = byKey.get(route);
+    if (reading === undefined) {
+      reasons.push(E2E_MESSAGES.renderedMissingRoute('NARROW', route));
+      continue;
+    }
+    texts += reading.drawings.reduce((sum, drawing) => sum + drawing.texts.length, 0);
+    identifiers += reading.identifiers.length;
+    for (const verdict of [overlapVerdict(reading), ...reading.identifiers.map(identifierBreakVerdict)]) {
+      if (!verdict.ok) reasons.push(`${route}: ${verdict.reason}`);
+    }
+  }
+  if (texts === 0 && byKey.size > 0) reasons.push(E2E_MESSAGES.noDrawingText());
+  return { verdict: verdictOf(reasons), detail: `${texts} drawing text(s) and ${identifiers} identifier(s) measured at 320 px, the tag clear of every drawing text` };
+}
+
+function judgeByWidth<T extends { readonly route: string; readonly width: number }>(
+  check: 'FLOW' | 'TABFLOW', lines: readonly string[], routes: readonly string[], accept: (value: unknown) => value is T, verdictFor: (value: T) => Verdict,
+): { verdict: Verdict; readings: T[] } {
+  const { byKey, reasons } = readKeyed(check, lines, accept, (value) => widthKey(value.route, value.width));
+  const readings: T[] = [];
+  for (const route of routes) {
+    for (const width of AXE_CONFIG.widths) {
+      const reading = byKey.get(widthKey(route, width));
+      if (reading === undefined) {
+        reasons.push(E2E_MESSAGES.renderedMissingRoute(check, widthKey(route, width)));
+        continue;
+      }
+      readings.push(reading);
+      const verdict = verdictFor(reading);
+      if (!verdict.ok) reasons.push(`${route}: ${verdict.reason}`);
+    }
+  }
+  return { verdict: verdictOf(reasons), readings };
+}
+
+function judgeFlow(lines: readonly string[], routes: readonly string[]): CheckResult {
+  const { verdict, readings } = judgeByWidth('FLOW', lines, routes, isFlowReading, flowVerdict);
+  return { verdict, detail: readings.map((reading) => `${widthKey(reading.route, reading.width)} movingOnLoad ${String(reading.movingOnLoad)}`).join(', ') };
+}
+
+function judgeTabFlow(lines: readonly string[], routes: readonly string[]): CheckResult {
+  const { verdict } = judgeByWidth('TABFLOW', lines, routes, isFlowTabReading, flowTabVerdict);
+  return { verdict, detail: `every visible Stop flow control is reached by Tab before the next section on ${routes.join(', ')}` };
+}
+
 const consoleRecord = (text: string): { readonly text: string; readonly url: string } => {
   const parsed = parseJson(text.slice('CONSOLE '.length));
   if (!isObject(parsed) || typeof parsed.text !== 'string') return { text, url: '' };
@@ -1136,7 +1341,7 @@ function judgeRendered(run: DriverRun, routes: readonly string[], print: (line: 
   const [stopped] = driverRunFailures(run, RENDERED_LABEL, printed);
   if (stopped !== undefined) return stopped;
   const records = new Map<string, string>();
-  const routeLines = new Map<string, string[]>(ROUTE_CHECKS.map((check) => [check, []]));
+  const routeLines = new Map<string, string[]>([...ROUTE_CHECKS, ...MEASURE_CHECKS].map((check) => [check, []]));
   const consoleErrors: string[] = [];
   for (const text of printed) {
     const kind = text.split(' ', 1)[0] ?? '';
@@ -1147,9 +1352,14 @@ function judgeRendered(run: DriverRun, routes: readonly string[], print: (line: 
     else if ((RENDERED_CHECKS as readonly string[]).includes(kind) || kind === 'STORAGE') records.set(kind, text);
     else routeLines.get(kind)?.push(text);
   }
+  const measured = (check: (typeof MEASURE_CHECKS)[number]): readonly string[] => routeLines.get(check) ?? [];
   const results: (readonly [string, { verdict: Verdict; detail: string }])[] = [
     ...RENDERED_CHECKS.map((check) => [check, judgeCheck(check, records.get(check))] as const),
     ...ROUTE_CHECKS.map((check) => [check, judgeRouteCheck(check, routeLines.get(check) ?? [], routes)] as const),
+    ['FLOW', judgeFlow(measured('FLOW'), routes)],
+    ['TABFLOW', judgeTabFlow(measured('TABFLOW'), routes)],
+    ['LINES', judgeLines(measured('LINES'), routes)],
+    ['NARROW', judgeNarrow(measured('NARROW'), routes)],
     ['STORAGE', judgeStorage(records.get('STORAGE'))],
     ['CONSOLE', { verdict: consoleVerdict(consoleErrors), detail: 'no console error, no Content Security Policy violation' }],
   ];
@@ -1225,6 +1435,7 @@ export async function runSiteE2e(options: SiteE2eOptions): Promise<number> {
     ['size', () => sizeStep(options, print)],
     ['built-checks', builtChecks],
     ['second-build', () => secondBuildStep(options, dist)],
+    ['copy-build', () => copyBuildStep(options, print)],
     ['rendered', () => renderedStep(options, dist, print)],
   ];
   for (const [name, run] of steps) {
