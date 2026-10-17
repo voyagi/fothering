@@ -76,7 +76,7 @@ describe('the stored-field map', () => {
   });
 
   it('classes every other field as neither', () => {
-    const identifying = new Set(identifyingFields().map((field) => field.path));
+    const identifying = new Set<string>(identifyingFields().map((field) => field.path));
     for (const [path, field] of Object.entries(STORED_FIELDS)) {
       if (!identifying.has(path)) expect(field, path).toEqual({ class: 'neither' });
     }
