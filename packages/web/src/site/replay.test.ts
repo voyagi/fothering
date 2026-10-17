@@ -298,7 +298,7 @@ describe('buildReplayView step contents', () => {
     expect(view.reopenCommand).toContain('--configuration-set-name fothering-bulk --sending-enabled');
     expect(view.steps[3]?.paragraphs).toEqual(['`GetConfigurationSet` then read `SendingEnabled` as true.']);
     expect(view.tag).toMatchObject({
-      evidence: 'All 31 hard bounces in the window carry that tag: `550 5.1.1`, 9 providers.',
+      evidence: 'All 31 hard bounces in the window carry that tag, from 9 providers: `550 5.1.1`.',
       readBack: 'SendingOptions.SendingEnabled: false, 14:03 UTC',
       replayReadBack: 'SendingEnabled: false, 14:03 UTC',
       number: 'TAG 001',
@@ -342,7 +342,7 @@ describe('buildReplayView event log', () => {
   it('words the tag evidence as a share when not every bounce carries the cause', () => {
     const artifact = shippedArtifact();
     const evidence = artifact.evidence.map((row) => (row.verdict === 'cause' ? { ...row, count: 29 } : row));
-    expect(buildReplayView({ ...artifact, evidence }).tag.evidence).toBe('29 of 31 hard bounces in the window carry that tag: `550 5.1.1`, 9 providers.');
+    expect(buildReplayView({ ...artifact, evidence }).tag.evidence).toBe('29 of 31 hard bounces in the window carry that tag, from 9 providers: `550 5.1.1`.');
   });
 
   it('names no open lane and no flowing lane when the artifact has one lane', () => {
