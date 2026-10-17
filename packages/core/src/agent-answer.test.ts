@@ -125,6 +125,15 @@ describe('validateExplanation (D-78, R12)', () => {
     for (const text of ['', '   ', '\n\t  　']) expect(checkOf(text, closeOn(APPROVED))).toBe('empty');
   });
 
+  it('rejects an explanation of only zero-width characters and spaces as empty', () => {
+    const onlyInvisible = [
+      String.fromCodePoint(0x200b).repeat(2),
+      `${String.fromCodePoint(0xfeff)} ${String.fromCodePoint(0x2060)}`,
+    ];
+    for (const text of onlyInvisible) expect(checkOf(text, closeOn(APPROVED))).toBe('empty');
+    expect(checkOf('the table does not settle one cause', unknownOn(UNSETTLED))).toBe('ok');
+  });
+
   it('counts code points of the NFC form: 600 passes and 601 rejects (AC-E41)', () => {
     const decomposedE = 'é';
     expect(checkOf(decomposedE.repeat(600), closeOn(APPROVED))).toBe('ok');

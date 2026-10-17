@@ -128,8 +128,10 @@ function folded(text: string): string {
   return withoutZeroWidth(text.normalize('NFKC')).toLowerCase();
 }
 
+// The same normal form the later checks read, so an explanation of only zero-width characters is
+// empty here rather than an empty folded string every later check passes.
 function isNotEmpty(text: string): boolean {
-  return text.normalize('NFC').trim() !== '';
+  return withoutZeroWidth(text.normalize('NFKC')).trim() !== '';
 }
 
 // Code points, never UTF-16 units: a character outside the BMP counts once (D-75).
