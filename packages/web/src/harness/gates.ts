@@ -43,12 +43,33 @@ export const AXE_CONFIG = Object.freeze({
 
 export interface AcceptedIncomplete {
   readonly ruleId: string;
+  // A regular expression over the node's axe target, so an entry covers named elements only.
+  readonly targetPattern: string;
   readonly reason: string;
 }
 
 // An incomplete result is a check axe could not decide. Each one fails the audit unless it is
 // listed here with a written reason; the matched counts print on every run.
-export const ACCEPTED_INCOMPLETE: readonly AcceptedIncomplete[] = Object.freeze([]);
+export const ACCEPTED_INCOMPLETE: readonly AcceptedIncomplete[] = Object.freeze([
+  {
+    ruleId: 'color-contrast',
+    // An SVG text element (axe names it by tag) or a drawing part (every drawing class starts dwg-).
+    targetPattern: '^(?:text(?:$|[[.:#])|[.]dwg-)',
+    reason: 'text inside the inline SVG drawings: axe-core cannot compute the background behind SVG text, and the drawings set it only in the ink and label colours on the sheet colour, the pairs the page text uses',
+  },
+]);
+
+const isAccepted = (ruleId: string, target: string, accepted: readonly AcceptedIncomplete[]): boolean =>
+  accepted.some((entry) => entry.ruleId === ruleId && new RegExp(entry.targetPattern).test(target));
+
+export function countAccepted(incomplete: readonly AxeItem[], accepted: readonly AcceptedIncomplete[]): Map<string, number> {
+  const counts = new Map<string, number>();
+  for (const item of incomplete) {
+    const matched = item.nodes.filter((node) => isAccepted(item.id, node.target, accepted)).length;
+    if (matched > 0) counts.set(item.id, (counts.get(item.id) ?? 0) + matched);
+  }
+  return counts;
+}
 
 const VIEWPORT_HEIGHT = 900;
 const DRIVER_TIMEOUT_SECONDS = 120;
@@ -373,7 +394,7 @@ export function keyboardVerdict(report: KeyboardReport): Verdict {
   return { ok: true };
 }
 
-export function axeReasons(axe: AxeReport, accepted: ReadonlyMap<string, number>): string[] {
+export function axeReasons(axe: AxeReport, accepted: readonly AcceptedIncomplete[]): string[] {
   const reasons: string[] = [];
   if (axe.version !== AXE_VERSION) reasons.push(A11Y_MESSAGES.axeVersionRan(axe.version));
   if (axe.selected.length === 0) reasons.push(A11Y_MESSAGES.noSelectedRules());
@@ -383,13 +404,13 @@ export function axeReasons(axe: AxeReport, accepted: ReadonlyMap<string, number>
   }
   for (const item of axe.violations) reasons.push(A11Y_MESSAGES.violation(item.id, item.nodes.length, item.nodes[0]?.target ?? 'no target'));
   for (const item of axe.incomplete) {
-    if (accepted.has(item.id)) continue;
-    reasons.push(A11Y_MESSAGES.incomplete(item.id, item.nodes.length, item.nodes[0]?.target ?? 'no target'));
+    const open = item.nodes.filter((node) => !isAccepted(item.id, node.target, accepted));
+    if (open.length > 0) reasons.push(A11Y_MESSAGES.incomplete(item.id, open.length, open[0]?.target ?? 'no target'));
   }
   return reasons;
 }
 
-export function auditReasons(line: AuditLine, width: number, accepted: ReadonlyMap<string, number>, expectedStatus = 200, expectedTheme: ThemeName = 'light'): string[] {
+export function auditReasons(line: AuditLine, width: number, accepted: readonly AcceptedIncomplete[], expectedStatus = 200, expectedTheme: ThemeName = 'light'): string[] {
   if (line.status !== expectedStatus) return [A11Y_MESSAGES.status(line.status, expectedStatus)];
   if (line.axe === undefined || line.keyboard === undefined || line.overflow === undefined) return [A11Y_MESSAGES.axeAbsent()];
   const reasons: string[] = [];
@@ -602,11 +623,11 @@ async function auditOne(context: AuditContext, theme: ThemeSetup, width: number)
   let held = 0;
   for (const [route, line] of lines) {
     for (const ruleId of line.axe?.selected ?? []) context.selected.add(ruleId);
-    for (const item of line.axe?.incomplete ?? []) {
-      if (context.accepted.has(item.id)) context.accepted.set(item.id, (context.accepted.get(item.id) ?? 0) + item.nodes.length);
+    for (const [ruleId, count] of countAccepted(line.axe?.incomplete ?? [], ACCEPTED_INCOMPLETE)) {
+      context.accepted.set(ruleId, (context.accepted.get(ruleId) ?? 0) + count);
     }
     if (line.theme !== undefined && tookHoldVerdict(line.theme, expectedTheme).ok) held += 1;
-    const reasons = auditReasons(line, width, context.accepted, EXPECTED_STATUS[route] ?? 200, expectedTheme);
+    const reasons = auditReasons(line, width, ACCEPTED_INCOMPLETE, EXPECTED_STATUS[route] ?? 200, expectedTheme);
     if (reasons.length === 0) {
       context.print(A11Y_MESSAGES.routePassed(route, label, line.status, line.keyboard?.walk.length ?? 0));
     } else {
