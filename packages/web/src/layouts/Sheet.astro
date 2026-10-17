@@ -12,7 +12,6 @@ const head = headMeta(Astro.props.route);
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="color-scheme" content="light dark" />
     <title>{head.title}</title>
     {head.metas.map((attrs) => <meta {...attrs} />)}
     {head.links.map((attrs) => <link {...attrs} />)}
