@@ -111,3 +111,13 @@ export const replayArtifactSchema = z
 export type ReplayArtifact = z.infer<typeof replayArtifactSchema>;
 export type ReplayEvent = ReplayArtifact['events'][number];
 export type EvidenceRow = ReplayArtifact['evidence'][number];
+
+export type PublishResult = { ok: true } | { ok: false; errors: string[] };
+
+export function replayArtifactHash(artifact: ReplayArtifact): string {
+  return '';
+}
+
+export function assertPublishable(artifact: ReplayArtifact, manifest: unknown): PublishResult {
+  return { ok: true };
+}
