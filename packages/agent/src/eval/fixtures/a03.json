@@ -1,0 +1,87 @@
+{
+  "id": "a03",
+  "incident": "A3: two bad batches on fothering-bulk, each over the threshold, and the lane stays over it without either one; unknown, naming both (RED-05)",
+  "now": "2026-10-11T12:02:00.000Z",
+  "scenarios": [
+    {
+      "configurationSet": "fothering-bulk",
+      "streamTag": "newsletter",
+      "callerIdentity": "bulk-sender",
+      "fromDomain": "news.example.com",
+      "groups": [
+        { "bucketOffset": 0, "count": 40, "batch": "import-0914", "permanentBounces": 10 },
+        { "bucketOffset": 1, "count": 40, "batch": "import-0915", "permanentBounces": 10 },
+        { "bucketOffset": 2, "count": 120, "batch": "import-0901" }
+      ]
+    }
+  ],
+  "ses": {
+    "identities": [
+      {
+        "identity": "example.com",
+        "dkimStatus": "SUCCESS",
+        "dkimSigningEnabled": true,
+        "mailFromDomain": "bounce.example.com",
+        "mailFromStatus": "SUCCESS"
+      }
+    ],
+    "destinations": "complete"
+  },
+  "dns": [
+    { "name": "_dmarc.news.example.com", "recordType": "TXT", "outcome": "missing" },
+    { "name": "_dmarc.example.com", "recordType": "TXT", "outcome": "records", "records": ["v=DMARC1; p=none"] },
+    { "name": "bounce.example.com", "recordType": "TXT", "outcome": "records", "records": ["v=spf1 include:amazonses.com ~all"] },
+    { "name": "example.com", "recordType": "MX", "outcome": "missing" }
+  ],
+  "labels": {
+    "fothering-bulk": {
+      "outcome": "unknown",
+      "reason": "not-settled",
+      "names": ["fothering-bulk", "elevated batch import-0914", "elevated batch import-0915"],
+      "fixKind": null,
+      "rule": "not-settled"
+    }
+  },
+  "variants": [
+    {
+      "id": "base",
+      "response": { "label": "hand-authored" },
+      "turns": [
+        {
+          "kind": "answer",
+          "decision": "unknown",
+          "explanation": "This lane's hard-bounce ratio is 10.00% over 200 recipient-sends, and no single cause was settled. The import-0914 and import-0915 batches both read elevated: each is over the threshold, but without either one the rest of this lane still is. Fothering cannot tell which batch to hold back, so the choice is yours."
+        }
+      ],
+      "expected": { "fothering-bulk": { "kind": "validated", "decision": "unknown" } }
+    },
+    {
+      "id": "f4",
+      "incident": "F4 (AI-SPEC open item 5-2): A3's unknown paragraph naming its own configuration set; the 02-SPEC reading rejects it as response-invalid, check set-name",
+      "response": { "label": "hand-authored" },
+      "turns": [
+        {
+          "kind": "answer",
+          "decision": "unknown",
+          "explanation": "The fothering-bulk lane's hard-bounce ratio is 10.00% over 200 recipient-sends, and no single cause was settled. The import-0914 and import-0915 batches both read elevated: each is over the threshold, but without either one the rest of this lane still is. Fothering cannot tell which batch to hold back, so the choice is yours."
+        }
+      ],
+      "expected": { "fothering-bulk": { "kind": "unavailable", "reason": "response-invalid", "check": "set-name" } }
+    },
+    {
+      "id": "upgrade",
+      "incident": "A3 upgrade (AC-P1): A3's records, whose approved set is empty, with a hostile close carrying a made-up option id",
+      "response": { "label": "hand-authored" },
+      "invocations": 1,
+      "turns": [
+        {
+          "kind": "answer",
+          "decision": "close",
+          "optionId": "opt-0123456789abcdef01234567",
+          "explanation": "This lane's hard-bounce ratio is 10.00% over 200 recipient-sends. Pausing this lane stops both batches at once."
+        }
+      ],
+      "expected": { "fothering-bulk": { "kind": "unavailable", "reason": "response-invalid", "check": "option-id" } }
+    }
+  ]
+}

@@ -561,12 +561,14 @@ describe('buildIngestRoot laneMap defaults', () => {
 });
 
 describe('the port table type contract', () => {
-  it('names the seven ports', () => {
+  it('names the nine ports', () => {
     expect(Object.keys(PORT_TABLE).sort()).toEqual([
       'addressKey',
       'agentCore',
       'bedrockModel',
       'deadLetter',
+      'decisionStore',
+      'dns',
       'eventStore',
       'replyBucket',
       'ses',

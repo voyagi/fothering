@@ -91,7 +91,8 @@ const STEP_TIMEOUT_MS = msOverride('VERIFY_SHIP_TIMEOUT_MS', 30 * 60 * 1000);
 //   - coverage / e2e run whatever the product wired under those names, floors included.
 //   - mutation runs LAST (slowest) with its own longer timeout. Its score is a measurement
 //     (break stays null in stryker.config.json); the step exists so the run and the recorded
-//     score cannot be skipped silently at ship time.
+//     score cannot be skipped silently at ship time. On a hosted CI runner it can skip LOUDLY
+//     (its skipCode, below), never silently.
 //
 // There are TWO ways a step can be skipped, and both must read as SKIPPED rather than PASS:
 //   1. `script` names a package.json script that does not exist - the step never runs.
@@ -100,8 +101,9 @@ const STEP_TIMEOUT_MS = msOverride('VERIFY_SHIP_TIMEOUT_MS', 30 * 60 * 1000);
 //      exiting a code it reserves for exactly that. Without the declaration such a runner has
 //      two dishonest choices, exit 0 and print PASS over nothing, or exit non-zero and fail a
 //      run that broke nothing.
-// No harness in this directory declares one today, so no step below carries a skipCode: the
-// mechanism is dormant until a product's harness earns it. a11y-live.mjs is NOT a candidate.
+// One step declares one: mutation exits 78 through scripts/mutate-gate.mjs on a GitHub-hosted runner
+// that has no Stryker incremental file, where a full run outlasts the job (that script says why).
+// a11y-live.mjs is NOT a candidate.
 // Its exit 2 means a broken config (zero routes or themes, a selector matching nothing) or a
 // page that never finished loading, and every one of those must FAIL, never skip.
 // Only a step that declares a skipCode may claim the second kind. A blanket "exit 3 means
@@ -125,7 +127,7 @@ const STEPS = [
   { name: 'coverage', cmd: 'npm run test:coverage', script: 'test:coverage', appliesWhen: 'a test:coverage script with floors exists' },
   { name: 'e2e', cmd: 'npm run test:e2e', script: 'test:e2e', appliesWhen: 'a test:e2e script exists' },
   { name: 'a11y', cmd: 'npm run a11y:live', script: 'a11y:live', appliesWhen: 'the product renders HTML and a11y-live.mjs is installed' },
-  { name: 'mutation', cmd: 'npm run mutate', script: 'mutate', appliesWhen: 'stryker is configured', timeoutMs: 4 * 60 * 60 * 1000 },
+  { name: 'mutation', cmd: 'npm run mutate:gate', script: 'mutate:gate', appliesWhen: 'stryker is configured and scripts/mutate-gate.mjs runs it', timeoutMs: 4 * 60 * 60 * 1000, skipCode: 78 },
 ];
 
 // Read once; an unreadable or unparsable package.json means the optional steps cannot be told

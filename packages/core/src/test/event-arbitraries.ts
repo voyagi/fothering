@@ -3,7 +3,7 @@ import { BUCKET_MS, bucketStartMs } from '../buckets.js';
 import { DETAIL_TYPE_BY_EVENT_TYPE, type SesEnvelope, type SesEvent } from '../ses-events.js';
 import { minimizeEvent, type MinimizeContext } from '../minimize.js';
 import type { EventRecord } from '../records.js';
-import type { LaneEntry, LaneMap } from '../lanes.js';
+import { findLane, type LaneEntry, type LaneMap } from '../lanes.js';
 import type { AddressKeySet } from '../address.js';
 
 // D-25: arbitraries shaped on the doc examples, provenance 'generated'. Every generated event
@@ -62,6 +62,7 @@ export interface BounceCase {
   bounceType: BounceTypeChoice;
   bounceSubType: string;
   timestampMs: number;
+  diagnosticCode?: string;
 }
 
 export interface MessageCase {
@@ -111,7 +112,9 @@ function recipientAddress(messageSeed: number, index: number): string {
   return `r${messageSeed}-${index}@example.com`;
 }
 
-function mailBase(mc: MessageCase, configurationSet: string) {
+type Mail = SesEvent['mail'];
+
+function mailBase(mc: MessageCase, configurationSet: string): Mail {
   const destination = Array.from({ length: mc.recipientCount }, (_, i) => recipientAddress(mc.messageSeed, i));
   return {
     timestamp: new Date(mc.sendTimestampMs).toISOString(),
@@ -140,14 +143,12 @@ function envelopeFor(detail: SesEvent, timeMs: number): SesEnvelope {
   } as SesEnvelope;
 }
 
-function sendEnvelope(mc: MessageCase, configurationSet: string): SesEnvelope {
-  const mail = mailBase(mc, configurationSet);
+function sendEnvelope(mail: Mail, sendTimestampMs: number): SesEnvelope {
   const detail: SesEvent = { eventType: 'Send', mail, send: {} };
-  return envelopeFor(detail, mc.sendTimestampMs);
+  return envelopeFor(detail, sendTimestampMs);
 }
 
-function deliveryEnvelope(mc: MessageCase, configurationSet: string, timestampMs: number): SesEnvelope {
-  const mail = mailBase(mc, configurationSet);
+function deliveryEnvelope(mail: Mail, timestampMs: number): SesEnvelope {
   const detail: SesEvent = {
     eventType: 'Delivery',
     mail,
@@ -164,8 +165,7 @@ function deliveryEnvelope(mc: MessageCase, configurationSet: string, timestampMs
 // Bounces only the message's first recipient: this is what lets a three-recipient message with
 // "one bounce" mean exactly one bounced recipient out of three sends, the shape the 1/3 hard
 // bounce ratio property depends on.
-function bounceEnvelope(mc: MessageCase, configurationSet: string, bounce: BounceCase): SesEnvelope {
-  const mail = mailBase(mc, configurationSet);
+function bounceEnvelope(mail: Mail, bounce: BounceCase): SesEnvelope {
   const bouncedAddress = mail.destination[0];
   if (bouncedAddress === undefined) throw new Error('expected at least one recipient to bounce');
   const detail: SesEvent = {
@@ -174,7 +174,9 @@ function bounceEnvelope(mc: MessageCase, configurationSet: string, bounce: Bounc
     bounce: {
       bounceType: bounce.bounceType,
       bounceSubType: bounce.bounceSubType,
-      bouncedRecipients: [{ emailAddress: bouncedAddress }],
+      bouncedRecipients: [
+        { emailAddress: bouncedAddress, ...(bounce.diagnosticCode !== undefined ? { diagnosticCode: bounce.diagnosticCode } : {}) },
+      ],
       timestamp: new Date(bounce.timestampMs).toISOString(),
       feedbackId: bounce.feedbackId,
     },
@@ -182,8 +184,7 @@ function bounceEnvelope(mc: MessageCase, configurationSet: string, bounce: Bounc
   return envelopeFor(detail, bounce.timestampMs);
 }
 
-function complaintEnvelope(mc: MessageCase, configurationSet: string, complaint: NonNullable<MessageCase['complaint']>): SesEnvelope {
-  const mail = mailBase(mc, configurationSet);
+function complaintEnvelope(mail: Mail, complaint: NonNullable<MessageCase['complaint']>): SesEnvelope {
   const detail: SesEvent = {
     eventType: 'Complaint',
     mail,
@@ -197,8 +198,7 @@ function complaintEnvelope(mc: MessageCase, configurationSet: string, complaint:
   return envelopeFor(detail, complaint.timestampMs);
 }
 
-function delayEnvelope(mc: MessageCase, configurationSet: string, timestampMs: number): SesEnvelope {
-  const mail = mailBase(mc, configurationSet);
+function delayEnvelope(mail: Mail, timestampMs: number): SesEnvelope {
   const detail: SesEvent = {
     eventType: 'DeliveryDelay',
     mail,
@@ -215,12 +215,116 @@ function delayEnvelope(mc: MessageCase, configurationSet: string, timestampMs: n
  * configurationSet defaults to TEST_CONFIGURATION_SET so single-lane callers need not pass it;
  * the two-lane fixture-store property passes each message's real lane instead. */
 export function envelopesFor(mc: MessageCase, configurationSet: string = TEST_CONFIGURATION_SET): SesEnvelope[] {
-  const events: SesEnvelope[] = [sendEnvelope(mc, configurationSet)];
-  if (mc.delivery !== undefined) events.push(deliveryEnvelope(mc, configurationSet, mc.delivery.timestampMs));
-  for (const bounce of mc.bounces) events.push(bounceEnvelope(mc, configurationSet, bounce));
-  if (mc.complaint !== undefined) events.push(complaintEnvelope(mc, configurationSet, mc.complaint));
-  for (const delay of mc.delays) events.push(delayEnvelope(mc, configurationSet, delay.timestampMs));
+  const mail = mailBase(mc, configurationSet);
+  const events: SesEnvelope[] = [sendEnvelope(mail, mc.sendTimestampMs)];
+  if (mc.delivery !== undefined) events.push(deliveryEnvelope(mail, mc.delivery.timestampMs));
+  for (const bounce of mc.bounces) events.push(bounceEnvelope(mail, bounce));
+  if (mc.complaint !== undefined) events.push(complaintEnvelope(mail, mc.complaint));
+  for (const delay of mc.delays) events.push(delayEnvelope(mail, delay.timestampMs));
   return events;
+}
+
+/** One group of single-recipient messages sent in one bucket. Of its messages, the first
+ * permanentBounces bounce permanently, the next suppressedBounces bounce off the account suppression
+ * list, and the next complaints are complained about; every message that did not bounce is
+ * delivered unless deliverRest is false. */
+export interface ScenarioGroup {
+  /** Buckets before the one holding now. */
+  bucketOffset: number;
+  count: number;
+  batch?: string;
+  template?: string;
+  campaign?: string;
+  /** Cycled per message; example.com when absent. */
+  receivingDomains?: readonly string[];
+  permanentBounces?: number;
+  /** Carried by every bounce of the group; "smtp; 550 5.1.1 user unknown" when absent. */
+  diagnosticCode?: string;
+  suppressedBounces?: number;
+  complaints?: number;
+  deliverRest?: boolean;
+}
+
+export interface LaneScenario {
+  configurationSet: string;
+  streamTag: string;
+  callerIdentity: string;
+  fromDomain: string;
+  groups: readonly ScenarioGroup[];
+}
+
+const DEFAULT_DIAGNOSTIC_CODE = 'smtp; 550 5.1.1 user unknown';
+// Sends sit one second into their bucket and one millisecond apart, so a group must stay well
+// under BUCKET_MS messages for every send to land in the bucket the group names.
+const SEND_OFFSET_MS = 1_000;
+
+function scenarioTags(scenario: LaneScenario, lane: LaneEntry, group: ScenarioGroup): Record<string, string[]> {
+  const tags: Record<string, string[]> = {
+    'ses:configuration-set': [scenario.configurationSet],
+    'ses:from-domain': [scenario.fromDomain],
+    'ses:caller-identity': [scenario.callerIdentity],
+    [lane.streamTagKey]: [scenario.streamTag],
+  };
+  if (group.batch !== undefined) tags[lane.batchTagKey] = [group.batch];
+  if (group.template !== undefined) tags[lane.templateTagKey] = [group.template];
+  if (group.campaign !== undefined) tags[lane.campaignTagKey] = [group.campaign];
+  return tags;
+}
+
+function scenarioOutcomes(group: ScenarioGroup, index: number, mail: Mail, sendMs: number): SesEnvelope[] {
+  const permanent = group.permanentBounces ?? 0;
+  const suppressed = group.suppressedBounces ?? 0;
+  const bounce = (bounceSubType: string): SesEnvelope =>
+    bounceEnvelope(mail, {
+      feedbackId: `fb-${mail.messageId}-b`,
+      bounceType: 'Permanent',
+      bounceSubType,
+      timestampMs: sendMs + 1_000,
+      diagnosticCode: group.diagnosticCode ?? DEFAULT_DIAGNOSTIC_CODE,
+    });
+  if (index < permanent) return [bounce('General')];
+  if (index < permanent + suppressed) return [bounce('OnAccountSuppressionList')];
+  const outcomes: SesEnvelope[] = [];
+  if (group.deliverRest !== false) outcomes.push(deliveryEnvelope(mail, sendMs + 500));
+  if (index < permanent + suppressed + (group.complaints ?? 0)) {
+    outcomes.push(complaintEnvelope(mail, { feedbackId: `fb-${mail.messageId}-c`, timestampMs: sendMs + 3_000 }));
+  }
+  return outcomes;
+}
+
+/** A deterministic lane story for the fold, evidence and decision tests; recipients sit on the
+ * documentation and simulator domains only. */
+export function scenarioEnvelopes(scenario: LaneScenario, nowMs: number, lane: LaneEntry): SesEnvelope[] {
+  const envelopes: SesEnvelope[] = [];
+  scenario.groups.forEach((group, groupIndex) => {
+    const bucket = bucketStartMs(nowMs) - group.bucketOffset * BUCKET_MS;
+    const domains = group.receivingDomains ?? ['example.com'];
+    const tags = scenarioTags(scenario, lane, group);
+    for (let index = 0; index < group.count; index += 1) {
+      const sendMs = bucket + SEND_OFFSET_MS + index;
+      const mail: Mail = {
+        timestamp: new Date(sendMs).toISOString(),
+        messageId: `scenario-${groupIndex}-${index}`,
+        destination: [`r${groupIndex}-${index}@${domains[index % domains.length] ?? 'example.com'}`],
+        tags,
+      };
+      envelopes.push(sendEnvelope(mail, sendMs), ...scenarioOutcomes(group, index, mail, sendMs));
+    }
+  });
+  return envelopes;
+}
+
+export function scenarioRecords(scenario: LaneScenario, nowMs: number, laneMap: LaneMap, keySet: AddressKeySet): EventRecord[] {
+  const lane = findLane(laneMap, scenario.configurationSet);
+  if (lane === undefined) throw new Error(`the scenario's configuration set ${scenario.configurationSet} is not in the lane map`);
+  return ingestAll(scenarioEnvelopes(scenario, nowMs, lane), {
+    lane,
+    laneMap,
+    keySet,
+    provenance: 'generated',
+    envelopeTimeMs: nowMs,
+    arrivalTimeMs: nowMs,
+  });
 }
 
 /** First-write-wins over pk+sk, the same semantics the conditional put gives the real table. */

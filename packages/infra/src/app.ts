@@ -8,4 +8,5 @@ addFotheringStacks(new App(), {
   ingestAssetDir: 'dist/ingest',
   forgetAssetDir: 'dist/forget',
   agentAssetDir: 'dist/agent',
+  detectAssetDir: 'dist/detect',
 });

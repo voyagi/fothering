@@ -9,17 +9,44 @@ import {
   expiresAtFor,
   type EventRecord,
 } from '@fothering/core/records';
-import { BUCKET_MS, bucketStartMs, countRecords } from '@fothering/core/buckets';
-import { findLane } from '@fothering/core/lanes';
+import { BUCKET_MS, bucketStartMs, countRecords, isCountedRecord } from '@fothering/core/buckets';
+import { REQUIRED_EVENT_TYPES, checkCloseability, type SesConfigurationFacts } from '@fothering/core/closeability';
+import { decideLane } from '@fothering/core/decision';
+import {
+  buildEvidenceRecord,
+  counterDayKey,
+  evidenceRecordSchema,
+  incidentIdFor,
+  incidentItemKey,
+  recordHash,
+  type EvidenceRecord,
+} from '@fothering/core/evidence-record';
+import { buildTagRows } from '@fothering/core/evidence-rows';
+import { findLane, parseLaneMap } from '@fothering/core/lanes';
 import { minimizeEvent } from '@fothering/core/minimize';
 import { parseSesEvent } from '@fothering/core/ses-events';
 import { selectKeyVersion, type AddressKeySet } from '@fothering/core/address';
+import { scenarioRecords, type LaneScenario } from '@fothering/core/test/event-arbitraries';
+import { LANE_RATIO_LABELS, LANE_SHARE_LABEL, laneSpikeVerdict, renderPercent } from '@fothering/core/verdicts';
+import {
+  MAX_WINDOW_BUCKETS,
+  WindowTooLongError,
+  createWindowFold,
+  spikeWindowFor,
+  summarizeWindow,
+  type LaneFold,
+} from '@fothering/core/window-fold';
+import lanesJson from '../../../../lanes.json' with { type: 'json' };
+import { createDryRunLog } from '../dry-run.js';
+import type { ReservationRequest, UsageRecord } from '../port-types.js';
 import { DOC_EXAMPLE_LANE_MAP, loadSesEventFixture } from './ses-events/index.js';
 import {
   FixtureWriteError,
   createFixtureAddressKey,
   createFixtureDeadLetter,
+  createFixtureDecisionStore,
   createFixtureEventStore,
+  createFixtureTableState,
   TEST_ADDRESS_KEY_SET,
 } from './ingest-ports.js';
 
@@ -472,5 +499,531 @@ describe('the fixture ports behave like the conditional-write store and queue th
     };
     expect(selectKeyVersion(keySet, rotationMs - 1).id).toBe('k1');
     expect(selectKeyVersion(keySet, rotationMs).id).toBe('k2');
+  });
+});
+
+const LANES = parseLaneMap(lanesJson);
+const BULK = 'fothering-bulk';
+const TRACER_NOW_MS = Date.UTC(2026, 9, 11, 12, 2, 0);
+
+const ONE_BAD_BATCH: LaneScenario = {
+  configurationSet: BULK,
+  streamTag: 'newsletter',
+  callerIdentity: 'bulk-sender',
+  fromDomain: 'news.example.com',
+  groups: [
+    { bucketOffset: 0, count: 40, batch: 'import-0915', permanentBounces: 15 },
+    { bucketOffset: 1, count: 160, batch: 'import-0901' },
+  ],
+};
+
+const BULK_SES_FACTS: SesConfigurationFacts = {
+  configurationSets: new Set(LANES.lanes.map((lane) => lane.configurationSet)),
+  defaultConfigurationSets: new Set(),
+  eventDestinations: new Map([[BULK, [{ enabled: true, eventBridge: true, matchingEventTypes: [...REQUIRED_EVENT_TYPES] }]]]),
+};
+
+async function tracerRecord() {
+  const records = scenarioRecords(ONE_BAD_BATCH, TRACER_NOW_MS, LANES, TEST_ADDRESS_KEY_SET);
+  const table = createFixtureTableState();
+  const events = createFixtureEventStore({ pageSize: 2, store: table });
+  for (const record of records) expect(await events.putIfAbsent(record)).toBe('written');
+
+  const window = spikeWindowFor(TRACER_NOW_MS);
+  const fold = createWindowFold({ lane: BULK, window, nowMs: TRACER_NOW_MS });
+  const summary = summarizeWindow(await events.foldLane(BULK, window.fromBucketMs, window.toBucketMs, TRACER_NOW_MS, fold));
+  const spike = laneSpikeVerdict(summary.totals);
+  const rows = buildTagRows('batch', summary, spike);
+  const closeability = checkCloseability(BULK, { laneMap: LANES, observed: new Map([[BULK, summary.observed]]), ses: BULK_SES_FACTS });
+  const decision = decideLane({ spike, rows, configurationRows: [], closeability, coverageNoData: false, bound: null, otherSpikingLanes: [] });
+  const countable = records.filter(isCountedRecord).length;
+
+  const record = buildEvidenceRecord({
+    incidentId: incidentIdFor(BULK, bucketStartMs(TRACER_NOW_MS)),
+    lane: { configurationSet: BULK, lane: BULK },
+    window,
+    laneTotals: {
+      recipientSends: summary.totals.recipientSends,
+      permanentBounces: summary.totals.permanentBounces,
+      complaints: summary.totals.complaints,
+      hardBounceRatio: spike.hardBounceRatio,
+      complaintRatio: spike.complaintRatio,
+      verdict: spike.verdict,
+      triggers: [...spike.triggers],
+      label: { hardBounceRatio: LANE_RATIO_LABELS.hardBounce, complaintRatio: LANE_RATIO_LABELS.complaint },
+    },
+    share: { laneCountableEvents: countable, storedCountableEvents: countable, percent: renderPercent(countable, countable), label: LANE_SHARE_LABEL },
+    rows,
+    configurationRows: [],
+    isolation: 'confined',
+    decision: { ...decision, noData: false, bound: null, otherSpikingLanes: [], sharedCause: null },
+    question: null,
+    fix: null,
+    expiresAt: Math.floor(TRACER_NOW_MS / 1000) + RETENTION_SECONDS,
+  });
+  return { records, table, summary, spike, rows, closeability, decision, record };
+}
+
+describe('tracer: one bad import batch on fothering-bulk becomes an evidence record with one approved option', () => {
+  it('folds the stored batch page by page into a spike, a cause row, a closeable lane, an approval and a hashed record', async () => {
+    const { table, summary, spike, rows, closeability, decision, record } = await tracerRecord();
+
+    expect(spike.verdict).toBe('spike');
+    expect(spike.hardBounceRatio).toBe('7.50%');
+    expect(summary.totals.recipientSends).toBe(200);
+    expect(summary.totals.permanentBounces).toBe(15);
+    expect(Object.fromEntries(rows.map((row) => [row.value, row.verdict]))).toEqual({
+      'import-0915': 'cause',
+      'import-0901': 'ruled-out',
+    });
+    expect(closeability.state).toBe('closeable');
+    expect(decision.outcome).toBe('approved');
+
+    expect(record.approvedOptions).toHaveLength(1);
+    const [option] = record.approvedOptions;
+    expect(option?.optionId).toMatch(/^opt-[0-9a-f]{24}$/);
+    expect(option?.optionId).not.toContain(BULK);
+    expect(recordHash(record)).toBe(record.hash);
+
+    const decisions = createFixtureDecisionStore({ store: table });
+    const key = incidentItemKey(record.incidentId, 'EVIDENCE');
+    const item = { ...key, expiresAt: record.expiresAt, record };
+    expect(await decisions.putIfAbsent(item, TRACER_NOW_MS)).toBe('written');
+    expect(await decisions.putIfAbsent(item, TRACER_NOW_MS)).toBe('duplicate');
+    const stored = await decisions.getItem(key, TRACER_NOW_MS);
+    const storedRecord = evidenceRecordSchema.parse(stored?.record);
+    expect(recordHash(storedRecord)).toBe(record.hash);
+  });
+
+  it('puts no recipient hash, address or receiving domain into the record', async () => {
+    const { records, record } = await tracerRecord();
+    const serialized = JSON.stringify(record);
+    expect(serialized).not.toContain('@');
+    for (const stored of records) {
+      if (stored.recipientHmac !== undefined) expect(serialized).not.toContain(stored.recipientHmac);
+      if (stored.receivingDomain !== undefined) expect(serialized).not.toContain(stored.receivingDomain);
+    }
+  });
+
+  it('refuses a record with an extra key and a record holding a non-integer count', async () => {
+    const { record } = await tracerRecord();
+    expect(evidenceRecordSchema.safeParse(record).success).toBe(true);
+    expect(evidenceRecordSchema.safeParse({ ...record, note: 'extra' }).success).toBe(false);
+    const fractional: EvidenceRecord = { ...record, laneTotals: { ...record.laneTotals, recipientSends: 200.5 } };
+    expect(evidenceRecordSchema.safeParse(fractional).success).toBe(false);
+  });
+});
+
+function bulkRecords(groups: LaneScenario['groups'], nowMs: number = TRACER_NOW_MS): EventRecord[] {
+  return scenarioRecords({ ...ONE_BAD_BATCH, groups }, nowMs, LANES, TEST_ADDRESS_KEY_SET);
+}
+
+function bulkFold(window = spikeWindowFor(TRACER_NOW_MS), nowMs: number = TRACER_NOW_MS) {
+  return createWindowFold({ lane: BULK, window, nowMs });
+}
+
+// Wraps a fold so a test sees every page the store delivers, in order, without changing the result.
+function watched<S>(fold: LaneFold<S>, onPage: (page: readonly EventRecord[], index: number) => void): LaneFold<S> {
+  let index = 0;
+  return {
+    initial: fold.initial,
+    step(state, page) {
+      onPage(page, index);
+      index += 1;
+      return fold.step(state, page);
+    },
+  };
+}
+
+async function storeHolding(records: readonly EventRecord[], pageSize = 2) {
+  const table = createFixtureTableState();
+  const events = createFixtureEventStore({ pageSize, store: table });
+  for (const record of records) await events.putIfAbsent(record);
+  return { table, events };
+}
+
+describe('the fixture store reads a lane window page by page into a fold (R1)', () => {
+  it('delivers 1,000 records of one lane in exactly 500 pages at page size 2 (AC-1)', async () => {
+    const records = bulkRecords([{ bucketOffset: 0, count: 500 }]);
+    expect(records).toHaveLength(1_000);
+    const { events } = await storeHolding(records);
+    const window = spikeWindowFor(TRACER_NOW_MS);
+    const pageSizes: number[] = [];
+    const state = await events.foldLane(
+      BULK,
+      window.fromBucketMs,
+      window.toBucketMs,
+      TRACER_NOW_MS,
+      watched(bulkFold(), (page) => pageSizes.push(page.length)),
+    );
+    expect(state.pages).toBe(500);
+    expect(pageSizes.every((size) => size === 2)).toBe(true);
+    expect(summarizeWindow(state).totals.recipientSends).toBe(500);
+  });
+
+  it('counts nowhere a record stored already expired inside the window, and counts it inside its retention (AC-2)', async () => {
+    const oldNowMs = TRACER_NOW_MS - 31 * 24 * 60 * 60 * 1000;
+    const oldWindow = spikeWindowFor(oldNowMs);
+    const records = bulkRecords([{ bucketOffset: 0, count: 4, batch: 'stale', permanentBounces: 1 }], oldNowMs);
+    const { events } = await storeHolding(records);
+    const fold = () => bulkFold(oldWindow, TRACER_NOW_MS);
+    const delivered: EventRecord[] = [];
+    const expired = summarizeWindow(
+      await events.foldLane(BULK, oldWindow.fromBucketMs, oldWindow.toBucketMs, TRACER_NOW_MS, watched(fold(), (page) => delivered.push(...page))),
+    );
+    expect(delivered).toHaveLength(0);
+    expect(expired.totals).toMatchObject({ recipientSends: 0, permanentBounces: 0 });
+    expect(expired.dimensions.batch.size).toBe(0);
+    expect(expired.observed.recordCount).toBe(0);
+
+    const live = summarizeWindow(
+      await events.foldLane(BULK, oldWindow.fromBucketMs, oldWindow.toBucketMs, oldNowMs, bulkFold(oldWindow, oldNowMs)),
+    );
+    expect(live.totals).toMatchObject({ recipientSends: 4, permanentBounces: 1 });
+  });
+
+  it('folds a window of exactly MAX_WINDOW_BUCKETS buckets and refuses one more before any page reaches the fold (AC-E1)', async () => {
+    const { events } = await storeHolding(bulkRecords([{ bucketOffset: 0, count: 3 }]));
+    const toBucketMs = bucketStartMs(TRACER_NOW_MS);
+    const longest = { fromBucketMs: toBucketMs - (MAX_WINDOW_BUCKETS - 1) * BUCKET_MS, toBucketMs };
+    const folded = await events.foldLane(BULK, longest.fromBucketMs, longest.toBucketMs, TRACER_NOW_MS, bulkFold(longest));
+    expect(summarizeWindow(folded).buckets).toHaveLength(MAX_WINDOW_BUCKETS);
+
+    let steps = 0;
+    const counting = watched(bulkFold(), () => {
+      steps += 1;
+    });
+    await expect(
+      events.foldLane(BULK, toBucketMs - MAX_WINDOW_BUCKETS * BUCKET_MS, toBucketMs, TRACER_NOW_MS, counting),
+    ).rejects.toThrow(WindowTooLongError);
+    expect(steps).toBe(0);
+  });
+
+  it('skips a stored record whose expiresAt equals now in seconds and counts it one second earlier (AC-E2)', async () => {
+    const [send] = bulkRecords([{ bucketOffset: 0, count: 1, deliverRest: false }]);
+    if (send === undefined) throw new Error('expected one send');
+    send.expiresAt = Math.floor(TRACER_NOW_MS / 1000);
+    const { events } = await storeHolding([send]);
+    const window = spikeWindowFor(TRACER_NOW_MS);
+    const at = await events.foldLane(BULK, window.fromBucketMs, window.toBucketMs, TRACER_NOW_MS, bulkFold());
+    expect(summarizeWindow(at).totals.recipientSends).toBe(0);
+    const before = await events.foldLane(BULK, window.fromBucketMs, window.toBucketMs, TRACER_NOW_MS - 1000, bulkFold(window, TRACER_NOW_MS - 1000));
+    expect(summarizeWindow(before).totals.recipientSends).toBe(1);
+  });
+
+  it('delivers one empty page for an empty window, as a DynamoDB query answers one (AC-E3)', async () => {
+    const { events } = await storeHolding([]);
+    const window = spikeWindowFor(TRACER_NOW_MS);
+    const pages: number[] = [];
+    const state = await events.foldLane(
+      BULK,
+      window.fromBucketMs,
+      window.toBucketMs,
+      TRACER_NOW_MS,
+      watched(bulkFold(), (page) => pages.push(page.length)),
+    );
+    expect(pages).toEqual([0]);
+    expect(summarizeWindow(state).buckets.every((bucket) => bucket.send === 0)).toBe(true);
+  });
+
+  it('returns records in the UTF-8 byte order of the sort key, whatever order they were written in (D-43)', async () => {
+    const records = bulkRecords([{ bucketOffset: 3, count: 5, permanentBounces: 2 }]);
+    const [send] = records.filter((record) => record.kind === 'send');
+    if (send === undefined) throw new Error('expected a send');
+    // U+FF5E sorts after U+10000 by UTF-16 code unit (0xFF5E against the surrogate 0xD800) and before
+    // it by UTF-8 byte (0xEF against 0xF0), so only a byte comparison puts the first one first.
+    const bmp = { ...structuredClone(send), sk: `${send.sk}#～` };
+    const astral = { ...structuredClone(send), sk: `${send.sk}#\u{10000}` };
+    expect([bmp.sk, astral.sk].sort()).toEqual([astral.sk, bmp.sk]);
+    const written = [...records, bmp, astral].sort((left, right) => (left.sk < right.sk ? 1 : -1));
+    const { events } = await storeHolding(written, 3);
+    const window = spikeWindowFor(TRACER_NOW_MS);
+    const order: string[] = [];
+    await events.foldLane(BULK, window.fromBucketMs, window.toBucketMs, TRACER_NOW_MS, watched(bulkFold(), (page) => order.push(...page.map((record) => record.sk))));
+    const byBytes = written.map((record) => record.sk).sort((left, right) => Buffer.compare(Buffer.from(left), Buffer.from(right)));
+    expect(order).toEqual(byBytes);
+    expect(order.indexOf(bmp.sk)).toBeLessThan(order.indexOf(astral.sk));
+  });
+
+  it('counts at most once a record written to the shared table while a fold runs (R1 concurrency backstop)', async () => {
+    const records = bulkRecords([{ bucketOffset: 0, count: 6 }]);
+    const { events } = await storeHolding(records);
+    const [extra] = bulkRecords([{ bucketOffset: 1, count: 1, deliverRest: false }]);
+    if (extra === undefined) throw new Error('expected one send');
+    const window = spikeWindowFor(TRACER_NOW_MS);
+    let pending: Promise<'written' | 'duplicate'> | undefined;
+    const delivered: string[] = [];
+    const during = await events.foldLane(
+      BULK,
+      window.fromBucketMs,
+      window.toBucketMs,
+      TRACER_NOW_MS,
+      watched(bulkFold(), (page, index) => {
+        if (index === 0) pending = events.putIfAbsent(extra);
+        delivered.push(...page.map((record) => record.sk));
+      }),
+    );
+    expect(await pending).toBe('written');
+    expect(new Set(delivered).size).toBe(delivered.length);
+    expect([6, 7]).toContain(summarizeWindow(during).totals.recipientSends);
+    const after = await events.foldLane(BULK, window.fromBucketMs, window.toBucketMs, TRACER_NOW_MS, bulkFold());
+    expect(summarizeWindow(after).totals.recipientSends).toBe(7);
+  });
+});
+
+describe('the fixture decision store shares the table without touching event reads (D-65)', () => {
+  it('keeps decision items out of every event read and refuses a decision item under a LANE# key', async () => {
+    const records = bulkRecords([{ bucketOffset: 0, count: 2 }]);
+    const { table, events } = await storeHolding(records);
+    const decisions = createFixtureDecisionStore({ store: table });
+    const key = incidentItemKey('0'.repeat(32), 'STATE');
+    expect(await decisions.putIfAbsent({ ...key, expiresAt: Math.floor(TRACER_NOW_MS / 1000) + 60 }, TRACER_NOW_MS)).toBe('written');
+
+    const window = spikeWindowFor(TRACER_NOW_MS);
+    expect(await events.queryLane(BULK, window.fromBucketMs, window.toBucketMs, TRACER_NOW_MS)).toHaveLength(records.length);
+    expect(await events.getRecord(key)).toBeUndefined();
+    const folded = await events.foldLane(BULK, window.fromBucketMs, window.toBucketMs, TRACER_NOW_MS, bulkFold());
+    expect(summarizeWindow(folded).totals.recipientSends).toBe(2);
+
+    const [record] = records;
+    if (record === undefined) throw new Error('expected a record');
+    await expect(decisions.putIfAbsent({ pk: record.pk, sk: 'X', expiresAt: 1 }, TRACER_NOW_MS)).rejects.toThrow(RangeError);
+    expect(await decisions.getItem({ pk: record.pk, sk: record.sk }, TRACER_NOW_MS)).toBeUndefined();
+  });
+
+  it('answers an item only while its expiresAt is after now, and as a copy', async () => {
+    const decisions = createFixtureDecisionStore();
+    const nowSeconds = Math.floor(TRACER_NOW_MS / 1000);
+    const key = incidentItemKey('1'.repeat(32), 'DECISION');
+    await decisions.putIfAbsent({ ...key, expiresAt: nowSeconds, note: 'kept' }, TRACER_NOW_MS);
+    expect(await decisions.getItem(key, TRACER_NOW_MS)).toBeUndefined();
+    const before = await decisions.getItem(key, TRACER_NOW_MS - 1000);
+    expect(before).toEqual({ ...key, expiresAt: nowSeconds, note: 'kept' });
+    if (before !== undefined) before.note = 'changed';
+    expect((await decisions.getItem(key, TRACER_NOW_MS - 1000))?.note).toBe('kept');
+  });
+
+  it('refuses a fixture page size that is not a whole number from 1 up', () => {
+    for (const pageSize of [0, -1, 1.5, Number.NaN]) {
+      expect(() => createFixtureEventStore({ pageSize })).toThrow(RangeError);
+    }
+  });
+});
+
+const NOW_SECONDS = Math.floor(TRACER_NOW_MS / 1000);
+const STATE_KEY = incidentItemKey('2'.repeat(32), 'STATE');
+const INCIDENT_COUNTER = incidentItemKey('3'.repeat(32), 'COUNTER');
+const DAY_COUNTER = counterDayKey('2026-10-11');
+
+function reservation(overrides: Partial<ReservationRequest> = {}): ReservationRequest {
+  return {
+    incidentKey: INCIDENT_COUNTER,
+    dayKey: DAY_COUNTER,
+    incidentCap: 3,
+    dayInvocationCap: 10,
+    dayTokenCap: 1_000,
+    tokenReservation: 100,
+    expiresAt: NOW_SECONDS + RETENTION_SECONDS,
+    ...overrides,
+  };
+}
+
+function usage(overrides: Partial<UsageRecord> = {}): UsageRecord {
+  return { incidentKey: INCIDENT_COUNTER, dayKey: DAY_COUNTER, inputTokens: 1_200, outputTokens: 80, modelCalls: 2, ...overrides };
+}
+
+describe('the fixture decision store writes once and updates by version (D-66, AC-E33)', () => {
+  it('keeps the first item when a second put names the same key', async () => {
+    const decisions = createFixtureDecisionStore();
+    expect(await decisions.putIfAbsent({ ...STATE_KEY, expiresAt: NOW_SECONDS + 60, note: 'first' }, TRACER_NOW_MS)).toBe('written');
+    expect(await decisions.putIfAbsent({ ...STATE_KEY, expiresAt: NOW_SECONDS + 60, note: 'second' }, TRACER_NOW_MS)).toBe('duplicate');
+    expect((await decisions.getItem(STATE_KEY, TRACER_NOW_MS))?.note).toBe('first');
+  });
+
+  it('overwrites an item past its expiresAt that DynamoDB has not deleted yet, and answers written', async () => {
+    const decisions = createFixtureDecisionStore();
+    await decisions.putIfAbsent({ ...STATE_KEY, expiresAt: NOW_SECONDS, note: 'expired' }, TRACER_NOW_MS - 60_000);
+    expect(await decisions.putIfAbsent({ ...STATE_KEY, expiresAt: NOW_SECONDS + 60, note: 'fresh' }, TRACER_NOW_MS)).toBe('written');
+    expect((await decisions.getItem(STATE_KEY, TRACER_NOW_MS))?.note).toBe('fresh');
+  });
+
+  it('answers duplicate for an item whose expiresAt is one second after now', async () => {
+    const decisions = createFixtureDecisionStore();
+    await decisions.putIfAbsent({ ...STATE_KEY, expiresAt: NOW_SECONDS + 1, note: 'live' }, TRACER_NOW_MS);
+    expect(await decisions.putIfAbsent({ ...STATE_KEY, expiresAt: NOW_SECONDS + 60, note: 'second' }, TRACER_NOW_MS)).toBe('duplicate');
+    expect((await decisions.getItem(STATE_KEY, TRACER_NOW_MS))?.note).toBe('live');
+  });
+
+  it('answers duplicate for a stored item that carries no expiresAt', async () => {
+    const table = createFixtureTableState();
+    table.items.set(`${STATE_KEY.pk}\u0000${STATE_KEY.sk}`, { ...STATE_KEY, note: 'no expiry' });
+    const decisions = createFixtureDecisionStore({ store: table });
+    expect(await decisions.putIfAbsent({ ...STATE_KEY, expiresAt: NOW_SECONDS + 60, note: 'second' }, TRACER_NOW_MS)).toBe('duplicate');
+    expect(table.items.get(`${STATE_KEY.pk}\u0000${STATE_KEY.sk}`)).toEqual({ ...STATE_KEY, note: 'no expiry' });
+  });
+
+  it('updates an item whose stored version is the expected one, bumping the version and refreshing expiresAt', async () => {
+    const decisions = createFixtureDecisionStore();
+    await decisions.putIfAbsent({ ...STATE_KEY, expiresAt: NOW_SECONDS + 60, version: 1, state: 'open' }, TRACER_NOW_MS);
+    expect(await decisions.updateIfVersion(STATE_KEY, 1, { state: 'closed' }, TRACER_NOW_MS)).toBe('updated');
+    expect(await decisions.getItem(STATE_KEY, TRACER_NOW_MS)).toEqual({
+      ...STATE_KEY,
+      expiresAt: NOW_SECONDS + RETENTION_SECONDS,
+      version: 2,
+      state: 'closed',
+    });
+  });
+
+  it('answers conflict and changes nothing for a stale version or an item that is not stored', async () => {
+    const decisions = createFixtureDecisionStore();
+    await decisions.putIfAbsent({ ...STATE_KEY, expiresAt: NOW_SECONDS + 60, version: 1, state: 'open' }, TRACER_NOW_MS);
+    await decisions.updateIfVersion(STATE_KEY, 1, { state: 'closed' }, TRACER_NOW_MS);
+    expect(await decisions.updateIfVersion(STATE_KEY, 1, { state: 'open' }, TRACER_NOW_MS)).toBe('conflict');
+    expect((await decisions.getItem(STATE_KEY, TRACER_NOW_MS))?.state).toBe('closed');
+
+    const missing = incidentItemKey('4'.repeat(32), 'STATE');
+    expect(await decisions.updateIfVersion(missing, 0, { state: 'open' }, TRACER_NOW_MS)).toBe('conflict');
+    expect(await decisions.getItem(missing, TRACER_NOW_MS)).toBeUndefined();
+  });
+
+  it('updates only while the stored item also holds each expected attribute value, and changes nothing otherwise', async () => {
+    const decisions = createFixtureDecisionStore();
+    await decisions.putIfAbsent({ ...STATE_KEY, expiresAt: NOW_SECONDS + 60, version: 1, incidentId: 'first', status: 'open' }, TRACER_NOW_MS);
+    expect(await decisions.updateIfVersion(STATE_KEY, 1, { status: 'closed' }, TRACER_NOW_MS, { incidentId: 'second' })).toBe('conflict');
+    expect(await decisions.updateIfVersion(STATE_KEY, 1, { status: 'closed' }, TRACER_NOW_MS, { note: 'first' })).toBe('conflict');
+    expect(await decisions.getItem(STATE_KEY, TRACER_NOW_MS)).toMatchObject({ version: 1, status: 'open' });
+    expect(await decisions.updateIfVersion(STATE_KEY, 1, { status: 'closed' }, TRACER_NOW_MS, { incidentId: 'first' })).toBe('updated');
+    expect(await decisions.getItem(STATE_KEY, TRACER_NOW_MS)).toMatchObject({ version: 2, status: 'closed', incidentId: 'first' });
+  });
+
+  it('refuses an update naming an attribute it writes itself, and any put or update of a counter item', async () => {
+    const decisions = createFixtureDecisionStore();
+    await decisions.putIfAbsent({ ...STATE_KEY, expiresAt: NOW_SECONDS + 60, version: 1 }, TRACER_NOW_MS);
+    for (const attribute of ['pk', 'sk', 'version', 'expiresAt']) {
+      await expect(decisions.updateIfVersion(STATE_KEY, 1, { [attribute]: 0 }, TRACER_NOW_MS)).rejects.toThrow(RangeError);
+    }
+    await expect(decisions.updateIfVersion(STATE_KEY, 1.5, {}, TRACER_NOW_MS)).rejects.toThrow(RangeError);
+    await expect(decisions.putIfAbsent({ ...DAY_COUNTER, expiresAt: NOW_SECONDS + 60, invocations: -5 }, TRACER_NOW_MS)).rejects.toThrow(RangeError);
+    await expect(decisions.updateIfVersion(INCIDENT_COUNTER, 0, { invocations: 0 }, TRACER_NOW_MS)).rejects.toThrow(RangeError);
+    expect(await decisions.getItem(DAY_COUNTER, TRACER_NOW_MS)).toBeUndefined();
+    expect((await decisions.getItem(STATE_KEY, TRACER_NOW_MS))?.version).toBe(1);
+  });
+});
+
+describe('the fixture decision store reserves both counters all or nothing (D-67)', () => {
+  it('creates the day counter at one invocation on the first reservation of a UTC day (AC-E46)', async () => {
+    const decisions = createFixtureDecisionStore();
+    expect(await decisions.reserveInvocation(reservation())).toEqual({ ok: true });
+    expect(await decisions.getItem(DAY_COUNTER, TRACER_NOW_MS)).toEqual({
+      ...DAY_COUNTER,
+      invocations: 1,
+      tokenReservations: 100,
+      expiresAt: NOW_SECONDS + RETENTION_SECONDS,
+    });
+    expect((await decisions.getItem(INCIDENT_COUNTER, TRACER_NOW_MS))?.invocations).toBe(1);
+  });
+
+  it('keeps the expiresAt of the first reservation, so a later one never extends a counter', async () => {
+    const decisions = createFixtureDecisionStore();
+    await decisions.reserveInvocation(reservation());
+    await decisions.reserveInvocation(reservation({ expiresAt: NOW_SECONDS + 2 * RETENTION_SECONDS }));
+    expect((await decisions.getItem(DAY_COUNTER, TRACER_NOW_MS))?.expiresAt).toBe(NOW_SECONDS + RETENTION_SECONDS);
+    expect((await decisions.getItem(INCIDENT_COUNTER, TRACER_NOW_MS))?.expiresAt).toBe(NOW_SECONDS + RETENTION_SECONDS);
+  });
+
+  it('allows one reservation one below the incident cap and refuses at the cap, naming the incident (AC-E48)', async () => {
+    const decisions = createFixtureDecisionStore();
+    await decisions.reserveInvocation(reservation());
+    await decisions.reserveInvocation(reservation());
+    expect((await decisions.reserveInvocation(reservation())).ok).toBe(true);
+    expect(await decisions.reserveInvocation(reservation())).toEqual({ ok: false, reason: 'cap', items: ['incident'] });
+    expect((await decisions.getItem(INCIDENT_COUNTER, TRACER_NOW_MS))?.invocations).toBe(3);
+    expect((await decisions.getItem(DAY_COUNTER, TRACER_NOW_MS))?.invocations).toBe(3);
+  });
+
+  it('refuses the day when its invocations or its token reservations are at their cap (AC-E48)', async () => {
+    const byInvocations = createFixtureDecisionStore();
+    await byInvocations.reserveInvocation(reservation({ dayInvocationCap: 1 }));
+    const second = reservation({ incidentKey: incidentItemKey('5'.repeat(32), 'COUNTER'), dayInvocationCap: 1 });
+    expect(await byInvocations.reserveInvocation(second)).toEqual({ ok: false, reason: 'cap', items: ['day'] });
+
+    const byTokens = createFixtureDecisionStore();
+    const tokens = { incidentCap: 10, dayTokenCap: 1_000, tokenReservation: 400 };
+    expect((await byTokens.reserveInvocation(reservation(tokens))).ok).toBe(true);
+    expect((await byTokens.reserveInvocation(reservation(tokens))).ok).toBe(true);
+    expect(await byTokens.reserveInvocation(reservation(tokens))).toEqual({ ok: false, reason: 'cap', items: ['day'] });
+    expect((await byTokens.getItem(DAY_COUNTER, TRACER_NOW_MS))?.tokenReservations).toBe(800);
+  });
+
+  it('lets exactly one of ten racing reservations through at one below the incident cap (AC-E49)', async () => {
+    const decisions = createFixtureDecisionStore({}, createDryRunLog({ sink: () => {}, addressKey: createFixtureAddressKey(), now: () => TRACER_NOW_MS }));
+    await decisions.reserveInvocation(reservation());
+    await decisions.reserveInvocation(reservation());
+    const results = await Promise.all(Array.from({ length: 10 }, () => decisions.reserveInvocation(reservation())));
+    expect(results.filter((result) => result.ok).length).toBe(1);
+    expect((await decisions.getItem(INCIDENT_COUNTER, TRACER_NOW_MS))?.invocations).toBe(3);
+  });
+
+  it('refuses once, naming both items, a reservation past the incident cap and the day cap together (AC-E45)', async () => {
+    const decisions = createFixtureDecisionStore();
+    const tight = reservation({ incidentCap: 1, dayInvocationCap: 1 });
+    await decisions.reserveInvocation(tight);
+    expect(await decisions.reserveInvocation(tight)).toEqual({ ok: false, reason: 'cap', items: ['incident', 'day'] });
+    expect((await decisions.getItem(DAY_COUNTER, TRACER_NOW_MS))?.invocations).toBe(1);
+  });
+
+  it('answers conflict for each injected transaction conflict, changing nothing, and then reserves (Pitfall 6)', async () => {
+    const decisions = createFixtureDecisionStore({ transactionConflicts: 2 });
+    expect(await decisions.reserveInvocation(reservation())).toEqual({ ok: false, reason: 'conflict' });
+    expect(await decisions.reserveInvocation(reservation())).toEqual({ ok: false, reason: 'conflict' });
+    expect(await decisions.getItem(DAY_COUNTER, TRACER_NOW_MS)).toBeUndefined();
+    expect(await decisions.reserveInvocation(reservation())).toEqual({ ok: true });
+    expect((await decisions.getItem(DAY_COUNTER, TRACER_NOW_MS))?.invocations).toBe(1);
+  });
+
+  it('refuses a reservation whose caps are not whole numbers or whose token reservation exceeds the day cap', async () => {
+    const decisions = createFixtureDecisionStore();
+    for (const overrides of [{ incidentCap: 0 }, { dayInvocationCap: 1.5 }, { tokenReservation: -1 }, { tokenReservation: 1_001 }, { dayKey: STATE_KEY }]) {
+      await expect(decisions.reserveInvocation(reservation(overrides))).rejects.toThrow(RangeError);
+    }
+    expect(await decisions.getItem(DAY_COUNTER, TRACER_NOW_MS)).toBeUndefined();
+  });
+});
+
+describe('the fixture decision store records usage by adding only (AC-P6 store half)', () => {
+  it('adds each amount to both counter items, call after call', async () => {
+    const decisions = createFixtureDecisionStore();
+    await decisions.reserveInvocation(reservation());
+    expect(await decisions.recordUsage(usage())).toBe('recorded');
+    expect(await decisions.recordUsage(usage({ inputTokens: 300, outputTokens: 20, modelCalls: 1 }))).toBe('recorded');
+    for (const key of [INCIDENT_COUNTER, DAY_COUNTER]) {
+      expect(await decisions.getItem(key, TRACER_NOW_MS)).toMatchObject({ inputTokens: 1_500, outputTokens: 100, modelCalls: 3, invocations: 1 });
+    }
+  });
+
+  // A counter item made by usage alone would carry no expiresAt and outlive the 30-day retention.
+  it('answers not-reserved and writes nothing for usage on counters no reservation created', async () => {
+    const decisions = createFixtureDecisionStore();
+    expect(await decisions.recordUsage(usage())).toBe('not-reserved');
+    expect(await decisions.getItem(INCIDENT_COUNTER, TRACER_NOW_MS)).toBeUndefined();
+    expect(await decisions.getItem(DAY_COUNTER, TRACER_NOW_MS)).toBeUndefined();
+  });
+
+  it('answers not-reserved and leaves the reserved counter unchanged when only one of the two exists', async () => {
+    const decisions = createFixtureDecisionStore();
+    await decisions.reserveInvocation(reservation({ incidentKey: incidentItemKey('6'.repeat(32), 'COUNTER') }));
+    const before = await decisions.getItem(DAY_COUNTER, TRACER_NOW_MS);
+    expect(await decisions.recordUsage(usage())).toBe('not-reserved');
+    expect(await decisions.getItem(DAY_COUNTER, TRACER_NOW_MS)).toEqual(before);
+    expect(await decisions.getItem(INCIDENT_COUNTER, TRACER_NOW_MS)).toBeUndefined();
+  });
+
+  it('throws a RangeError for a negative or fractional amount before anything is written', async () => {
+    const decisions = createFixtureDecisionStore();
+    await decisions.reserveInvocation(reservation());
+    for (const overrides of [{ inputTokens: -1 }, { outputTokens: 0.5 }, { modelCalls: Number.NaN }]) {
+      await expect(decisions.recordUsage(usage(overrides))).rejects.toThrow(RangeError);
+    }
+    expect((await decisions.getItem(DAY_COUNTER, TRACER_NOW_MS))?.inputTokens).toBeUndefined();
   });
 });

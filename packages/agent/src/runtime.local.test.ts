@@ -7,6 +7,20 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { bucketStartMs, isCountedRecord } from '@fothering/core/buckets';
+import { REQUIRED_EVENT_TYPES, checkCloseability } from '@fothering/core/closeability';
+import { decideLane } from '@fothering/core/decision';
+import { buildEvidenceRecord, incidentIdFor, type EvidenceRecord } from '@fothering/core/evidence-record';
+import { buildTagRows } from '@fothering/core/evidence-rows';
+import { parseLaneMap } from '@fothering/core/lanes';
+import { PINNED_MODEL_VALUES } from '@fothering/core/model-values';
+import { RETENTION_SECONDS } from '@fothering/core/records';
+import { scenarioRecords } from '@fothering/core/test/event-arbitraries';
+import { LANE_RATIO_LABELS, LANE_SHARE_LABEL, laneSpikeVerdict, renderPercent } from '@fothering/core/verdicts';
+import { createWindowFold, spikeWindowFor, summarizeWindow } from '@fothering/core/window-fold';
+import { TEST_ADDRESS_KEY_SET } from '@fothering/providers/fixtures/ingest-ports';
+import lanesJson from '../../../lanes.json' with { type: 'json' };
+import { SYSTEM_PROMPT_SHA256 } from './handler.js';
 
 // This file lives at packages/agent/src/, two levels below the repo root every path here is
 // read relative to.
@@ -16,6 +30,12 @@ const BUNDLE_OPTIONS = join(REPO_ROOT, 'scripts', 'bundle-options.mjs');
 const AGENTCORE_APP_JS = join(REPO_ROOT, 'node_modules', 'bedrock-agentcore', 'dist', 'src', 'runtime', 'app.js');
 const CREATE_REQUIRE_LINE = 'const require = createRequire(import.meta.url);';
 const CHILD_TIMEOUT_MS = 60000;
+// The two tests that run esbuild inside this process write their planted inputs here, not under
+// the system temp folder: the time of those tiny builds follows the size of the folders above the
+// planted files. Under a temp folder holding about a million entries they took about 3 s alone and
+// went past 60 s in 3 of 4 cold verify:ship runs; from a small folder they took under 50 ms
+// (measured 2026-10-14). node_modules/ is git-ignored.
+const PLANT_PARENT = join(REPO_ROOT, 'node_modules', '.cache');
 const SESSION_HEADER = 'x-amzn-bedrock-agentcore-runtime-session-id';
 const LISTEN_REFUSED = 'listen guard refused a non-loopback bind';
 
@@ -87,9 +107,70 @@ async function waitForOk(url: string, deadlineMs: number, exitedEarly: () => str
   }
 }
 
-describe('the agent bundle answers the AgentCore contract with no model and no AWS client', () => {
+// A real evidence record, built in this process by the core path detection runs: one bad import
+// batch on fothering-bulk with one approved option. The runtime child receives it as the request body.
+function fixtureEvidenceRecord(): EvidenceRecord {
+  const lanes = parseLaneMap(lanesJson);
+  const bulk = 'fothering-bulk';
+  const nowMs = Date.UTC(2026, 9, 11, 12, 2, 0);
+  const records = scenarioRecords(
+    {
+      configurationSet: bulk,
+      streamTag: 'newsletter',
+      callerIdentity: 'bulk-sender',
+      fromDomain: 'news.example.com',
+      groups: [
+        { bucketOffset: 0, count: 40, batch: 'import-0915', permanentBounces: 15 },
+        { bucketOffset: 1, count: 160, batch: 'import-0901' },
+      ],
+    },
+    nowMs,
+    lanes,
+    TEST_ADDRESS_KEY_SET,
+  );
+  const window = spikeWindowFor(nowMs);
+  const fold = createWindowFold({ lane: bulk, window, nowMs });
+  const summary = summarizeWindow(fold.step(fold.initial, records));
+  const spike = laneSpikeVerdict(summary.totals);
+  const rows = buildTagRows('batch', summary, spike);
+  const ses = {
+    configurationSets: new Set(lanes.lanes.map((lane) => lane.configurationSet)),
+    defaultConfigurationSets: new Set<string>(),
+    eventDestinations: new Map([[bulk, [{ enabled: true, eventBridge: true, matchingEventTypes: [...REQUIRED_EVENT_TYPES] }]]]),
+  };
+  const closeability = checkCloseability(bulk, { laneMap: lanes, observed: new Map([[bulk, summary.observed]]), ses });
+  const decision = decideLane({ spike, rows, configurationRows: [], closeability, coverageNoData: false, bound: null, otherSpikingLanes: [] });
+  const countable = records.filter(isCountedRecord).length;
+  return buildEvidenceRecord({
+    incidentId: incidentIdFor(bulk, bucketStartMs(nowMs)),
+    lane: { configurationSet: bulk, lane: bulk },
+    window,
+    laneTotals: {
+      recipientSends: summary.totals.recipientSends,
+      permanentBounces: summary.totals.permanentBounces,
+      complaints: summary.totals.complaints,
+      hardBounceRatio: spike.hardBounceRatio,
+      complaintRatio: spike.complaintRatio,
+      verdict: spike.verdict,
+      triggers: [...spike.triggers],
+      label: { hardBounceRatio: LANE_RATIO_LABELS.hardBounce, complaintRatio: LANE_RATIO_LABELS.complaint },
+    },
+    share: { laneCountableEvents: countable, storedCountableEvents: countable, percent: renderPercent(countable, countable), label: LANE_SHARE_LABEL },
+    rows,
+    configurationRows: [],
+    isolation: 'confined',
+    decision: { ...decision, noData: false, bound: null, otherSpikingLanes: [], sharedCause: null },
+    question: null,
+    fix: null,
+    expiresAt: Math.floor(nowMs / 1000) + RETENTION_SECONDS,
+  });
+}
+
+describe('the agent bundle answers the AgentCore contract with the real handler and no AWS client', () => {
   const outDir = mkdtempSync(join(tmpdir(), 'fothering-agent-bundle-'));
   const workDir = mkdtempSync(join(tmpdir(), 'fothering-agent-work-'));
+  mkdirSync(PLANT_PARENT, { recursive: true });
+  const plantDir = mkdtempSync(join(PLANT_PARENT, 'fothering-agent-plant-'));
   const listenGuard = join(workDir, 'listen-guard.mjs');
   writeFileSync(listenGuard, LISTEN_GUARD_SOURCE);
   const preloadOut = join(workDir, 'guard-preload.mjs');
@@ -123,6 +204,7 @@ describe('the agent bundle answers the AgentCore contract with no model and no A
     const retryOptions = { recursive: true, force: true, maxRetries: 5, retryDelay: 200 } as const;
     rmSync(outDir, retryOptions);
     rmSync(workDir, retryOptions);
+    rmSync(plantDir, retryOptions);
   });
 
   it(
@@ -153,8 +235,8 @@ describe('the agent bundle answers the AgentCore contract with no model and no A
         CJS_BUNDLE_BASE: BuildOptions;
         agentcoreInlineRequirePlugin: () => Plugin;
       };
-      // A private copy of the package path the plugin's filter matches, under this test's own folder.
-      const plantedRoot = join(workDir, 'planted-agentcore');
+      // A private copy of the package path the plugin's filter matches, under this file's plant folder.
+      const plantedRoot = join(plantDir, 'planted-agentcore');
       const runtimeDir = join(plantedRoot, 'node_modules', 'bedrock-agentcore', 'dist', 'src', 'runtime');
       mkdirSync(runtimeDir, { recursive: true });
       const plantedApp = join(runtimeDir, 'app.js');
@@ -224,7 +306,7 @@ describe('the agent bundle answers the AgentCore contract with no model and no A
     'the shared CommonJS settings fail a planted import.meta use instead of bundling it as undefined',
     async () => {
       const { CJS_BUNDLE_BASE } = (await import(pathToFileURL(BUNDLE_OPTIONS).href)) as { CJS_BUNDLE_BASE: BuildOptions };
-      const planted = join(workDir, 'planted-import-meta.mjs');
+      const planted = join(plantDir, 'planted-import-meta.mjs');
       await writeFile(planted, 'export const where = import.meta.url;\n');
       const failure = await build({ ...CJS_BUNDLE_BASE, entryPoints: [planted], write: false, logLevel: 'silent' }).then(
         () => undefined,
@@ -234,7 +316,7 @@ describe('the agent bundle answers the AgentCore contract with no model and no A
 
       // Control: the same settings bundle a file with no import.meta, so the failure above is the
       // override firing, not settings that fail every build.
-      const clean = join(workDir, 'clean-entry.mjs');
+      const clean = join(plantDir, 'clean-entry.mjs');
       await writeFile(clean, 'export const where = 1;\n');
       const ok = await build({ ...CJS_BUNDLE_BASE, entryPoints: [clean], write: false, logLevel: 'silent' });
       expect(ok.errors).toEqual([]);
@@ -258,13 +340,14 @@ describe('the agent bundle answers the AgentCore contract with no model and no A
   );
 
   it(
-    'answers /ping and /invocations locally with no model and no AWS client (AC-21, AC-E38)',
+    'answers /ping, and /invocations over a fixture evidence record with a dry-run result, with no AWS client (AC-14, AC-21, AC-E38)',
     async () => {
       const port = await findFreePort();
       const host = '127.0.0.1';
 
       // No deploy variable and the listen guard preloaded: the runtime must choose loopback on its
-      // own, or the guard ends it before it answers a single ping.
+      // own, or the guard ends it before it answers a single ping. The suite's global setup refuses
+      // to start with the live switch set, so the child's model row is the dry-run recorder.
       child = spawn(
         process.execPath,
         ['--import', pathToFileURL(preloadOut).href, '--import', pathToFileURL(listenGuard).href, 'main.js', '--port', String(port)],
@@ -295,14 +378,34 @@ describe('the agent bundle answers the AgentCore contract with no model and no A
 
       const invokeUrl = `http://${host}:${port}/invocations`;
       const headers = { 'content-type': 'application/json', [SESSION_HEADER]: 'session-1' };
+      const record = JSON.stringify(fixtureEvidenceRecord());
       const [a, b] = await Promise.all([
-        fetch(invokeUrl, { method: 'POST', headers, body: '{}' }),
-        fetch(invokeUrl, { method: 'POST', headers, body: '{}' }),
+        fetch(invokeUrl, { method: 'POST', headers, body: record }),
+        fetch(invokeUrl, { method: 'POST', headers, body: record }),
       ]);
-      expect(a.status).toBe(200);
-      expect(b.status).toBe(200);
-      expect(await a.json()).toEqual({ status: 'no-model', model: 'none' });
-      expect(await b.json()).toEqual({ status: 'no-model', model: 'none' });
+      expect(a.status, output).toBe(200);
+      expect(b.status, output).toBe(200);
+      const dryRun = { status: 'dry-run', pinned: PINNED_MODEL_VALUES, promptSha256: SYSTEM_PROMPT_SHA256 };
+      expect(await a.json()).toEqual(dryRun);
+      expect(await b.json()).toEqual(dryRun);
+      // The child writes its line before it answers, but the pipe may deliver it a moment later.
+      const dryRunLines = (): number =>
+        output.split('\n').filter((line) => line.startsWith('(dry-run) WOULD bedrockModel.stream eu.anthropic.claude-sonnet-5 ')).length;
+      for (let waitedMs = 0; dryRunLines() < 2 && waitedMs < 5000; waitedMs += 100) {
+        await new Promise((resolveDelay) => setTimeout(resolveDelay, 100));
+      }
+      expect(dryRunLines(), output).toBe(2);
+
+      const empty = await fetch(invokeUrl, { method: 'POST', headers, body: '{}' });
+      expect(empty.status).toBe(200);
+      expect(await empty.json()).toEqual({
+        status: 'refused',
+        reason: 'payload-invalid',
+        pinned: PINNED_MODEL_VALUES,
+        promptSha256: SYSTEM_PROMPT_SHA256,
+        usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
+        modelCalls: 0,
+      });
 
       const noSession = await fetch(invokeUrl, {
         method: 'POST',

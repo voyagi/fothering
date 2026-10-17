@@ -2,7 +2,7 @@ import { App } from 'aws-cdk-lib';
 import { parseLaneMap } from '@fothering/core/lanes';
 import lanesJson from '../../../lanes.json' with { type: 'json' };
 import { cdkJsonContext } from './cdk-context.js';
-import { addFotheringStacks, INGEST_STACK_ID, RUNTIME_STACK_ID } from './create-app.js';
+import { addFotheringStacks, DETECTION_STACK_ID, INGEST_STACK_ID, RUNTIME_STACK_ID } from './create-app.js';
 import { createStubAssets } from './stub-assets.js';
 
 interface CfnResource {
@@ -38,14 +38,15 @@ export interface PermissionDiff {
   extra: PermissionEntry[];
 }
 
+// The detection function reuses the ingest stub folder: a stub bundle only has to exist to be hashed.
 export function synthesizePermissionTemplates(): StackTemplates {
   const assets = createStubAssets();
   try {
     const app = new App({ context: { ...cdkJsonContext }, outdir: assets.outdir });
-    addFotheringStacks(app, { laneMap: parseLaneMap(lanesJson), ...assets });
+    addFotheringStacks(app, { laneMap: parseLaneMap(lanesJson), ...assets, detectAssetDir: assets.ingestAssetDir });
     const assembly = app.synth();
     return Object.fromEntries(
-      [INGEST_STACK_ID, RUNTIME_STACK_ID].map((id) => [id, assembly.getStackByName(id).template as CfnTemplate]),
+      [INGEST_STACK_ID, RUNTIME_STACK_ID, DETECTION_STACK_ID].map((id) => [id, assembly.getStackByName(id).template as CfnTemplate]),
     );
   } finally {
     assets.remove();
@@ -157,7 +158,7 @@ function entryKey(entry: PermissionEntry): string {
 }
 
 // One entry per action and resource of every role statement, and one per action of every trust
-// statement, over both stacks, sorted so the same code always yields the same list.
+// statement, over every stack, sorted so the same code always yields the same list.
 export function collectPermissions(templates: StackTemplates): PermissionEntry[] {
   const unique = new Map<string, PermissionEntry>();
   for (const [stack, template] of Object.entries(templates)) {

@@ -20,6 +20,14 @@ export const EXPECTED_KINDS: Readonly<Record<string, Readonly<Record<string, Kin
     queryByRecipient: ['fixture', 'live', 'live'],
     deleteRecord: ['fixture', 'live', 'live'],
     getRecord: ['fixture', 'live', 'live'],
+    foldLane: ['fixture', 'live', 'live'],
+  },
+  decisionStore: {
+    putIfAbsent: ['fixture', 'live', 'live'],
+    getItem: ['fixture', 'live', 'live'],
+    updateIfVersion: ['fixture', 'live', 'live'],
+    reserveInvocation: ['fixture', 'live', 'live'],
+    recordUsage: ['fixture', 'live', 'live'],
   },
   addressKey: {
     getKeySet: ['fixture', 'live', 'live'],
@@ -36,11 +44,16 @@ export const EXPECTED_KINDS: Readonly<Record<string, Readonly<Record<string, Kin
     reopenConfigurationSet: ['fixture', 'dry-run', 'not-built-until-phase-3'],
     sendEmail: ['fixture', 'dry-run', 'not-built-until-phase-4'],
   },
+  // R6: recorded in test, live in deployed whatever the switch.
+  dns: {
+    resolveMx: ['fixture', 'live', 'live'],
+    resolveTxt: ['fixture', 'live', 'live'],
+  },
   bedrockModel: {
-    converse: ['fixture', 'dry-run', 'not-built-until-phase-2'],
+    stream: ['fixture', 'dry-run', 'live'],
   },
   agentCore: {
-    invokeAgentRuntime: ['fixture', 'dry-run', 'not-built-until-phase-2'],
+    invokeAgentRuntime: ['fixture', 'dry-run', 'live'],
   },
   replyBucket: {
     getReplyObject: ['fixture', 'not-built-until-phase-4', 'not-built-until-phase-4'],

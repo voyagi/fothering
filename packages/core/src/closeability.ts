@@ -61,7 +61,8 @@ export interface ObserveLanesOptions {
   nowMs: number;
 }
 
-interface Tally {
+/** What one lane's records have shown so far; a fold over pages feeds it one record at a time (D-47). */
+export interface ObserveTally {
   recordCount: number;
   streamTagValues: Set<string>;
   recordsWithoutValidStream: number;
@@ -71,7 +72,7 @@ interface Tally {
   completeOutcomes: number;
 }
 
-function emptyTally(): Tally {
+export function createObserveTally(): ObserveTally {
   return {
     recordCount: 0,
     streamTagValues: new Set(),
@@ -87,24 +88,48 @@ function emptyTally(): Tally {
 // stream tag it could not validate out, so either of those, or an empty string, is no evidence. A
 // stream tag an operator set to the literal word unclassified counts as missing too, and the lane
 // map refuses that word as a declared stream so no lane can depend on it.
-function usable(value: string | undefined): value is string {
+export function isUsableValue(value: string | undefined): value is string {
   return value !== undefined && value !== '' && value !== UNCLASSIFIED;
 }
 
-function addRecord(tally: Tally, record: EventRecord, nowMs: number): void {
+/** The caller filters: only a counted record inside the window it reads belongs here. */
+export function observeRecord(tally: ObserveTally, record: EventRecord, nowMs: number): void {
   tally.recordCount += 1;
 
   const stream = record.fields.streamTagValue;
-  if (usable(stream)) tally.streamTagValues.add(stream);
+  if (isUsableValue(stream)) tally.streamTagValues.add(stream);
   else tally.recordsWithoutValidStream += 1;
 
   const caller = record.fields.callerIdentity;
-  if (usable(caller)) tally.callerIdentities.add(caller);
+  if (isUsableValue(caller)) tally.callerIdentities.add(caller);
   else tally.recordsWithoutCaller += 1;
 
   if (!isBucketComplete(record.bucketStartMs, nowMs)) return;
   if (record.kind === 'send') tally.completeSends += 1;
   else if (record.kind === 'outcome') tally.completeOutcomes += 1;
+}
+
+export function mergeObserveTallies(a: ObserveTally, b: ObserveTally): ObserveTally {
+  return {
+    recordCount: a.recordCount + b.recordCount,
+    streamTagValues: new Set([...a.streamTagValues, ...b.streamTagValues]),
+    recordsWithoutValidStream: a.recordsWithoutValidStream + b.recordsWithoutValidStream,
+    callerIdentities: new Set([...a.callerIdentities, ...b.callerIdentities]),
+    recordsWithoutCaller: a.recordsWithoutCaller + b.recordsWithoutCaller,
+    completeSends: a.completeSends + b.completeSends,
+    completeOutcomes: a.completeOutcomes + b.completeOutcomes,
+  };
+}
+
+export function observedFactsOf(tally: ObserveTally): ObservedLaneFacts {
+  return {
+    recordCount: tally.recordCount,
+    streamTagValues: new Set(tally.streamTagValues),
+    recordsWithoutValidStream: tally.recordsWithoutValidStream,
+    callerIdentities: new Set(tally.callerIdentities),
+    recordsWithoutCaller: tally.recordsWithoutCaller,
+    completeBucketsHoldSendsWithoutOutcomes: tally.completeSends > 0 && tally.completeOutcomes === 0,
+  };
 }
 
 // A NaN now reads every bucket as still open, so a lane of sends with no outcome would pass as
@@ -133,31 +158,21 @@ export function observeLanes(
 ): ReadonlyMap<string, ObservedLaneFacts> {
   assertFiniteTimes(options);
   const firstBucketMs = bucketStartMs(options.windowStartMs);
-  const tallies = new Map<string, Tally>(options.laneMap.lanes.map((lane) => [lane.configurationSet, emptyTally()]));
+  const tallies = new Map<string, ObserveTally>(
+    options.laneMap.lanes.map((lane) => [lane.configurationSet, createObserveTally()]),
+  );
 
   for (const record of records) {
     if (!isCountedRecord(record) || record.bucketStartMs < firstBucketMs) continue;
     let tally = tallies.get(record.configurationSet);
     if (tally === undefined) {
-      tally = emptyTally();
+      tally = createObserveTally();
       tallies.set(record.configurationSet, tally);
     }
-    addRecord(tally, record, options.nowMs);
+    observeRecord(tally, record, options.nowMs);
   }
 
-  return new Map(
-    [...tallies].map(([configurationSet, tally]) => [
-      configurationSet,
-      {
-        recordCount: tally.recordCount,
-        streamTagValues: tally.streamTagValues,
-        recordsWithoutValidStream: tally.recordsWithoutValidStream,
-        callerIdentities: tally.callerIdentities,
-        recordsWithoutCaller: tally.recordsWithoutCaller,
-        completeBucketsHoldSendsWithoutOutcomes: tally.completeSends > 0 && tally.completeOutcomes === 0,
-      },
-    ]),
-  );
+  return new Map([...tallies].map(([configurationSet, tally]) => [configurationSet, observedFactsOf(tally)]));
 }
 
 export interface CheckCloseabilityOptions {

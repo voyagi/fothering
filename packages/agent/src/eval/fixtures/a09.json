@@ -1,0 +1,54 @@
+{
+  "id": "a09",
+  "incident": "A9: A1's spike on fothering-bulk while the complete buckets of the coverage window hold outcomes for 50 of 100 recipient-sends; unknown no-data",
+  "now": "2026-10-11T12:02:00.000Z",
+  "scenarios": [
+    {
+      "configurationSet": "fothering-bulk",
+      "streamTag": "newsletter",
+      "callerIdentity": "bulk-sender",
+      "fromDomain": "news.example.com",
+      "groups": [
+        { "bucketOffset": 0, "count": 40, "batch": "import-0915", "permanentBounces": 15 },
+        { "bucketOffset": 1, "count": 160, "batch": "import-0901" },
+        { "bucketOffset": 170, "count": 50, "batch": "import-0830" },
+        { "bucketOffset": 170, "count": 50, "batch": "import-0830", "deliverRest": false }
+      ]
+    }
+  ],
+  "ses": {
+    "identities": [
+      {
+        "identity": "example.com",
+        "dkimStatus": "SUCCESS",
+        "dkimSigningEnabled": true,
+        "mailFromDomain": "bounce.example.com",
+        "mailFromStatus": "SUCCESS"
+      }
+    ],
+    "destinations": "complete"
+  },
+  "dns": [
+    { "name": "_dmarc.news.example.com", "recordType": "TXT", "outcome": "missing" },
+    { "name": "_dmarc.example.com", "recordType": "TXT", "outcome": "records", "records": ["v=DMARC1; p=none"] },
+    { "name": "bounce.example.com", "recordType": "TXT", "outcome": "records", "records": ["v=spf1 include:amazonses.com ~all"] },
+    { "name": "example.com", "recordType": "MX", "outcome": "missing" }
+  ],
+  "labels": {
+    "fothering-bulk": { "outcome": "unknown", "reason": "no-data", "names": ["fothering-bulk (no-data)"], "fixKind": null, "rule": "no-data" }
+  },
+  "variants": [
+    {
+      "id": "base",
+      "response": { "label": "hand-authored" },
+      "turns": [
+        {
+          "kind": "answer",
+          "decision": "unknown",
+          "explanation": "This lane's hard-bounce ratio is 7.50% over 200 recipient-sends, and the import-0915 batch reads as the cause, but too few of this lane's earlier sends have an outcome on record to trust the counts, so no decision was made and it is left to you."
+        }
+      ],
+      "expected": { "fothering-bulk": { "kind": "validated", "decision": "unknown" } }
+    }
+  ]
+}

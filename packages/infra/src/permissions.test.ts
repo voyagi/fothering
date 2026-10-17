@@ -12,6 +12,8 @@ import {
 
 const SNAPSHOT_URL = new URL('../permissions.json', import.meta.url);
 
+const SES_READS = ['ses:GetConfigurationSetEventDestinations', 'ses:GetEmailIdentity', 'ses:ListConfigurationSets', 'ses:ListEmailIdentities'];
+
 function committedSnapshot(): PermissionEntry[] {
   return JSON.parse(readFileSync(SNAPSHOT_URL, 'utf8')) as PermissionEntry[];
 }
@@ -57,7 +59,7 @@ describe('the permissions snapshot', () => {
     synthesized = collectPermissions(templates);
   }, 60_000);
 
-  it('equals the permissions the two stacks synthesize, in both directions', () => {
+  it('equals the permissions the three stacks synthesize, in both directions', () => {
     const committed = committedSnapshot();
     expect(committed.length).toBeGreaterThan(0);
     expect(diffPermissions(committed, synthesized)).toEqual({ missing: [], extra: [] });
@@ -125,7 +127,23 @@ describe('the permissions snapshot', () => {
     expect(new Set(synthesized.map((entry) => JSON.stringify(entry))).size).toBe(synthesized.length);
   });
 
-  it('holds exactly the actions of the ingest, forget and runtime roles, and no ses: action anywhere', () => {
+  it('holds exactly the actions of the detection role', () => {
+    expect(actionsOf(rolesOf(synthesized, 'FotheringDetection', 'DetectRole')).join(',')).toBe(
+      'bedrock-agentcore:InvokeAgentRuntime,dynamodb:GetItem,dynamodb:PutItem,dynamodb:Query,dynamodb:UpdateItem,logs:CreateLogStream,logs:PutLogEvents,ses:GetConfigurationSetEventDestinations,ses:GetEmailIdentity,ses:ListConfigurationSets,ses:ListEmailIdentities',
+    );
+  });
+
+  it('holds no SES action outside the four reads, and those only on the detection role', () => {
+    const sesEntries = synthesized.filter((entry) => entry.action.toLowerCase().startsWith('ses:'));
+    expect(sesEntries.length).toBeGreaterThan(0);
+    for (const entry of sesEntries) {
+      expect(entry.stack).toBe('FotheringDetection');
+      expect(entry.role).toMatch(/^DetectRole/);
+      expect(SES_READS).toContain(entry.action);
+    }
+  });
+
+  it('holds exactly the actions of the ingest, forget and runtime roles', () => {
     expect(actionsOf(rolesOf(synthesized, 'FotheringIngest', 'IngestRole'))).toEqual([
       'dynamodb:PutItem',
       'logs:CreateLogStream',
@@ -141,14 +159,14 @@ describe('the permissions snapshot', () => {
       'secretsmanager:GetSecretValue',
     ]);
     const runtimeActions = actionsOf(rolesOf(synthesized, 'FotheringRuntime', 'RuntimeRole'));
-    expect(runtimeActions).toEqual(['logs:CreateLogStream', 'logs:DescribeLogGroups', 'logs:DescribeLogStreams', 'logs:PutLogEvents']);
-    for (const action of runtimeActions) expect(action).not.toMatch(/^(ses|dynamodb|s3|bedrock):/);
-    for (const entry of synthesized) expect(entry.action).not.toMatch(/^ses:/);
+    expect(runtimeActions).toEqual(['bedrock:InvokeModel', 'logs:CreateLogStream', 'logs:DescribeLogGroups', 'logs:DescribeLogStreams', 'logs:PutLogEvents']);
+    for (const action of runtimeActions) expect(action).not.toMatch(/^(ses|dynamodb|s3):/);
   });
 
   it('records who may assume each role, with the runtime role tied to this account', () => {
     const trust = synthesized.filter((entry) => entry.kind === 'trust');
     expect(trust.map((entry) => [entry.role.replace(/[0-9A-F]{8}$/, ''), entry.principal, entry.action])).toEqual([
+      ['DetectRole', '{"Service":"lambda.amazonaws.com"}', 'sts:AssumeRole'],
       ['ForgetRole', '{"Service":"lambda.amazonaws.com"}', 'sts:AssumeRole'],
       ['IngestRole', '{"Service":"lambda.amazonaws.com"}', 'sts:AssumeRole'],
       ['RuntimeRole', '{"Service":"bedrock-agentcore.amazonaws.com"}', 'sts:AssumeRole'],

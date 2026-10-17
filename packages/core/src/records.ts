@@ -30,7 +30,9 @@ export const RETENTION_SECONDS = 2_592_000;
 const BUCKET_DIGITS = 13;
 const BUCKET_LIMIT_MS = 10 ** BUCKET_DIGITS;
 
-/** The full phase 2 field schedule (SPEC requirement 5), carried as closed-vocabulary strings only. */
+/** The stored field schedule (SPEC requirement 5), carried as closed-vocabulary strings only. It
+ * leaves out the sender source IP (ses:source-ip) because nothing reads it (R16); records stored
+ * before it left still carry it until they expire, and the fold reads only the fields it names. */
 export interface EventFields {
   bounceType?: string;
   bounceSubType?: string;
@@ -44,7 +46,6 @@ export interface EventFields {
   remoteMtaIp?: string;
   reportingMta?: string;
   outgoingIp?: string;
-  sourceIp?: string;
   fromDomain?: string;
   callerIdentity?: string;
   streamTagValue?: string;
