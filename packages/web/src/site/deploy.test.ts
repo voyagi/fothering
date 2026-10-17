@@ -155,7 +155,8 @@ describe('the permissions schedules', () => {
 
   it('renders two entries differing only in resource as two rows', () => {
     const second = permission({ resource: '{"Ref":"SecondTable"}' });
-    const rows = permissionSchedules([permission({}), second]).flatMap((schedule) => schedule.rows);
+    const reasons = { [permissionKey(second)]: 'Planted.' };
+    const rows = permissionSchedules([permission({}), second], reasons).flatMap((schedule) => schedule.rows);
     expect(rows.map((row) => row.resourceOrPrincipal)).toEqual(['{"Fn::GetAtt":["EventStore165FCE28","Arn"]}', '{"Ref":"SecondTable"}']);
   });
 
