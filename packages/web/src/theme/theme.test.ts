@@ -249,6 +249,116 @@ describe('HEAD_SCRIPT in node:vm (AC-40, AC-E29, AC-E5, AC-E17)', () => {
   });
 });
 
+const FACE_PACKAGES = [
+  { name: 'red-hat-display', family: 'Red Hat Display' },
+  { name: 'red-hat-text', family: 'Red Hat Text' },
+  { name: 'red-hat-mono', family: 'Red Hat Mono' },
+] as const;
+const FONTSOURCE = join(REPO_ROOT, 'node_modules', '@fontsource-variable');
+const SITE_CSS = join(REPO_ROOT, 'packages', 'web', 'src', 'styles', 'site.css');
+const LICENCES_FILE = join(REPO_ROOT, 'packages', 'web', 'public', 'font-licences.txt');
+const unixText = (text: string): string => text.replace(/\r\n/g, '\n');
+
+interface FaceRule {
+  readonly descriptors: ReadonlyMap<string, string>;
+  readonly url: string;
+  readonly format: string;
+}
+
+function fontFaces(css: string): FaceRule[] {
+  return [...css.matchAll(/@font-face\s*\{([^}]*)\}/g)].map((match) => {
+    const descriptors = new Map(declarations(match[1] ?? '').map((item) => {
+      const colon = item.indexOf(':');
+      return [item.slice(0, colon).trim(), item.slice(colon + 1).trim()] as const;
+    }));
+    const src = /^url\((['"]?)([^'")]+)\1\)\s+format\((['"])([^'"]+)\3\)$/.exec(descriptors.get('src') ?? '');
+    return { descriptors, url: src?.[2] ?? '', format: src?.[4] ?? '' };
+  });
+}
+
+const fileName = (url: string): string => url.slice(url.lastIndexOf('/') + 1);
+const unquoted = (value: string | undefined): string => (value ?? '').replace(/^(['"])(.*)\1$/, '$2');
+
+// The installed wght.css of each package, keyed by the woff2 file each of its rules names.
+function installedFaces(): Map<string, { readonly family: string; readonly rule: FaceRule }> {
+  const faces = new Map<string, { family: string; rule: FaceRule }>();
+  for (const face of FACE_PACKAGES) {
+    for (const rule of fontFaces(readFileSync(join(FONTSOURCE, face.name, 'wght.css'), 'utf8'))) faces.set(fileName(rule.url), { family: face.family, rule });
+  }
+  return faces;
+}
+
+// A bare package path resolves under node_modules, any other path from the stylesheet's folder.
+const resolvedFace = (url: string): string => (url.startsWith('@fontsource-variable/') ? join(REPO_ROOT, 'node_modules', url) : join(SITE_CSS, '..', url));
+
+describe('the self-hosted faces (D-134, AC-59)', () => {
+  const ours = (): FaceRule[] => fontFaces(readFileSync(SITE_CSS, 'utf8'));
+
+  it('declares one @font-face for each latin and latin-ext normal file the three packages install, and no other', () => {
+    const installed = installedFaces();
+    expect(installed.size).toBe(6);
+    expect(ours().map((rule) => fileName(rule.url)).sort()).toEqual([...installed.keys()].sort());
+  });
+
+  it('names each family exactly Red Hat Display, Red Hat Text or Red Hat Mono, with font-display swap', () => {
+    const installed = installedFaces();
+    const rules = ours();
+    expect(rules.length).toBeGreaterThan(0);
+    for (const rule of rules) {
+      expect(unquoted(rule.descriptors.get('font-family')), rule.url).toBe(installed.get(fileName(rule.url))?.family);
+      expect(rule.descriptors.get('font-display'), rule.url).toBe('swap');
+    }
+  });
+
+  it('copies font-weight, font-style, unicode-range and the src format from the installed wght.css rule of the same file', () => {
+    const installed = installedFaces();
+    const rules = ours();
+    expect(rules.length).toBeGreaterThan(0);
+    for (const rule of rules) {
+      const source = installed.get(fileName(rule.url))?.rule;
+      for (const descriptor of ['font-weight', 'font-style', 'unicode-range']) {
+        expect(rule.descriptors.get(descriptor), `${rule.url} ${descriptor}`).toBe(source?.descriptors.get(descriptor));
+      }
+      expect(rule.format, rule.url).toBe(source?.format);
+    }
+  });
+
+  it('points every src at an installed latin or latin-ext normal woff2 file, never italic, never another origin', () => {
+    const rules = ours();
+    expect(rules.length).toBeGreaterThan(0);
+    for (const rule of rules) {
+      expect(rule.url).toMatch(/^(?:@fontsource-variable\/|\.\.?\/)[^:]*-(?:latin|latin-ext)-wght-normal\.woff2$/);
+      expect(readFileSync(resolvedFace(rule.url)).length, rule.url).toBeGreaterThan(0);
+    }
+  });
+});
+
+describe('the font licences file (D-134)', () => {
+  const HEADER = /^(@fontsource-variable\/[a-z-]+) (\d+\.\d+\.\d+)\n=+\n/gm;
+
+  function sections(text: string): Map<string, { readonly version: string; readonly body: string }> {
+    const found = new Map<string, { version: string; body: string }>();
+    const heads = [...text.matchAll(HEADER)];
+    heads.forEach((head, index) => {
+      const start = head.index + head[0].length;
+      const end = heads[index + 1]?.index ?? text.length;
+      found.set(head[1] ?? '', { version: head[2] ?? '', body: text.slice(start, end).trim() });
+    });
+    return found;
+  }
+
+  it('holds one section per face package, headed by its name and installed version, equal to its installed LICENSE', () => {
+    const found = sections(unixText(readFileSync(LICENCES_FILE, 'utf8')));
+    expect([...found.keys()].sort()).toEqual(FACE_PACKAGES.map((face) => `@fontsource-variable/${face.name}`).sort());
+    for (const face of FACE_PACKAGES) {
+      const folder = join(FONTSOURCE, face.name);
+      const section = found.get(`@fontsource-variable/${face.name}`);
+      expect(section?.version, face.name).toBe((JSON.parse(readFileSync(join(folder, 'package.json'), 'utf8')) as { version: string }).version);
+      expect(section?.body, face.name).toBe(unixText(readFileSync(join(folder, 'LICENSE'), 'utf8')).trim());
+    }
+  });
+});
+
 describe('the response headers file (D-149, T-05-21, T-05-23, T-05-24)', () => {
   const text = (): string => readFileSync(HEADERS_FILE, 'utf8');
 

@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
-import { completeSite, HEADERS_TEXT, page, plantDist, REPO_ROOT, SHEET_HEAD_ITEMS, THEME_HEAD, type PlantedDist } from '../test/planted-dist.js';
+import { completeSite, HEADERS_TEXT, page, plantDist, REPO_ROOT, SHEET_HEAD_ITEMS, THEME_HEAD, THEME_SWITCH, type PlantedDist } from '../test/planted-dist.js';
 import { loadCheckContext } from '../harness/gates.js';
 import { HEAD_SCRIPT, headScriptHash, renderTokensCss } from '../theme/head-script.js';
 import { BANNED_NAMES, CONSOLE_DELETE_PHRASES, REPLY_PROMISE_PHRASES } from '../site/content.js';
@@ -27,6 +27,7 @@ import {
   sesPercentageLinkRule,
   sesRateWordingRule,
   sitemapRule,
+  switchMarkupRule,
   themeTokenBlocksRule,
   thirdPartyReferenceRule,
   typeTokenDeclaredRule,
@@ -152,11 +153,11 @@ describe('runBuiltChecks', () => {
     expect([...rules].filter((rule) => ['page-metadata', 'sitemap', 'robots'].includes(rule)).sort()).toEqual(['page-metadata', 'robots', 'sitemap']);
   });
 
-  it('holds exactly the twenty rule ids the plans name', () => {
+  it('holds exactly the twenty-one rule ids the plans name', () => {
     expect([...RULE_IDS].sort()).toEqual([
       'banned-name', 'console-delete', 'dash', 'exact-30-days', 'forms-cookies-analytics', 'head-script-order', 'no-inline-style', 'page-metadata',
       'pre-r6-words', 'region-claim', 'reply-promise', 'robots', 'script-hash', 'ses-percentage-link', 'ses-rate-wording', 'sitemap',
-      'theme-token-blocks', 'third-party-reference', 'type-token-declared', 'unit-figure',
+      'switch-markup', 'theme-token-blocks', 'third-party-reference', 'type-token-declared', 'unit-figure',
     ]);
   });
 
@@ -634,6 +635,71 @@ describe('the inline style rule (C6)', () => {
       ['/', 'img src holds a data: URL'],
       ['/', 'img srcset holds a data: URL'],
       ['file:_astro/site.css', 'a CSS url() holds a data: URL'],
+    ]);
+  });
+});
+
+const themeRadio = (value: string, label: string, checked = false): string =>
+  `<label><input type="radio" name="theme" value="${value}"${checked ? ' checked' : ''}> ${label}</label>`;
+const DEVICE_RADIO = themeRadio('device', 'Device', true);
+const LIGHT_RADIO = themeRadio('light', 'Light');
+const DARK_RADIO = themeRadio('dark', 'Dark');
+const themeHeader = (radios: readonly string[], legend = '<legend>Colour theme</legend>'): string => `<header><fieldset>${legend}${radios.join('')}</fieldset></header><p>sheet</p>`;
+const switchTexts = (body: string): string[] => texts(switchMarkupRule(siteOf({ 'index.html': page(body) }), context));
+
+describe('the switch markup rule (AC-38, UI-SPEC section 7)', () => {
+  it('passes a header holding one fieldset with its legend and Device, Light, Dark, Device checked', () => {
+    expect(switchTexts(`${THEME_SWITCH}<p>sheet</p>`)).toEqual([]);
+    expect(switchTexts(themeHeader([DEVICE_RADIO, LIGHT_RADIO, DARK_RADIO]))).toEqual([]);
+  });
+
+  it('passes radios labelled through for and id as well as by a wrapping label', () => {
+    const radios = [['device', 'Device', ' checked'], ['light', 'Light', ''], ['dark', 'Dark', '']]
+      .map(([value, label, checked]) => `<input type="radio" name="theme" value="${value}" id="theme-${value}"${checked}><label for="theme-${value}">${label}</label>`);
+    expect(switchTexts(themeHeader(radios))).toEqual([]);
+  });
+
+  it('fails a page with no header and a header with no fieldset', () => {
+    expect(switchTexts('<p>sheet</p>')).toEqual(['the page has no header element']);
+    expect(switchTexts('<header><a href="/">FOTHERING</a></header>')).toEqual(['the header holds no theme fieldset']);
+  });
+
+  it('fails a header holding two fieldsets', () => {
+    const fieldset = `<fieldset><legend>Colour theme</legend>${DEVICE_RADIO}${LIGHT_RADIO}${DARK_RADIO}</fieldset>`;
+    expect(switchTexts(`<header>${fieldset}${fieldset}</header>`)).toEqual(['the header holds 2 fieldsets, 1 expected']);
+  });
+
+  it('fails a fieldset with no legend and one whose legend is empty', () => {
+    expect(switchTexts(themeHeader([DEVICE_RADIO, LIGHT_RADIO, DARK_RADIO], ''))).toEqual(['the theme fieldset has no legend']);
+    expect(switchTexts(themeHeader([DEVICE_RADIO, LIGHT_RADIO, DARK_RADIO], '<legend> </legend>'))).toEqual(['the theme fieldset has no legend']);
+  });
+
+  it('fails radios out of order', () => {
+    expect(switchTexts(themeHeader([LIGHT_RADIO, DEVICE_RADIO, DARK_RADIO]))).toEqual(['the theme radios read Light, Device, Dark; Device, Light, Dark expected']);
+  });
+
+  it('fails a fourth radio', () => {
+    expect(switchTexts(themeHeader([DEVICE_RADIO, LIGHT_RADIO, DARK_RADIO, themeRadio('blue', 'Blue')]))).toEqual(['the theme fieldset holds 4 radio inputs, 3 expected']);
+  });
+
+  it('fails a Device radio left unchecked, and another radio checked in its place', () => {
+    expect(switchTexts(themeHeader([themeRadio('device', 'Device'), LIGHT_RADIO, DARK_RADIO]))).toEqual(['the Device radio is not checked in the markup']);
+    expect(switchTexts(themeHeader([themeRadio('device', 'Device'), themeRadio('light', 'Light', true), DARK_RADIO]))).toEqual([
+      'the Device radio is not checked in the markup',
+      'the Light radio is checked in the markup',
+    ]);
+  });
+
+  it('fails a radio outside the theme group or with a value its label does not name', () => {
+    expect(switchTexts(themeHeader([DEVICE_RADIO, LIGHT_RADIO, DARK_RADIO.replace('name="theme"', 'name="mode"')]))).toEqual(['the Dark radio is not named theme']);
+    expect(switchTexts(themeHeader([DEVICE_RADIO, LIGHT_RADIO, DARK_RADIO.replace('value="dark"', 'value="night"')]))).toEqual(['the Dark radio has the value night, dark expected']);
+  });
+
+  it('reports every route that lacks the switch, the 404 page included', () => {
+    const site = siteOf({ 'index.html': page('<p>landing</p>'), '404.html': page('<p>none</p>'), 'replay/index.html': page(`${THEME_SWITCH}<p>replay</p>`) });
+    expect(switchMarkupRule(site, context).map((finding) => [finding.rule, finding.route])).toEqual([
+      ['switch-markup', '/'],
+      ['switch-markup', NOT_FOUND_ROUTE],
     ]);
   });
 });

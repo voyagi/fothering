@@ -51,6 +51,13 @@ export interface SheetHead {
 export const THEME_HEAD = `<script>${HEAD_SCRIPT}</script><link rel="stylesheet" href="/tokens.css">`;
 export const HEADERS_TEXT = readFileSync(join(REPO_ROOT, 'packages', 'web', 'public', '_headers'), 'utf8');
 
+// The header every sheet carries: the theme fieldset with Device checked (AC-38).
+export const THEME_SWITCH = '<header><fieldset><legend>Colour theme</legend>'
+  + '<label><input type="radio" name="theme" value="device" checked> Device</label>'
+  + '<label><input type="radio" name="theme" value="light"> Light</label>'
+  + '<label><input type="radio" name="theme" value="dark"> Dark</label>'
+  + '</fieldset></header>';
+
 export function sheetHead(route: string, options: SheetHead = {}): string {
   const title = options.title ?? `Planted sheet ${route}`;
   const description = options.description ?? `What the planted sheet at ${route} holds.`;
@@ -73,7 +80,7 @@ export function completeSite(bodies: Readonly<Record<string, string>>, heads: Re
   const paths: string[] = [];
   for (const [file, body] of Object.entries(bodies)) {
     const route = routeOf(file);
-    files[file] = page(body, sheetHead(route, heads[file]));
+    files[file] = page(`${THEME_SWITCH}${body}`, sheetHead(route, heads[file]));
     if (route !== NOT_FOUND_ROUTE) paths.push(route);
   }
   return {

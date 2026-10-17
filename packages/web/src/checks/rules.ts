@@ -31,6 +31,7 @@ export const RULE_IDS = Object.freeze([
   'script-hash',
   'no-inline-style',
   'type-token-declared',
+  'switch-markup',
 ] as const);
 
 export type RuleId = (typeof RULE_IDS)[number];
@@ -566,6 +567,10 @@ export function noInlineStyleRule(site: BuiltSite, _context: CheckContext): Find
   return [...onPages, ...inCss];
 }
 
+export function switchMarkupRule(_site: BuiltSite, _context: CheckContext): Finding[] {
+  return [];
+}
+
 // Workers limits: 20,000 files per version on the Free plan and 25 MiB per file (AC-62).
 const MAX_FILES = 20_000;
 const MAX_FILE_BYTES = 25 * 1024 * 1024;
@@ -606,6 +611,7 @@ const RULES: Readonly<Record<RuleId, Rule>> = {
   'script-hash': scriptHashRule,
   'no-inline-style': noInlineStyleRule,
   'type-token-declared': typeTokenDeclaredRule,
+  'switch-markup': switchMarkupRule,
 };
 
 // Every rule runs over the whole site and every hit is kept, so one report names them all.
