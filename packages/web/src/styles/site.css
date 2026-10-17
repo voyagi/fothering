@@ -53,3 +53,112 @@
   src: url('@fontsource-variable/red-hat-mono/files/red-hat-mono-latin-wght-normal.woff2') format('woff2-variations');
   unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD;
 }
+
+/* The sheet. Colours, type sizes, the measure and spacing steps come from tokens.css, which also
+   paints the page ground and ink; this file adds the drawing's geometry and its parts. */
+:root {
+  --font-display: 'Red Hat Display', sans-serif;
+  --font-text: 'Red Hat Text', sans-serif;
+  --font-mono: 'Red Hat Mono', monospace;
+  --gutter: clamp(16px, 3vw, 40px);
+  --sheet-block: clamp(44px, 6vw, 92px);
+  --rail: 34px;
+  /* Browsers round border widths down to whole device pixels, so below 1.5 device pixels per CSS
+     pixel a 1.5px outline would draw as a 1px rule; the weights step up there and stay three lines. */
+  --w-rule: 1px;
+  --w-outline: 1.5px;
+  --w-emph: 2.5px;
+  accent-color: var(--ink);
+  scrollbar-color: var(--label) var(--ground);
+}
+@media (max-resolution: 1.49dppx) {
+  :root { --w-outline: 2px; --w-emph: 3px; }
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
+body { margin: 0; font: 400 var(--text-body)/1.55 var(--font-text); }
+::selection { background: var(--ink); color: var(--ground); }
+a { color: inherit; text-underline-offset: 0.22em; text-decoration-thickness: 1px; }
+a:hover { text-decoration-thickness: 2px; }
+:focus-visible { outline: 2px solid var(--ink); outline-offset: 3px; }
+#main:focus { outline: none; }
+h1 { font: 700 var(--text-display)/1.04 var(--font-display); letter-spacing: -0.026em; margin: 0; max-inline-size: 22ch; text-wrap: balance; }
+h2 { font: 700 var(--text-headline)/1.08 var(--font-display); letter-spacing: -0.02em; margin: 0; text-wrap: balance; }
+h3 { font: 700 var(--text-title)/1.25 var(--font-display); margin: 0 0 var(--space-sm); }
+p, li, dd { max-inline-size: var(--measure); }
+.mono, code { font-family: var(--font-mono); font-feature-settings: "tnum" 1; }
+code { font-size: var(--text-mono-value); font-weight: 500; }
+.visually-hidden, .theme legend { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+
+.skip { position: absolute; left: var(--space-12); top: -64px; z-index: 5; background: var(--ink); color: var(--sheet); padding: var(--space-12) var(--space-md); font-weight: 600; text-decoration: none; }
+.skip:focus { top: var(--space-12); }
+
+/* Drawing frame. The zone letters and the row numbers are real coordinates copy can cite, so the
+   border is an index, not an ornament. */
+.frame { margin: var(--gutter); border: var(--w-outline) solid var(--ink); background: var(--sheet); }
+.zones { display: grid; grid-template-columns: var(--rail) repeat(6, minmax(0, 1fr)); border-bottom: var(--w-rule) solid var(--rule); }
+.zones span { font: 500 var(--text-label-small)/1 var(--font-mono); color: var(--label); text-align: center; padding: 6px 0; border-left: var(--w-rule) solid var(--rule); }
+.zones span:first-child { border-left: 0; }
+.row { display: grid; grid-template-columns: var(--rail) minmax(0, 1fr); border-bottom: var(--w-rule) solid var(--ink); }
+.row:first-of-type { border-top: var(--w-rule) solid var(--ink); }
+.rail { border-right: var(--w-rule) solid var(--rule); font: 500 var(--text-label-small)/1 var(--font-mono); color: var(--label); text-align: center; padding-top: 14px; }
+
+.bar { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: var(--space-md) var(--space-lg); padding: var(--space-md) var(--gutter); }
+.wordmark { font: 850 var(--text-wordmark)/1 var(--font-display); letter-spacing: 0.08em; text-decoration: none; padding: var(--space-xs) 0; }
+.bar-end { display: flex; align-items: center; gap: clamp(16px, 2.4vw, 32px); }
+.bar-link { font: 600 var(--text-small)/1 var(--font-text); padding: var(--space-12) 0; }
+
+/* Three segments in one outline; the native radios sit over their labels, so the browser keeps the
+   group's single Tab stop and its arrow keys. */
+.theme { display: inline-flex; margin: 0; padding: 0; min-inline-size: 0; border: var(--w-outline) solid var(--ink); border-radius: 2px; }
+.theme label { position: relative; cursor: pointer; }
+.theme input { position: absolute; inset: 0; margin: 0; opacity: 0; cursor: pointer; }
+.theme span { display: block; min-width: 44px; min-height: 36px; padding: 11px 10px; font: 600 var(--text-label)/1 var(--font-mono); letter-spacing: 0.04em; text-align: center; border-left: var(--w-rule) solid var(--rule); }
+.theme label:first-of-type span { border-left: 0; }
+.theme input:checked + span { background: var(--ink); color: var(--sheet); }
+.theme input:focus-visible + span { position: relative; z-index: 1; outline: none; box-shadow: 0 0 0 3px var(--sheet), 0 0 0 5px var(--ink); }
+/* Device already follows the OS through CSS alone, so without JavaScript the switch would be a
+   control that does nothing. */
+:root:not(.js) .theme { display: none; }
+@media (forced-colors: active) {
+  .theme input:checked + span { text-decoration: underline; text-decoration-thickness: 2px; text-underline-offset: 3px; }
+  .theme input:focus-visible + span { outline: 2px solid; }
+}
+
+/* Moving flow never plays past the visitor's say (WCAG 2.2.2): Stop flow pins data-flow, and with
+   nothing stored reduced motion keeps the dashes still. */
+.flow-dash { stroke-dasharray: 3 11; animation: flow 1.6s linear infinite; }
+@keyframes flow { to { stroke-dashoffset: -28; } }
+:root[data-flow="stopped"] .flow-dash { animation: none; }
+@media (prefers-reduced-motion: reduce) {
+  :root:not([data-flow="running"]) .flow-dash { animation: none; }
+}
+.flow-toggle { min-width: 44px; min-height: 44px; padding: 0 var(--space-md); font: 600 var(--text-label)/1 var(--font-mono); letter-spacing: 0.04em; color: var(--ink); background: var(--sheet); border: var(--w-outline) solid var(--ink); border-radius: 2px; cursor: pointer; }
+.flow-toggle:hover { background: var(--ground); }
+:root:not(.js) .flow-toggle { display: none; }
+
+/* The title block is the site's navigation, the way a drawing's title block indexes its sheet set.
+   Cells after the project cell share the remaining width, however many sheet lists exist yet. */
+.titleblock { display: grid; grid-template-columns: minmax(0, 2fr); grid-auto-columns: minmax(0, 1fr); grid-auto-flow: column; font-size: var(--text-small); line-height: 1.45; }
+.titleblock > * { padding: 16px var(--gutter) 18px; border-left: var(--w-rule) solid var(--rule); }
+.titleblock > :first-child { border-left: 0; }
+.titleblock b { display: block; margin-bottom: var(--space-sm); font: 600 var(--text-label-small)/1 var(--font-mono); letter-spacing: 0.06em; text-transform: uppercase; color: var(--label); }
+.titleblock ul { list-style: none; margin: 0; padding: 0; }
+.titleblock li a { display: inline-block; padding: var(--space-sm) 0; font-weight: 600; }
+.titleblock a[aria-current="page"] { text-decoration-thickness: 3px; }
+.titleblock .mono { font-size: var(--text-mono-value); font-weight: 500; color: var(--label); }
+
+@media (max-width: 960px) {
+  .titleblock { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-auto-flow: row; }
+  .titleblock > :first-child { grid-column: 1 / -1; border-bottom: var(--w-rule) solid var(--rule); }
+  .titleblock > :nth-child(2) { border-left: 0; }
+}
+@media (max-width: 620px) {
+  :root { --rail: 22px; }
+  .frame { margin: 0; border-left: 0; border-right: 0; }
+  .bar-link { display: none; }
+  .titleblock { grid-template-columns: minmax(0, 1fr); }
+  .titleblock > * { border-left: 0; border-top: var(--w-rule) solid var(--rule); }
+  .titleblock > :first-child { border-top: 0; border-bottom: 0; }
+}

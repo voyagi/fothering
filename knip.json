@@ -24,7 +24,8 @@
     },
     "packages/web": {
       "entry": ["src/pages/**/*.{astro,ts}", "src/harness/cli.ts"],
-      "ignoreDependencies": ["@astrojs/check"]
+      "ignore": ["src/components/FlowSwitch.astro"],
+      "ignoreDependencies": ["@astrojs/check", "@fontsource-variable/red-hat-display", "@fontsource-variable/red-hat-text", "@fontsource-variable/red-hat-mono"]
     }
   }
 }
