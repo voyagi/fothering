@@ -105,6 +105,10 @@ export const A11Y_MESSAGES = Object.freeze({
   noWidths: () => 'zero widths to audit, so the audit did not run',
   noDist: (dist: string) => `${dist} does not exist; run npm run build first, so the audit did not run`,
   noRoutes: (dist: string) => `${dist} holds no built route (an .html file other than 404.html), so the audit did not run`,
+  noNotFoundPage: (dist: string) => `${dist} holds no 404.html, so the unknown address has no page to show and the audit did not run`,
+  noSitemap: (dist: string) => `${dist} holds no sitemap.xml to compare the built routes with, so the audit did not run`,
+  sitemapDiffers: (builtOnly: readonly string[], sitemapOnly: readonly string[]) =>
+    `the built routes and sitemap.xml differ: built only ${builtOnly.join(', ') || 'none'}; sitemap only ${sitemapOnly.join(', ') || 'none'}`,
   devBrowserMissing: (path: string) => `dev-browser ${DEV_BROWSER_VERSION} is not installed (looked for ${path}); install it with npm install -g dev-browser@${DEV_BROWSER_VERSION}`,
   devBrowserVersion: (found: string) => `dev-browser ${found} is installed, ${DEV_BROWSER_VERSION} expected`,
   axeMissing: (path: string) => `the axe-core source was not found at ${path}; run npm install from the repo root`,
@@ -117,7 +121,7 @@ export const A11Y_MESSAGES = Object.freeze({
   noDone: (run: string) => `${run}: the driver run ended without its final done line`,
   malformedAudit: (run: string, text: string) => `${run}: an AUDIT line is not a valid audit record: ${text.slice(0, 120)}`,
   missingRoute: (run: string, route: string) => `${run}: no AUDIT line for ${route}, so it was not run`,
-  status: (status: number) => `the route answered ${status}, not 200`,
+  status: (status: number, expected: number) => `the route answered ${status}, not ${expected}`,
   axeAbsent: () => 'the record carries no axe, keyboard or overflow result',
   axeVersionRan: (version: string) => `axe-core ${version} ran, ${AXE_VERSION} expected`,
   noSelectedRules: () => 'the five tags selected no axe rule',
@@ -205,7 +209,7 @@ export function axeReasons(axe: AxeReport, accepted: ReadonlyMap<string, number>
 }
 
 export function auditReasons(line: AuditLine, width: number, accepted: ReadonlyMap<string, number>): string[] {
-  if (line.status !== 200) return [A11Y_MESSAGES.status(line.status)];
+  if (line.status !== 200) return [A11Y_MESSAGES.status(line.status, 200)];
   if (line.axe === undefined || line.keyboard === undefined || line.overflow === undefined) return [A11Y_MESSAGES.axeAbsent()];
   const reasons = axeReasons(line.axe, accepted);
   if (line.overflow.innerWidth !== width) reasons.push(A11Y_MESSAGES.viewport(line.overflow.innerWidth, width));

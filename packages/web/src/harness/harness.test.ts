@@ -7,6 +7,7 @@ import { afterAll, describe, expect, it, vi } from 'vitest';
 import { main, PROCESS_IO, waitForSignal, type CliIo } from './cli.js';
 import { DRIVER_JOB_TOKEN, runDriver, stageAxeSource, writeDriver } from './dev-browser.js';
 import { completeSite, page, plantDist } from '../test/planted-dist.js';
+import { renderSitemap, SITE_ORIGIN } from '../site/route-list.js';
 import {
   A11Y_MESSAGES,
   ACCEPTED_INCOMPLETE,
@@ -58,14 +59,17 @@ if (scenario.hang) setInterval(() => {}, 1000);
 else {
   const driver = readFileSync(process.argv[process.argv.length - 1], 'utf8');
   const job = JSON.parse(/^const JOB = (.*);$/m.exec(driver)[1]);
+  writeFileSync(join(here, 'job.json'), JSON.stringify(job));
   if (!existsSync(join(scenario.homeDir, '.dev-browser', 'tmp', job.axeFile))) {
     console.error('staged axe file not found');
     process.exit(3);
   }
   const stop = { domIndex: 5, tag: 'a', radioGroup: null, skipLink: true };
   for (const route of job.routes) {
-    const status = scenario.status === undefined ? 200 : scenario.status;
-    const line = status !== 200 ? { route, status } : {
+    const expected = (job.expectedStatus || {})[route] || 200;
+    const answered = scenario.unknownStatus !== undefined && expected !== 200 ? scenario.unknownStatus : expected;
+    const status = scenario.status === undefined ? answered : scenario.status;
+    const line = status !== 200 && status !== expected ? { route, status } : {
       route,
       status,
       axe: { version: '4.14.0', selected: ['html-has-lang', 'target-size', 'label-content-name-mismatch'], ran: ['html-has-lang', 'target-size', 'label-content-name-mismatch'], violations: [], incomplete: [] },
@@ -83,6 +87,7 @@ else {
 
 interface Scenario {
   readonly status?: number;
+  readonly unknownStatus?: number;
   readonly omitDone?: boolean;
   readonly exitCode?: number;
   readonly hang?: boolean;
@@ -112,7 +117,12 @@ function plantRepo(options: { pages?: Record<string, string>; devBrowserVersion?
   const homeDir = join(base, 'home');
   const dist = join(repoRoot, 'packages', 'web', 'dist');
   mkdirSync(homeDir, { recursive: true });
-  const pages = options.pages ?? { 'index.html': '<!doctype html><title>home</title>', 'about/index.html': '<!doctype html><title>about</title>' };
+  const pages = options.pages ?? {
+    'index.html': '<!doctype html><title>home</title>',
+    'about/index.html': '<!doctype html><title>about</title>',
+    '404.html': '<!doctype html><title>not found</title>',
+    'sitemap.xml': renderSitemap([{ path: '/', indexable: true }, { path: '/about/', indexable: true }]),
+  };
   for (const [file, text] of Object.entries(pages)) write(join(dist, file), text);
   copyFileSync(join(REPO_ROOT, 'packages', 'web', 'wrangler.jsonc'), join(repoRoot, 'packages', 'web', 'wrangler.jsonc'));
   write(join(repoRoot, 'scripts', 'a11y.devbrowser.js'), readFileSync(TEMPLATE, 'utf8'));
@@ -171,8 +181,54 @@ describe('runA11yLive refuses every empty or broken run by name', () => {
   it('fails when a route answers 404', async () => {
     const { code, lines } = await audit(plantRepo({ scenario: { status: 404 } }));
     expect(code).toBe(1);
-    expect(lines).toContain(A11Y_MESSAGES.routeFailed('/', 'light 320px', [A11Y_MESSAGES.status(404)]));
-    expect(lines.at(-1)).toMatch(/^\[a11y\] FAIL: 12 of 12 audit\(s\) failed/);
+    expect(lines).toContain(A11Y_MESSAGES.routeFailed('/', 'light 320px', [A11Y_MESSAGES.status(404, 200)]));
+    expect(lines.at(-1)).toMatch(/^\[a11y\] FAIL: 12 of 18 audit\(s\) failed/);
+  });
+
+  it('fails a planted dist with no 404.html by name', async () => {
+    const planted = plantRepo();
+    rmSync(join(planted.dist, '404.html'));
+    const { code, lines } = await audit(planted);
+    expect(code).toBe(1);
+    expect(lines).toEqual([A11Y_MESSAGES.fail(A11Y_MESSAGES.noNotFoundPage(planted.dist))]);
+  });
+
+  it('fails a planted dist with no sitemap.xml by name', async () => {
+    const planted = plantRepo();
+    rmSync(join(planted.dist, 'sitemap.xml'));
+    const { code, lines } = await audit(planted);
+    expect(code).toBe(1);
+    expect(lines).toEqual([A11Y_MESSAGES.fail(A11Y_MESSAGES.noSitemap(planted.dist))]);
+  });
+
+  it('fails a planted dist whose sitemap and HTML routes differ, naming both sides', async () => {
+    const planted = plantRepo();
+    write(join(planted.dist, 'sitemap.xml'), renderSitemap([{ path: '/', indexable: true }, { path: '/ghost/', indexable: true }]));
+    const { code, lines } = await audit(planted);
+    expect(code).toBe(1);
+    expect(lines).toEqual([A11Y_MESSAGES.fail(A11Y_MESSAGES.sitemapDiffers(['/about/'], ['/ghost/']))]);
+  });
+
+  it('strips only the site origin from sitemap URLs, so a URL on another origin differs', async () => {
+    const planted = plantRepo();
+    write(join(planted.dist, 'sitemap.xml'), `<urlset><url><loc>${SITE_ORIGIN}/</loc></url><url><loc>https://elsewhere.example/about/</loc></url></urlset>`);
+    const { code, lines } = await audit(planted);
+    expect(code).toBe(1);
+    expect(lines).toEqual([A11Y_MESSAGES.fail(A11Y_MESSAGES.sitemapDiffers(['/about/'], ['https://elsewhere.example/about/']))]);
+  });
+
+  it('puts the unknown path /no-such-sheet/ in every job, expecting status 404', async () => {
+    const planted = plantRepo();
+    expect((await audit(planted)).code).toBe(0);
+    const job = JSON.parse(readFileSync(join(planted.globalModules, 'dev-browser', 'bin', 'job.json'), 'utf8')) as { routes: string[]; expectedStatus: Record<string, number> };
+    expect(job.routes).toEqual(['/', '/about/', '/no-such-sheet/']);
+    expect(job.expectedStatus).toEqual({ '/no-such-sheet/': 404 });
+  });
+
+  it('fails an AUDIT line for the unknown path that answered 200', async () => {
+    const { code, lines } = await audit(plantRepo({ scenario: { unknownStatus: 200 } }));
+    expect(code).toBe(1);
+    expect(lines).toContain(A11Y_MESSAGES.routeFailed('/no-such-sheet/', 'light 320px', [A11Y_MESSAGES.status(200, 404)]));
   });
 
   it('fails when the installed dev-browser reads 0.2.8', async () => {
@@ -256,9 +312,10 @@ describe('runA11yLive refuses every empty or broken run by name', () => {
     const { code, lines } = await audit(planted);
     expect(code).toBe(0);
     expect(lines).toContain(A11Y_MESSAGES.routePassed('/about/', 'device 1440px', 1));
+    expect(lines).toContain(A11Y_MESSAGES.routePassed('/no-such-sheet/', 'device 1440px', 1));
     expect(lines).toContain(A11Y_MESSAGES.acceptedNone());
-    expect(lines.at(-1)).toBe(A11Y_MESSAGES.pass(2, 2, 3, 0));
-    expect(lines.filter((line) => line.endsWith('Tab stop(s)'))).toHaveLength(12);
+    expect(lines.at(-1)).toBe(A11Y_MESSAGES.pass(3, 2, 3, 0));
+    expect(lines.filter((line) => line.endsWith('Tab stop(s)'))).toHaveLength(18);
     expect(readdirSync(join(planted.homeDir, '.dev-browser', 'tmp'))).toEqual([]);
     const args = JSON.parse(readFileSync(join(planted.globalModules, 'dev-browser', 'bin', 'args.json'), 'utf8')) as string[];
     expect(args.slice(0, 6)).toEqual(['--headless', '--timeout', '120', '--browser', 'fothering-site', 'run']);
@@ -288,6 +345,9 @@ const CATALOGUE_SAMPLES: CatalogueSamples = {
   noWidths: [],
   noDist: ['d'],
   noRoutes: ['d'],
+  noNotFoundPage: ['d'],
+  noSitemap: ['d'],
+  sitemapDiffers: [['/a/'], []],
   devBrowserMissing: ['p'],
   devBrowserVersion: ['0.2.8'],
   axeMissing: ['p'],
@@ -300,7 +360,7 @@ const CATALOGUE_SAMPLES: CatalogueSamples = {
   noDone: ['r'],
   malformedAudit: ['r', 'AUDIT x'],
   missingRoute: ['r', '/'],
-  status: [404],
+  status: [404, 200],
   axeAbsent: [],
   axeVersionRan: ['4.13.0'],
   noSelectedRules: [],
@@ -450,7 +510,9 @@ describe('axe verdicts (D-129)', () => {
   it('judges a whole AUDIT record: status, missing results, viewport and overflow', () => {
     const line: AuditLine = { route: '/', status: 200, axe: cleanAxe, keyboard: keyboard([skip, nav, radios[0] ?? skip, button].map(withRing)), overflow: { scrollWidth: 320, innerWidth: 320 } };
     expect(auditReasons(line, 320, NO_ACCEPTED)).toEqual([]);
-    expect(auditReasons({ route: '/', status: 500 }, 320, NO_ACCEPTED)).toEqual([A11Y_MESSAGES.status(500)]);
+    expect(auditReasons({ route: '/', status: 500 }, 320, NO_ACCEPTED)).toEqual([A11Y_MESSAGES.status(500, 200)]);
+    expect(auditReasons({ ...line, status: 404 }, 320, NO_ACCEPTED, 404)).toEqual([]);
+    expect(auditReasons(line, 320, NO_ACCEPTED, 404)).toEqual([A11Y_MESSAGES.status(200, 404)]);
     expect(auditReasons({ route: '/', status: 200 }, 320, NO_ACCEPTED)).toEqual([A11Y_MESSAGES.axeAbsent()]);
     expect(auditReasons({ ...line, overflow: { scrollWidth: 330, innerWidth: 300 } }, 320, NO_ACCEPTED)).toEqual([A11Y_MESSAGES.viewport(300, 320), A11Y_MESSAGES.overflow(330, 320)]);
   });
@@ -561,7 +623,7 @@ describe('cli main', () => {
     const out: string[] = [];
     const io: CliIo = { out: (line) => out.push(line), err: () => undefined, homeDir: planted.homeDir, waitForStop: () => Promise.resolve() };
     expect(await main(['a11y', '--repo-root', planted.repoRoot, '--global-modules', planted.globalModules], io)).toBe(0);
-    expect(out.at(-1)).toBe(A11Y_MESSAGES.pass(2, 2, 3, 0));
+    expect(out.at(-1)).toBe(A11Y_MESSAGES.pass(3, 2, 3, 0));
   });
 
   it('the process io writes to the console and the preview stops on SIGINT or SIGTERM', async () => {
