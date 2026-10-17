@@ -18,6 +18,9 @@ const head = headMeta(Astro.props.route);
     <title>{head.title}</title>
     {head.metas.map((attrs) => <meta {...attrs} />)}
     {head.links.map((attrs) => <link {...attrs} />)}
+    <script>
+      import '../client/chrome.ts';
+    </script>
   </head>
   <body>
     <a href="#main">Skip to main content</a>

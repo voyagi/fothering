@@ -6,6 +6,7 @@ import {
   THEME_RADIO_LIMIT,
 } from '../site/content.js';
 import { sitemapUrls, type SiteRoute } from '../site/route-list.js';
+import { scriptHash } from '../theme/head-script.js';
 import { NOT_FOUND_ROUTE as NOT_FOUND_PAGE, textOf, walk, type BuiltElement, type BuiltPage, type BuiltSite } from './built-site.js';
 
 // Later plans' expected-red tracers name these ids, so an id is never renamed once a plan names it.
@@ -54,6 +55,8 @@ export interface CheckContext {
   readonly bannedNames: readonly string[];
   readonly siteOrigin: string;
   readonly routes: readonly SiteRoute[];
+  // The one inline script the layout may ship, compared by its exact text (AC-40).
+  readonly headScript: string;
 }
 
 const EXCERPT_RADIUS = 40;
@@ -383,24 +386,184 @@ export function robotsRule(site: BuiltSite, context: CheckContext): Finding[] {
   return required.filter(([pattern]) => !lines.some((line) => pattern.test(line))).map(([, text]) => ({ rule, route, text }));
 }
 
-export function themeTokenBlocksRule(_site: BuiltSite, _context: CheckContext): Finding[] {
-  return [];
+interface CssRule {
+  readonly selector: string;
+  readonly declarations: readonly string[];
 }
 
-export function typeTokenDeclaredRule(_site: BuiltSite, _context: CheckContext): Finding[] {
-  return [];
+const squash = (text: string): string => text.replace(/\s+/g, ' ').trim();
+
+// A brace-matching read of generated CSS: each rule's selector is joined to its enclosing at-rule
+// preludes, so the dark block reads as one key under its media query. tokens.css holds no comment
+// or string, so neither is handled.
+function cssRules(css: string): CssRule[] {
+  const rules: CssRule[] = [];
+  const preludes: string[] = [];
+  let buffer = '';
+  for (const char of css) {
+    if (char === '{') {
+      preludes.push(squash(buffer));
+      buffer = '';
+    } else if (char === '}') {
+      const declarations = buffer.split(';').map((item) => {
+        const colon = item.indexOf(':');
+        return colon < 0 ? squash(item) : `${item.slice(0, colon).trim()}: ${squash(item.slice(colon + 1))}`;
+      }).filter((item) => item !== '');
+      const selector = [...preludes].join(' ');
+      preludes.pop();
+      if (declarations.length > 0) rules.push({ selector, declarations });
+      buffer = '';
+    } else {
+      buffer += char;
+    }
+  }
+  return rules;
 }
 
-export function headScriptOrderRule(_site: BuiltSite, _context: CheckContext): Finding[] {
-  return [];
+const TOKENS_FILE = 'tokens.css';
+const LIGHT_SELECTOR = ':root';
+const MEDIA_SELECTOR = '@media (prefers-color-scheme: dark) :root:not([data-theme="light"])';
+const PINNED_SELECTOR = ':root[data-theme="dark"]';
+const nameOf = (declaration: string): string => declaration.slice(0, declaration.indexOf(':'));
+
+function tokenRules(site: BuiltSite): Map<string, readonly string[]> | null {
+  const file = site.css.find((item) => item.file === TOKENS_FILE);
+  if (file === undefined) return null;
+  return new Map(cssRules(file.text).map((rule) => [rule.selector, rule.declarations]));
 }
 
-export function scriptHashRule(_site: BuiltSite, _context: CheckContext): Finding[] {
-  return [];
+// AC-39: the dark values written twice must be the same list, under both R8 selectors, each block
+// also switching color-scheme, and every dark token must override one the light block declares.
+export function themeTokenBlocksRule(site: BuiltSite, _context: CheckContext): Finding[] {
+  const rule = 'theme-token-blocks' as const;
+  const route = fileRoute(TOKENS_FILE);
+  const rules = tokenRules(site);
+  if (rules === null) return [{ rule, route, text: 'dist/tokens.css is missing' }];
+  const texts: string[] = [];
+  const light = rules.get(LIGHT_SELECTOR) ?? [];
+  const media = rules.get(MEDIA_SELECTOR);
+  const pinned = rules.get(PINNED_SELECTOR);
+  if (!light.includes('color-scheme: light')) texts.push('the :root block does not declare color-scheme: light');
+  if (media === undefined) texts.push('tokens.css has no :root:not([data-theme="light"]) block under @media (prefers-color-scheme: dark)');
+  if (pinned === undefined) texts.push('tokens.css has no :root[data-theme="dark"] block');
+  if (media !== undefined && pinned !== undefined) {
+    if (media.join(';') !== pinned.join(';')) texts.push('the dark blocks under the media query and under :root[data-theme="dark"] differ');
+    else if (!media.includes('color-scheme: dark')) texts.push('the dark blocks do not declare color-scheme: dark');
+    const lightNames = new Set(light.map(nameOf));
+    for (const name of media.map(nameOf)) {
+      if (name !== 'color-scheme' && !lightNames.has(name)) texts.push(`the dark blocks declare ${name}, which the :root block does not`);
+    }
+  }
+  return texts.map((text) => ({ rule, route, text }));
 }
 
-export function noInlineStyleRule(_site: BuiltSite, _context: CheckContext): Finding[] {
-  return [];
+// AC-63 names six type steps the built CSS must carry; two of them are fixed sizes (UI-SPEC 6).
+const R14_TYPE_TOKENS: readonly (readonly [string, string | null])[] = [
+  ['--text-lede', null],
+  ['--text-intro', null],
+  ['--text-narrative-headline', null],
+  ['--text-small', '0.9375rem'],
+  ['--text-mono-value', '0.8125rem'],
+  ['--text-schedule-compact', null],
+];
+
+export function typeTokenDeclaredRule(site: BuiltSite, _context: CheckContext): Finding[] {
+  const rule = 'type-token-declared' as const;
+  const route = fileRoute(TOKENS_FILE);
+  const rules = tokenRules(site);
+  if (rules === null) return [{ rule, route, text: 'dist/tokens.css is missing' }];
+  const values = new Map((rules.get(LIGHT_SELECTOR) ?? []).map((declaration) => [nameOf(declaration), declaration.slice(declaration.indexOf(':') + 1).trim()]));
+  return R14_TYPE_TOKENS.flatMap(([name, expected]): Finding[] => {
+    const value = values.get(name);
+    if (value === undefined || value === '') return [{ rule, route, text: `tokens.css declares no ${name} on :root` }];
+    return expected === null || value === expected ? [] : [{ rule, route, text: `${name} is ${value}, ${expected} expected` }];
+  });
+}
+
+const isStylesheet = (element: BuiltElement): boolean => element.tag === 'link' && (element.attrs.rel ?? '').toLowerCase().split(/\s+/).includes('stylesheet');
+const isInlineScript = (element: BuiltElement): boolean => element.tag === 'script' && element.attrs.src === undefined;
+const scriptText = (element: BuiltElement): string => element.children.filter((child): child is string => typeof child === 'string').join('');
+const headOf = (page: BuiltPage): BuiltElement | undefined =>
+  page.root.children.find((child): child is BuiltElement => typeof child !== 'string' && child.tag === 'head');
+
+function headFindings(page: BuiltPage, headScript: string): string[] {
+  const head = headOf(page);
+  let order = 0;
+  let firstSheet = Number.POSITIVE_INFINITY;
+  let theme: { readonly order: number; readonly element: BuiltElement } | undefined;
+  if (head !== undefined) {
+    walk(head, (element) => {
+      order += 1;
+      if (isStylesheet(element)) firstSheet = Math.min(firstSheet, order);
+      if (theme === undefined && isInlineScript(element)) theme = { order, element };
+    });
+  }
+  if (theme === undefined) return ['the head holds no inline theme script'];
+  const texts: string[] = [];
+  const { attrs } = theme.element;
+  if (scriptText(theme.element) !== headScript) texts.push('the inline head script is not the HEAD_SCRIPT text');
+  if (attrs.defer !== undefined) texts.push('the theme script carries defer');
+  if (attrs.async !== undefined) texts.push('the theme script carries async');
+  if ((attrs.type ?? '').trim().toLowerCase() === 'module') texts.push('the theme script carries type="module"');
+  if (firstSheet < theme.order) texts.push('the theme script follows a stylesheet link');
+  return texts;
+}
+
+// AC-40 and Pitfall 4: the stored theme applies before first paint only if the head script runs,
+// in parsing order, before the first stylesheet, on every page.
+export function headScriptOrderRule(site: BuiltSite, context: CheckContext): Finding[] {
+  return site.pages.flatMap((page) => headFindings(page, context.headScript).map((text) => ({ rule: 'head-script-order' as const, route: page.route, text })));
+}
+
+const CSP_HASH = /'sha256-([A-Za-z0-9+/=]+)'/g;
+
+function listedHashes(headers: string): Set<string> {
+  const policy = headers.split(/\r?\n/).find((line) => /^\s*content-security-policy\s*:/i.test(line)) ?? '';
+  const scriptSrc = policy.split(';').find((directive) => directive.trim().toLowerCase().startsWith('script-src')) ?? '';
+  return new Set([...scriptSrc.matchAll(CSP_HASH)].map((match) => match[1] ?? ''));
+}
+
+// D-149 both ways: every inline script the build ships is allowed by exactly a hash _headers lists,
+// and _headers allows nothing the build does not ship.
+export function scriptHashRule(site: BuiltSite, _context: CheckContext): Finding[] {
+  const rule = 'script-hash' as const;
+  if (site.headers === null) return [{ rule, route: fileRoute('_headers'), text: 'dist/_headers is missing' }];
+  const listed = listedHashes(site.headers);
+  const shipped = new Set<string>();
+  const findings: Finding[] = [];
+  for (const page of site.pages) {
+    for (const script of page.scripts) {
+      if (script.src !== null) continue;
+      const hash = scriptHash(script.text);
+      shipped.add(hash);
+      if (!listed.has(hash)) findings.push({ rule, route: page.route, text: `an inline script hashes to sha256-${hash}, which _headers does not list` });
+    }
+  }
+  for (const hash of listed) {
+    if (!shipped.has(hash)) findings.push({ rule, route: fileRoute('_headers'), text: `_headers lists sha256-${hash}, which no inline script has` });
+  }
+  return findings;
+}
+
+const isDataUrl = (url: string): boolean => url.trim().toLowerCase().startsWith('data:');
+
+// C6: under default-src 'self' the browser blocks a style attribute, a style element and a data:
+// asset, so each would break only on the real host; the built files are checked for all three.
+export function noInlineStyleRule(site: BuiltSite, _context: CheckContext): Finding[] {
+  const rule = 'no-inline-style' as const;
+  const onPages = site.pages.flatMap((page) => {
+    const texts: string[] = [];
+    walk(page.root, (element) => {
+      if (element.attrs.style !== undefined) texts.push(`a style attribute on <${element.tag}>`);
+      if (element.tag === 'style') texts.push('a style element');
+    });
+    for (const reference of page.references) {
+      if (urlsOf(reference.attr, reference.value).some(isDataUrl)) texts.push(`${reference.tag} ${reference.attr} holds a data: URL`);
+    }
+    return texts.map((text) => ({ rule, route: page.route, text }));
+  });
+  const inCss = site.css.flatMap((file) => (cssUrls(file.text).some(isDataUrl) ? [{ rule, route: fileRoute(file.file), text: 'a CSS url() holds a data: URL' }] : []));
+  return [...onPages, ...inCss];
 }
 
 // Workers limits: 20,000 files per version on the Free plan and 25 MiB per file (AC-62).

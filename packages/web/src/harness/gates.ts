@@ -16,7 +16,7 @@ import { filesIn, loadBuiltSite, NoBuiltPagesError, routeOf, type BuiltSite } fr
 import { checkFileBudget, isRegisteredRule, runBuiltChecks, type BudgetViolation, type CheckContext, type Finding } from '../checks/rules.js';
 import { BANNED_NAMES, CONSOLE_DELETE_PHRASES, REPLY_PROMISE_PHRASES, REPUTATION_PAGE_URL } from '../site/content.js';
 import { ROUTES, SITE_ORIGIN, sitemapUrls } from '../site/route-list.js';
-import { themedValue, TOKENS } from '../theme/head-script.js';
+import { HEAD_SCRIPT, themedValue, TOKENS } from '../theme/head-script.js';
 
 export interface ThemeSetup {
   readonly name: string;
@@ -617,6 +617,7 @@ export function loadCheckContext(repoRoot: string): CheckContext {
     bannedNames: BANNED_NAMES,
     siteOrigin: SITE_ORIGIN,
     routes: ROUTES,
+    headScript: HEAD_SCRIPT,
   });
 }
 

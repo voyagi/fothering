@@ -537,7 +537,7 @@ describe('the theme token blocks rule (AC-39, D-140)', () => {
   });
 
   it('fails dark blocks without color-scheme dark, and a dark token the light block never declares', () => {
-    const noScheme = renderTokensCss().replaceAll('color-scheme: dark', 'color-scheme: only dark');
+    const noScheme = renderTokensCss().replaceAll('color-scheme: dark;', 'color-scheme: only dark;');
     expect(texts(themeTokenBlocksRule(siteOf(withFile('tokens.css', noScheme)), context))).toEqual(['the dark blocks do not declare color-scheme: dark']);
     const stray = renderTokensCss().replaceAll('color-scheme: dark;', 'color-scheme: dark;\n  --stray: #000000;');
     expect(texts(themeTokenBlocksRule(siteOf(withFile('tokens.css', stray)), context))).toEqual(['the dark blocks declare --stray, which the :root block does not']);
