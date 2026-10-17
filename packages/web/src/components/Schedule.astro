@@ -38,7 +38,12 @@ const hide = (column: number): string | undefined => (narrowHidden.includes(colu
         <th scope="row">{row.header}</th>
         {row.cells.map((cell, index) => (
           <td class={hide(index + 1)} {...cell.attrs}>
-            {cell.mark === undefined ? <span class="cell-text">{cell.text}</span> : <span class={`state ${cell.mark}`}>{cell.text}</span>}
+            {cell.mark === undefined ? <span class="cell-text">{cell.text}</span> : (
+              <span class="state">
+                <svg class={`state-mark state-mark-${cell.mark}`} viewBox="0 0 12 12" aria-hidden="true"><rect x="1" y="1" width="10" height="10" /></svg>
+                {cell.text}
+              </span>
+            )}
           </td>
         ))}
       </tr>

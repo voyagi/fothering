@@ -160,9 +160,12 @@ code { font-size: var(--text-mono-value); font-weight: 500; }
 /* An identifier ends a line only at the <wbr> after a dot; nothing here may add another break. */
 .identifier { white-space: normal; overflow-wrap: normal; word-break: normal; hyphens: none; }
 .state { font: 600 var(--text-label)/1 var(--font-mono); letter-spacing: 0.06em; text-transform: uppercase; white-space: nowrap; }
-.state::before { content: ""; display: inline-block; width: 12px; height: 12px; margin-right: var(--space-sm); vertical-align: -1px; border: var(--w-outline) solid var(--ink); }
-.state.later::before { border-style: dashed; }
-.state.open::before { background: var(--ink); }
+/* State marks are drawn, not bordered: a dashed CSS border on a 12px square renders as a solid line,
+   so the not-yet mark keeps its dashes only as an SVG dash array. */
+.state-mark { display: inline-block; width: 12px; height: 12px; margin-right: var(--space-sm); vertical-align: -1px; }
+.state-mark rect { fill: none; stroke: var(--ink); stroke-width: var(--w-outline); }
+.state-mark-later rect { stroke-dasharray: 2.5 2; stroke-dashoffset: 1.25; }
+.state-mark-open rect { fill: var(--ink); }
 
 /* Row 1: the claim beside the flow drawing, the tag hung from the closed valve's stem. */
 .moment { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); }
