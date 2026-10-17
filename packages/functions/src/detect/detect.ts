@@ -307,13 +307,17 @@ async function claimLane(deps: DetectDeps, view: LaneView, nowMs: number, counts
   }
 }
 
-// Recovery builds the state under the marker's id, never one derived from now (steelman S3).
+// Recovery builds the state under the marker's id, never one derived from now (steelman S3). A
+// state this cycle did not open takes this cycle's window, not the opening's, and the incident id is
+// a hash the opening window cannot be read back from. So a recovered state is opening-finalized: no
+// false spike (MEAS-10) is judged against a window that was not the opening.
 async function putState(deps: DetectDeps, view: LaneView, nowMs: number, counts: CycleCounts): Promise<void> {
   const marker = view.marker;
   if (view.failed || view.claim === 'lost' || marker?.status !== 'open' || !view.stateMissing) return;
   const { lane, summary } = view.folded;
   try {
-    const state: IncidentState = { ...openIncident(lane.configurationSet, nowMs, summary.window), incidentId: marker.incidentId };
+    const opened = openIncident(lane.configurationSet, nowMs, summary.window);
+    const state: IncidentState = { ...opened, incidentId: marker.incidentId, openingFinalized: view.claim !== 'won' };
     await deps.ports.decisionStore.putIfAbsent({
       ...incidentItemKey(marker.incidentId, 'STATE'),
       expiresAt: expiresAtFor(nowMs),

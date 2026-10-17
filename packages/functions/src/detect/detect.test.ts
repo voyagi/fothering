@@ -387,6 +387,30 @@ describe('a cycle that dies part way is completed by the next one under the mark
     expect(counting.calls.count).toBe(1);
   });
 
+  // The incident id is a hash, so a later cycle cannot learn the real opening window from it; judging
+  // a false spike on that cycle's own window would count one the opening never had (MEAS-10).
+  it('rebuilds a missing STATE as opening-finalized, so a later quiet window counts no false spike', async () => {
+    const { deps } = await builtCycle({ runtime: closeRuntime });
+    const failing = withDecisionStore(deps, {
+      putIfAbsent: async (item, nowMs) => {
+        if (item.sk === 'STATE') throw namedError('InternalServerError');
+        return deps.ports.decisionStore.putIfAbsent(item, nowMs);
+      },
+    });
+    await runDetectionCycle(failing);
+    expect([(await markerOf(deps))?.status, await storedItem(deps, INCIDENT_ID, 'STATE')]).toEqual(['open', undefined]);
+
+    await runDetectionCycle(at(deps, QUIET_NOW_MS));
+    const recovered = await storedItem(deps, INCIDENT_ID, 'STATE', QUIET_NOW_MS);
+    await runDetectionCycle(at(deps, CLOSE_NOW_MS));
+    const later = await storedItem(deps, INCIDENT_ID, 'STATE', CLOSE_NOW_MS);
+
+    expect([recovered?.state, later?.state]).toMatchObject([
+      { incidentId: INCIDENT_ID, status: 'open', openingFinalized: true },
+      { status: 'open', falseSpikes: 0 },
+    ]);
+  });
+
   it('catches a record assembly refusal as opening-failed, then the next cycle assembles cleanly under the same incident id and invokes once', async () => {
     const counting = countingRuntime(closeRuntime);
     const { deps, store, lines } = await builtCycle({ runtime: counting.runtime });
