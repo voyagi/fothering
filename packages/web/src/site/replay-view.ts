@@ -271,7 +271,8 @@ function logNote(hardBounces: number): string {
 
 function tagEvidence(row: EvidenceRow, smtpCode: string, providers: number): string {
   const share = row.count === row.denominator ? `All ${String(row.count)}` : `${String(row.count)} of ${String(row.denominator)}`;
-  return `${share} ${row.unit} in the window carry that tag: \`${smtpCode}\`, ${String(providers)} providers.`;
+  // The count stays in the sentence and the code ends it, so no figure is set against the mono code.
+  return `${share} ${row.unit} in the window carry that tag, from ${String(providers)} providers: \`${smtpCode}\`.`;
 }
 
 export function buildReplayView(artifact: ReplayArtifact): ReplayView {
