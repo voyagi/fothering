@@ -120,12 +120,18 @@ function errorLink(error: object): ErrorLink {
   };
 }
 
+// It runs inside catches that must never rethrow, on objects the handler did not make: a getter that
+// throws ends the walk, and the links read before it are still logged.
 function logModelError(error: unknown): void {
   const errors: ErrorLink[] = [];
-  let current: unknown = error;
-  while (typeof current === 'object' && current !== null && errors.length < CAUSE_CHAIN_DEPTH) {
-    errors.push(errorLink(current));
-    current = (current as { cause?: unknown }).cause;
+  try {
+    let current: unknown = error;
+    while (typeof current === 'object' && current !== null && errors.length < CAUSE_CHAIN_DEPTH) {
+      errors.push(errorLink(current));
+      current = (current as { cause?: unknown }).cause;
+    }
+  } catch {
+    // The thrown value is never read: its message could quote model text (D-73).
   }
   console.error(JSON.stringify({ msg: 'model-error', errors }));
 }
@@ -143,7 +149,8 @@ export function createInvocationHandler(deps: AgentDeps, options: InvocationHand
     if (deps.kinds.bedrockModel?.stream === 'dry-run') {
       try {
         return await recordDryRun(deps, userText);
-      } catch {
+      } catch (error) {
+        logModelError(error);
         return failedBeforeModel('model-error');
       }
     }

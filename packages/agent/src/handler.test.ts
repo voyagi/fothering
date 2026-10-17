@@ -354,6 +354,20 @@ describe('the deployed runtime with the switch unset answers dry-run', () => {
     expect(lines[0]?.startsWith('(dry-run) WOULD bedrockModel.stream eu.anthropic.claude-sonnet-5 ')).toBe(true);
     expect(lines[0]).toContain('"messageCount":1');
   });
+
+  // PR #33 review: the dry-run path returns model-error too, so it writes the same identifier line.
+  it('logs the identifiers of a dry-run failure and none of its messages', async () => {
+    const sinkFailure = Object.assign(new Error('QZVX-sink-message'), { code: 'EPIPE' });
+    const deps = buildAgentRoot({ runtimeContext: 'deployed', switchValue: undefined, dryRunSink: () => { throw sinkFailure; }, logSink: () => {} });
+
+    const { value: result, output } = await captureOutput(() => createInvocationHandler(deps)(tracerRecord()));
+
+    expect(failureOf(result)).toBe('failed:model-error');
+    const line = output.split('\n').find((text) => text.includes('"model-error"'));
+    expect(line, output).toBeDefined();
+    expect((JSON.parse(line ?? '{}') as { errors?: unknown[] }).errors).toEqual(expect.arrayContaining([{ name: 'Error', code: 'EPIPE' }]));
+    expect(output).not.toContain('QZVX');
+  });
 });
 
 describe('the handler maps every loop outcome to a result', () => {
@@ -412,6 +426,25 @@ describe('the handler maps every loop outcome to a result', () => {
     const logged = JSON.parse(line ?? '{}') as { msg?: string; errors?: unknown[] };
     expect(logged.msg).toBe('model-error');
     expect(logged.errors).toEqual(expect.arrayContaining([{ name: 'AccessDeniedException', status: 403 }, { name: 'Error', code: 'ECONNRESET' }, {}]));
+    expect(output).not.toContain('QZVX');
+  });
+
+  // PR #33 review: the walk reads properties of objects the handler did not make. A getter that throws
+  // ends the walk; the links read before it are still logged and the handler still returns its result.
+  it.each([
+    ['a nested code', (link: Error) => Object.defineProperty(link, 'code', { get: () => { throw new Error('QZVX-code-getter'); } })],
+    ['a nested cause', (link: Error) => Object.defineProperty(link, 'cause', { get: () => { throw new Error('QZVX-cause-getter'); } })],
+  ])('returns model-error and logs the links before %s getter that throws', async (_where, plant) => {
+    const hostile = plant(new Error('QZVX-hostile-message'));
+    const refusal = Object.assign(new Error('QZVX-refusal-message'), { name: 'AccessDeniedException', $metadata: { httpStatusCode: 403 }, cause: hostile });
+    const { handler } = testHandler([{ events: [], error: () => refusal }]);
+
+    const { value: result, output } = await captureOutput(() => handler(tracerRecord()));
+
+    expect(failureOf(result)).toBe('failed:model-error');
+    const line = output.split('\n').find((text) => text.includes('"model-error"'));
+    expect(line, output).toBeDefined();
+    expect((JSON.parse(line ?? '{}') as { errors?: unknown[] }).errors).toEqual(expect.arrayContaining([{ name: 'AccessDeniedException', status: 403 }]));
     expect(output).not.toContain('QZVX');
   });
 
