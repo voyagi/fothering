@@ -46,6 +46,7 @@ import { createDynamoDecisionStore, createDynamoEventStore } from './live/event-
 import { createSecretsManagerAddressKey } from './live/address-key.js';
 import { createSqsDeadLetter } from './live/dead-letter.js';
 import { createSesReads } from './live/ses-reads.js';
+import { createSesWrites } from './live/ses-writes.js';
 
 const LIVE_REGION = 'eu-central-1';
 
@@ -199,9 +200,11 @@ export const PORT_TABLE = {
     gatedOperations: ['pauseConfigurationSet', 'reopenConfigurationSet', 'sendEmail'],
     fixture: (fixtures: FixtureOptions, dryRun: DryRunLog) =>
       createFixtureSes({ recordings: fixtures.recordings?.ses ?? [], dryRun, state: fixtures.sesState }),
-    live: ({ liveClients }) =>
-      brandPort(createSesReads({ client: resolveLiveClient(liveClients.sesv2, () => new SESv2Client({ region: LIVE_REGION })) }), 'live'),
-    notBuiltOperations: { getConfigurationSetSending: 3, pauseConfigurationSet: 3, reopenConfigurationSet: 3, sendEmail: 4 },
+    // One client for the reads and the writes, built on the first call of either.
+    live: ({ liveClients }) => {
+      const client = resolveLiveClient(liveClients.sesv2, () => new SESv2Client({ region: LIVE_REGION }));
+      return brandPort({ ...createSesReads({ client }), ...createSesWrites({ client }) }, 'live');
+    },
     dryRun: (log: DryRunLog) => createSesDryRun(log),
   },
   // R6 reads the ROADMAP's "DNS behind the dry-run gate" as DNS behind this table: recorded answers in
