@@ -302,7 +302,36 @@ const narrowRun = async (route) => {
   }, route);
 };
 
+// The stem shown between the closed valve and the hung tag: a walk down the stem's line until the
+// card is the element hit there, with the tag scrolled into view so every point can be hit.
+const hangRun = async (route, width) => {
+  await loadFlow(route, width, null, 'reduce');
+  return page.evaluate((args) => {
+    // A vertical stem has no width, so a part counts as shown when either side has length.
+    const shown = (element) => {
+      const box = element.getBoundingClientRect();
+      return box.width > 0 || box.height > 0;
+    };
+    const tag = Array.from(document.querySelectorAll('[data-tag]')).find(shown);
+    const valve = Array.from(document.querySelectorAll('[data-lane-state="closed"] .dwg-valve-shut')).find(shown);
+    const stem = Array.from(document.querySelectorAll('[data-lane-state="closed"] .dwg-stem')).find(shown);
+    if (!tag || !valve || !stem) return { route: args.route, width: args.width, hanging: false, visibleStem: 0, tagTop: 0, valveBottom: 0 };
+    tag.scrollIntoView({ block: 'center' });
+    const valveBox = valve.getBoundingClientRect();
+    const stemBox = stem.getBoundingClientRect();
+    const x = stemBox.left + stemBox.width / 2;
+    let visibleStem = 0;
+    for (let y = Math.ceil(valveBox.bottom) + 1; y < valveBox.bottom + 400; y += 1) {
+      const hit = document.elementFromPoint(x, y);
+      if (hit === null || hit.closest('[data-tag]')) break;
+      visibleStem += 1;
+    }
+    return { route: args.route, width: args.width, hanging: true, visibleStem, tagTop: tag.getBoundingClientRect().top, valveBottom: valveBox.bottom };
+  }, { route, width });
+};
+
 for (const route of JOB.routes) {
+  for (const width of JOB.hangWidths) console.log('HANG ' + JSON.stringify(await hangRun(route, width)));
   for (const width of JOB.widths) {
     console.log('FLOW ' + JSON.stringify(await flowRun(route, width)));
     console.log('TABFLOW ' + JSON.stringify(await tabFlowRun(route, width)));

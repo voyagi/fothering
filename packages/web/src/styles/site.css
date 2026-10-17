@@ -216,7 +216,10 @@ code { font-size: var(--text-mono-value); font-weight: 500; }
 .tag footer { display: flex; justify-content: space-between; padding: var(--space-sm) var(--space-md); border-top: var(--w-outline) dashed var(--tag-ink); font: 600 var(--text-label-small)/1.2 var(--font-mono); }
 /* The hole sits on the stem's end: the tag's left edge is the stem's x (36.3% of the wide drawing,
    53.9% of the narrow one) less half the tag, kept inside the drawing. */
-.drawing .tag { --tw: min(320px, 100%); width: var(--tw); margin: -24px 0 0 clamp(0px, calc(100% * 0.363 - var(--tw) / 2), calc(100% - var(--tw))); transform: rotate(-2.5deg); transform-origin: 50% 20px; }
+/* The card rises over the stem's lower end so that 18px of stem always shows above it: a percentage
+   margin resolves against the drawing's width, the same width the drawing scales by, and the stem is
+   48 of the wide drawing's 760 units (58 of the narrow one's 360) in LaneDrawing. */
+.drawing .tag { --tw: min(320px, 100%); width: var(--tw); margin: calc(18px - 100% * 48 / 760) 0 0 clamp(0px, calc(100% * 0.363 - var(--tw) / 2), calc(100% - var(--tw))); transform: rotate(-2.5deg); transform-origin: 50% 20px; }
 
 /* Row 2: one process line with a valve per step. */
 ol.procedure { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); margin: 0; padding: 0; list-style: none; }
@@ -269,7 +272,7 @@ table.ruled { width: 100%; border-collapse: collapse; }
   .actions { order: 4; margin-top: var(--space-md); margin-bottom: 36px; }
   .dwg-wide { display: none; }
   .dwg-narrow { display: block; }
-  .drawing .tag { margin-left: clamp(0px, calc(100% * 0.539 - var(--tw) / 2), calc(100% - var(--tw))); transform: rotate(-2deg); }
+  .drawing .tag { margin-top: calc(18px - 100% * 58 / 360); margin-left: clamp(0px, calc(100% * 0.539 - var(--tw) / 2), calc(100% - var(--tw))); transform: rotate(-2deg); }
   .tag dl { grid-template-columns: minmax(0, 1fr); gap: 0; }
   .tag dd { margin-bottom: var(--space-sm); }
   ol.procedure, .procedure.steps-5 { grid-template-columns: minmax(0, 1fr); row-gap: 0; }

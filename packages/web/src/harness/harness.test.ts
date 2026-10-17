@@ -1377,13 +1377,15 @@ describe('the built checks through the CLI and the e2e step (D-150, D-151)', () 
     expect(lines).toContain(E2E_MESSAGES.renderedFailed('TABFLOW', `/: ${E2E_MESSAGES.flowTabLate(320)}; /: ${E2E_MESSAGES.flowTabLate(1440)}`));
   });
 
-  it('the rendered step measures the hung tag at 320, 960, 1280 and 1440 and fails a tag stuck to the valve, naming the route and width', async () => {
-    expect(HANG_WIDTHS).toEqual([320, 960, 1280, 1440]);
+  it('the rendered step measures the hung tag at 320, 961, 1280 and 1440 and fails a tag stuck to the valve, naming the route and width', async () => {
+    expect(HANG_WIDTHS).toEqual([320, 961, 1280, 1440]);
     const healthy = await e2e(renderedTree());
     expect(healthy.lines.find((line) => line.startsWith('[e2e] rendered HANG: ok, '))).toContain('/ at 1280 px 18 px of stem');
     const stuck = await e2e(renderedTree(), {}, { lines: siteLines({}, [], {}, { HANG: (route, width) => (route === '/' && width === 1280 ? { ...hanging(5), width } : healthyHang(route, width)) }) });
     expect(stuck.code).toBe(1);
     expect(stuck.lines).toContain(E2E_MESSAGES.renderedFailed('HANG', `/: ${E2E_MESSAGES.tagStuck(1280, 5)}`));
+    const none = await e2e(renderedTree(), {}, { lines: siteLines({}, [], {}, { HANG: (route, width) => ({ route, width, hanging: false, visibleStem: 0, tagTop: 0, valveBottom: 0 }) }) });
+    expect(none.lines).toContain(E2E_MESSAGES.renderedFailed('HANG', E2E_MESSAGES.noHungTag()));
   });
 
   it('the rendered step fails a run that measured zero prose blocks, no drawing text, or no flow line for a width', async () => {
@@ -1590,7 +1592,7 @@ describe('the built checks through the CLI and the e2e step (D-150, D-151)', () 
       noProseBlocks: [], lineTooLong: ['/', 81, 'x'], identifierBreak: ['a.b', ['a', '.b']], tagOverlap: ['x'], textOutside: ['x'], noDrawingText: [],
       flowNoControl: [320], flowControlWithoutMotion: [320], flowSmallControl: [320, 40, 40], flowStillRunning: [320, 1], flowLabel: [320, ['Stop flow']],
       flowReloadRuns: [320, 1], flowReduced: [320, 1], flowStoredRunning: [320], flowStoredStopped: [320, 1], flowTabUnreached: [320], flowTabLate: [320],
-      copyBuildPassed: [], copyBuildUnnamed: ['x'], copyBuildLeft: ['d'], tagStuck: [1280, 5], tagMeetsValve: [1280],
+      copyBuildPassed: [], copyBuildUnnamed: ['x'], copyBuildLeft: ['d'], tagStuck: [1280, 5], tagMeetsValve: [1280], noHungTag: [],
     };
     const rendered = Object.entries(samples).map(([key, args]) => (E2E_MESSAGES[key as keyof typeof E2E_MESSAGES] as (...a: unknown[]) => string)(...args));
     expect(rendered).toHaveLength(Object.keys(E2E_MESSAGES).length);

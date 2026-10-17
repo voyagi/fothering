@@ -471,7 +471,7 @@ export function flowTabVerdict(reading: FlowTabReading): Verdict {
 
 // The tag's stem is checked across the 5:7 range as well as at the audit widths, since the drawing
 // is narrowest just above 960.
-export const HANG_WIDTHS = Object.freeze([320, 960, 1280, 1440]);
+export const HANG_WIDTHS = Object.freeze([320, 961, 1280, 1440]);
 
 export interface HangReading {
   readonly route: string;
@@ -482,8 +482,16 @@ export interface HangReading {
   readonly valveBottom: number;
 }
 
-export function hangVerdict(_reading: HangReading): Verdict {
-  return { ok: true };
+const MIN_STEM = 12;
+
+// UI-SPEC 8.1: the tag hangs from the closed valve's stem, so a clear stretch of stem shows between
+// the valve and the card, and no corner of the tilted card reaches the valve.
+export function hangVerdict(reading: HangReading): Verdict {
+  if (!reading.hanging) return { ok: true };
+  const reasons: string[] = [];
+  if (reading.visibleStem < MIN_STEM) reasons.push(E2E_MESSAGES.tagStuck(reading.width, reading.visibleStem));
+  if (reading.tagTop <= reading.valveBottom) reasons.push(E2E_MESSAGES.tagMeetsValve(reading.width));
+  return verdictOf(reasons);
 }
 
 const NOT_FOUND_LOAD = /^Failed to load resource: the server responded with a status of 404\b/;
@@ -917,6 +925,7 @@ export const E2E_MESSAGES = Object.freeze({
   copyBuildLeft: (folder: string) => `the project copy folder ${folder} is still on disk after the build`,
   tagStuck: (width: number, stem: number) => `at ${width} px the lockout tag shows ${stem} px of stem below the closed valve, 12 at least, so it reads as stuck, not hung`,
   tagMeetsValve: (width: number) => `at ${width} px the lockout tag's tilted top edge reaches the closed valve`,
+  noHungTag: () => 'no route hung a lockout tag from a closed valve, so the stem check measured nothing',
 });
 
 export interface SecondBuildRun {
@@ -1197,7 +1206,7 @@ const isStorageReading = (value: unknown): value is StorageReading => isObject(v
 const ROUTE_CHECKS = ['SWITCH', 'FONTS', 'REQUESTS'] as const;
 // Measured over every route: the flow and Tab walk at both widths, prose lines at 1440, the tag and
 // drawing labels at 320.
-const MEASURE_CHECKS = ['FLOW', 'TABFLOW', 'LINES', 'NARROW'] as const;
+const MEASURE_CHECKS = ['FLOW', 'TABFLOW', 'LINES', 'NARROW', 'HANG'] as const;
 type RouteCheck = (typeof ROUTE_CHECKS)[number];
 
 const ROUTE_JUDGES: Readonly<Record<RouteCheck, (value: unknown) => Verdict | null>> = {
@@ -1320,12 +1329,13 @@ function judgeNarrow(lines: readonly string[], routes: readonly string[]): Check
 }
 
 function judgeByWidth<T extends { readonly route: string; readonly width: number }>(
-  check: 'FLOW' | 'TABFLOW', lines: readonly string[], routes: readonly string[], accept: (value: unknown) => value is T, verdictFor: (value: T) => Verdict,
+  check: 'FLOW' | 'TABFLOW' | 'HANG', lines: readonly string[], routes: readonly string[], accept: (value: unknown) => value is T, verdictFor: (value: T) => Verdict,
+  widths: readonly number[] = AXE_CONFIG.widths,
 ): { verdict: Verdict; readings: T[] } {
   const { byKey, reasons } = readKeyed(check, lines, accept, (value) => widthKey(value.route, value.width));
   const readings: T[] = [];
   for (const route of routes) {
-    for (const width of AXE_CONFIG.widths) {
+    for (const width of widths) {
       const reading = byKey.get(widthKey(route, width));
       if (reading === undefined) {
         reasons.push(E2E_MESSAGES.renderedMissingRoute(check, widthKey(route, width)));
@@ -1342,6 +1352,17 @@ function judgeByWidth<T extends { readonly route: string; readonly width: number
 function judgeFlow(lines: readonly string[], routes: readonly string[]): CheckResult {
   const { verdict, readings } = judgeByWidth('FLOW', lines, routes, isFlowReading, flowVerdict);
   return { verdict, detail: readings.map((reading) => `${widthKey(reading.route, reading.width)} movingOnLoad ${String(reading.movingOnLoad)}`).join(', ') };
+}
+
+const isHangReading = (value: unknown): value is HangReading => isObject(value) && typeof value.route === 'string' && isNumber(value.width)
+  && typeof value.hanging === 'boolean' && isNumber(value.visibleStem) && isNumber(value.tagTop) && isNumber(value.valveBottom);
+
+function judgeHang(lines: readonly string[], routes: readonly string[]): CheckResult {
+  const { verdict, readings } = judgeByWidth('HANG', lines, routes, isHangReading, hangVerdict, HANG_WIDTHS);
+  const hung = readings.filter((reading) => reading.hanging).map((reading) => `${widthKey(reading.route, reading.width)} ${String(reading.visibleStem)} px of stem`);
+  // A run in which no route hung a tag measured nothing, so it fails rather than passing empty.
+  if (hung.length === 0 && readings.length > 0) return { verdict: { ok: false, reason: E2E_MESSAGES.noHungTag() }, detail: '' };
+  return { verdict, detail: hung.join(', ') };
 }
 
 function judgeTabFlow(lines: readonly string[], routes: readonly string[]): CheckResult {
@@ -1379,6 +1400,7 @@ function judgeRendered(run: DriverRun, routes: readonly string[], print: (line: 
     ['TABFLOW', judgeTabFlow(measured('TABFLOW'), routes)],
     ['LINES', judgeLines(measured('LINES'), routes)],
     ['NARROW', judgeNarrow(measured('NARROW'), routes)],
+    ['HANG', judgeHang(measured('HANG'), routes)],
     ['STORAGE', judgeStorage(records.get('STORAGE'))],
     ['CONSOLE', { verdict: consoleVerdict(consoleErrors), detail: 'no console error, no Content Security Policy violation' }],
   ];
@@ -1404,7 +1426,7 @@ async function renderedStep(options: SiteE2eOptions, dist: string, print: (line:
   if (typeof driver === 'string') return driver;
   const routes = [...routesFromDist(dist), UNKNOWN_PATH];
   const served = await withPreview(options.repoRoot, 'fothering-e2e-', async (server, workDir) => {
-    const written = writeDriver(driver.templatePath, { base: server.url, route: '/', routes, widths: AXE_CONFIG.widths, families: SITE_FAMILIES }, join(workDir, 'site.js'));
+    const written = writeDriver(driver.templatePath, { base: server.url, route: '/', routes, widths: AXE_CONFIG.widths, hangWidths: HANG_WIDTHS, families: SITE_FAMILIES }, join(workDir, 'site.js'));
     if (!written.ok) return A11Y_MESSAGES.templateTokens(driver.templatePath, written.tokens);
     const run = await runDriver({ launcher: driver.launcher, driverPath: written.path, timeoutSeconds: DRIVER_TIMEOUT_SECONDS });
     return judgeRendered(run, routes, print);
