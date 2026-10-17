@@ -1,6 +1,9 @@
 ---
 // A drawing's table. The first cell of every row is its row header; a cell may carry a state mark,
-// whose name is always printed beside it (UI-SPEC section 7, StateMark).
+// whose name is always printed beside it (UI-SPEC section 7, StateMark). Text marks code spans with
+// backticks, the way the replay view writes them, and each span renders as an identifier.
+import Identifier from './Identifier.astro';
+
 type Mark = 'open' | 'later';
 
 interface Cell {
@@ -11,6 +14,9 @@ interface Cell {
 
 interface Row {
   header: string;
+  // A short state printed after the header, such as "unconfirmed" on a provider row.
+  headerNote?: string;
+  headerHref?: string;
   cells: readonly Cell[];
   attrs?: Record<string, string>;
 }
@@ -20,25 +26,42 @@ interface Props {
   rows: readonly Row[];
   // Column indexes hidden at 620px and below.
   narrowHidden?: readonly number[];
+  // Column indexes set in mono, 0 being the row header.
+  monoColumns?: readonly number[];
   caption?: string;
+  captionAttrs?: Record<string, string>;
   variant?: 'schedule' | 'ruled';
+  compact?: boolean;
+  // One block per row at 620px and below, each cell under its column name.
+  stack?: boolean;
 }
 
-const { columns, rows, narrowHidden = [], caption, variant = 'schedule' } = Astro.props;
-const hide = (column: number): string | undefined => (narrowHidden.includes(column) ? 'hide-narrow' : undefined);
+const { columns, rows, narrowHidden = [], monoColumns = [], caption, captionAttrs = {}, variant = 'schedule', compact = false, stack = false } = Astro.props;
+const classes = (column: number): string | undefined =>
+  [narrowHidden.includes(column) ? 'hide-narrow' : '', monoColumns.includes(column) ? 'mono' : ''].filter((name) => name !== '').join(' ') || undefined;
+const tableClass = [variant, compact ? 'compact' : '', stack ? 'stack' : ''].filter((name) => name !== '').join(' ');
+// display: block drops table semantics in some engines, so a stacking table states its roles.
+type TableRole = 'table' | 'rowgroup' | 'row' | 'columnheader' | 'rowheader' | 'cell';
+const role = (name: TableRole): TableRole | undefined => (stack ? name : undefined);
+const spans = (text: string): string[] => text.split('`');
 ---
-<table class={variant}>
-  {caption !== undefined && <caption>{caption}</caption>}
-  <thead>
-    <tr>{columns.map((column, index) => <th scope="col" class={hide(index)}>{column}</th>)}</tr>
+<table class={tableClass} role={role('table')}>
+  {caption !== undefined && <caption {...captionAttrs}>{caption}</caption>}
+  <thead role={role('rowgroup')}>
+    <tr role={role('row')}>{columns.map((column, index) => <th scope="col" class={classes(index)} role={role('columnheader')}>{column}</th>)}</tr>
   </thead>
-  <tbody>
+  <tbody role={role('rowgroup')}>
     {rows.map((row) => (
-      <tr {...row.attrs}>
-        <th scope="row">{row.header}</th>
+      <tr {...row.attrs} role={role('row')}>
+        <th scope="row" class={classes(0)} role={role('rowheader')}>
+          {row.headerHref === undefined
+            ? spans(row.header).map((part, index) => (index % 2 === 1 ? <Identifier value={part} /> : part))
+            : <a href={row.headerHref}>{spans(row.header).map((part, index) => (index % 2 === 1 ? <Identifier value={part} /> : part))}</a>}
+          {row.headerNote !== undefined && <Fragment> <span class="note">{row.headerNote}</span></Fragment>}
+        </th>
         {row.cells.map((cell, index) => (
-          <td class={hide(index + 1)} {...cell.attrs}>
-            {cell.mark === undefined ? <span class="cell-text">{cell.text}</span> : (
+          <td class={classes(index + 1)} data-col={stack ? columns[index + 1] : undefined} role={role('cell')} {...cell.attrs}>
+            {cell.mark === undefined ? <span class="cell-text">{spans(cell.text).map((part, spanIndex) => (spanIndex % 2 === 1 ? <Identifier value={part} /> : part))}</span> : (
               <span class="state">
                 <svg class={`state-mark state-mark-${cell.mark}`} viewBox="0 0 12 12" aria-hidden="true"><rect x="1" y="1" width="10" height="10" /></svg>
                 {cell.text}

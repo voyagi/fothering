@@ -1,0 +1,15 @@
+---
+// A command an operator copies. It keeps its own line breaks and wraps between its arguments: each
+// argument is one atomic box, so a line never ends inside --sending-enabled after its hyphens, and
+// only an argument wider than the column breaks inside itself, as the last resort.
+interface Props {
+  command: string;
+  provenance?: string;
+}
+
+const { command, provenance } = Astro.props;
+const lines = command.split('\n').map((line) => line.split(' '));
+---
+<pre class="command" data-provenance={provenance}><code>{lines.map((tokens, lineIndex) => (
+  <Fragment>{lineIndex > 0 && '\n'}{tokens.map((token, index) => <Fragment>{index > 0 && ' '}<span>{token}</span></Fragment>)}</Fragment>
+))}</code></pre>

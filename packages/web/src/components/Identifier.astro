@@ -1,7 +1,8 @@
 ---
-// An identifier may end a line only right after one of its dots (UI-SPEC section 6), so the break
-// opportunities are emitted here, a space inside one (an SMTP code) is made non-breaking, and the
-// CSS forbids every other break.
+// An identifier may end a line only right after one of its dots (UI-SPEC section 6). Each dotted
+// part is one unbreakable run, since a browser would otherwise break after the hyphens of a tag
+// value such as batch=2026-10-14-b; the <wbr> after each dot is the only break, and a space inside
+// a part (an SMTP code) is made non-breaking.
 interface Props {
   value: string;
 }
@@ -10,4 +11,4 @@ const NO_BREAK_SPACE = String.fromCharCode(0xa0);
 const { value } = Astro.props;
 const parts = value.split('.').map((part) => part.replaceAll(' ', NO_BREAK_SPACE));
 ---
-<code class="identifier" data-identifier>{parts.map((part, index) => (index < parts.length - 1 ? <Fragment>{part}.<wbr /></Fragment> : part))}</code>
+<code class="identifier" data-identifier>{parts.map((part, index) => (index < parts.length - 1 ? <Fragment><span>{part}.</span><wbr /></Fragment> : <span>{part}</span>))}</code>

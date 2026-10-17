@@ -1,0 +1,23 @@
+---
+// The operator email shown as a message, not described (DESIGN.md Message). The disclosure line
+// opens the body above a rule, so the agent's paragraph is named before it is read.
+import type { ReplayView } from '../site/replay-view.ts';
+
+interface Props {
+  email: ReplayView['email'];
+  label: string;
+}
+
+const { email, label } = Astro.props;
+---
+<article class="message" aria-label={label}>
+  <dl>
+    <dt>Subject</dt>
+    <dd>{email.subject}</dd>
+  </dl>
+  <div class="message-body">
+    <p class="disclosure" data-model-role>{email.disclosure}</p>
+    <p><b>Why.</b> {email.why}</p>
+    <p><b>Reopen.</b> {email.reopen}</p>
+  </div>
+</article>

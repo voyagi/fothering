@@ -34,6 +34,14 @@ export const ROUTES: readonly SiteRoute[] = Object.freeze([
     description: 'Fothering reads Amazon SES events, pauses only the configuration set that is damaging the shared reputation, reads the setting back, and tells the operator by email.',
     indexable: true,
   }),
+  Object.freeze({
+    path: '/replay/',
+    sheet: 'FTH-002',
+    label: 'Replay',
+    title: 'Incident replay: one SES lane paused and reopened',
+    description: 'One SES incident in four steps: bounces arrive on one configuration set, code names the cause with counts, the lane is paused and read back, and the operator reopens it by command.',
+    indexable: true,
+  }),
 ]);
 
 export const NOT_FOUND_ROUTE: NotFoundRoute = Object.freeze({
