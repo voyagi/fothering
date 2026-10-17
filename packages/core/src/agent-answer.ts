@@ -195,9 +195,12 @@ function holdsNoUrl(text: string, context: ExplanationContext): boolean {
 }
 
 // The stem "clos" anywhere, so closed, closing, closure and disclose reject too: "closure" and
-// "closing" do not contain "close", and the stricter reading of D-78 is meant to catch them.
-function holdsNoCommandWord(text: string): boolean {
-  const normal = folded(text);
+// "closing" do not contain "close", and the stricter reading of D-78 is meant to catch them. The
+// record's own names are removed first, whole token, as the number check removes them: the prompt
+// says to copy a tag value, from-domain or set exactly, and a cause batch named closeout-sale would
+// otherwise fail every faithful answer.
+function holdsNoCommandWord(text: string, context: ExplanationContext): boolean {
+  const normal = folded(withoutRecordNames(withoutZeroWidth(text.normalize('NFKC')), recordFacts(context.record).names));
   return !normal.includes('clos') && !normal.includes('reopen');
 }
 

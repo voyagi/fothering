@@ -207,6 +207,14 @@ describe('validateExplanation (D-78, R12)', () => {
     for (const text of words) expect(checkOf(text, closeOn(APPROVED)), text).toBe('command-word');
   });
 
+  it("lets the record's own names through the command-word check, whole token only", () => {
+    const record = recordFor(COMMITTED, bulkStory([{ bucketOffset: 0, count: 40, batch: 'closeout-sale', permanentBounces: 15 }, { bucketOffset: 1, count: 160, batch: 'import-0901' }]), BULK);
+    expect(record.rows.some((row) => row.value === 'closeout-sale')).toBe(true);
+    expect(checkOf("batch closeout-sale carried this lane's hard-bounce ratio", closeOn(record))).toBe('ok');
+    expect(checkOf('pausing this lane, then close it', closeOn(record))).toBe('command-word');
+    expect(checkOf('we made a disclosure', closeOn(record))).toBe('command-word');
+  });
+
   it('allows only the record lane set with close, and no lane-map set with unknown (5-2, F4)', () => {
     expect(checkOf(`pause ${BULK} for now`, closeOn(APPROVED))).toBe('ok');
     expect(checkOf(`pause ${TRANSACTIONAL} for now`, closeOn(APPROVED))).toBe('set-name');
