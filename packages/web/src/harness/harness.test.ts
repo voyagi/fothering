@@ -1,6 +1,6 @@
 import { spawnSync } from 'node:child_process';
 import { EventEmitter } from 'node:events';
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, describe, expect, it, vi } from 'vitest';
@@ -14,6 +14,7 @@ import {
   E2E_MESSAGES,
   auditReasons,
   axeReasons,
+  compareBuilds,
   keyboardVerdict,
   loadCheckContext,
   overflowVerdict,
@@ -24,11 +25,14 @@ import {
   type AxeReport,
   type FocusStop,
   type KeyboardReport,
+  type SecondBuildRun,
+  type SiteE2eOptions,
 } from './gates.js';
 
 // This file sits four folders below the repo root, like packages/infra/src/repo's tests.
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../../../..');
 const TEMPLATE = join(REPO_ROOT, 'scripts', 'a11y.devbrowser.js');
+const SECRETS_SCRIPT = join(REPO_ROOT, 'scripts', 'check-client-secrets.mjs');
 const SKIP_WORD = /\bSKIPPED\b/;
 
 // Planted trees live under the repo's git-ignored node_modules/.cache, never the system temp
@@ -658,12 +662,103 @@ describe('the built checks through the CLI and the e2e step (D-150, D-151)', () 
   it('the e2e step and the built-checks subcommand judge one build with equal contexts', async () => {
     expect(loadCheckContext(dashed.root)).toEqual(loadCheckContext(dashed.root));
     const e2eLines: string[] = [];
-    expect(await runSiteE2e({ repoRoot: dashed.root, globalModules: dashed.root, print: (line) => e2eLines.push(line) })).toBe(1);
+    expect(await runSiteE2e({ repoRoot: dashed.root, globalModules: dashed.root, print: (line) => e2eLines.push(line), clientSecretsScript: SECRETS_SCRIPT })).toBe(1);
     const { out } = await builtChecks(dashed.dist);
     const findingLines = (lines: readonly string[]): string[] => lines.filter((line) => line.startsWith('[built-checks] dash '));
     expect(findingLines(e2eLines)).toEqual(findingLines(out));
     expect(findingLines(out)).toHaveLength(1);
     allOutput.push(...e2eLines);
+  });
+
+  it('--expect dash over a dist with an em dash and a reply promise names reply-promise as unexpected, and --allow reply-promise passes it', async () => {
+    const both = plantSite({ 'index.html': page('<p>closed &mdash; one lane</p><p>Reply to approve the pause.</p>') });
+    const strict = await builtChecks(both.dist, '--expect', 'dash');
+    expect(strict.code).toBe(1);
+    expect(strict.out).toContain(E2E_MESSAGES.checksFail(E2E_MESSAGES.unexpected('reply-promise', 1)));
+    expect((await builtChecks(both.dist, '--expect', 'dash', '--allow', 'reply-promise')).code).toBe(0);
+  });
+
+  const copyBuild = (dist: string, change?: (outDir: string) => void) => (outDir: string): SecondBuildRun => {
+    cpSync(dist, outDir, { recursive: true });
+    change?.(outDir);
+    return { status: 0, output: '' };
+  };
+
+  async function e2e(tree: ReturnType<typeof plantDist>, extra: Partial<SiteE2eOptions> = {}): Promise<{ code: number; lines: string[] }> {
+    const lines: string[] = [];
+    const code = await runSiteE2e({ repoRoot: tree.root, globalModules: tree.root, print: (line) => lines.push(line), clientSecretsScript: SECRETS_SCRIPT, secondBuild: copyBuild(tree.dist), ...extra });
+    allOutput.push(...lines);
+    return { code, lines };
+  }
+
+  function stubScript(name: string, exitCode: number): string {
+    const path = join(PLANT, 'stubs', `${name}.mjs`);
+    write(path, `console.log('[client-secrets] planted stub');\nprocess.exit(${exitCode});\n`);
+    return path;
+  }
+
+  it('runSiteE2e runs the client-secret scan, the file budget, the built checks and the second build in order, then passes', async () => {
+    const tree = plantSite({ 'index.html': page('<p>closed - one lane</p>'), 'tokens.css': ':root {}' });
+    const { code, lines } = await e2e(tree);
+    expect(code).toBe(0);
+    const steps = lines.filter((line) => line.startsWith('[e2e] step '));
+    expect(steps).toEqual(['client-secrets', 'file-budget', 'built-checks', 'second-build'].map((name) => E2E_MESSAGES.step(name)));
+    expect(lines.at(-1)).toBe(E2E_MESSAGES.pass(1, 4));
+    expect(existsSync(join(tree.root, 'dist', 'site-second-build'))).toBe(false);
+  });
+
+  it('runSiteE2e fails by name when the client-secret scan exits 2 or 1', async () => {
+    const tree = plantSite({ 'index.html': page('<p>clean</p>') });
+    for (const exitCode of [2, 1]) {
+      const { code, lines } = await e2e(tree, { clientSecretsScript: stubScript(`exit-${exitCode}`, exitCode) });
+      expect(code).toBe(1);
+      expect(lines.at(-1)).toBe(E2E_MESSAGES.fail(E2E_MESSAGES.clientSecrets(exitCode)));
+    }
+  });
+
+  it('runSiteE2e fails when the second build differs from the first in one byte, naming the file', async () => {
+    const tree = plantSite({ 'index.html': page('<p>clean</p>'), 'replay/index.html': page('<p>replay</p>') });
+    const differing = copyBuild(tree.dist, (outDir) => writeFileSync(join(outDir, 'replay', 'index.html'), `${page('<p>replay</p>')} `));
+    const { code, lines } = await e2e(tree, { secondBuild: differing });
+    expect(code).toBe(1);
+    expect(lines.at(-1)).toBe(E2E_MESSAGES.fail(E2E_MESSAGES.buildDiffers('replay/index.html')));
+    expect(existsSync(join(tree.root, 'dist', 'site-second-build'))).toBe(false);
+  });
+
+  it('runSiteE2e fails when the second build does not finish', async () => {
+    const tree = plantSite({ 'index.html': page('<p>clean</p>') });
+    const { code, lines } = await e2e(tree, { secondBuild: () => ({ status: 3, output: 'astro said no' }) });
+    expect(code).toBe(1);
+    expect(lines.at(-1)).toBe(E2E_MESSAGES.fail(E2E_MESSAGES.secondBuildFailed(3, 'astro said no')));
+  });
+
+  it('compareBuilds names a page missing from either build and a sitemap that differs', () => {
+    const first = plantSite({ 'index.html': 'a', 'only-first.html': 'b', 'sitemap.xml': '<urlset/>' });
+    const second = plantSite({ 'index.html': 'a', 'only-second/index.html': 'c', 'sitemap.xml': '<urlset />' });
+    expect(compareBuilds(first.dist, second.dist)).toEqual([
+      E2E_MESSAGES.buildMissing('only-first.html', second.dist),
+      E2E_MESSAGES.buildMissing('only-second/index.html', first.dist),
+      E2E_MESSAGES.buildDiffers('sitemap.xml'),
+    ]);
+  });
+
+  it('runSiteE2e fails a dist over the file budget by name', async () => {
+    const tree = plantSite({ 'index.html': page('<p>clean</p>') });
+    const { code, lines } = await e2e(tree, { fileBudget: () => [{ kind: 'size', path: 'index.html', bytes: 26_214_400, limit: 26_214_400 }] });
+    expect(code).toBe(1);
+    expect(lines.at(-1)).toBe(E2E_MESSAGES.fail(E2E_MESSAGES.fileTooLarge('index.html', 26_214_400, 26_214_400)));
+  });
+
+  it('holds no catalogue message with the uppercase skip word', () => {
+    const samples: { readonly [K in keyof typeof E2E_MESSAGES]: Parameters<(typeof E2E_MESSAGES)[K]> } = {
+      step: ['x'], fail: ['x'], pass: [1, 4], noDist: ['d'], noPages: ['d'], finding: ['dash', '/', 't'], findings: [1, 'x'],
+      checksPass: [1], expectPass: [1], checksFail: ['x'], unregistered: ['x'], unexpected: ['x', 1], expectedMissing: ['x'],
+      clientSecrets: [2], tooManyFiles: [20_000, 20_000], fileTooLarge: ['f', 1, 1], secondBuildFailed: [1, 'x'],
+      buildDiffers: ['f'], buildMissing: ['f', 'd'],
+    };
+    const rendered = Object.entries(samples).map(([key, args]) => (E2E_MESSAGES[key as keyof typeof E2E_MESSAGES] as (...a: unknown[]) => string)(...args));
+    expect(rendered).toHaveLength(Object.keys(E2E_MESSAGES).length);
+    expect(rendered.filter((text) => SKIP_WORD.test(text))).toEqual([]);
   });
 
   it('prints the uppercase skip word in no line of any run so far', () => {

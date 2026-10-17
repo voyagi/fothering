@@ -42,6 +42,27 @@ export function dashRule(site: BuiltSite, _context: CheckContext): Finding[] {
   return site.pages.flatMap((page) => matchesIn('dash', page.route, page.text, DASHES));
 }
 
+const notYet = (_site: BuiltSite, _context: CheckContext): Finding[] => [];
+export const sesRateWordingRule = notYet;
+export const sesPercentageLinkRule = notYet;
+export const replyPromiseRule = notYet;
+export const consoleDeleteRule = notYet;
+export const unitFigureRule = notYet;
+export const bannedNameRule = notYet;
+export const regionClaimRule = notYet;
+export const exactThirtyDaysRule = notYet;
+export const preR6WordsRule = notYet;
+export const formsCookiesAnalyticsRule = notYet;
+export const thirdPartyReferenceRule = notYet;
+
+export type BudgetViolation =
+  | { readonly kind: 'count'; readonly count: number; readonly limit: number }
+  | { readonly kind: 'size'; readonly path: string; readonly bytes: number; readonly limit: number };
+
+export function checkFileBudget(_files: readonly { readonly path: string; readonly bytes: number }[]): BudgetViolation[] {
+  return [];
+}
+
 type Rule = (site: BuiltSite, context: CheckContext) => Finding[];
 
 const RULES: Readonly<Record<RuleId, Rule>> = {

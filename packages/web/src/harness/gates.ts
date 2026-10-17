@@ -12,7 +12,7 @@ import {
 } from './dev-browser.js';
 import { startPreviewServer, type PreviewServer } from './preview-server.js';
 import { filesIn, loadBuiltSite, NoBuiltPagesError, routeOf, type BuiltSite } from '../checks/built-site.js';
-import { isRegisteredRule, runBuiltChecks, type CheckContext, type Finding } from '../checks/rules.js';
+import { isRegisteredRule, runBuiltChecks, type BudgetViolation, type CheckContext, type Finding } from '../checks/rules.js';
 
 export interface ThemeSetup {
   readonly name: string;
@@ -425,7 +425,22 @@ export const E2E_MESSAGES = Object.freeze({
   unregistered: (id: string) => `${id} is not a registered rule`,
   unexpected: (id: string, count: number) => `${count} finding(s) of rule ${id}, which is neither expected nor allowed`,
   expectedMissing: (id: string) => `rule ${id} is expected and has no finding`,
+  clientSecrets: (code: number | null) => `the client-secret scan exited ${String(code)}, 0 expected`,
+  tooManyFiles: (count: number, limit: number) => `the built output holds ${count} files, fewer than ${limit} allowed`,
+  fileTooLarge: (path: string, bytes: number, limit: number) => `${path} is ${bytes} bytes, under ${limit} allowed`,
+  secondBuildFailed: (code: number | null, tail: string) => `the second build exited ${String(code)}${tail === '' ? '' : `: ${tail}`}`,
+  buildDiffers: (file: string) => `${file} differs between the two builds of one commit`,
+  buildMissing: (file: string, folder: string) => `${file} is missing from ${folder}`,
 });
+
+export interface SecondBuildRun {
+  readonly status: number | null;
+  readonly output: string;
+}
+
+export function compareBuilds(_first: string, _second: string): string[] {
+  return [];
+}
 
 // The one place the rules' context is built, so the e2e step and the built-checks subcommand can
 // never judge the same build differently.
@@ -502,6 +517,9 @@ export interface SiteE2eOptions {
   // The rendered checks of a later plan drive dev-browser from the global npm folder.
   readonly globalModules: string;
   readonly print?: (line: string) => void;
+  readonly clientSecretsScript?: string;
+  readonly fileBudget?: (files: readonly { readonly path: string; readonly bytes: number }[]) => BudgetViolation[];
+  readonly secondBuild?: (outDir: string) => SecondBuildRun;
 }
 
 export function runSiteE2e(options: SiteE2eOptions): Promise<number> {
