@@ -6,16 +6,17 @@
 export const MODEL_VALUES = {
   // EU geo inference profile, passed as the provider's modelId. A global profile routes worldwide and
   // contradicts the EU processing statement, and the bare id is not served on demand. VERIFIED, model card.
-  inferenceProfileId: 'eu.anthropic.claude-sonnet-5',
+  inferenceProfileId: 'eu.anthropic.claude-sonnet-4-6',
   // Reported in every result and used in the foundation-model IAM ARNs. VERIFIED, model card.
-  modelId: 'anthropic.claude-sonnet-5',
+  modelId: 'anthropic.claude-sonnet-4-6',
   // The profile's source Region and the Regions it may route to; the runtime role grants the profile
   // in the source and the foundation model in each destination (D-82). VERIFIED, model card; re-read
   // live at the owner checkpoint.
   sourceRegion: 'eu-central-1',
   destinationRegions: ['eu-central-1', 'eu-north-1', 'eu-south-1', 'eu-south-2', 'eu-west-1', 'eu-west-3'],
-  // No thinking field means adaptive thinking on this model, so "disabled" is sent on every call.
-  // VERIFIED, thinking page per-model table; Bedrock pass-through confirmed at the checkpoint.
+  // Sent on every call so a request never depends on a model's default; on Sonnet 4.6 no thinking field
+  // means thinking off. VERIFIED, thinking troubleshooting page, read 2026-10-17; Bedrock pass-through
+  // checked at the owner checkpoint.
   thinking: 'disabled',
   // One paragraph of at most 600 code points plus the tool-call JSON fits far below it. VERIFIED
   // within the model's limit; the fit is measured at the checkpoint.

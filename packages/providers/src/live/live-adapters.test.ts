@@ -1662,7 +1662,7 @@ describe('createLiveBedrockModel', () => {
     expect(built).toHaveLength(1);
     expect(built[0]).toEqual({
       region: 'eu-central-1',
-      modelId: 'eu.anthropic.claude-sonnet-5',
+      modelId: 'eu.anthropic.claude-sonnet-4-6',
       maxTokens: 1_024,
       stream: false,
       additionalArgs: { additionalModelRequestFields: { thinking: { type: 'disabled' } } },
@@ -1684,7 +1684,7 @@ describe('createLiveBedrockModel', () => {
 
     expect(sends.map((send) => send.name)).toEqual(['ConverseCommand', 'ConverseCommand']);
     for (const send of sends) {
-      expect(send.input.modelId).toBe('eu.anthropic.claude-sonnet-5');
+      expect(send.input.modelId).toBe('eu.anthropic.claude-sonnet-4-6');
       expect(send.input.inferenceConfig).toEqual({ maxTokens: 1_024 });
       expect(send.input.additionalModelRequestFields).toEqual({ thinking: { type: 'disabled' } });
       expect(JSON.stringify(send.input)).not.toMatch(/temperature|topP|topK|top_p|top_k/);
