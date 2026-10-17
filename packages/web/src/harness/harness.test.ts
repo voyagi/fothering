@@ -22,6 +22,8 @@ import {
   countAccepted,
   flowTabVerdict,
   flowVerdict,
+  HANG_WIDTHS,
+  hangVerdict,
   identifierBreakVerdict,
   lineVerdict,
   overlapVerdict,
@@ -51,6 +53,7 @@ import {
   type FlowReading,
   type FlowState,
   type FocusStop,
+  type HangReading,
   type LinesReading,
   type FontsReading,
   type KeyboardReport,
@@ -1094,6 +1097,26 @@ describe('flowTabVerdict (AC-E33, held-out)', () => {
   });
 });
 
+const hanging = (visibleStem: number, tagTop = 420, valveBottom = 400): HangReading => ({ route: '/', width: 1280, hanging: true, visibleStem, tagTop, valveBottom });
+
+describe('hangVerdict (UI-SPEC 8.1, the tag hung from the stem)', () => {
+  it('passes a tag hung below a clear stretch of stem', () => {
+    expect(hangVerdict(hanging(18))).toEqual({ ok: true });
+  });
+
+  it('fails a tag whose card meets the valve, leaving less than 12 px of stem', () => {
+    expect(hangVerdict(hanging(5))).toEqual({ ok: false, reason: E2E_MESSAGES.tagStuck(1280, 5) });
+  });
+
+  it('fails a tag whose tilted top edge reaches the valve', () => {
+    expect(hangVerdict(hanging(14, 398, 400))).toEqual({ ok: false, reason: E2E_MESSAGES.tagMeetsValve(1280) });
+  });
+
+  it('passes a route with no hung tag', () => {
+    expect(hangVerdict({ route: '/no-such-sheet/', width: 1280, hanging: false, visibleStem: 0, tagTop: 0, valveBottom: 0 })).toEqual({ ok: true });
+  });
+});
+
 describe('copyBuild (AC-12, AC-E10 build half)', () => {
   it('builds a project copy with an artifact whose provenance is measured and fails naming the field and the file, leaving no folder', () => {
     const artifact = JSON.parse(readFileSync(join(REPO_ROOT, 'packages', 'web', 'src', 'fixtures', 'replay-incident.json'), 'utf8')) as { events: { provenance: string }[] };
@@ -1197,7 +1220,7 @@ describe('the built checks through the CLI and the e2e step (D-150, D-151)', () 
 
   type SiteLines = Partial<Record<'THEME' | 'DEVICE' | 'PIN' | 'STORAGE', unknown>>;
   type RouteLines = Partial<Record<'SWITCH' | 'FONTS' | 'REQUESTS' | 'LINES' | 'NARROW', (route: string) => unknown>>;
-  type WidthLines = Partial<Record<'FLOW' | 'TABFLOW', (route: string, width: number) => unknown>>;
+  type WidthLines = Partial<Record<'FLOW' | 'TABFLOW' | 'HANG', (route: string, width: number) => unknown>>;
   // The planted tree's one page, then the unknown address that answers with the 404 page.
   const SITE_ROUTES = ['/', UNKNOWN_PATH];
   const healthyLines = (route: string): LinesReading => ({ route, blocks: 1, lines: ['closed - one lane'] });
@@ -1210,6 +1233,7 @@ describe('the built checks through the CLI and the e2e step (D-150, D-151)', () 
   });
   const healthyFlowLine = (route: string, width: number): FlowReading => (route === '/' ? { ...healthyFlow, route, width } : { ...stillRoute, route, width });
   const healthyTab = (route: string, width: number): unknown => ({ route, width, flows: route === '/' ? [{ flowStep: 6, nextStep: null }] : [] });
+  const healthyHang = (route: string, width: number): HangReading => (route === '/' ? { ...hanging(18), width } : { route, width, hanging: false, visibleStem: 0, tagTop: 0, valveBottom: 0 });
 
   // What a healthy site driver prints: a Dark stored on a light OS, Device following the OS with no
   // reload, Dark stored on a dark OS kept when the OS turns light, then the switch, fonts and
@@ -1223,12 +1247,13 @@ describe('the built checks through the CLI and the e2e step (D-150, D-151)', () 
       ...overrides,
     };
     const perRoute = { SWITCH: healthySwitch, FONTS: healthyFonts, REQUESTS: healthyRequests, LINES: healthyLines, NARROW: healthyNarrow, ...routeOverrides } as Required<RouteLines>;
-    const perWidth = { FLOW: healthyFlowLine, TABFLOW: healthyTab, ...widthOverrides } as Required<WidthLines>;
+    const perWidth = { FLOW: healthyFlowLine, TABFLOW: healthyTab, HANG: healthyHang, ...widthOverrides } as Required<WidthLines>;
     const printed = (check: string, value: unknown): string[] => (value === undefined ? [] : [`${check} ${JSON.stringify(value)}`]);
+    const widthsOf = (check: string): readonly number[] => (check === 'HANG' ? HANG_WIDTHS : [320, 1440]);
     return [
       ...Object.entries(checks).flatMap(([check, value]) => printed(check, value)),
       ...Object.entries(perRoute).flatMap(([check, make]) => SITE_ROUTES.flatMap((route) => printed(check, make(route)))),
-      ...Object.entries(perWidth).flatMap(([check, make]) => SITE_ROUTES.flatMap((route) => [320, 1440].flatMap((width) => printed(check, make(route, width))))),
+      ...Object.entries(perWidth).flatMap(([check, make]) => SITE_ROUTES.flatMap((route) => widthsOf(check).flatMap((width) => printed(check, make(route, width))))),
       ...consoleErrors.map((text) => `CONSOLE ${JSON.stringify({ type: 'error', text })}`),
     ];
   }
@@ -1350,6 +1375,15 @@ describe('the built checks through the CLI and the e2e step (D-150, D-151)', () 
     expect(lines).toContain(E2E_MESSAGES.renderedFailed('LINES', E2E_MESSAGES.lineTooLong('/', 81, 'a'.repeat(81))));
     expect(lines).toContain(E2E_MESSAGES.renderedFailed('NARROW', `/: ${E2E_MESSAGES.tagOverlap('fothering-bulk')}`));
     expect(lines).toContain(E2E_MESSAGES.renderedFailed('TABFLOW', `/: ${E2E_MESSAGES.flowTabLate(320)}; /: ${E2E_MESSAGES.flowTabLate(1440)}`));
+  });
+
+  it('the rendered step measures the hung tag at 320, 960, 1280 and 1440 and fails a tag stuck to the valve, naming the route and width', async () => {
+    expect(HANG_WIDTHS).toEqual([320, 960, 1280, 1440]);
+    const healthy = await e2e(renderedTree());
+    expect(healthy.lines.find((line) => line.startsWith('[e2e] rendered HANG: ok, '))).toContain('/ at 1280 px 18 px of stem');
+    const stuck = await e2e(renderedTree(), {}, { lines: siteLines({}, [], {}, { HANG: (route, width) => (route === '/' && width === 1280 ? { ...hanging(5), width } : healthyHang(route, width)) }) });
+    expect(stuck.code).toBe(1);
+    expect(stuck.lines).toContain(E2E_MESSAGES.renderedFailed('HANG', `/: ${E2E_MESSAGES.tagStuck(1280, 5)}`));
   });
 
   it('the rendered step fails a run that measured zero prose blocks, no drawing text, or no flow line for a width', async () => {
@@ -1556,7 +1590,7 @@ describe('the built checks through the CLI and the e2e step (D-150, D-151)', () 
       noProseBlocks: [], lineTooLong: ['/', 81, 'x'], identifierBreak: ['a.b', ['a', '.b']], tagOverlap: ['x'], textOutside: ['x'], noDrawingText: [],
       flowNoControl: [320], flowControlWithoutMotion: [320], flowSmallControl: [320, 40, 40], flowStillRunning: [320, 1], flowLabel: [320, ['Stop flow']],
       flowReloadRuns: [320, 1], flowReduced: [320, 1], flowStoredRunning: [320], flowStoredStopped: [320, 1], flowTabUnreached: [320], flowTabLate: [320],
-      copyBuildPassed: [], copyBuildUnnamed: ['x'], copyBuildLeft: ['d'],
+      copyBuildPassed: [], copyBuildUnnamed: ['x'], copyBuildLeft: ['d'], tagStuck: [1280, 5], tagMeetsValve: [1280],
     };
     const rendered = Object.entries(samples).map(([key, args]) => (E2E_MESSAGES[key as keyof typeof E2E_MESSAGES] as (...a: unknown[]) => string)(...args));
     expect(rendered).toHaveLength(Object.keys(E2E_MESSAGES).length);

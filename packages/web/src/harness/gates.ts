@@ -469,6 +469,23 @@ export function flowTabVerdict(reading: FlowTabReading): Verdict {
   return verdictOf(reasons);
 }
 
+// The tag's stem is checked across the 5:7 range as well as at the audit widths, since the drawing
+// is narrowest just above 960.
+export const HANG_WIDTHS = Object.freeze([320, 960, 1280, 1440]);
+
+export interface HangReading {
+  readonly route: string;
+  readonly width: number;
+  readonly hanging: boolean;
+  readonly visibleStem: number;
+  readonly tagTop: number;
+  readonly valveBottom: number;
+}
+
+export function hangVerdict(_reading: HangReading): Verdict {
+  return { ok: true };
+}
+
 const NOT_FOUND_LOAD = /^Failed to load resource: the server responded with a status of 404\b/;
 
 // Chromium logs the unknown address's own 404 as a console error; that answer is the 404 page
@@ -898,6 +915,8 @@ export const E2E_MESSAGES = Object.freeze({
   copyBuildPassed: () => 'the project copy with an artifact whose provenance is measured built, and a broken artifact must fail the build',
   copyBuildUnnamed: (tail: string) => `the project copy with a broken artifact failed without naming the artifact file and its events or provenance field: ${tail}`,
   copyBuildLeft: (folder: string) => `the project copy folder ${folder} is still on disk after the build`,
+  tagStuck: (width: number, stem: number) => `at ${width} px the lockout tag shows ${stem} px of stem below the closed valve, 12 at least, so it reads as stuck, not hung`,
+  tagMeetsValve: (width: number) => `at ${width} px the lockout tag's tilted top edge reaches the closed valve`,
 });
 
 export interface SecondBuildRun {
