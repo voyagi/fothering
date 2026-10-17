@@ -1,3 +1,4 @@
+import type { EventEmitter } from 'node:events';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -14,18 +15,18 @@ export interface CliIo {
 
 const VALUE_OPTIONS = new Set(['--repo-root', '--global-modules', '--dist']);
 
-function waitForSignal(): Promise<void> {
+export function waitForSignal(source: EventEmitter = process): Promise<void> {
   return new Promise((resolveStop) => {
-    process.once('SIGINT', () => resolveStop());
-    process.once('SIGTERM', () => resolveStop());
+    source.once('SIGINT', () => resolveStop());
+    source.once('SIGTERM', () => resolveStop());
   });
 }
 
-const processIo: CliIo = {
+export const PROCESS_IO: CliIo = {
   out: (line) => console.log(line),
   err: (line) => console.error(line),
   homeDir: homedir(),
-  waitForStop: waitForSignal,
+  waitForStop: () => waitForSignal(),
 };
 
 function parseOptions(args: readonly string[]): Map<string, string> | string {
@@ -56,7 +57,7 @@ async function preview(options: Map<string, string>, repoRoot: string, io: CliIo
   return 0;
 }
 
-export async function main(argv: readonly string[], io: CliIo = processIo): Promise<number> {
+export async function main(argv: readonly string[], io: CliIo = PROCESS_IO): Promise<number> {
   const [subcommand, ...rest] = argv;
   const options = parseOptions(rest);
   if (typeof options === 'string') {

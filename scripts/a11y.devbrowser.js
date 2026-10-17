@@ -8,8 +8,8 @@ const page = await browser.newPage();
 await page.setViewportSize({ width: JOB.width, height: JOB.height });
 await page.emulateMedia({ colorScheme: JOB.osScheme, reducedMotion: 'reduce' });
 
-// The theme is pinned by storage and a second navigation, never addInitScript, which crashes
-// dev-browser 0.2.9 in every form. The page's own head script reads storage on the next load.
+// The theme is pinned by storage and a second navigation, never the page init-script API, which
+// crashes dev-browser 0.2.9 in every form. The page's own head script reads storage on the next load.
 await page.goto(JOB.base + JOB.routes[0], { waitUntil: 'load' });
 await page.evaluate((stored) => {
   localStorage.clear();

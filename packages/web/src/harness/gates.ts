@@ -242,11 +242,12 @@ export function routesFromDist(dist: string): string[] {
     }
   };
   visit(dist);
-  return files.sort().map((file) => {
+  // Sorted as routes, not file paths, so / leads and the driver pins the theme on the landing page.
+  return files.map((file) => {
     if (file === 'index.html') return '/';
     if (file.endsWith('/index.html')) return `/${file.slice(0, -'index.html'.length)}`;
     return `/${file.slice(0, -'.html'.length)}`;
-  });
+  }).sort();
 }
 
 interface RunResult {
@@ -332,7 +333,11 @@ async function auditOne(context: AuditContext, theme: ThemeSetup, width: number)
     rules: AXE_CONFIG.enabledRules,
   };
   const written = writeDriver(context.prepared.templatePath, job, join(context.workDir, `a11y-${theme.name}-${width}.js`));
-  if (!written.ok) return { failures: [A11Y_MESSAGES.templateTokens(context.prepared.templatePath, written.tokens)], audits: 0 };
+  if (!written.ok) {
+    const failure = A11Y_MESSAGES.templateTokens(context.prepared.templatePath, written.tokens);
+    context.print(`[a11y] ${failure}`);
+    return { failures: [failure], audits: 0 };
+  }
   const run = await runDriver({
     launcher: context.prepared.launcher,
     driverPath: written.path,

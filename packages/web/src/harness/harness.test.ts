@@ -1,8 +1,9 @@
+import { EventEmitter } from 'node:events';
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { afterAll, describe, expect, it } from 'vitest';
-import { main, type CliIo } from './cli.js';
+import { afterAll, describe, expect, it, vi } from 'vitest';
+import { main, PROCESS_IO, waitForSignal, type CliIo } from './cli.js';
 import { DRIVER_JOB_TOKEN, runDriver, stageAxeSource, writeDriver } from './dev-browser.js';
 import {
   A11Y_MESSAGES,
@@ -65,6 +66,7 @@ else {
     console.log('AUDIT ' + JSON.stringify(line));
   }
   if (scenario.malformed) console.log('AUDIT {not json');
+  if (scenario.incomplete) console.log('AUDIT ' + JSON.stringify({ route: job.routes[0], status: 200, axe: { version: '4.14.0', selected: ['target-size', 'label-content-name-mismatch'], ran: ['target-size', 'label-content-name-mismatch'], violations: [], incomplete: [{ id: 'color-contrast', nodes: [{ target: 'p', summary: '' }] }] }, keyboard: { focusables: [stop], positiveTabindex: [], walk: [{ ...stop, outlineStyle: 'auto', outlineWidth: '1px', boxShadow: 'none' }] }, overflow: { scrollWidth: job.width, innerWidth: job.width } }));
   if (!scenario.omitDone) console.log('done');
   process.exit(scenario.exitCode === undefined ? 0 : scenario.exitCode);
 }
@@ -76,6 +78,7 @@ interface Scenario {
   readonly exitCode?: number;
   readonly hang?: boolean;
   readonly malformed?: boolean;
+  readonly incomplete?: boolean;
 }
 
 interface Planted {
@@ -202,6 +205,12 @@ describe('runA11yLive refuses every empty or broken run by name', () => {
     const malformed = await audit(plantRepo({ scenario: { malformed: true } }));
     expect(malformed.code).toBe(1);
     expect(malformed.lines).toContain(`[a11y] ${A11Y_MESSAGES.malformedAudit('light 320px', 'AUDIT {not json')}`);
+  });
+
+  it('fails an incomplete axe result that is not on the accepted list', async () => {
+    const { code, lines } = await audit(plantRepo({ scenario: { incomplete: true } }));
+    expect(code).toBe(1);
+    expect(lines).toContain(A11Y_MESSAGES.routeFailed('/', 'light 320px', [A11Y_MESSAGES.incomplete('color-contrast', 1, 'p')]));
   });
 
   it('fails a route the driver printed no AUDIT line for', async () => {
@@ -544,6 +553,22 @@ describe('cli main', () => {
     const io: CliIo = { out: (line) => out.push(line), err: () => undefined, homeDir: planted.homeDir, waitForStop: () => Promise.resolve() };
     expect(await main(['a11y', '--repo-root', planted.repoRoot, '--global-modules', planted.globalModules], io)).toBe(0);
     expect(out.at(-1)).toBe(A11Y_MESSAGES.pass(2, 2, 3, 0));
+  });
+
+  it('the process io writes to the console and the preview stops on SIGINT or SIGTERM', async () => {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    PROCESS_IO.out('to stdout');
+    PROCESS_IO.err('to stderr');
+    expect([log.mock.calls, error.mock.calls]).toEqual([[['to stdout']], [['to stderr']]]);
+    log.mockRestore();
+    error.mockRestore();
+    for (const signal of ['SIGINT', 'SIGTERM']) {
+      const source = new EventEmitter();
+      const stopped = waitForSignal(source);
+      source.emit(signal);
+      await expect(stopped, signal).resolves.toBeUndefined();
+    }
   });
 
   it('refuses a missing repo root, a missing global folder, an unknown subcommand and a stray option', async () => {

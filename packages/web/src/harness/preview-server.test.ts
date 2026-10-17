@@ -178,10 +178,16 @@ describe('startPreviewServer refuses what it does not implement', () => {
   });
 
   it('rejects a malformed _headers line by name', async () => {
-    for (const [name, text] of [['orphan', '  X-A: b\n'], ['no-colon', '/*\n  X-A b\n'], ['detach', '/*\n  ! X-A\n']]) {
+    const cases: readonly (readonly [string, string])[] = [['orphan', '  X-A: b\n'], ['no-colon', '/*\n  X-A b\n'], ['detach', '/*\n  ! X-A\n']];
+    for (const [name, text] of cases) {
       const site = plantSite(`headers-${name}`, { 'index.html': 'x', '_headers': text });
       await expect(startPreviewServer({ distDir: site.dist, wranglerConfigPath: site.config }), name).rejects.toThrow(/expected an indented "Name: value" line/);
     }
+  });
+
+  it('passes on a _headers read failure other than a missing file', async () => {
+    const site = plantSite('headers-folder', { 'index.html': 'x', '_headers/inner.txt': 'y' });
+    await expect(startPreviewServer({ distDir: site.dist, wranglerConfigPath: site.config })).rejects.toThrow(/EISDIR/);
   });
 
   it('rejects a wrangler.jsonc with html_handling none by name', async () => {

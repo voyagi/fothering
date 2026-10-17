@@ -93,9 +93,10 @@ export default [
       'vitest/no-identical-title': 'error',
     },
   },
-  // Browser API support is checked on site code only: on Node code the plugin flags valid syntax.
+  // Browser API support is checked on the site's browser files only: on Node code, the harness and
+  // build-time modules included, the plugin flags valid syntax.
   {
-    files: ['apps/web/src/**/*.{ts,tsx,js,jsx,mjs}', '**/*.{jsx,tsx}'],
+    files: ['packages/web/src/client/**/*.{ts,js}', '**/*.{jsx,tsx}'],
     ignores: TEST_FILES,
     languageOptions: { ...tsParser },
     plugins: { compat },
