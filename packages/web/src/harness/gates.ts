@@ -200,6 +200,59 @@ export function consoleVerdict(errors: readonly string[]): Verdict {
   return { ok: false, reason: csp === undefined ? E2E_MESSAGES.consoleError(first) : E2E_MESSAGES.cspViolation(csp) };
 }
 
+export interface ChosenTheme {
+  readonly choice: string;
+  readonly stored: string | null;
+  readonly reloadedTheme: string | null;
+  readonly reloadedChecked: string | null;
+}
+
+export interface SwitchReading {
+  readonly route: string;
+  readonly deviceStored: string | null;
+  readonly chosen: readonly ChosenTheme[];
+  readonly osFlip: { readonly light: string; readonly dark: string };
+  readonly invalid: readonly { readonly stored: string; readonly checked: string | null }[];
+  readonly domOrder: readonly string[];
+  readonly boxOrders: readonly { readonly width: number; readonly order: readonly string[] }[];
+  readonly arrow: { readonly before: string | null; readonly after: string | null };
+}
+
+export interface FontsReading {
+  readonly route: string;
+  readonly families: readonly { readonly family: string; readonly loaded: boolean; readonly check: boolean }[];
+  readonly control: { readonly family: string; readonly present: boolean };
+}
+
+export interface RequestsReading {
+  readonly route: string;
+  readonly page: string;
+  readonly requests: readonly string[];
+}
+
+export interface StorageReading {
+  readonly local: readonly string[];
+  readonly session: readonly string[];
+}
+
+export const SITE_FAMILIES = Object.freeze(['Red Hat Display', 'Red Hat Text', 'Red Hat Mono']);
+
+export function switchVerdict(_reading: SwitchReading): Verdict {
+  return { ok: true };
+}
+
+export function fontsVerdict(_reading: FontsReading): Verdict {
+  return { ok: true };
+}
+
+export function requestsVerdict(_reading: RequestsReading): Verdict {
+  return { ok: true };
+}
+
+export function storageVerdict(_reading: StorageReading): Verdict {
+  return { ok: true };
+}
+
 export function overflowVerdict(scrollWidth: number, viewportWidth: number): Verdict {
   return scrollWidth <= viewportWidth ? { ok: true } : { ok: false, reason: A11Y_MESSAGES.overflow(scrollWidth, viewportWidth) };
 }
@@ -574,6 +627,28 @@ export const E2E_MESSAGES = Object.freeze({
   renderedMissing: (check: string) => `the driver printed no ${check} line, so the check did not run`,
   renderedMalformed: (text: string) => `the line is not a valid record: ${text.slice(0, 120)}`,
   renderedFailures: (count: number, first: string) => `${count} rendered check(s) failed; first: ${first}`,
+  renderedMissingRoute: (check: string, route: string) => `the driver printed no ${check} line for ${route}, so the check did not run there`,
+  deviceStored: (stored: string) => `choosing Device left fothering-theme ${stored} stored, and Device stores nothing`,
+  choiceMissing: (choice: string) => `the switch run never chose ${choice}`,
+  choiceNotStored: (choice: string, stored: string | null) => `choosing ${choice} stored ${stored ?? 'nothing'}, ${choice} expected`,
+  choiceNotKept: (choice: string, theme: string | null, checked: string | null) =>
+    `the ${choice} choice did not survive a reload: data-theme ${theme ?? 'absent'}, ${checked ?? 'no'} radio checked`,
+  osNotFollowed: (light: string, dark: string, wantedLight: string, wantedDark: string) =>
+    `with Device chosen, --ground read ${light} on a light OS and ${dark} on a dark OS, ${wantedLight} and ${wantedDark} expected`,
+  invalidMissing: (value: string) => `the switch run never tried the stored value ${JSON.stringify(value)}`,
+  invalidChecked: (value: string, checked: string | null) => `a stored ${JSON.stringify(value)} left the ${checked ?? 'no'} radio checked, device expected`,
+  domOrder: (order: readonly string[]) => `the theme radios sit ${order.join(', ') || 'nowhere'} in DOM order; device, light, dark expected`,
+  boxOrder: (width: number, order: readonly string[]) => `at ${width} px the theme radios sit ${order.join(', ') || 'nowhere'} left to right; device, light, dark expected`,
+  noBoxOrder: () => 'the switch run measured no box order, so the visual order is unknown',
+  arrowStill: (theme: string | null) => `ArrowRight inside the theme group left data-theme ${theme ?? 'absent'}`,
+  fontMissing: (family: string) => `document.fonts holds no ${family} face`,
+  fontNotLoaded: (family: string) => `no ${family} face has loaded`,
+  fontCheckFalse: (family: string) => `document.fonts.check is false for ${family}`,
+  fontControl: (family: string) => `the undeclared control family ${family} reads present, so the font check proves nothing`,
+  noRequests: () => 'the page recorded no request, so where its requests went is unknown',
+  foreignRequest: (page: string, origins: readonly string[]) => `request(s) left the page's origin ${page}: ${origins.join(', ')}`,
+  storageKeys: (keys: readonly string[]) => `storage holds ${keys.join(', ')}; only fothering-theme and fothering-flow in localStorage are allowed`,
+  sizeLimit: (status: number | null) => `size-limit exited ${String(status)}, 0 expected; the client scripts are over the budget in packages/web/package.json or were not measured`,
 });
 
 export interface SecondBuildRun {
@@ -693,6 +768,12 @@ export interface SiteE2eOptions {
   readonly clientSecretsScript?: string;
   readonly fileBudget?: (files: readonly { readonly path: string; readonly bytes: number }[]) => BudgetViolation[];
   readonly secondBuild?: (outDir: string) => SecondBuildRun;
+  readonly sizeLimit?: () => SizeRun;
+}
+
+export interface SizeRun {
+  readonly status: number | null;
+  readonly output: string;
 }
 
 const printOutput = (print: (line: string) => void, output: string): void => {

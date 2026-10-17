@@ -19,21 +19,31 @@ import {
   compareBuilds,
   consoleVerdict,
   deviceVerdict,
+  fontsVerdict,
   keyboardVerdict,
   loadCheckContext,
   overflowVerdict,
   pinVerdict,
+  requestsVerdict,
   routesFromDist,
   runA11yLive,
   runSiteE2e,
+  SITE_FAMILIES,
+  storageVerdict,
   storedThemeVerdict,
+  switchVerdict,
   tookHoldVerdict,
+  UNKNOWN_PATH,
   type AuditLine,
   type AxeReport,
   type FocusStop,
+  type FontsReading,
   type KeyboardReport,
+  type RequestsReading,
   type SecondBuildRun,
   type SiteE2eOptions,
+  type SizeRun,
+  type SwitchReading,
   type ThemeReading,
 } from './gates.js';
 
@@ -620,6 +630,148 @@ describe('the rendered theme verdicts (D-131, AC-42, AC-E28, C5)', () => {
   });
 });
 
+const THEME_ORDER = ['device', 'light', 'dark'];
+const BASE = 'http://127.0.0.1:4000';
+
+function healthySwitch(route: string): SwitchReading {
+  return {
+    route,
+    deviceStored: null,
+    chosen: ['light', 'dark'].map((choice) => ({ choice, stored: choice, reloadedTheme: choice, reloadedChecked: choice })),
+    osFlip: { light: LIGHT_GROUND, dark: DARK_GROUND },
+    invalid: ['blue', '', 'DARK'].map((stored) => ({ stored, checked: 'device' })),
+    domOrder: THEME_ORDER,
+    boxOrders: [320, 1440].map((width) => ({ width, order: THEME_ORDER })),
+    arrow: { before: null, after: 'light' },
+  };
+}
+
+const healthyFonts = (route: string): FontsReading => ({
+  route,
+  families: SITE_FAMILIES.map((family) => ({ family, loaded: true, check: true })),
+  control: { family: 'Fothering Undeclared Face', present: false },
+});
+
+const healthyRequests = (route: string): RequestsReading => ({
+  route,
+  page: `${BASE}${route}`,
+  requests: [`${BASE}${route}`, `${BASE}/tokens.css`, `${BASE}/_astro/Sheet.css`, `${BASE}/_astro/Sheet.js`, `${BASE}/_astro/red-hat-text-latin-wght-normal.woff2`],
+});
+
+const failed = (reason: string): { ok: false; reason: string } => ({ ok: false, reason });
+
+describe('switchVerdict (AC-41, AC-E29, AC-E30)', () => {
+  it('passes a switch that stores, keeps, orders and follows as R8 locks it', () => {
+    expect(switchVerdict(healthySwitch('/'))).toEqual({ ok: true });
+  });
+
+  it('fails when choosing Device leaves the stored key', () => {
+    expect(switchVerdict({ ...healthySwitch('/'), deviceStored: 'dark' })).toEqual(failed(E2E_MESSAGES.deviceStored('dark')));
+  });
+
+  it('fails when Light or Dark is not stored, or was never chosen', () => {
+    const chosen = healthySwitch('/').chosen.map((entry) => (entry.choice === 'light' ? { ...entry, stored: null } : entry));
+    expect(switchVerdict({ ...healthySwitch('/'), chosen })).toEqual(failed(E2E_MESSAGES.choiceNotStored('light', null)));
+    const onlyLight = healthySwitch('/').chosen.filter((entry) => entry.choice === 'light');
+    expect(switchVerdict({ ...healthySwitch('/'), chosen: onlyLight })).toEqual(failed(E2E_MESSAGES.choiceMissing('dark')));
+  });
+
+  it('fails when a Light or Dark choice is not kept after a reload', () => {
+    const chosen = healthySwitch('/').chosen.map((entry) => (entry.choice === 'dark' ? { ...entry, reloadedTheme: null, reloadedChecked: 'device' } : entry));
+    expect(switchVerdict({ ...healthySwitch('/'), chosen })).toEqual(failed(E2E_MESSAGES.choiceNotKept('dark', null, 'device')));
+  });
+
+  it('fails when, with Device chosen, an OS change does not change --ground', () => {
+    expect(switchVerdict({ ...healthySwitch('/'), osFlip: { light: LIGHT_GROUND, dark: LIGHT_GROUND } }))
+      .toEqual(failed(E2E_MESSAGES.osNotFollowed(LIGHT_GROUND, LIGHT_GROUND, LIGHT_GROUND, DARK_GROUND)));
+  });
+
+  it.each(['blue', '', 'DARK'])('fails when a stored %j leaves a radio other than Device checked', (value) => {
+    const invalid = healthySwitch('/').invalid.map((entry) => (entry.stored === value ? { ...entry, checked: 'dark' } : entry));
+    expect(switchVerdict({ ...healthySwitch('/'), invalid })).toEqual(failed(E2E_MESSAGES.invalidChecked(value, 'dark')));
+  });
+
+  it('fails when an invalid stored value was never tried', () => {
+    const invalid = healthySwitch('/').invalid.filter((entry) => entry.stored !== 'DARK');
+    expect(switchVerdict({ ...healthySwitch('/'), invalid })).toEqual(failed(E2E_MESSAGES.invalidMissing('DARK')));
+  });
+
+  it('fails when the DOM order differs from Device, Light, Dark', () => {
+    expect(switchVerdict({ ...healthySwitch('/'), domOrder: ['light', 'device', 'dark'] })).toEqual(failed(E2E_MESSAGES.domOrder(['light', 'device', 'dark'])));
+  });
+
+  it('fails when the left-to-right box order at a width differs, and when no box order was measured', () => {
+    const boxOrders = [{ width: 320, order: THEME_ORDER }, { width: 1440, order: ['dark', 'light', 'device'] }];
+    expect(switchVerdict({ ...healthySwitch('/'), boxOrders })).toEqual(failed(E2E_MESSAGES.boxOrder(1440, ['dark', 'light', 'device'])));
+    expect(switchVerdict({ ...healthySwitch('/'), boxOrders: [] })).toEqual(failed(E2E_MESSAGES.noBoxOrder()));
+  });
+
+  it('fails when ArrowRight inside the group does not change data-theme', () => {
+    expect(switchVerdict({ ...healthySwitch('/'), arrow: { before: null, after: null } })).toEqual(failed(E2E_MESSAGES.arrowStill(null)));
+  });
+
+  it('names every failure of one reading, not only the first', () => {
+    const verdict = switchVerdict({ ...healthySwitch('/'), deviceStored: 'light', arrow: { before: 'dark', after: 'dark' } });
+    expect(verdict).toEqual(failed(`${E2E_MESSAGES.deviceStored('light')}; ${E2E_MESSAGES.arrowStill('dark')}`));
+  });
+});
+
+describe('fontsVerdict (D-135, AC-59 rendered half)', () => {
+  it('passes when each of the three families has a loaded face and a true check, and the control reads absent', () => {
+    expect(fontsVerdict(healthyFonts('/'))).toEqual({ ok: true });
+  });
+
+  it('fails a family with no face in document.fonts', () => {
+    const families = healthyFonts('/').families.filter((entry) => entry.family !== 'Red Hat Mono');
+    expect(fontsVerdict({ ...healthyFonts('/'), families })).toEqual(failed(E2E_MESSAGES.fontMissing('Red Hat Mono')));
+  });
+
+  it('fails a family whose faces have not loaded, and one whose check is false', () => {
+    const notLoaded = healthyFonts('/').families.map((entry) => (entry.family === 'Red Hat Display' ? { ...entry, loaded: false } : entry));
+    expect(fontsVerdict({ ...healthyFonts('/'), families: notLoaded })).toEqual(failed(E2E_MESSAGES.fontNotLoaded('Red Hat Display')));
+    const unchecked = healthyFonts('/').families.map((entry) => (entry.family === 'Red Hat Text' ? { ...entry, check: false } : entry));
+    expect(fontsVerdict({ ...healthyFonts('/'), families: unchecked })).toEqual(failed(E2E_MESSAGES.fontCheckFalse('Red Hat Text')));
+  });
+
+  it('fails when the undeclared control family reads present', () => {
+    expect(fontsVerdict({ ...healthyFonts('/'), control: { family: 'Fothering Undeclared Face', present: true } })).toEqual(failed(E2E_MESSAGES.fontControl('Fothering Undeclared Face')));
+  });
+});
+
+describe('requestsVerdict (AC-57, AC-E52)', () => {
+  it('passes when every request comes from the page origin', () => {
+    expect(requestsVerdict(healthyRequests('/'))).toEqual({ ok: true });
+  });
+
+  it('fails a request to another origin, protocol-relative ones resolved included', () => {
+    const reading = { ...healthyRequests('/'), requests: [...healthyRequests('/').requests, 'https://fonts.gstatic.com/s/x.woff2', 'http://127.0.0.1:4001/x.js'] };
+    expect(requestsVerdict(reading)).toEqual(failed(E2E_MESSAGES.foreignRequest(BASE, ['http://127.0.0.1:4001', 'https://fonts.gstatic.com'])));
+  });
+
+  it('gives the same verdict for the same requests in another order', () => {
+    const requests = [...healthyRequests('/').requests, 'https://fonts.gstatic.com/s/x.woff2', 'http://127.0.0.1:4001/x.js'];
+    const forward = requestsVerdict({ ...healthyRequests('/'), requests });
+    expect(forward.ok).toBe(false);
+    expect(requestsVerdict({ ...healthyRequests('/'), requests: [...requests].reverse() })).toEqual(forward);
+    expect(requestsVerdict({ ...healthyRequests('/'), requests: [...healthyRequests('/').requests].reverse() })).toEqual({ ok: true });
+  });
+
+  it('fails a page that recorded no request at all', () => {
+    expect(requestsVerdict({ ...healthyRequests('/'), requests: [] })).toEqual(failed(E2E_MESSAGES.noRequests()));
+  });
+});
+
+describe('storageVerdict (AC-22, D-141)', () => {
+  it('passes fothering-theme and fothering-flow in localStorage', () => {
+    expect(storageVerdict({ local: ['fothering-theme', 'fothering-flow'], session: [] })).toEqual({ ok: true });
+  });
+
+  it('fails a localStorage key outside the two, and any sessionStorage key', () => {
+    expect(storageVerdict({ local: ['fothering-theme', 'tracking-id'], session: [] })).toEqual(failed(E2E_MESSAGES.storageKeys(['tracking-id'])));
+    expect(storageVerdict({ local: [], session: ['fothering-theme'] })).toEqual(failed(E2E_MESSAGES.storageKeys(['session:fothering-theme'])));
+  });
+});
+
 describe('routesFromDist', () => {
   it('maps every built page except 404.html to its Workers route, sorted', () => {
     const planted = plantRepo({ pages: { 'index.html': 'a', 'replay/index.html': 'b', 'privacy.html': 'c', '404.html': 'd', 'replay/404.html': 'e', 'tokens.css': 'f' } });
@@ -826,7 +978,7 @@ describe('the built checks through the CLI and the e2e step (D-150, D-151)', () 
   it('the e2e step and the built-checks subcommand judge one build with equal contexts', async () => {
     expect(loadCheckContext(dashed.root)).toEqual(loadCheckContext(dashed.root));
     const e2eLines: string[] = [];
-    expect(await runSiteE2e({ repoRoot: dashed.root, globalModules: dashed.root, print: (line) => e2eLines.push(line), clientSecretsScript: SECRETS_SCRIPT })).toBe(1);
+    expect(await runSiteE2e({ repoRoot: dashed.root, globalModules: dashed.root, print: (line) => e2eLines.push(line), clientSecretsScript: SECRETS_SCRIPT, sizeLimit: passingSize })).toBe(1);
     const { out } = await builtChecks(dashed.dist);
     const findingLines = (lines: readonly string[]): string[] => lines.filter((line) => line.startsWith('[built-checks] dash '));
     expect(findingLines(e2eLines)).toEqual(findingLines(out));
@@ -848,22 +1000,31 @@ describe('the built checks through the CLI and the e2e step (D-150, D-151)', () 
     return { status: 0, output: '' };
   };
 
-  type SiteLines = Partial<Record<'THEME' | 'DEVICE' | 'PIN', unknown>>;
+  type SiteLines = Partial<Record<'THEME' | 'DEVICE' | 'PIN' | 'STORAGE', unknown>>;
+  type RouteLines = Partial<Record<'SWITCH' | 'FONTS' | 'REQUESTS', (route: string) => unknown>>;
+  // The planted tree's one page, then the unknown address that answers with the 404 page.
+  const SITE_ROUTES = ['/', UNKNOWN_PATH];
 
   // What a healthy site driver prints: a Dark stored on a light OS, Device following the OS with no
-  // reload, and Dark stored on a dark OS kept when the OS turns light.
-  function siteLines(overrides: SiteLines = {}, consoleErrors: readonly string[] = []): string[] {
+  // reload, Dark stored on a dark OS kept when the OS turns light, then the switch, fonts and
+  // requests of every route and the storage keys left after using the switch.
+  function siteLines(overrides: SiteLines = {}, consoleErrors: readonly string[] = [], routeOverrides: RouteLines = {}): string[] {
     const checks: SiteLines = {
       THEME: DARK_PINNED,
       DEVICE: { dark: reading(null, DARK_GROUND), light: reading(null, LIGHT_GROUND) },
       PIN: { before: DARK_PINNED, after: DARK_PINNED },
+      STORAGE: { local: ['fothering-theme'], session: [] },
       ...overrides,
     };
+    const perRoute: Required<RouteLines> = { SWITCH: healthySwitch, FONTS: healthyFonts, REQUESTS: healthyRequests, ...routeOverrides } as Required<RouteLines>;
     return [
       ...Object.entries(checks).filter(([, value]) => value !== undefined).map(([check, value]) => `${check} ${JSON.stringify(value)}`),
+      ...Object.entries(perRoute).flatMap(([check, make]) => SITE_ROUTES.map((route) => make(route)).filter((value) => value !== undefined).map((value) => `${check} ${JSON.stringify(value)}`)),
       ...consoleErrors.map((text) => `CONSOLE ${JSON.stringify({ type: 'error', text })}`),
     ];
   }
+
+  const passingSize = (): SizeRun => ({ status: 0, output: '  Size limit: 2 kB\n  Size:       688 B brotlied' });
 
   // The rendered step needs a launcher, the Workers config and the driver template under the planted
   // root; the stand-in launcher only reads the job out of the written driver and prints the lines.
@@ -878,7 +1039,7 @@ describe('the built checks through the CLI and the e2e step (D-150, D-151)', () 
   async function e2e(tree: ReturnType<typeof plantDist>, extra: Partial<SiteE2eOptions> = {}, site?: SiteScenario): Promise<{ code: number; lines: string[] }> {
     const lines: string[] = [];
     const globalModules = plantBrowser(tree, site);
-    const code = await runSiteE2e({ repoRoot: tree.root, globalModules, print: (line) => lines.push(line), clientSecretsScript: SECRETS_SCRIPT, secondBuild: copyBuild(tree.dist), ...extra });
+    const code = await runSiteE2e({ repoRoot: tree.root, globalModules, print: (line) => lines.push(line), clientSecretsScript: SECRETS_SCRIPT, secondBuild: copyBuild(tree.dist), sizeLimit: passingSize, ...extra });
     allOutput.push(...lines);
     return { code, lines };
   }
@@ -891,33 +1052,75 @@ describe('the built checks through the CLI and the e2e step (D-150, D-151)', () 
     return path;
   }
 
-  it('runSiteE2e runs the client-secret scan, the file budget, the built checks, the second build and the rendered checks in order, then passes', async () => {
+  it('runSiteE2e runs the client-secret scan, the file budget, the size budget, the built checks, the second build and the rendered checks in order, then passes', async () => {
     const tree = renderedTree();
     const { code, lines } = await e2e(tree);
     expect(code).toBe(0);
     const steps = lines.filter((line) => line.startsWith('[e2e] step '));
-    expect(steps).toEqual(['client-secrets', 'file-budget', 'built-checks', 'second-build', 'rendered'].map((name) => E2E_MESSAGES.step(name)));
-    expect(lines.at(-1)).toBe(E2E_MESSAGES.pass(1, 5));
+    expect(steps).toEqual(['client-secrets', 'file-budget', 'size', 'built-checks', 'second-build', 'rendered'].map((name) => E2E_MESSAGES.step(name)));
+    expect(lines.at(-1)).toBe(E2E_MESSAGES.pass(1, 6));
     expect(existsSync(join(tree.root, 'dist', 'site-second-build'))).toBe(false);
   });
 
-  it('the rendered step prints one ok line per THEME, DEVICE, PIN and CONSOLE check', async () => {
+  it('the size step passes on a size-limit exit of 0 and prints what it measured', async () => {
     const { code, lines } = await e2e(renderedTree());
     expect(code).toBe(0);
-    expect(lines.filter((line) => line.startsWith('[e2e] rendered '))).toEqual([
+    expect(lines).toContain('Size:       688 B brotlied');
+    expect(lines).toContain(E2E_MESSAGES.step('size'));
+  });
+
+  it('the size step fails when size-limit exits non-zero, before the built checks run', async () => {
+    const { code, lines } = await e2e(renderedTree(), { sizeLimit: () => ({ status: 1, output: 'Package size limit has exceeded by 188 B' }) });
+    expect(code).toBe(1);
+    expect(lines).toContain('Package size limit has exceeded by 188 B');
+    expect(lines.at(-1)).toBe(E2E_MESSAGES.fail(E2E_MESSAGES.sizeLimit(1)));
+    expect(lines).not.toContain(E2E_MESSAGES.step('built-checks'));
+  });
+
+  it('the rendered step prints one ok line per check, the switch, fonts and requests lines naming every route', async () => {
+    const { code, lines } = await e2e(renderedTree());
+    expect(code).toBe(0);
+    const rendered = lines.filter((line) => line.startsWith('[e2e] rendered '));
+    expect(rendered.slice(0, 3)).toEqual([
       E2E_MESSAGES.renderedOk('THEME', `Dark stored on a light OS painted --ground ${DARK_GROUND}`),
       E2E_MESSAGES.renderedOk('DEVICE', `--ground followed the OS from ${DARK_GROUND} to ${LIGHT_GROUND} with no reload`),
       E2E_MESSAGES.renderedOk('PIN', `Dark stored on a dark OS kept --ground ${DARK_GROUND} after the OS turned light`),
-      E2E_MESSAGES.renderedOk('CONSOLE', 'no console error, no Content Security Policy violation'),
     ]);
+    for (const check of ['SWITCH', 'FONTS', 'REQUESTS']) {
+      const line = rendered.find((text) => text.startsWith(`[e2e] rendered ${check}: ok, `));
+      expect(line, check).toBeDefined();
+      for (const route of SITE_ROUTES) expect(line, `${check} ${route}`).toContain(route);
+    }
+    expect(rendered.find((text) => text.startsWith('[e2e] rendered STORAGE: ok, '))).toContain('fothering-theme');
+    expect(rendered.at(-1)).toBe(E2E_MESSAGES.renderedOk('CONSOLE', 'no console error, no Content Security Policy violation'));
   });
 
-  it('the rendered step serves the planted dist on 127.0.0.1 and hands the driver its base URL and the landing route', async () => {
+  it('the rendered step fails a route whose switch, fonts or requests verdict fails, naming the route', async () => {
+    const switchFails = await e2e(renderedTree(), {}, { lines: siteLines({}, [], { SWITCH: (route) => ({ ...healthySwitch(route), deviceStored: route === UNKNOWN_PATH ? 'dark' : null }) }) });
+    expect(switchFails.code).toBe(1);
+    expect(switchFails.lines).toContain(E2E_MESSAGES.renderedFailed('SWITCH', `${UNKNOWN_PATH}: ${E2E_MESSAGES.deviceStored('dark')}`));
+    const fontsFail = await e2e(renderedTree(), {}, { lines: siteLines({}, [], { FONTS: (route) => ({ ...healthyFonts(route), control: { family: 'x', present: true } }) }) });
+    expect(fontsFail.lines).toContain(E2E_MESSAGES.renderedFailed('FONTS', `/: ${E2E_MESSAGES.fontControl('x')}; ${UNKNOWN_PATH}: ${E2E_MESSAGES.fontControl('x')}`));
+    const foreign = (route: string): RequestsReading => ({ ...healthyRequests(route), requests: [...healthyRequests(route).requests, 'https://fonts.gstatic.com/s/x.woff2'] });
+    const requestsFail = await e2e(renderedTree(), {}, { lines: siteLines({}, [], { REQUESTS: foreign }) });
+    expect(requestsFail.lines).toContain(E2E_MESSAGES.renderedFailed('REQUESTS', `/: ${E2E_MESSAGES.foreignRequest(BASE, ['https://fonts.gstatic.com'])}; ${UNKNOWN_PATH}: ${E2E_MESSAGES.foreignRequest(BASE, ['https://fonts.gstatic.com'])}`));
+  });
+
+  it('the rendered step fails a route with no switch, fonts or requests line, and a storage key outside the two', async () => {
+    const missing = await e2e(renderedTree(), {}, { lines: siteLines({}, [], { FONTS: (route) => (route === '/' ? healthyFonts(route) : undefined) }) });
+    expect(missing.code).toBe(1);
+    expect(missing.lines).toContain(E2E_MESSAGES.renderedFailed('FONTS', E2E_MESSAGES.renderedMissingRoute('FONTS', UNKNOWN_PATH)));
+    const storage = await e2e(renderedTree(), {}, { lines: siteLines({ STORAGE: { local: ['fothering-theme', 'other'], session: [] } }) });
+    expect(storage.lines).toContain(E2E_MESSAGES.renderedFailed('STORAGE', E2E_MESSAGES.storageKeys(['other'])));
+  });
+
+  it('the rendered step serves the planted dist on 127.0.0.1 and hands the driver its base URL, the landing route and every route', async () => {
     const tree = renderedTree();
     expect((await e2e(tree)).code).toBe(0);
-    const job = JSON.parse(readFileSync(join(tree.root, 'global', 'dev-browser', 'bin', 'job.json'), 'utf8')) as { base: string; route: string };
+    const job = JSON.parse(readFileSync(join(tree.root, 'global', 'dev-browser', 'bin', 'job.json'), 'utf8')) as { base: string; route: string; routes: string[] };
     expect(job.base).toMatch(/^http:\/\/127\.0\.0\.1:\d+$/);
     expect(job.route).toBe('/');
+    expect(job.routes).toEqual(SITE_ROUTES);
     const args = JSON.parse(readFileSync(join(tree.root, 'global', 'dev-browser', 'bin', 'args.json'), 'utf8')) as string[];
     expect(args.slice(0, 6)).toEqual(['--headless', '--timeout', '120', '--browser', 'fothering-site', 'run']);
   });
@@ -966,21 +1169,21 @@ describe('the built checks through the CLI and the e2e step (D-150, D-151)', () 
     const tree = renderedTree();
     const lines: string[] = [];
     const absent = join(tree.root, 'no-global');
-    expect(await runSiteE2e({ repoRoot: tree.root, globalModules: absent, print: (line) => lines.push(line), clientSecretsScript: SECRETS_SCRIPT, secondBuild: copyBuild(tree.dist) })).toBe(1);
+    expect(await runSiteE2e({ repoRoot: tree.root, globalModules: absent, print: (line) => lines.push(line), clientSecretsScript: SECRETS_SCRIPT, secondBuild: copyBuild(tree.dist), sizeLimit: passingSize })).toBe(1);
     expect(lines.at(-1)).toBe(E2E_MESSAGES.fail(A11Y_MESSAGES.devBrowserMissing(join(absent, 'dev-browser'))));
     const globalModules = plantBrowser(tree);
     rmSync(join(tree.root, 'scripts', 'site.devbrowser.js'));
     lines.length = 0;
-    expect(await runSiteE2e({ repoRoot: tree.root, globalModules, print: (line) => lines.push(line), clientSecretsScript: SECRETS_SCRIPT, secondBuild: copyBuild(tree.dist) })).toBe(1);
+    expect(await runSiteE2e({ repoRoot: tree.root, globalModules, print: (line) => lines.push(line), clientSecretsScript: SECRETS_SCRIPT, secondBuild: copyBuild(tree.dist), sizeLimit: passingSize })).toBe(1);
     expect(lines.at(-1)).toBe(E2E_MESSAGES.fail(A11Y_MESSAGES.templateMissing(join(tree.root, 'scripts', 'site.devbrowser.js'))));
     write(join(tree.root, 'scripts', 'site.devbrowser.js'), 'console.log("done");\n');
     lines.length = 0;
-    expect(await runSiteE2e({ repoRoot: tree.root, globalModules, print: (line) => lines.push(line), clientSecretsScript: SECRETS_SCRIPT, secondBuild: copyBuild(tree.dist) })).toBe(1);
+    expect(await runSiteE2e({ repoRoot: tree.root, globalModules, print: (line) => lines.push(line), clientSecretsScript: SECRETS_SCRIPT, secondBuild: copyBuild(tree.dist), sizeLimit: passingSize })).toBe(1);
     expect(lines.at(-1)).toBe(E2E_MESSAGES.fail(A11Y_MESSAGES.templateTokens(join(tree.root, 'scripts', 'site.devbrowser.js'), 0)));
     plantBrowser(tree);
     write(join(tree.root, 'packages', 'web', 'wrangler.jsonc'), '{ "assets": { "html_handling": "none", "not_found_handling": "404-page" } }');
     lines.length = 0;
-    expect(await runSiteE2e({ repoRoot: tree.root, globalModules, print: (line) => lines.push(line), clientSecretsScript: SECRETS_SCRIPT, secondBuild: copyBuild(tree.dist) })).toBe(1);
+    expect(await runSiteE2e({ repoRoot: tree.root, globalModules, print: (line) => lines.push(line), clientSecretsScript: SECRETS_SCRIPT, secondBuild: copyBuild(tree.dist), sizeLimit: passingSize })).toBe(1);
     expect(lines.at(-1)).toMatch(/^\[e2e\] FAIL: the preview server did not start: .*assets\.html_handling is "none"/);
     allOutput.push(...lines);
   });
@@ -1068,6 +1271,11 @@ describe('the built checks through the CLI and the e2e step (D-150, D-151)', () 
       themeNotTaken: ['dark', '#000000', '#0F1316'], themeAttribute: [null, 'dark'], deviceAttribute: ['dark'], deviceStill: ['#000000'],
       pinLost: [null, '#000000'], cspViolation: ['x'], consoleError: ['x'], renderedOk: ['THEME', 'x'], renderedFailed: ['THEME', 'x'],
       renderedMissing: ['THEME'], renderedMalformed: ['THEME x'], renderedFailures: [1, 'x'],
+      renderedMissingRoute: ['FONTS', '/'], deviceStored: ['dark'], choiceMissing: ['dark'], choiceNotStored: ['light', null],
+      choiceNotKept: ['dark', null, null], osNotFollowed: ['#F5F7F8', '#F5F7F8', '#F5F7F8', '#0F1316'], invalidMissing: ['DARK'],
+      invalidChecked: ['blue', null], domOrder: [['light']], boxOrder: [320, []], noBoxOrder: [], arrowStill: [null],
+      fontMissing: ['Red Hat Mono'], fontNotLoaded: ['Red Hat Mono'], fontCheckFalse: ['Red Hat Mono'], fontControl: ['x'],
+      noRequests: [], foreignRequest: ['http://127.0.0.1:1', ['https://x.test']], storageKeys: [['x']], sizeLimit: [1],
     };
     const rendered = Object.entries(samples).map(([key, args]) => (E2E_MESSAGES[key as keyof typeof E2E_MESSAGES] as (...a: unknown[]) => string)(...args));
     expect(rendered).toHaveLength(Object.keys(E2E_MESSAGES).length);
