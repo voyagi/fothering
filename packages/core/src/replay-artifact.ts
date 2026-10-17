@@ -127,8 +127,6 @@ export const captureManifestSchema = z.strictObject({
   requestIds: z.array(text).min(1, 'lists no request id'),
 });
 
-export type CaptureManifest = z.infer<typeof captureManifestSchema>;
-
 export interface IssueReport {
   path: string;
   problem: string;

@@ -327,9 +327,36 @@ describe('buildReplayView event log', () => {
   });
 
   it('captions the log from the label map and counts the hard bounces it shows', () => {
-    const { eventLog } = buildReplayView(shippedArtifact());
+    const artifact = shippedArtifact();
+    const { eventLog } = buildReplayView(artifact);
     expect(eventLog.caption).toBe(PROVENANCE_LABELS.generated.caption);
     expect(eventLog.note).toBe('Showing the first two hard bounces and every decision, call and email.');
+    const oneBounce = artifact.events.filter((event, index) => event.kind !== 'bounce' || index === 0);
+    expect(buildReplayView({ ...artifact, events: oneBounce }).eventLog.note).toBe('Showing the first hard bounce and every decision, call and email.');
+    const transient = artifact.events.map((event) => (event.kind === 'bounce' ? { ...event, bounceType: 'Transient' as const } : event));
+    const view = buildReplayView({ ...artifact, events: transient });
+    expect(view.eventLog.note).toBe('Showing every decision, call and email.');
+    expect(view.eventLog.rows[0]?.kind).toBe('Bounce, Transient');
+  });
+
+  it('words the tag evidence as a share when not every bounce carries the cause', () => {
+    const artifact = shippedArtifact();
+    const evidence = artifact.evidence.map((row) => (row.verdict === 'cause' ? { ...row, count: 29 } : row));
+    expect(buildReplayView({ ...artifact, evidence }).tag.evidence).toBe('29 of 31 hard bounces in the window carry that tag: `550 5.1.1`, 9 providers.');
+  });
+
+  it('names no open lane and no flowing lane when the artifact has one lane', () => {
+    const view = buildReplayView({ ...shippedArtifact(), lanes: ['fothering-bulk'] });
+    expect(view.lanesLines).toEqual({ paused: 'Closed: fothering-bulk. No other lane.', reopened: 'Reopened: fothering-bulk. No other lane.' });
+    expect(view.boardDescriptions[2]).toBe('fothering-bulk is stopped at a filled valve with a lockout tag, and its outlet is dotted.');
+    expect(view.steps[0]?.paragraphs[0]).toMatch(/providers\.$/);
+  });
+
+  it('carries the simulator caption link and a provider-free configuration label', () => {
+    const view = buildReplayView({ ...shippedArtifact(), provenance: 'simulator-captured' });
+    expect(view.captionLinkHref).toBe(PROVENANCE_LABELS['simulator-captured'].captionLinkHref);
+    expect(view.schedule.rows[3]?.label).toBe('DKIM and MAIL FROM');
+    expect(buildReplayView(shippedArtifact()).captionLinkHref).toBeUndefined();
   });
 });
 
