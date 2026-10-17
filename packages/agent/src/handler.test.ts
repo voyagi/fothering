@@ -397,6 +397,32 @@ describe('the handler maps every loop outcome to a result', () => {
     expect(JSON.stringify(result)).not.toContain('fell over');
   });
 
+  // Live session A: a deployed model-error said nothing about its cause. The log names the cause
+  // chain by identifiers only; every message, and any name that is not a plain identifier, stays out.
+  it('logs the identifiers of a model-error cause chain and none of its messages', async () => {
+    const socket = Object.assign(new Error('QZVX-socket-message'), { code: 'ECONNRESET', cause: Object.assign(new Error('QZVX-deepest'), { name: 'QZVX planted name' }) });
+    const refusal = Object.assign(new Error('QZVX-refusal-message'), { name: 'AccessDeniedException', $metadata: { httpStatusCode: 403 }, cause: socket });
+    const { handler } = testHandler([{ events: [], error: () => refusal }]);
+
+    const { value: result, output } = await captureOutput(() => handler(tracerRecord()));
+
+    expect(failureOf(result)).toBe('failed:model-error');
+    const line = output.split('\n').find((text) => text.includes('"model-error"'));
+    expect(line, output).toBeDefined();
+    const logged = JSON.parse(line ?? '{}') as { msg?: string; errors?: unknown[] };
+    expect(logged.msg).toBe('model-error');
+    expect(logged.errors).toEqual(expect.arrayContaining([{ name: 'AccessDeniedException', status: 403 }, { name: 'Error', code: 'ECONNRESET' }, {}]));
+    expect(output).not.toContain('QZVX');
+  });
+
+  it('logs nothing when the invocation answers', async () => {
+    const record = tracerRecord();
+    const { handler } = testHandler([structuredAnswerTurn(closeAnswer(record), USAGE)]);
+    const { value: result, output } = await captureOutput(() => handler(record));
+    expect(failureOf(result)).toBe('answered');
+    expect(output).toBe('');
+  });
+
   // AC-E34, runtime half. Throttling retries happen inside one cycle, so a throttle in each of the two
   // cycles the turn limit allows asks for a fourth call, which the wrapper refuses before the port.
   it('stops at the call ceiling: a script reaching for a fourth call fails model-call-ceiling after three', async () => {

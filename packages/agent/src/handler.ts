@@ -90,6 +90,46 @@ function failureReason(model: PortBackedModel, error: unknown, deadline: AbortSi
   return 'model-error';
 }
 
+// D-73 keeps every error message out of the log, because an SDK or zod message can quote model text.
+// A model-error still needs its cause named: an access refusal, missing credentials and a dropped
+// connection all return the same result, and live session A's deployed runtime could not tell them
+// apart. Names, codes and HTTP statuses are the SDK's and Node's own identifiers, never model output,
+// and a name or code that is not a plain identifier is left out.
+const ERROR_IDENTIFIER = /^[A-Za-z0-9_.:-]{1,80}$/;
+const CAUSE_CHAIN_DEPTH = 6;
+
+interface ErrorLink {
+  name?: string;
+  code?: string;
+  status?: number;
+}
+
+function identifierOf(value: unknown): string | undefined {
+  return typeof value === 'string' && ERROR_IDENTIFIER.test(value) ? value : undefined;
+}
+
+function errorLink(error: object): ErrorLink {
+  const fields = error as { name?: unknown; code?: unknown; $metadata?: { httpStatusCode?: unknown } };
+  const name = identifierOf(fields.name);
+  const code = identifierOf(fields.code);
+  const status = fields.$metadata?.httpStatusCode;
+  return {
+    ...(name === undefined ? {} : { name }),
+    ...(code === undefined ? {} : { code }),
+    ...(Number.isInteger(status) ? { status: status as number } : {}),
+  };
+}
+
+function logModelError(error: unknown): void {
+  const errors: ErrorLink[] = [];
+  let current: unknown = error;
+  while (typeof current === 'object' && current !== null && errors.length < CAUSE_CHAIN_DEPTH) {
+    errors.push(errorLink(current));
+    current = (current as { cause?: unknown }).cause;
+  }
+  console.error(JSON.stringify({ msg: 'model-error', errors }));
+}
+
 export interface InvocationHandlerOptions {
   /** Tests only: a signal that ends the loop in place of the per-invocation runtimeDeadlineMs timer. */
   deadlineSignal?: AbortSignal;
@@ -156,7 +196,9 @@ export function createInvocationHandler(deps: AgentDeps, options: InvocationHand
       };
     } catch (error) {
       // Never rethrown: BedrockAgentCoreApp's Fastify logger would record the message (D-73).
-      return failed(failureReason(model, error, deadline));
+      const reason = failureReason(model, error, deadline);
+      if (reason === 'model-error') logModelError(error);
+      return failed(reason);
     }
   };
 }
