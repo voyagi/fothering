@@ -18,6 +18,7 @@ import {
   axeReasons,
   compareBuilds,
   consoleVerdict,
+  countAccepted,
   deviceVerdict,
   fontsVerdict,
   isExpectedNotFound,
@@ -35,6 +36,7 @@ import {
   switchVerdict,
   tookHoldVerdict,
   UNKNOWN_PATH,
+  type AcceptedIncomplete,
   type AuditLine,
   type AxeReport,
   type FocusStop,
@@ -353,7 +355,7 @@ describe('runA11yLive refuses every empty or broken run by name', () => {
     expect(code).toBe(0);
     expect(lines).toContain(A11Y_MESSAGES.routePassed('/about/', 'device 1440px', 200, 1));
     expect(lines).toContain(A11Y_MESSAGES.routePassed('/no-such-sheet/', 'device 1440px', 404, 1));
-    expect(lines).toContain(A11Y_MESSAGES.acceptedNone());
+    for (const entry of ACCEPTED_INCOMPLETE) expect(lines).toContain(A11Y_MESSAGES.acceptedCount(entry.ruleId, 0, entry.reason));
     expect(lines.at(-1)).toBe(A11Y_MESSAGES.pass(3, 2, 3, 0));
     expect(lines.filter((line) => line.endsWith('Tab stop(s)'))).toHaveLength(18);
     expect(readdirSync(join(planted.homeDir, '.dev-browser', 'tmp'))).toEqual([]);
@@ -464,7 +466,7 @@ describe('the message catalogue', () => {
     expect(AXE_CONFIG.enabledRules).toEqual(['target-size', 'label-content-name-mismatch']);
     expect(AXE_CONFIG.widths).toEqual([320, 1440]);
     expect(AXE_CONFIG.themes.map((theme) => [theme.name, theme.stored, theme.os])).toEqual([['light', 'light', 'dark'], ['dark', 'dark', 'light'], ['device', null, 'dark']]);
-    expect(ACCEPTED_INCOMPLETE).toEqual([]);
+    expect(ACCEPTED_INCOMPLETE.map((entry) => [entry.ruleId, entry.targetPattern])).toEqual([['color-contrast', '^(?:text(?:$|[[.:#])|[.]dwg-)']]);
   });
 });
 
@@ -540,7 +542,8 @@ const cleanAxe: AxeReport = {
   violations: [],
   incomplete: [],
 };
-const NO_ACCEPTED = new Map<string, number>();
+const NO_ACCEPTED: readonly AcceptedIncomplete[] = [];
+const svgNode = (target: string): { target: string; summary: string } => ({ target, summary: '' });
 
 describe('axe verdicts (D-129)', () => {
   it('passes a clean record', () => {
@@ -560,7 +563,22 @@ describe('axe verdicts (D-129)', () => {
   it('fails an incomplete result that is not on the accepted list, and passes one that is', () => {
     const incomplete = [{ id: 'color-contrast', nodes: [{ target: 'p', summary: '' }] }];
     expect(axeReasons({ ...cleanAxe, incomplete }, NO_ACCEPTED)).toEqual([A11Y_MESSAGES.incomplete('color-contrast', 1, 'p')]);
-    expect(axeReasons({ ...cleanAxe, incomplete }, new Map([['color-contrast', 0]]))).toEqual([]);
+    expect(axeReasons({ ...cleanAxe, incomplete }, [{ ruleId: 'color-contrast', targetPattern: '^p$', reason: 'planted' }])).toEqual([]);
+  });
+
+  it('accepts a color-contrast incomplete only on drawing text, never on page text', () => {
+    const incomplete = [{ id: 'color-contrast', nodes: ['text[y="126"]', '.dwg-bubble-text', 'text', 'p', '.textlink', 'textarea', '.dwgx'].map(svgNode) }];
+    expect(axeReasons({ ...cleanAxe, incomplete }, ACCEPTED_INCOMPLETE)).toEqual([A11Y_MESSAGES.incomplete('color-contrast', 4, 'p')]);
+  });
+
+  it('never accepts another rule on drawing text', () => {
+    const incomplete = [{ id: 'link-in-text-block', nodes: [svgNode('text[y="126"]')] }];
+    expect(axeReasons({ ...cleanAxe, incomplete }, ACCEPTED_INCOMPLETE)).toEqual([A11Y_MESSAGES.incomplete('link-in-text-block', 1, 'text[y="126"]')]);
+  });
+
+  it('counts the accepted nodes per rule, leaving the others out', () => {
+    const incomplete = [{ id: 'color-contrast', nodes: ['text[y="126"]', '.dwg-lane', 'p'].map(svgNode) }];
+    expect(countAccepted(incomplete, ACCEPTED_INCOMPLETE)).toEqual(new Map([['color-contrast', 2]]));
   });
 
   it('fails a violation', () => {
