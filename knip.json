@@ -6,8 +6,8 @@
   "ignoreIssues": { "*.config.{ts,mjs}": ["exports"], "packages/functions/src/*/handler.ts": ["exports"] },
   "workspaces": {
     ".": {
-      "entry": ["verify-ship.mjs", "scripts/*.mjs", "vitest.config.ts", "vitest.stryker.config.ts", "eslint.config.mjs", "eslint.complexity.config.mjs", "design/mockups/shared/*.js"],
-      "ignoreDependencies": ["@types/node", "fast-check", "schema-dts", "size-limit", "@size-limit/file", "@stryker-mutator/core", "@stryker-mutator/vitest-runner", "aws-cdk"]
+      "entry": ["verify-ship.mjs", "scripts/*.mjs", "scripts/*.devbrowser.js", "vitest.config.ts", "vitest.stryker.config.ts", "eslint.config.mjs", "eslint.complexity.config.mjs", "design/mockups/shared/*.js"],
+      "ignoreDependencies": ["@types/node", "fast-check", "schema-dts", "size-limit", "@size-limit/file", "@stryker-mutator/core", "@stryker-mutator/vitest-runner", "aws-cdk", "axe-core", "astro"]
     },
     "packages/core": {
       "entry": ["src/mode.ts"]
@@ -21,6 +21,10 @@
     },
     "packages/agent": {
       "entry": ["src/main.ts"]
+    },
+    "packages/web": {
+      "entry": ["src/pages/**/*.{astro,ts}", "src/harness/cli.ts"],
+      "ignoreDependencies": ["@astrojs/check"]
     }
   }
 }

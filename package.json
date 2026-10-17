@@ -16,7 +16,7 @@
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
     "lint": "eslint .",
-    "gate:types": "tsc --noEmit",
+    "gate:types": "tsc --noEmit && npm run check -w @fothering/web",
     "gate:complexity": "eslint --config eslint.complexity.config.mjs .",
     "gate:dup": "jscpd .",
     "gate:deps": "depcruise packages --config .dependency-cruiser.cjs",
