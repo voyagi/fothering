@@ -1,0 +1,18 @@
+{
+  "name": "@fothering/web",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node ../../scripts/astro.mjs build",
+    "check": "node ../../scripts/astro.mjs check",
+    "dev": "node ../../scripts/astro.mjs dev --host 127.0.0.1"
+  },
+  "dependencies": {
+    "@fothering/core": "0.0.0",
+    "astro": "7.3.8"
+  },
+  "devDependencies": {
+    "@astrojs/check": "0.9.10"
+  }
+}

@@ -35,6 +35,9 @@ describe('repoRoot', () => {
   mkdirSync(join(PLANT, 'tree/packages/web/src/pages'), { recursive: true });
   plant('bad/package.json', '{ not json');
   mkdirSync(join(PLANT, 'bad/inner'), { recursive: true });
+  plant('tree/nameless/package.json', JSON.stringify({ private: true }));
+  plant('tree/listed/package.json', JSON.stringify(['fothering']));
+  mkdirSync(join(PLANT, 'folder-manifest/package.json'), { recursive: true });
 
   it('returns the folder itself when it holds the fothering package.json', () => {
     expect(repoRoot(join(PLANT, 'tree'))).toBe(join(PLANT, 'tree'));
@@ -43,6 +46,15 @@ describe('repoRoot', () => {
   it('walks up past a package.json with another name to the fothering one', () => {
     expect(repoRoot(join(PLANT, 'tree/packages/web/src/pages'))).toBe(join(PLANT, 'tree'));
     expect(repoRoot(join(PLANT, 'tree/packages/web'))).toBe(join(PLANT, 'tree'));
+  });
+
+  it('walks past a package.json with no name and one that is not an object', () => {
+    expect(repoRoot(join(PLANT, 'tree/nameless'))).toBe(join(PLANT, 'tree'));
+    expect(repoRoot(join(PLANT, 'tree/listed'))).toBe(join(PLANT, 'tree'));
+  });
+
+  it('passes on a manifest read failure other than a missing file', () => {
+    expect(() => repoRoot(join(PLANT, 'folder-manifest'))).toThrow(/EISDIR/);
   });
 
   it('finds the real repository from this test file', () => {
@@ -64,6 +76,7 @@ describe('readRepoText', () => {
   plant('texts/lanes.json', '{"lanes":[]}\n');
   plant('texts/blank.txt', ' \n\t\n');
   plant('texts/zero.txt', '');
+  plant('texts/..notes.txt', 'kept\n');
   mkdirSync(join(root, 'folder'), { recursive: true });
 
   it('reads a committed file as UTF-8 text', () => {
@@ -86,6 +99,11 @@ describe('readRepoText', () => {
   it('refuses a path that leaves the repository root', () => {
     expect(() => readRepoText('../tree/package.json', root)).toThrow(/^\.\.\/tree\/package\.json: outside the repository root$/);
     expect(() => readRepoText(join(PLANT, 'tree/package.json'), root)).toThrow(/: outside the repository root$/);
+    expect(() => readRepoText('..', root)).toThrow(/^\.\.: outside the repository root$/);
+  });
+
+  it('reads a file whose name only starts with two dots', () => {
+    expect(readRepoText('..notes.txt', root)).toBe('kept\n');
   });
 
   it('passes on a read failure other than a missing file', () => {

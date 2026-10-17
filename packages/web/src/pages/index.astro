@@ -1,0 +1,25 @@
+---
+import { parseLaneMap } from '@fothering/core/lanes';
+import { readRepoText, repoRoot } from '../site/repo-facts.ts';
+
+const laneMap = parseLaneMap(JSON.parse(readRepoText('lanes.json', repoRoot(process.cwd()))));
+const configurationSets = laneMap.lanes.map((lane) => lane.configurationSet);
+---
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Fothering</title>
+    <meta name="description" content="Fothering closes the one Amazon SES sending lane that is going wrong, with evidence." />
+  </head>
+  <body>
+    <a href="#main">Skip to main content</a>
+    <main id="main" tabindex="-1">
+      <h1>Fothering</h1>
+      <ul>
+        {configurationSets.map((name) => <li>{name}</li>)}
+      </ul>
+    </main>
+  </body>
+</html>
