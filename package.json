@@ -31,6 +31,7 @@
     "gate": "npm run gate:tsconfig && npm run gate:tracked-paths && npm run gate:test-discovery && npm run gate:types && npm run gate:complexity && npm run gate:dup && npm run gate:deps && npm run gate:env && npm run gate:dead && npm run gate:repo",
     "verify:ship": "node verify-ship.mjs",
     "mutate": "stryker run",
+    "mutate:gate": "node scripts/mutate-gate.mjs",
     "build": "node scripts/build.mjs",
     "permissions:snapshot": "node scripts/permissions-snapshot.mjs"
   },

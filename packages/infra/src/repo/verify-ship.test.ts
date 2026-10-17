@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -9,6 +9,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 // script under test.
 const REPO_ROOT = fileURLToPath(new URL('../../../../', import.meta.url));
 const VERIFY_SHIP = join(REPO_ROOT, 'verify-ship.mjs');
+const MUTATE_GATE = join(REPO_ROOT, 'scripts', 'mutate-gate.mjs');
 
 const STEP_ORDER = ['types', 'tests', 'lint', 'gate', 'repo', 'selftest', 'build', 'coverage', 'e2e', 'a11y', 'mutation'];
 const SUB_GATE_LINE = 'neutral-subgate: SKIPPED, nothing to check';
@@ -16,6 +17,8 @@ const SELFTEST_PASS_LINE = 'selftest ok: an absent file is a loud SKIPPED, exit 
 const HANG_PID_FILE = 'hang.pid';
 const LINGER_EXIT_FILE = 'linger.exit';
 const NEXT_START_FILE = 'tests.start';
+const STRYKER_RAN_FILE = 'stryker.ran';
+const MUTATION_SKIP_CODE = 78;
 
 function makeProject(overrides: Record<string, string> = {}): string {
   const dir = mkdtempSync(join(tmpdir(), 'verify-ship-st-'));
@@ -51,6 +54,23 @@ function makeProject(overrides: Record<string, string> = {}): string {
   return dir;
 }
 
+// The real mutation step: this repo's own scripts/mutate-gate.mjs, copied in, in front of a stand-in
+// Stryker that records that it ran and exits with the code it is given.
+function makeMutationProject(strykerExitCode = 0): string {
+  const dir = makeProject({ 'mutate:gate': 'node scripts/mutate-gate.mjs', mutate: 'node stryker-stand-in.mjs' });
+  mkdirSync(join(dir, 'scripts'));
+  copyFileSync(MUTATE_GATE, join(dir, 'scripts', 'mutate-gate.mjs'));
+  writeFileSync(
+    join(dir, 'stryker-stand-in.mjs'),
+    `import { writeFileSync } from 'node:fs';\nwriteFileSync('${STRYKER_RAN_FILE}', 'ran');\nprocess.exit(${strykerExitCode});\n`,
+  );
+  return dir;
+}
+
+function strykerRan(dir: string): boolean {
+  return existsSync(join(dir, STRYKER_RAN_FILE));
+}
+
 interface RunResult {
   stdout: string;
   stderr: string;
@@ -61,10 +81,11 @@ interface RunResult {
 
 // The script's two timer settings come from each test, never from the shell running the suite: a
 // grace exported for a slow machine's verify:ship run, whose tests step runs this file, would
-// otherwise stretch every wait on a step left draining. Windows reads environment names in any
-// letter case, so every spelling is dropped.
-const TIMER_SETTINGS = new Set(['VERIFY_SHIP_TIMEOUT_MS', 'VERIFY_SHIP_DRAIN_GRACE_MS']);
-const INHERITED_ENV = Object.fromEntries(Object.entries(process.env).filter(([name]) => !TIMER_SETTINGS.has(name.toUpperCase())));
+// otherwise stretch every wait on a step left draining. GITHUB_ACTIONS decides whether the mutation
+// step may skip, and CI runs this suite with it set, so it comes from each test too. Windows reads
+// environment names in any letter case, so every spelling is dropped.
+const PER_TEST_SETTINGS = new Set(['VERIFY_SHIP_TIMEOUT_MS', 'VERIFY_SHIP_DRAIN_GRACE_MS', 'GITHUB_ACTIONS']);
+const INHERITED_ENV = Object.fromEntries(Object.entries(process.env).filter(([name]) => !PER_TEST_SETTINGS.has(name.toUpperCase())));
 
 // Both streams come back whatever the exit code, so a stderr check on a passing run can fail.
 function run(dir: string, stepTimeoutMs = 60_000, watchdogMs = 55_000, extraEnv: Record<string, string> = {}): RunResult {
@@ -94,32 +115,34 @@ function hangPid(dir: string): number | undefined {
   return existsSync(file) ? Number(readFileSync(file, 'utf8')) : undefined;
 }
 
-describe('verify:ship selftest step and sub-gate reporting', () => {
-  const dirs: string[] = [];
-  afterEach(async () => {
-    for (const d of dirs.splice(0)) {
-      // A run can leave the hung or lingering fixture alive; stop it by the PID it recorded (never
-      // by name), then wait until it is really gone, since Windows refuses to remove the folder a
-      // process is still running in.
-      const pid = hangPid(d);
-      if (pid !== undefined && isAlive(pid)) {
-        process.kill(pid);
-        for (let waited = 0; isAlive(pid) && waited < 5000; waited += 100) {
-          await new Promise((resolveWait) => setTimeout(resolveWait, 100));
-        }
-      }
-      try {
-        rmSync(d, { recursive: true, force: true, maxRetries: 20, retryDelay: 200 });
-      } catch (error) {
-        // Under Node 22 on Windows the folder can stay locked after every process the fixture
-        // started is gone (measured 2026-09-28: no fixture process left, EBUSY still). The test's
-        // assertions have already run, so a folder left in the OS temp directory is reported by
-        // name rather than failing it; any other error still fails.
-        if ((error as NodeJS.ErrnoException).code !== 'EBUSY') throw error;
-        console.warn(`verify-ship.test: temp folder still locked, left behind: ${d}`);
+async function removeFixtures(dirs: string[]): Promise<void> {
+  for (const d of dirs.splice(0)) {
+    // A run can leave the hung or lingering fixture alive; stop it by the PID it recorded (never
+    // by name), then wait until it is really gone, since Windows refuses to remove the folder a
+    // process is still running in.
+    const pid = hangPid(d);
+    if (pid !== undefined && isAlive(pid)) {
+      process.kill(pid);
+      for (let waited = 0; isAlive(pid) && waited < 5000; waited += 100) {
+        await new Promise((resolveWait) => setTimeout(resolveWait, 100));
       }
     }
-  });
+    try {
+      rmSync(d, { recursive: true, force: true, maxRetries: 20, retryDelay: 200 });
+    } catch (error) {
+      // Under Node 22 on Windows the folder can stay locked after every process the fixture
+      // started is gone (measured 2026-09-28: no fixture process left, EBUSY still). The test's
+      // assertions have already run, so a folder left in the OS temp directory is reported by
+      // name rather than failing it; any other error still fails.
+      if ((error as NodeJS.ErrnoException).code !== 'EBUSY') throw error;
+      console.warn(`verify-ship.test: temp folder still locked, left behind: ${d}`);
+    }
+  }
+}
+
+describe('verify:ship selftest step and sub-gate reporting', () => {
+  const dirs: string[] = [];
+  afterEach(() => removeFixtures(dirs));
 
   it(
     'runs every step in order with the last five SKIPPED, and repeats the SKIPPED sub-gate line the repo script printed',
@@ -359,6 +382,124 @@ describe('verify:ship selftest step and sub-gate reporting', () => {
       expect(hung, 'verify:ship never reached a verdict for a step that ignored the stop signal').toBe(false);
       expect(stderr).toContain('types TIMED OUT');
       expect(status).not.toBe(0);
+    },
+  );
+});
+
+// The mutation step's own skip. A full Stryker run no longer fits on a GitHub-hosted runner, so
+// scripts/mutate-gate.mjs declares a skip there when Stryker has no incremental file to start from,
+// and runs Stryker everywhere else. The tests drive the whole gate, so the exit code the script keeps
+// for that skip and the skipCode verify-ship.mjs reads for the step are checked against each other.
+describe('verify:ship mutation step on a hosted runner', () => {
+  const dirs: string[] = [];
+  afterEach(() => removeFixtures(dirs));
+
+  function summaryOf(stdout: string): string {
+    return stdout.slice(stdout.indexOf('verify:ship summary'));
+  }
+
+  it(
+    'skips Stryker loudly on a GitHub Actions runner with no incremental file, and never reads the step as PASS',
+    { timeout: 60_000 },
+    () => {
+      const dir = makeMutationProject();
+      dirs.push(dir);
+      const { stdout, status } = run(dir, 60_000, 55_000, { GITHUB_ACTIONS: 'true' });
+      expect(status).toBe(0);
+      expect(strykerRan(dir), 'Stryker started although the step skipped').toBe(false);
+      const summary = summaryOf(stdout);
+      expect(summary).toMatch(new RegExp(`mutation\\s+SKIPPED \\(exit ${MUTATION_SKIP_CODE}\\)`));
+      expect(summary).not.toMatch(/mutation\s+PASS/);
+      expect(summary, 'the reason for the skip is not repeated under the step').toContain('[mutate:gate] mutation SKIPPED');
+      expect(stdout).toContain('verify:ship: PASS (6/11 steps green, 5 SKIPPED as not applicable: build, coverage, e2e, a11y, mutation');
+    },
+  );
+
+  it('runs Stryker on a GitHub Actions runner that has an incremental file', { timeout: 60_000 }, () => {
+    const dir = makeMutationProject();
+    dirs.push(dir);
+    mkdirSync(join(dir, 'reports'));
+    writeFileSync(join(dir, 'reports', 'stryker-incremental.json'), '{}\n');
+    const { stdout, status } = run(dir, 60_000, 55_000, { GITHUB_ACTIONS: 'true' });
+    expect(status).toBe(0);
+    expect(strykerRan(dir)).toBe(true);
+    expect(summaryOf(stdout)).toMatch(/mutation\s+PASS \(exit 0\)/);
+  });
+
+  it('runs Stryker through the gate where GITHUB_ACTIONS is not set', { timeout: 60_000 }, () => {
+    const dir = makeMutationProject();
+    dirs.push(dir);
+    const { stdout, status } = run(dir);
+    expect(status).toBe(0);
+    expect(strykerRan(dir)).toBe(true);
+    expect(summaryOf(stdout)).toMatch(/mutation\s+PASS \(exit 0\)/);
+  });
+
+  // Only the exact value the runner sets may skip; anything else a local shell might carry runs
+  // Stryker. The value that skips goes first, so the loop is known to tell the two apart.
+  it('skips for GITHUB_ACTIONS exactly true and runs Stryker for every other value', { timeout: 60_000 }, () => {
+    const dir = makeMutationProject();
+    dirs.push(dir);
+    const runScript = (value: string) =>
+      spawnSync(process.execPath, [join('scripts', 'mutate-gate.mjs')], {
+        cwd: dir,
+        encoding: 'utf8',
+        env: { ...INHERITED_ENV, GITHUB_ACTIONS: value },
+        timeout: 30_000,
+      });
+    expect(runScript('true').status).toBe(MUTATION_SKIP_CODE);
+    expect(strykerRan(dir), 'Stryker started although the step skipped').toBe(false);
+    for (const value of ['', 'false', 'TRUE', '1', ' true']) {
+      rmSync(join(dir, STRYKER_RAN_FILE), { force: true });
+      expect(runScript(value).status, `GITHUB_ACTIONS=${JSON.stringify(value)}`).toBe(0);
+      expect(strykerRan(dir), `Stryker did not run for GITHUB_ACTIONS=${JSON.stringify(value)}`).toBe(true);
+    }
+  });
+
+  it('fails the gate when Stryker fails', { timeout: 60_000 }, () => {
+    const dir = makeMutationProject(1);
+    dirs.push(dir);
+    const { stdout, status } = run(dir);
+    expect(status).toBe(1);
+    expect(stdout).toContain('verify:ship: FAIL at step "mutation"');
+    expect(summaryOf(stdout)).toMatch(/mutation\s+FAIL \(exit 1\)/);
+  });
+
+  it('fails, never skips, when Stryker itself exits with the code the skip keeps', { timeout: 60_000 }, () => {
+    const dir = makeMutationProject(MUTATION_SKIP_CODE);
+    dirs.push(dir);
+    const { stdout, stderr, status } = run(dir);
+    expect(status).toBe(1);
+    expect(strykerRan(dir)).toBe(true);
+    expect(stderr).toContain('[mutate:gate] Stryker exited 78');
+    expect(summaryOf(stdout)).toMatch(/mutation\s+FAIL \(exit 1\)/);
+    expect(stdout).toContain('verify:ship: FAIL at step "mutation"');
+  });
+
+  it('fails any other step that exits with that code: only the mutation step declares it', { timeout: 60_000 }, () => {
+    const dir = makeProject({ lint: 'node exit-skip-code.mjs' });
+    dirs.push(dir);
+    writeFileSync(join(dir, 'exit-skip-code.mjs'), `process.exit(${MUTATION_SKIP_CODE});\n`);
+    const { stdout, status } = run(dir);
+    expect(status).not.toBe(0);
+    expect(stdout).toContain('verify:ship: FAIL at step "lint"');
+    expect(summaryOf(stdout)).toMatch(new RegExp(`lint\\s+FAIL \\(exit ${MUTATION_SKIP_CODE}\\)`));
+  });
+
+  // On POSIX a path through a file fails with ENOTDIR, an error other than absence. Windows reports
+  // that path as absent (ENOENT, measured 2026-10-17), so there this case cannot be built this way.
+  it.skipIf(process.platform === 'win32')(
+    'fails rather than skips when the incremental file cannot be checked',
+    { timeout: 60_000 },
+    () => {
+      const dir = makeMutationProject();
+      dirs.push(dir);
+      writeFileSync(join(dir, 'reports'), 'a file where the reports folder belongs\n');
+      const { stdout, stderr, status } = run(dir, 60_000, 55_000, { GITHUB_ACTIONS: 'true' });
+      expect(status).toBe(1);
+      expect(strykerRan(dir)).toBe(false);
+      expect(stderr).toContain('[mutate:gate] could not check');
+      expect(summaryOf(stdout)).toMatch(/mutation\s+FAIL \(exit 1\)/);
     },
   );
 });
