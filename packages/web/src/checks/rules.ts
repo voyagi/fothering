@@ -1,3 +1,4 @@
+import type { Provenance } from '@fothering/core/records';
 import {
   ANALYTICS_PATTERNS,
   EXACT_30_DAY_PATTERNS,
@@ -32,6 +33,10 @@ export const RULE_IDS = Object.freeze([
   'no-inline-style',
   'type-token-declared',
   'switch-markup',
+  'lede',
+  'landing-sections',
+  'limits',
+  'no-ellipsis',
 ] as const);
 
 export type RuleId = (typeof RULE_IDS)[number];
@@ -58,6 +63,8 @@ export interface CheckContext {
   readonly routes: readonly SiteRoute[];
   // The one inline script the layout may ship, compared by its exact text (AC-40).
   readonly headScript: string;
+  // The committed replay artifact's provenance, which names the limits table's replay state.
+  readonly provenance: Provenance;
 }
 
 const EXCERPT_RADIUS = 40;
@@ -636,6 +643,22 @@ export function switchMarkupRule(site: BuiltSite, _context: CheckContext): Findi
   return site.pages.flatMap((page) => switchFindings(page).map((text) => ({ rule: 'switch-markup' as const, route: page.route, text })));
 }
 
+export function ledeRule(_site: BuiltSite, _context: CheckContext): Finding[] {
+  return [];
+}
+
+export function landingSectionsRule(_site: BuiltSite, _context: CheckContext): Finding[] {
+  return [];
+}
+
+export function limitsRule(_site: BuiltSite, _context: CheckContext): Finding[] {
+  return [];
+}
+
+export function noEllipsisRule(_site: BuiltSite, _context: CheckContext): Finding[] {
+  return [];
+}
+
 // Workers limits: 20,000 files per version on the Free plan and 25 MiB per file (AC-62).
 const MAX_FILES = 20_000;
 const MAX_FILE_BYTES = 25 * 1024 * 1024;
@@ -677,6 +700,10 @@ const RULES: Readonly<Record<RuleId, Rule>> = {
   'no-inline-style': noInlineStyleRule,
   'type-token-declared': typeTokenDeclaredRule,
   'switch-markup': switchMarkupRule,
+  'lede': ledeRule,
+  'landing-sections': landingSectionsRule,
+  'limits': limitsRule,
+  'no-ellipsis': noEllipsisRule,
 };
 
 // Every rule runs over the whole site and every hit is kept, so one report names them all.

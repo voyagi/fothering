@@ -76,3 +76,43 @@ export const ANALYTICS_PATTERNS: readonly RegExp[] = Object.freeze([
 
 // The theme switch is the only input a page holds: three radios, Device, Light and Dark (AC-58).
 export const THEME_RADIO_LIMIT = 3;
+
+// The landing lede names each of these as a whole word, case-sensitive (AC-2): what acts, what it
+// runs on, what it reads, what it pauses and how the operator hears of it.
+export const LEDE_TERMS: readonly string[] = Object.freeze(['agent', 'Amazon Bedrock AgentCore', 'Amazon SES', 'configuration set', 'email']);
+
+export type LandingSectionId = 'moment' | 'procedure' | 'refusals' | 'limits';
+
+export interface LandingSection {
+  readonly id: LandingSectionId;
+  readonly level: 'h1' | 'h2';
+  readonly heading: string;
+}
+
+// The four headed sections of the landing (AC-1, UI-SPEC 11.4); the page's h1 carries the moment.
+// The page renders these headings from here, so the rule and the page cannot drift apart.
+export const LANDING_SECTIONS: readonly LandingSection[] = Object.freeze([
+  { id: 'moment', level: 'h1', heading: 'When one import starts bouncing, Fothering closes that lane and nothing else.' },
+  { id: 'procedure', level: 'h2', heading: 'How one lane gets closed' },
+  { id: 'refusals', level: 'h2', heading: 'What it will not do' },
+  { id: 'limits', level: 'h2', heading: 'Limits, and what is real today' },
+]);
+
+export const NO_MEASURED_NUMBER_SENTENCE = 'Everything on this site is labelled by where it came from, and this site carries no measured number.';
+
+export interface LimitsRow {
+  readonly id: string;
+  readonly part: string;
+  readonly state: string;
+  readonly mark: 'later' | 'open';
+  readonly note: string;
+}
+
+// The replay row's state, mark and note come from the provenance label map (D-139); these three
+// rows are the same whatever the artifact holds.
+export const LIMITS_REPLAY_ROW = Object.freeze({ id: 'replay', part: 'Incident replay' });
+export const LIMITS_FIXED_ROWS: readonly LimitsRow[] = Object.freeze([
+  { id: 'measured-numbers', part: 'Measured numbers', state: 'None yet', mark: 'later', note: 'This site shows no measured number. Numbers come only from recorded live runs.' },
+  { id: 'live-run', part: 'Live run', state: 'Not yet', mark: 'later', note: 'One run against the SES mailbox simulator and a verified address is planned before submission.' },
+  { id: 'deploy-sheet', part: 'Deploy sheet', state: 'From the template', mark: 'open', note: 'Its permissions and resources are generated from the template on every build.' },
+]);

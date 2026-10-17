@@ -1,10 +1,26 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
-import { completeSite, HEADERS_TEXT, page, plantDist, REPO_ROOT, SHEET_HEAD_ITEMS, THEME_HEAD, THEME_SWITCH, type PlantedDist } from '../test/planted-dist.js';
+import {
+  completeSite,
+  HEADERS_TEXT,
+  landingBody,
+  LIMITS_ROWS,
+  limitsRow,
+  limitsSection,
+  page,
+  plantDist,
+  REPLAY_LIMITS_STATE,
+  REPO_ROOT,
+  SHEET_HEAD_ITEMS,
+  THEME_HEAD,
+  THEME_SWITCH,
+  type PlantedDist,
+} from '../test/planted-dist.js';
 import { loadCheckContext } from '../harness/gates.js';
 import { HEAD_SCRIPT, headScriptHash, renderTokensCss } from '../theme/head-script.js';
-import { BANNED_NAMES, CONSOLE_DELETE_PHRASES, REPLY_PROMISE_PHRASES } from '../site/content.js';
+import { BANNED_NAMES, CONSOLE_DELETE_PHRASES, LANDING_SECTIONS, LEDE_TERMS, LIMITS_FIXED_ROWS, REPLY_PROMISE_PHRASES } from '../site/content.js';
+import { PROVENANCE_LABELS } from '../site/labels.js';
 import { renderRobots, renderSitemap, SITE_ORIGIN } from '../site/route-list.js';
 import { filesIn, loadBuiltSite, NOT_FOUND_ROUTE, NoBuiltPagesError, type BuiltSite } from './built-site.js';
 import {
@@ -15,6 +31,10 @@ import {
   exactThirtyDaysRule,
   formsCookiesAnalyticsRule,
   headScriptOrderRule,
+  landingSectionsRule,
+  ledeRule,
+  limitsRule,
+  noEllipsisRule,
   noInlineStyleRule,
   pageMetadataRule,
   preR6WordsRule,
@@ -153,11 +173,12 @@ describe('runBuiltChecks', () => {
     expect([...rules].filter((rule) => ['page-metadata', 'sitemap', 'robots'].includes(rule)).sort()).toEqual(['page-metadata', 'robots', 'sitemap']);
   });
 
-  it('holds exactly the twenty-one rule ids the plans name', () => {
+  it('holds exactly the twenty-five rule ids the plans name', () => {
     expect([...RULE_IDS].sort()).toEqual([
-      'banned-name', 'console-delete', 'dash', 'exact-30-days', 'forms-cookies-analytics', 'head-script-order', 'no-inline-style', 'page-metadata',
-      'pre-r6-words', 'region-claim', 'reply-promise', 'robots', 'script-hash', 'ses-percentage-link', 'ses-rate-wording', 'sitemap',
-      'switch-markup', 'theme-token-blocks', 'third-party-reference', 'type-token-declared', 'unit-figure',
+      'banned-name', 'console-delete', 'dash', 'exact-30-days', 'forms-cookies-analytics', 'head-script-order', 'landing-sections', 'lede', 'limits',
+      'no-ellipsis', 'no-inline-style', 'page-metadata', 'pre-r6-words', 'region-claim', 'reply-promise', 'robots', 'script-hash',
+      'ses-percentage-link', 'ses-rate-wording', 'sitemap', 'switch-markup', 'theme-token-blocks', 'third-party-reference', 'type-token-declared',
+      'unit-figure',
     ]);
   });
 
@@ -728,6 +749,162 @@ describe('the guard is read-only and repeatable (AC-E45, AC-E47)', () => {
     const run = (): Promise<Finding[]> => Promise.resolve().then(() => runBuiltChecks(loadBuiltSite(tree.dist), context));
     const [first, second] = await Promise.all([run(), run()]);
     expect(second).toEqual(first);
+  });
+});
+
+const landingSite = (body: string): BuiltSite => siteOf({ 'index.html': page(body) });
+const landingTexts = (rule: RuleFunction, body: string, ruleContext = context): string[] => {
+  const findings = rule(landingSite(body), ruleContext);
+  expect(findings.every((finding) => finding.route === '/')).toBe(true);
+  return texts(findings);
+};
+const lede = (text: string): string => landingBody({ lede: `<p data-lede>${text}</p>` });
+const FULL_LEDE = 'An agent on Amazon Bedrock AgentCore reads what Amazon SES publishes for each configuration set and tells you by email.';
+
+describe('the lede rule (AC-2, AC-E1 to AC-E3)', () => {
+  it('passes a lede holding all five terms', () => {
+    expect(LEDE_TERMS).toEqual(['agent', 'Amazon Bedrock AgentCore', 'Amazon SES', 'configuration set', 'email']);
+    expect(landingTexts(ledeRule, lede(FULL_LEDE))).toEqual([]);
+  });
+
+  it('fails a lede naming AgentCore alone', () => {
+    expect(landingTexts(ledeRule, lede(FULL_LEDE.replace('Amazon Bedrock AgentCore', 'AgentCore')))).toEqual(['the lede does not name Amazon Bedrock AgentCore as a whole phrase']);
+  });
+
+  it('fails a lede naming Amazon Bedrock alone', () => {
+    expect(landingTexts(ledeRule, lede(FULL_LEDE.replace('Amazon Bedrock AgentCore', 'Amazon Bedrock')))).toEqual(['the lede does not name Amazon Bedrock AgentCore as a whole phrase']);
+  });
+
+  it('fails a lede where agent appears only inside agents or reagent', () => {
+    const text = 'Two agents on Amazon Bedrock AgentCore, one reagent, read what Amazon SES publishes for each configuration set and tell you by email.';
+    expect(landingTexts(ledeRule, lede(text))).toEqual(['the lede does not name agent as a whole phrase']);
+  });
+
+  it('fails a lede missing email', () => {
+    expect(landingTexts(ledeRule, lede(FULL_LEDE.replace('by email', 'by mail')))).toEqual(['the lede does not name email as a whole phrase']);
+  });
+
+  it('fails a lede missing configuration set', () => {
+    expect(landingTexts(ledeRule, lede(FULL_LEDE.replace('each configuration set', 'each lane')))).toEqual(['the lede does not name configuration set as a whole phrase']);
+  });
+
+  it('fails an empty lede', () => {
+    expect(landingTexts(ledeRule, lede(' &nbsp; ')).join('; ')).toBe('the lede element is empty');
+  });
+
+  it('fails a page with no data-lede element', () => {
+    expect(landingTexts(ledeRule, landingBody({ lede: `<p>${FULL_LEDE}</p>` }))).toEqual(['the landing has no data-lede element']);
+  });
+
+  it('passes Amazon Bedrock AgentCore split by a non-breaking space', () => {
+    expect(landingTexts(ledeRule, lede(FULL_LEDE.replace('Amazon Bedrock AgentCore', 'Amazon&nbsp;Bedrock&nbsp;AgentCore')))).toEqual([]);
+  });
+
+  it('passes Amazon Bedrock AgentCore split by a line break', () => {
+    expect(landingTexts(ledeRule, lede(FULL_LEDE.replace('Amazon Bedrock AgentCore', 'Amazon\nBedrock\n  AgentCore')))).toEqual([]);
+  });
+
+  it('passes Amazon Bedrock AgentCore split by an inline span', () => {
+    expect(landingTexts(ledeRule, lede(FULL_LEDE.replace('Amazon Bedrock AgentCore', 'Amazon <span>Bedrock</span> AgentCore')))).toEqual([]);
+  });
+
+  it('fails a build with no landing page', () => {
+    expect(texts(ledeRule(casesSite([`<p data-lede>${FULL_LEDE}</p>`]), context))).toEqual(['the build has no landing page at /']);
+  });
+});
+
+describe('the landing sections rule (AC-1, AC-P15)', () => {
+  it('passes a landing with the four headed sections and only the limits table', () => {
+    expect(LANDING_SECTIONS.map((section) => section.heading).slice(1)).toEqual(['How one lane gets closed', 'What it will not do', 'Limits, and what is real today']);
+    expect(landingTexts(landingSectionsRule, landingBody())).toEqual([]);
+  });
+
+  for (const section of LANDING_SECTIONS) {
+    it(`fails a landing missing the ${section.id} section heading`, () => {
+      expect(landingTexts(landingSectionsRule, landingBody({ omit: section.id }))).toEqual([`the landing has no ${section.level} reading "${section.heading}"`]);
+    });
+  }
+
+  it('fails a landing holding a second table besides the limits table', () => {
+    const comparison = '<table><tr><th scope="col">Recipe</th><th scope="col">Closes</th></tr></table>';
+    expect(landingTexts(landingSectionsRule, landingBody({ extra: comparison }))).toEqual(['the landing holds 1 table besides the limits table']);
+  });
+});
+
+describe('the limits rule (AC-3, UI-SPEC E11)', () => {
+  const [, measured] = LIMITS_ROWS;
+
+  it('passes one row per part with a state, the replay state from the label map, and the no-measured-number sentence', () => {
+    expect(REPLAY_LIMITS_STATE).toBe(PROVENANCE_LABELS[context.provenance].limitsState);
+    expect(landingTexts(limitsRule, landingBody())).toEqual([]);
+  });
+
+  it('fails a limits row whose state cell is empty', () => {
+    const rows = LIMITS_ROWS.map((row) => (row === measured ? limitsRow('measured-numbers', 'Measured numbers', ' ') : row));
+    expect(landingTexts(limitsRule, landingBody({ limits: limitsSection(rows) }))).toEqual(['the limits row measured-numbers has no state']);
+  });
+
+  it('fails a limits row with no state cell', () => {
+    const rows = LIMITS_ROWS.map((row) => (row === measured ? limitsRow('measured-numbers', 'Measured numbers', null) : row));
+    expect(landingTexts(limitsRule, landingBody({ limits: limitsSection(rows) }))).toEqual(['the limits row measured-numbers has no state']);
+  });
+
+  it('fails a replay row whose state differs from the label map for the artifact provenance', () => {
+    const rows = [limitsRow('replay', 'Incident replay', 'Simulator'), ...LIMITS_ROWS.slice(1)];
+    expect(landingTexts(limitsRule, landingBody({ limits: limitsSection(rows) }))).toEqual([
+      `the replay row reads Simulator; the label map gives ${REPLAY_LIMITS_STATE} for a ${context.provenance} artifact`,
+    ]);
+  });
+
+  it('reads the expected replay state from the provenance in the check context', () => {
+    expect(landingTexts(limitsRule, landingBody(), { ...context, provenance: 'live' })).toEqual([
+      `the replay row reads ${REPLAY_LIMITS_STATE}; the label map gives Live for a live artifact`,
+    ]);
+  });
+
+  it('fails a part with no row and a part with two', () => {
+    const rows = [...LIMITS_ROWS.filter((row) => row !== measured), LIMITS_ROWS[0] ?? ''];
+    expect(landingTexts(limitsRule, landingBody({ limits: limitsSection(rows) }))).toEqual([
+      'the limits section has 2 rows for replay, 1 expected',
+      'the limits section has no row for measured-numbers',
+    ]);
+  });
+
+  it('fails a landing with no limits section', () => {
+    expect(landingTexts(limitsRule, landingBody({ limits: '' }))).toEqual(['the landing has no limits section (data-limits)']);
+  });
+
+  it('fails a limits section without the no-measured-number sentence', () => {
+    expect(landingTexts(limitsRule, landingBody({ limits: limitsSection(LIMITS_ROWS, 'Everything on this site is labelled by where it came from.') }))).toEqual([
+      'the limits section does not say that this site carries no measured number',
+    ]);
+  });
+
+  it('holds three fixed rows beside the replay row', () => {
+    expect(LIMITS_FIXED_ROWS.map((row) => row.part)).toEqual(['Measured numbers', 'Live run', 'Deploy sheet']);
+  });
+});
+
+describe('the no-ellipsis rule (UI-SPEC E14)', () => {
+  it('fails built CSS holding text-overflow ellipsis, in either value form', () => {
+    const site = siteOf({ ...completeSite(ONE_SHEET), '_astro/a.css': '.a{text-overflow:ellipsis}', '_astro/b.css': '.b { text-overflow: clip ellipsis; }' });
+    expect(noEllipsisRule(site, context).map((finding) => [finding.route, finding.text])).toEqual([
+      ['file:_astro/a.css', 'the CSS truncates text with text-overflow: ellipsis'],
+      ['file:_astro/b.css', 'the CSS truncates text with text-overflow: ellipsis'],
+    ]);
+  });
+
+  it('fails built CSS holding a line clamp, prefixed or not', () => {
+    const site = siteOf({ ...completeSite(ONE_SHEET), '_astro/a.css': '.a { -webkit-line-clamp: 3; }', '_astro/b.css': '.b { line-clamp: 2; }' });
+    expect(noEllipsisRule(site, context).map((finding) => [finding.route, finding.text])).toEqual([
+      ['file:_astro/a.css', 'the CSS truncates text with a line clamp'],
+      ['file:_astro/b.css', 'the CSS truncates text with a line clamp'],
+    ]);
+  });
+
+  it('passes CSS that wraps rather than truncates', () => {
+    const site = siteOf({ ...completeSite(ONE_SHEET), '_astro/a.css': '.a { overflow-wrap: anywhere; text-overflow: clip; }' });
+    expect(noEllipsisRule(site, context)).toEqual([]);
   });
 });
 

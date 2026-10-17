@@ -1,7 +1,10 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { NOT_FOUND_ROUTE, routeOf } from '../checks/built-site.js';
+import { LANDING_SECTIONS, LIMITS_FIXED_ROWS, LIMITS_REPLAY_ROW, NO_MEASURED_NUMBER_SENTENCE, type LandingSectionId } from '../site/content.js';
+import { PROVENANCE_LABELS } from '../site/labels.js';
+import { loadReplayArtifact } from '../site/replay-view.js';
 import { renderRobots, renderSitemap } from '../site/route-list.js';
 import { HEAD_SCRIPT, renderTokensCss } from '../theme/head-script.js';
 
@@ -19,11 +22,17 @@ export interface PlantedDist {
   readonly remove: () => void;
 }
 
+// The check context reads the replay artifact's provenance from the root it judges, so every planted
+// root carries the committed artifact.
+const ARTIFACT_FILE = join('packages', 'web', 'src', 'fixtures', 'replay-incident.json');
+
 export function plantDist(files: Readonly<Record<string, string | Buffer>>): PlantedDist {
   mkdirSync(CACHE, { recursive: true });
   const root = mkdtempSync(join(CACHE, 'fothering-built-'));
   const dist = join(root, 'packages', 'web', 'dist');
   mkdirSync(dist, { recursive: true });
+  mkdirSync(dirname(join(root, ARTIFACT_FILE)), { recursive: true });
+  copyFileSync(join(REPO_ROOT, ARTIFACT_FILE), join(root, ARTIFACT_FILE));
   for (const [path, body] of Object.entries(files)) {
     const file = join(dist, path);
     mkdirSync(dirname(file), { recursive: true });
@@ -58,6 +67,45 @@ export const THEME_SWITCH = '<header><fieldset><legend>Colour theme</legend>'
   + '<label><input type="radio" name="theme" value="dark"> Dark</label>'
   + '</fieldset></header>';
 
+export const PLANTED_LEDE = '<p data-lede>Fothering reads the events your Amazon SES configuration sets publish and pauses one configuration set. '
+  + 'An agent on Amazon Bedrock AgentCore explains the evidence, and you hear of it by email.</p>';
+
+// The committed artifact's own replay state, the one the check context expects.
+export const REPLAY_LIMITS_STATE = PROVENANCE_LABELS[loadReplayArtifact(join(REPO_ROOT, 'packages', 'web')).provenance].limitsState;
+
+export function limitsRow(id: string, part: string, state: string | null): string {
+  const stateCell = state === null ? '' : `<td data-limits-state>${state}</td>`;
+  return `<tr data-limits-row="${id}"><th scope="row">${part}</th>${stateCell}</tr>`;
+}
+
+export const LIMITS_ROWS: readonly string[] = [
+  limitsRow(LIMITS_REPLAY_ROW.id, LIMITS_REPLAY_ROW.part, REPLAY_LIMITS_STATE),
+  ...LIMITS_FIXED_ROWS.map((row) => limitsRow(row.id, row.part, row.state)),
+];
+
+const headingOf = (id: LandingSectionId): string => {
+  const section = LANDING_SECTIONS.find((item) => item.id === id);
+  return section === undefined ? '' : `<${section.level}>${section.heading}</${section.level}>`;
+};
+
+export function limitsSection(rows: readonly string[] = LIMITS_ROWS, sentence: string = NO_MEASURED_NUMBER_SENTENCE): string {
+  return `<section data-limits>${headingOf('limits')}<p>${sentence}</p><table>${rows.join('')}</table></section>`;
+}
+
+export interface LandingParts {
+  readonly lede?: string;
+  readonly omit?: LandingSectionId;
+  readonly limits?: string;
+  readonly extra?: string;
+}
+
+// The landing the lede, sections and limits rules pass, with any one part replaced or left out.
+export function landingBody(parts: LandingParts = {}): string {
+  const heading = (id: LandingSectionId): string => (parts.omit === id ? '' : headingOf(id));
+  const limits = parts.omit === 'limits' ? limitsSection().replace(headingOf('limits'), '') : (parts.limits ?? limitsSection());
+  return `${heading('moment')}${parts.lede ?? PLANTED_LEDE}${heading('procedure')}${heading('refusals')}${limits}${parts.extra ?? ''}`;
+}
+
 export function sheetHead(route: string, options: SheetHead = {}): string {
   const title = options.title ?? `Planted sheet ${route}`;
   const description = options.description ?? `What the planted sheet at ${route} holds.`;
@@ -73,14 +121,15 @@ export function sheetHead(route: string, options: SheetHead = {}): string {
   return (options.theme ?? THEME_HEAD) + SHEET_HEAD_ITEMS.filter((item) => !omitted.has(item)).map((item) => items[item]).join('');
 }
 
-// A planted build every head and file rule passes, so a case can plant one fault and see only the
-// rule it aims at fire.
+// A planted build every head, file and landing rule passes, so a case can plant one fault and see
+// only the rule it aims at fire.
 export function completeSite(bodies: Readonly<Record<string, string>>, heads: Readonly<Record<string, SheetHead>> = {}): Record<string, string> {
   const files: Record<string, string> = {};
   const paths: string[] = [];
   for (const [file, body] of Object.entries(bodies)) {
     const route = routeOf(file);
-    files[file] = page(`${THEME_SWITCH}${body}`, sheetHead(route, heads[file]));
+    const landing = route === '/' ? landingBody() : '';
+    files[file] = page(`${THEME_SWITCH}${landing}${body}`, sheetHead(route, heads[file]));
     if (route !== NOT_FOUND_ROUTE) paths.push(route);
   }
   return {
