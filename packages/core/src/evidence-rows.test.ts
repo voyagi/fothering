@@ -558,6 +558,22 @@ describe('the DMARC row (D-60, AC-E25, AC-E26)', () => {
   it('reads an organizational domain tldts cannot determine as unknown (AC-E25)', () => {
     expect(dmarcOf('news.example.unknowntld', { '_dmarc.news.example.unknowntld': MISSING })?.state).toBe('unknown');
   });
+
+  // RFC 9989 section 4.8: dmarc-version = "v" equals %s"DMARC1", equals = *WSP "=" *WSP. The tag name
+  // is an ABNF string, so any letter case (RFC 5234); the value DMARC1 is case sensitive.
+  it.each(['v = DMARC1; p=none', 'v\t=\tDMARC1; p=none', 'V=DMARC1; p=none', 'v =DMARC1'])(
+    'reads the version tag in %s as a DMARC record',
+    (record) => {
+      expect(dmarcOf('example.com', { '_dmarc.example.com': records(record) })?.state).toBe('present');
+    },
+  );
+
+  it.each(['v=dmarc1; p=none', 'v=Dmarc1; p=none', 'v=DMARC10; p=none'])(
+    'reads %s as no DMARC record, since receivers discard it',
+    (record) => {
+      expect(dmarcOf('example.com', { '_dmarc.example.com': records(record) })?.state).toBe('missing');
+    },
+  );
 });
 
 describe('the SPF row', () => {
@@ -581,6 +597,16 @@ describe('the SPF row', () => {
   it('reads not applicable without a custom MAIL FROM domain', () => {
     const { mailFromDomain: _omitted, ...withoutMailFrom } = HEALTHY;
     expect(configurationRows({ identities: [withoutMailFrom] }).spf?.state).toBe('not-applicable');
+  });
+
+  // RFC 7208 section 4.5: version = "v=spf1", an ABNF string, so any letter case (RFC 5234), ended by a
+  // space or the end of the record. It has no spaces inside.
+  it.each(['V=SPF1 include:amazonses.com ~all', 'v=SPF1 -all', 'V=spf1'])('reads the version in %s as an SPF record', (record) => {
+    expect(spfOf(records(record))?.state).toBe('present');
+  });
+
+  it.each(['v=spf10 -all', 'v = spf1 -all'])('reads %s as no SPF record', (record) => {
+    expect(spfOf(records(record))?.state).toBe('missing');
   });
 });
 

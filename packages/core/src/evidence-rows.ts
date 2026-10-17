@@ -397,8 +397,12 @@ const CONFIGURATION_RECORD_ORDER: readonly ConfigurationRecord[] = ['dkim', 'mai
 // codes. Complaints carry no status code, so they never corroborate.
 const CORROBORATION_SHARE: Rational = { numerator: 1, denominator: 2 };
 
-const DMARC_RECORD = /^v=DMARC1(?:;|\s|$)/;
-const SPF_RECORD = /^v=spf1(?: |$)/;
+// A record these miss reads as missing, which can become a cause, so they follow the grammars, not
+// the common spelling. RFC 9989 section 4.8: the tag name "v" in any letter case (an ABNF string,
+// RFC 5234), spaces or tabs around "=", and DMARC1 case sensitive. RFC 7208 section 4.5: "v=spf1" is
+// an ABNF string, so any letter case, ended by a space or the end of the record.
+const DMARC_RECORD = /^[vV][ \t]*=[ \t]*DMARC1(?:;|\s|$)/;
+const SPF_RECORD = /^v=spf1(?: |$)/i;
 
 type TxtReading = 'one' | 'none' | 'many' | 'unknown';
 
