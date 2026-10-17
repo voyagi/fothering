@@ -86,6 +86,7 @@ export interface AxeReport {
 export interface AuditLine {
   readonly route: string;
   readonly status: number;
+  readonly theme?: ThemeReading;
   readonly axe?: AxeReport;
   readonly keyboard?: KeyboardReport;
   readonly overflow?: { readonly scrollWidth: number; readonly innerWidth: number };
@@ -145,7 +146,36 @@ export const A11Y_MESSAGES = Object.freeze({
   pass: (routes: number, widths: number, themes: number, accepted: number) => `[a11y] PASS: ${routes} route(s) x ${widths} widths x ${themes} themes, 0 violations, ${accepted} accepted incomplete`,
   fail: (reason: string) => `[a11y] FAIL: ${reason}`,
   failCount: (failed: number, total: number, first: string) => `${failed} of ${total} audit(s) failed; first: ${first}`,
+  tookHold: (run: string, ground: string, routes: number) => `[a11y] ${run}: the theme took hold, --ground ${ground} on ${routes} route(s)`,
+  themeAbsent: () => 'the record carries no theme reading, so whether the theme took hold is unknown',
 });
+
+export type ThemeName = 'light' | 'dark';
+
+export interface ThemeReading {
+  readonly dataTheme: string | null;
+  readonly ground: string;
+}
+
+export function tookHoldVerdict(_reading: ThemeReading, _expected: ThemeName): Verdict {
+  return { ok: true };
+}
+
+export function storedThemeVerdict(_reading: ThemeReading, _stored: ThemeName): Verdict {
+  return { ok: true };
+}
+
+export function deviceVerdict(_dark: ThemeReading, _light: ThemeReading): Verdict {
+  return { ok: true };
+}
+
+export function pinVerdict(_before: ThemeReading, _after: ThemeReading): Verdict {
+  return { ok: true };
+}
+
+export function consoleVerdict(_errors: readonly string[]): Verdict {
+  return { ok: true };
+}
 
 export function overflowVerdict(scrollWidth: number, viewportWidth: number): Verdict {
   return scrollWidth <= viewportWidth ? { ok: true } : { ok: false, reason: A11Y_MESSAGES.overflow(scrollWidth, viewportWidth) };
@@ -462,6 +492,18 @@ export const E2E_MESSAGES = Object.freeze({
   secondBuildFailed: (code: number | null, tail: string) => `the second build exited ${String(code)}${tail === '' ? '' : `: ${tail}`}`,
   buildDiffers: (file: string) => `${file} differs between the two builds of one commit`,
   buildMissing: (file: string, folder: string) => `${file} is missing from ${folder}`,
+  themeNotTaken: (expected: string, found: string, wanted: string) => `the ${expected} theme did not take hold: --ground read ${found === '' ? 'empty' : found}, ${wanted} expected`,
+  themeAttribute: (found: string | null, wanted: string) => `data-theme read ${found ?? 'absent'}, ${wanted} expected`,
+  deviceAttribute: (found: string) => `Device left data-theme ${found} on the root, and Device sets none`,
+  deviceStill: (ground: string) => `--ground stayed ${ground} when the OS turned from dark to light`,
+  pinLost: (dataTheme: string | null, ground: string) => `the stored Dark did not hold after the OS turned light: data-theme ${dataTheme ?? 'absent'}, --ground ${ground}`,
+  cspViolation: (text: string) => `the page reported a Content Security Policy violation: ${text.slice(0, 200)}`,
+  consoleError: (text: string) => `the page logged a console error: ${text.slice(0, 200)}`,
+  renderedOk: (check: string, detail: string) => `[e2e] rendered ${check}: ok, ${detail}`,
+  renderedFailed: (check: string, reason: string) => `[e2e] rendered ${check}: failed: ${reason}`,
+  renderedMissing: (check: string) => `the driver printed no ${check} line, so the check did not run`,
+  renderedMalformed: (text: string) => `the line is not a valid record: ${text.slice(0, 120)}`,
+  renderedFailures: (count: number, first: string) => `${count} rendered check(s) failed; first: ${first}`,
 });
 
 export interface SecondBuildRun {

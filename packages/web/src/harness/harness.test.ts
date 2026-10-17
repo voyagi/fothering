@@ -8,6 +8,7 @@ import { main, PROCESS_IO, waitForSignal, type CliIo } from './cli.js';
 import { DRIVER_JOB_TOKEN, runDriver, stageAxeSource, writeDriver } from './dev-browser.js';
 import { completeSite, page, plantDist } from '../test/planted-dist.js';
 import { renderSitemap, SITE_ORIGIN } from '../site/route-list.js';
+import { themedValue, TOKENS } from '../theme/head-script.js';
 import {
   A11Y_MESSAGES,
   ACCEPTED_INCOMPLETE,
@@ -16,18 +17,24 @@ import {
   auditReasons,
   axeReasons,
   compareBuilds,
+  consoleVerdict,
+  deviceVerdict,
   keyboardVerdict,
   loadCheckContext,
   overflowVerdict,
+  pinVerdict,
   routesFromDist,
   runA11yLive,
   runSiteE2e,
+  storedThemeVerdict,
+  tookHoldVerdict,
   type AuditLine,
   type AxeReport,
   type FocusStop,
   type KeyboardReport,
   type SecondBuildRun,
   type SiteE2eOptions,
+  type ThemeReading,
 } from './gates.js';
 
 // This file sits four folders below the repo root, like packages/infra/src/repo's tests.
@@ -60,11 +67,18 @@ else {
   const driver = readFileSync(process.argv[process.argv.length - 1], 'utf8');
   const job = JSON.parse(/^const JOB = (.*);$/m.exec(driver)[1]);
   writeFileSync(join(here, 'job.json'), JSON.stringify(job));
+  if (job.route !== undefined) {
+    const site = scenario.site || {};
+    for (const line of site.lines || []) console.log(line);
+    if (!site.omitDone) console.log('done');
+    process.exit(site.exitCode === undefined ? 0 : site.exitCode);
+  }
   if (!existsSync(join(scenario.homeDir, '.dev-browser', 'tmp', job.axeFile))) {
     console.error('staged axe file not found');
     process.exit(3);
   }
   const stop = { domIndex: 5, tag: 'a', radioGroup: null, skipLink: true };
+  const theme = { dataTheme: job.storedTheme, ground: scenario.grounds[job.storedTheme || job.osScheme] };
   for (const route of job.routes) {
     const expected = (job.expectedStatus || {})[route] || 200;
     const answered = scenario.unknownStatus !== undefined && expected !== 200 ? scenario.unknownStatus : expected;
@@ -72,6 +86,7 @@ else {
     const line = status !== 200 && status !== expected ? { route, status } : {
       route,
       status,
+      theme,
       axe: { version: '4.14.0', selected: ['html-has-lang', 'target-size', 'label-content-name-mismatch'], ran: ['html-has-lang', 'target-size', 'label-content-name-mismatch'], violations: [], incomplete: [] },
       keyboard: { focusables: [stop], positiveTabindex: [], walk: [{ ...stop, outlineStyle: 'auto', outlineWidth: '1px', boxShadow: 'none' }] },
       overflow: { scrollWidth: job.width, innerWidth: job.width },
@@ -79,11 +94,17 @@ else {
     console.log('AUDIT ' + JSON.stringify(line));
   }
   if (scenario.malformed) console.log('AUDIT {not json');
-  if (scenario.incomplete) console.log('AUDIT ' + JSON.stringify({ route: job.routes[0], status: 200, axe: { version: '4.14.0', selected: ['target-size', 'label-content-name-mismatch'], ran: ['target-size', 'label-content-name-mismatch'], violations: [], incomplete: [{ id: 'color-contrast', nodes: [{ target: 'p', summary: '' }] }] }, keyboard: { focusables: [stop], positiveTabindex: [], walk: [{ ...stop, outlineStyle: 'auto', outlineWidth: '1px', boxShadow: 'none' }] }, overflow: { scrollWidth: job.width, innerWidth: job.width } }));
+  if (scenario.incomplete) console.log('AUDIT ' + JSON.stringify({ route: job.routes[0], status: 200, theme, axe: { version: '4.14.0', selected: ['target-size', 'label-content-name-mismatch'], ran: ['target-size', 'label-content-name-mismatch'], violations: [], incomplete: [{ id: 'color-contrast', nodes: [{ target: 'p', summary: '' }] }] }, keyboard: { focusables: [stop], positiveTabindex: [], walk: [{ ...stop, outlineStyle: 'auto', outlineWidth: '1px', boxShadow: 'none' }] }, overflow: { scrollWidth: job.width, innerWidth: job.width } }));
   if (!scenario.omitDone) console.log('done');
   process.exit(scenario.exitCode === undefined ? 0 : scenario.exitCode);
 }
 `;
+
+interface SiteScenario {
+  readonly lines?: readonly string[];
+  readonly omitDone?: boolean;
+  readonly exitCode?: number;
+}
 
 interface Scenario {
   readonly status?: number;
@@ -93,7 +114,13 @@ interface Scenario {
   readonly hang?: boolean;
   readonly malformed?: boolean;
   readonly incomplete?: boolean;
+  // What --ground the stand-in reports per expected theme; tokens.json's values unless a case plants others.
+  readonly grounds?: Readonly<Record<'light' | 'dark', string>>;
+  readonly site?: SiteScenario;
 }
+
+const LIGHT_GROUND = themedValue(TOKENS, '--ground', 'light');
+const DARK_GROUND = themedValue(TOKENS, '--ground', 'dark');
 
 interface Planted {
   readonly repoRoot: string;
@@ -132,13 +159,15 @@ function plantRepo(options: { pages?: Record<string, string>; devBrowserVersion?
     write(join(repoRoot, 'node_modules', 'axe-core', 'axe.min.js'), '/* planted axe */\n');
   }
   const devBrowserVersion = options.devBrowserVersion === undefined ? '0.2.9' : options.devBrowserVersion;
-  if (devBrowserVersion !== null) {
-    const packageDir = join(globalModules, 'dev-browser');
-    write(join(packageDir, 'package.json'), JSON.stringify({ name: 'dev-browser', version: devBrowserVersion, type: 'module' }));
-    write(join(packageDir, 'bin', 'dev-browser.js'), STUB_LAUNCHER);
-    write(join(packageDir, 'bin', 'scenario.json'), JSON.stringify({ ...options.scenario, homeDir }));
-  }
+  if (devBrowserVersion !== null) plantLauncher(globalModules, devBrowserVersion, options.scenario ?? {}, homeDir);
   return { repoRoot, globalModules, homeDir, dist };
+}
+
+function plantLauncher(globalModules: string, version: string, scenario: Scenario, homeDir: string): void {
+  const packageDir = join(globalModules, 'dev-browser');
+  write(join(packageDir, 'package.json'), JSON.stringify({ name: 'dev-browser', version, type: 'module' }));
+  write(join(packageDir, 'bin', 'dev-browser.js'), STUB_LAUNCHER);
+  write(join(packageDir, 'bin', 'scenario.json'), JSON.stringify({ grounds: { light: LIGHT_GROUND, dark: DARK_GROUND }, ...scenario, homeDir }));
 }
 
 const allOutput: string[] = [];
@@ -321,6 +350,29 @@ describe('runA11yLive refuses every empty or broken run by name', () => {
     expect(args.slice(0, 6)).toEqual(['--headless', '--timeout', '120', '--browser', 'fothering-site', 'run']);
   });
 
+  it('prints one took-hold line per run, naming the --ground of the theme each run expects (D-131)', async () => {
+    const { code, lines } = await audit(plantRepo());
+    expect(code).toBe(0);
+    const tookHold = lines.filter((line) => line.includes('the theme took hold'));
+    expect(tookHold).toEqual([
+      A11Y_MESSAGES.tookHold('light 320px', LIGHT_GROUND, 3),
+      A11Y_MESSAGES.tookHold('light 1440px', LIGHT_GROUND, 3),
+      A11Y_MESSAGES.tookHold('dark 320px', DARK_GROUND, 3),
+      A11Y_MESSAGES.tookHold('dark 1440px', DARK_GROUND, 3),
+      A11Y_MESSAGES.tookHold('device 320px', DARK_GROUND, 3),
+      A11Y_MESSAGES.tookHold('device 1440px', DARK_GROUND, 3),
+    ]);
+  });
+
+  it('fails every route whose --ground is not the token value of the theme its run expects', async () => {
+    const { code, lines } = await audit(plantRepo({ scenario: { grounds: { light: DARK_GROUND, dark: LIGHT_GROUND } } }));
+    expect(code).toBe(1);
+    expect(lines).toContain(A11Y_MESSAGES.routeFailed('/', 'light 320px', [E2E_MESSAGES.themeNotTaken('light', DARK_GROUND, LIGHT_GROUND)]));
+    expect(lines).toContain(A11Y_MESSAGES.routeFailed('/no-such-sheet/', 'device 1440px', [E2E_MESSAGES.themeNotTaken('dark', LIGHT_GROUND, DARK_GROUND)]));
+    expect(lines.filter((line) => line.includes('the theme took hold'))).toEqual([]);
+    expect(lines.at(-1)).toMatch(/^\[a11y\] FAIL: 18 of 18 audit\(s\) failed/);
+  });
+
   it('reports a driver run that hangs as stopped by the outer timeout', async () => {
     const { code, lines } = await audit(plantRepo({ scenario: { hang: true } }), { outerTimeoutMs: 1500 });
     expect(code).toBe(1);
@@ -384,6 +436,8 @@ const CATALOGUE_SAMPLES: CatalogueSamples = {
   pass: [1, 2, 3, 0],
   fail: ['x'],
   failCount: [1, 2, 'x'],
+  tookHold: ['r', '#000000', 3],
+  themeAbsent: [],
 };
 
 describe('the message catalogue', () => {
@@ -508,13 +562,61 @@ describe('axe verdicts (D-129)', () => {
   });
 
   it('judges a whole AUDIT record: status, missing results, viewport and overflow', () => {
-    const line: AuditLine = { route: '/', status: 200, axe: cleanAxe, keyboard: keyboard([skip, nav, radios[0] ?? skip, button].map(withRing)), overflow: { scrollWidth: 320, innerWidth: 320 } };
+    const line: AuditLine = { route: '/', status: 200, theme: { dataTheme: null, ground: LIGHT_GROUND }, axe: cleanAxe, keyboard: keyboard([skip, nav, radios[0] ?? skip, button].map(withRing)), overflow: { scrollWidth: 320, innerWidth: 320 } };
     expect(auditReasons(line, 320, NO_ACCEPTED)).toEqual([]);
+    expect(auditReasons(line, 320, NO_ACCEPTED, 200, 'dark')).toEqual([E2E_MESSAGES.themeNotTaken('dark', LIGHT_GROUND, DARK_GROUND)]);
+    const { theme: _unread, ...withoutTheme } = line;
+    expect(auditReasons(withoutTheme, 320, NO_ACCEPTED)).toEqual([A11Y_MESSAGES.themeAbsent()]);
     expect(auditReasons({ route: '/', status: 500 }, 320, NO_ACCEPTED)).toEqual([A11Y_MESSAGES.status(500, 200)]);
     expect(auditReasons({ ...line, status: 404 }, 320, NO_ACCEPTED, 404)).toEqual([]);
     expect(auditReasons(line, 320, NO_ACCEPTED, 404)).toEqual([A11Y_MESSAGES.status(200, 404)]);
     expect(auditReasons({ route: '/', status: 200 }, 320, NO_ACCEPTED)).toEqual([A11Y_MESSAGES.axeAbsent()]);
     expect(auditReasons({ ...line, overflow: { scrollWidth: 330, innerWidth: 300 } }, 320, NO_ACCEPTED)).toEqual([A11Y_MESSAGES.viewport(300, 320), A11Y_MESSAGES.overflow(330, 320)]);
+  });
+});
+
+const reading = (dataTheme: string | null, ground: string): ThemeReading => ({ dataTheme, ground });
+const DARK_PINNED = reading('dark', DARK_GROUND);
+
+describe('the rendered theme verdicts (D-131, AC-42, AC-E28, C5)', () => {
+  it('took hold when the read --ground equals the token value of the expected theme, and not otherwise', () => {
+    expect(tookHoldVerdict(reading(null, LIGHT_GROUND), 'light')).toEqual({ ok: true });
+    expect(tookHoldVerdict(reading('dark', DARK_GROUND), 'dark')).toEqual({ ok: true });
+    expect(tookHoldVerdict(reading(null, DARK_GROUND), 'light')).toEqual({ ok: false, reason: E2E_MESSAGES.themeNotTaken('light', DARK_GROUND, LIGHT_GROUND) });
+    expect(tookHoldVerdict(reading(null, ''), 'dark')).toEqual({ ok: false, reason: E2E_MESSAGES.themeNotTaken('dark', '', DARK_GROUND) });
+  });
+
+  it('a stored Dark needs data-theme dark as well as the dark --ground', () => {
+    expect(storedThemeVerdict(DARK_PINNED, 'dark')).toEqual({ ok: true });
+    expect(storedThemeVerdict(reading(null, DARK_GROUND), 'dark')).toEqual({ ok: false, reason: E2E_MESSAGES.themeAttribute(null, 'dark') });
+    expect(storedThemeVerdict(reading('dark', LIGHT_GROUND), 'dark')).toEqual({ ok: false, reason: E2E_MESSAGES.themeNotTaken('dark', LIGHT_GROUND, DARK_GROUND) });
+  });
+
+  it('Device passes when the dark-OS and light-OS readings follow their token values with no data-theme', () => {
+    expect(deviceVerdict(reading(null, DARK_GROUND), reading(null, LIGHT_GROUND))).toEqual({ ok: true });
+  });
+
+  it('Device fails when the dark-OS and light-OS readings are equal', () => {
+    expect(deviceVerdict(reading(null, DARK_GROUND), reading(null, DARK_GROUND))).toEqual({ ok: false, reason: E2E_MESSAGES.deviceStill(DARK_GROUND) });
+  });
+
+  it('Device fails when either reading differs from its token value, and when data-theme is set', () => {
+    expect(deviceVerdict(reading(null, '#123456'), reading(null, LIGHT_GROUND))).toEqual({ ok: false, reason: E2E_MESSAGES.themeNotTaken('dark', '#123456', DARK_GROUND) });
+    expect(deviceVerdict(reading(null, DARK_GROUND), reading(null, '#123456'))).toEqual({ ok: false, reason: E2E_MESSAGES.themeNotTaken('light', '#123456', LIGHT_GROUND) });
+    expect(deviceVerdict(reading('dark', DARK_GROUND), reading(null, LIGHT_GROUND))).toEqual({ ok: false, reason: E2E_MESSAGES.deviceAttribute('dark') });
+  });
+
+  it('the pin fails when Dark stored on a dark OS reads light after the OS turns light (AC-E28)', () => {
+    expect(pinVerdict(DARK_PINNED, DARK_PINNED)).toEqual({ ok: true });
+    expect(pinVerdict(DARK_PINNED, reading(null, LIGHT_GROUND))).toEqual({ ok: false, reason: E2E_MESSAGES.pinLost(null, LIGHT_GROUND) });
+    expect(pinVerdict(reading('dark', LIGHT_GROUND), DARK_PINNED)).toEqual({ ok: false, reason: E2E_MESSAGES.themeNotTaken('dark', LIGHT_GROUND, DARK_GROUND) });
+  });
+
+  it('a Content Security Policy console line fails the rendered run, any other console error too', () => {
+    const csp = "Executing inline script violates the following Content Security Policy directive 'script-src 'self''.";
+    expect(consoleVerdict([])).toEqual({ ok: true });
+    expect(consoleVerdict([csp])).toEqual({ ok: false, reason: E2E_MESSAGES.cspViolation(csp) });
+    expect(consoleVerdict(['Uncaught TypeError: x is not a function'])).toEqual({ ok: false, reason: E2E_MESSAGES.consoleError('Uncaught TypeError: x is not a function') });
   });
 });
 
@@ -746,12 +848,42 @@ describe('the built checks through the CLI and the e2e step (D-150, D-151)', () 
     return { status: 0, output: '' };
   };
 
-  async function e2e(tree: ReturnType<typeof plantDist>, extra: Partial<SiteE2eOptions> = {}): Promise<{ code: number; lines: string[] }> {
+  type SiteLines = Partial<Record<'THEME' | 'DEVICE' | 'PIN', unknown>>;
+
+  // What a healthy site driver prints: a Dark stored on a light OS, Device following the OS with no
+  // reload, and Dark stored on a dark OS kept when the OS turns light.
+  function siteLines(overrides: SiteLines = {}, consoleErrors: readonly string[] = []): string[] {
+    const checks: SiteLines = {
+      THEME: DARK_PINNED,
+      DEVICE: { dark: reading(null, DARK_GROUND), light: reading(null, LIGHT_GROUND) },
+      PIN: { before: DARK_PINNED, after: DARK_PINNED },
+      ...overrides,
+    };
+    return [
+      ...Object.entries(checks).filter(([, value]) => value !== undefined).map(([check, value]) => `${check} ${JSON.stringify(value)}`),
+      ...consoleErrors.map((text) => `CONSOLE ${JSON.stringify({ type: 'error', text })}`),
+    ];
+  }
+
+  // The rendered step needs a launcher, the Workers config and the driver template under the planted
+  // root; the stand-in launcher only reads the job out of the written driver and prints the lines.
+  function plantBrowser(tree: ReturnType<typeof plantDist>, site: SiteScenario = { lines: siteLines() }): string {
+    const globalModules = join(tree.root, 'global');
+    write(join(tree.root, 'packages', 'web', 'wrangler.jsonc'), readFileSync(join(REPO_ROOT, 'packages', 'web', 'wrangler.jsonc'), 'utf8'));
+    write(join(tree.root, 'scripts', 'site.devbrowser.js'), `const JOB = ${DRIVER_JOB_TOKEN};\nconsole.log('done');\n`);
+    plantLauncher(globalModules, '0.2.9', { site }, join(tree.root, 'home'));
+    return globalModules;
+  }
+
+  async function e2e(tree: ReturnType<typeof plantDist>, extra: Partial<SiteE2eOptions> = {}, site?: SiteScenario): Promise<{ code: number; lines: string[] }> {
     const lines: string[] = [];
-    const code = await runSiteE2e({ repoRoot: tree.root, globalModules: tree.root, print: (line) => lines.push(line), clientSecretsScript: SECRETS_SCRIPT, secondBuild: copyBuild(tree.dist), ...extra });
+    const globalModules = plantBrowser(tree, site);
+    const code = await runSiteE2e({ repoRoot: tree.root, globalModules, print: (line) => lines.push(line), clientSecretsScript: SECRETS_SCRIPT, secondBuild: copyBuild(tree.dist), ...extra });
     allOutput.push(...lines);
     return { code, lines };
   }
+
+  const renderedTree = (): ReturnType<typeof plantDist> => plantSite({ ...completeSite({ 'index.html': '<p>closed - one lane</p>' }), 'tokens.css': ':root {}' });
 
   function stubScript(name: string, exitCode: number): string {
     const path = join(PLANT, 'stubs', `${name}.mjs`);
@@ -759,14 +891,94 @@ describe('the built checks through the CLI and the e2e step (D-150, D-151)', () 
     return path;
   }
 
-  it('runSiteE2e runs the client-secret scan, the file budget, the built checks and the second build in order, then passes', async () => {
-    const tree = plantSite({ ...completeSite({ 'index.html': '<p>closed - one lane</p>' }), 'tokens.css': ':root {}' });
+  it('runSiteE2e runs the client-secret scan, the file budget, the built checks, the second build and the rendered checks in order, then passes', async () => {
+    const tree = renderedTree();
     const { code, lines } = await e2e(tree);
     expect(code).toBe(0);
     const steps = lines.filter((line) => line.startsWith('[e2e] step '));
-    expect(steps).toEqual(['client-secrets', 'file-budget', 'built-checks', 'second-build'].map((name) => E2E_MESSAGES.step(name)));
-    expect(lines.at(-1)).toBe(E2E_MESSAGES.pass(1, 4));
+    expect(steps).toEqual(['client-secrets', 'file-budget', 'built-checks', 'second-build', 'rendered'].map((name) => E2E_MESSAGES.step(name)));
+    expect(lines.at(-1)).toBe(E2E_MESSAGES.pass(1, 5));
     expect(existsSync(join(tree.root, 'dist', 'site-second-build'))).toBe(false);
+  });
+
+  it('the rendered step prints one ok line per THEME, DEVICE, PIN and CONSOLE check', async () => {
+    const { code, lines } = await e2e(renderedTree());
+    expect(code).toBe(0);
+    expect(lines.filter((line) => line.startsWith('[e2e] rendered '))).toEqual([
+      E2E_MESSAGES.renderedOk('THEME', `Dark stored on a light OS painted --ground ${DARK_GROUND}`),
+      E2E_MESSAGES.renderedOk('DEVICE', `--ground followed the OS from ${DARK_GROUND} to ${LIGHT_GROUND} with no reload`),
+      E2E_MESSAGES.renderedOk('PIN', `Dark stored on a dark OS kept --ground ${DARK_GROUND} after the OS turned light`),
+      E2E_MESSAGES.renderedOk('CONSOLE', 'no console error, no Content Security Policy violation'),
+    ]);
+  });
+
+  it('the rendered step serves the planted dist on 127.0.0.1 and hands the driver its base URL and the landing route', async () => {
+    const tree = renderedTree();
+    expect((await e2e(tree)).code).toBe(0);
+    const job = JSON.parse(readFileSync(join(tree.root, 'global', 'dev-browser', 'bin', 'job.json'), 'utf8')) as { base: string; route: string };
+    expect(job.base).toMatch(/^http:\/\/127\.0\.0\.1:\d+$/);
+    expect(job.route).toBe('/');
+    const args = JSON.parse(readFileSync(join(tree.root, 'global', 'dev-browser', 'bin', 'args.json'), 'utf8')) as string[];
+    expect(args.slice(0, 6)).toEqual(['--headless', '--timeout', '120', '--browser', 'fothering-site', 'run']);
+  });
+
+  it('the rendered step fails when Dark stored on a dark OS reads light after the OS turns light (AC-E28)', async () => {
+    const { code, lines } = await e2e(renderedTree(), {}, { lines: siteLines({ PIN: { before: DARK_PINNED, after: reading(null, LIGHT_GROUND) } }) });
+    expect(code).toBe(1);
+    expect(lines).toContain(E2E_MESSAGES.renderedFailed('PIN', E2E_MESSAGES.pinLost(null, LIGHT_GROUND)));
+    expect(lines.at(-1)).toBe(E2E_MESSAGES.fail(E2E_MESSAGES.renderedFailures(1, `PIN: ${E2E_MESSAGES.pinLost(null, LIGHT_GROUND)}`)));
+  });
+
+  it('the rendered step fails when Device does not follow the OS (AC-42)', async () => {
+    const { code, lines } = await e2e(renderedTree(), {}, { lines: siteLines({ DEVICE: { dark: reading(null, DARK_GROUND), light: reading(null, DARK_GROUND) } }) });
+    expect(code).toBe(1);
+    expect(lines).toContain(E2E_MESSAGES.renderedFailed('DEVICE', E2E_MESSAGES.deviceStill(DARK_GROUND)));
+  });
+
+  it('the rendered step fails a Content Security Policy console error (C5)', async () => {
+    const csp = "Applying inline style violates the following Content Security Policy directive 'default-src 'self''.";
+    const { code, lines } = await e2e(renderedTree(), {}, { lines: siteLines({}, [csp]) });
+    expect(code).toBe(1);
+    expect(lines).toContain(E2E_MESSAGES.renderedFailed('CONSOLE', E2E_MESSAGES.cspViolation(csp)));
+  });
+
+  it('the rendered step fails a missing check line and a malformed one by name', async () => {
+    const missing = await e2e(renderedTree(), {}, { lines: siteLines({ DEVICE: undefined }) });
+    expect(missing.code).toBe(1);
+    expect(missing.lines).toContain(E2E_MESSAGES.renderedFailed('DEVICE', E2E_MESSAGES.renderedMissing('DEVICE')));
+    const malformed = await e2e(renderedTree(), {}, { lines: [...siteLines({ THEME: undefined }), 'THEME {not json'] });
+    expect(malformed.code).toBe(1);
+    expect(malformed.lines).toContain(E2E_MESSAGES.renderedFailed('THEME', E2E_MESSAGES.renderedMalformed('THEME {not json')));
+    const wrongShape = await e2e(renderedTree(), {}, { lines: siteLines({ PIN: { before: DARK_PINNED } }) });
+    expect(wrongShape.lines).toContain(E2E_MESSAGES.renderedFailed('PIN', E2E_MESSAGES.renderedMalformed(`PIN ${JSON.stringify({ before: DARK_PINNED })}`)));
+  });
+
+  it('the rendered step fails a driver run without its done line and one that exits non-zero', async () => {
+    const noDone = await e2e(renderedTree(), {}, { lines: siteLines(), omitDone: true });
+    expect(noDone.code).toBe(1);
+    expect(noDone.lines.at(-1)).toBe(E2E_MESSAGES.fail(A11Y_MESSAGES.noDone('rendered')));
+    const exited = await e2e(renderedTree(), {}, { lines: siteLines(), exitCode: 2 });
+    expect(exited.code).toBe(1);
+    expect(exited.lines.at(-1)).toBe(E2E_MESSAGES.fail(A11Y_MESSAGES.driverExit('rendered', 2, '')));
+  });
+
+  it('the rendered step refuses a missing dev-browser, a missing template and a broken Workers config by name', async () => {
+    const tree = renderedTree();
+    const lines: string[] = [];
+    const absent = join(tree.root, 'no-global');
+    expect(await runSiteE2e({ repoRoot: tree.root, globalModules: absent, print: (line) => lines.push(line), clientSecretsScript: SECRETS_SCRIPT, secondBuild: copyBuild(tree.dist) })).toBe(1);
+    expect(lines.at(-1)).toBe(E2E_MESSAGES.fail(A11Y_MESSAGES.devBrowserMissing(join(absent, 'dev-browser'))));
+    const globalModules = plantBrowser(tree);
+    rmSync(join(tree.root, 'scripts', 'site.devbrowser.js'));
+    lines.length = 0;
+    expect(await runSiteE2e({ repoRoot: tree.root, globalModules, print: (line) => lines.push(line), clientSecretsScript: SECRETS_SCRIPT, secondBuild: copyBuild(tree.dist) })).toBe(1);
+    expect(lines.at(-1)).toBe(E2E_MESSAGES.fail(A11Y_MESSAGES.templateMissing(join(tree.root, 'scripts', 'site.devbrowser.js'))));
+    plantBrowser(tree);
+    write(join(tree.root, 'packages', 'web', 'wrangler.jsonc'), '{ "assets": { "html_handling": "none", "not_found_handling": "404-page" } }');
+    lines.length = 0;
+    expect(await runSiteE2e({ repoRoot: tree.root, globalModules, print: (line) => lines.push(line), clientSecretsScript: SECRETS_SCRIPT, secondBuild: copyBuild(tree.dist) })).toBe(1);
+    expect(lines.at(-1)).toMatch(/^\[e2e\] FAIL: the preview server did not start: .*assets\.html_handling is "none"/);
+    allOutput.push(...lines);
   });
 
   it('runSiteE2e fails by name when the client-secret scan exits 2 or 1', async () => {
@@ -849,6 +1061,9 @@ describe('the built checks through the CLI and the e2e step (D-150, D-151)', () 
       checksPass: [1], expectPass: [1], checksFail: ['x'], unregistered: ['x'], unexpected: ['x', 1], expectedMissing: ['x'],
       clientSecrets: [2], tooManyFiles: [20_000, 20_000], fileTooLarge: ['f', 1, 1], secondBuildFailed: [1, 'x'],
       buildDiffers: ['f'], buildMissing: ['f', 'd'],
+      themeNotTaken: ['dark', '#000000', '#0F1316'], themeAttribute: [null, 'dark'], deviceAttribute: ['dark'], deviceStill: ['#000000'],
+      pinLost: [null, '#000000'], cspViolation: ['x'], consoleError: ['x'], renderedOk: ['THEME', 'x'], renderedFailed: ['THEME', 'x'],
+      renderedMissing: ['THEME'], renderedMalformed: ['THEME x'], renderedFailures: [1, 'x'],
     };
     const rendered = Object.entries(samples).map(([key, args]) => (E2E_MESSAGES[key as keyof typeof E2E_MESSAGES] as (...a: unknown[]) => string)(...args));
     expect(rendered).toHaveLength(Object.keys(E2E_MESSAGES).length);
