@@ -1,10 +1,12 @@
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { parseLaneMap } from '@fothering/core/lanes';
 import { replayArtifactHash, replayArtifactSchema, type ReplayArtifact } from '@fothering/core/replay-artifact';
 import { afterAll, describe, expect, it } from 'vitest';
 import { PROVENANCE_LABELS } from './labels.js';
-import { buildReplayView, loadReplayArtifact } from './replay-view.js';
+import { readRepoText, repoRoot } from './repo-facts.js';
+import { buildReplayView, fixtureFindings, loadReplayArtifact } from './replay-view.js';
 
 const WEB_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const REPO_ROOT = resolve(WEB_ROOT, '../..');
@@ -185,5 +187,215 @@ describe('loadReplayArtifact refusals', () => {
     const artifact = liveArtifact();
     const root = plantProject('live-complete', JSON.stringify(artifact), JSON.stringify(manifestFor(artifact)));
     expect(loadReplayArtifact(root)).toEqual(artifact);
+  });
+});
+
+describe('buildReplayView order', () => {
+  it('renders steps 1 to 4 and the same log whatever order the artifact lists events in', () => {
+    const artifact = shippedArtifact();
+    const reversed = buildReplayView({ ...artifact, events: [...artifact.events].reverse() });
+    expect(reversed.steps.map((step) => step.number)).toEqual([1, 2, 3, 4]);
+    expect(reversed.eventLog.rows).toEqual(buildReplayView(artifact).eventLog.rows);
+  });
+
+  it('keeps the artifact order for two events with equal times', () => {
+    const artifact = shippedArtifact();
+    const [first, second, ...rest] = artifact.events;
+    if (first === undefined || second === undefined) throw new Error('the shipped artifact has fewer than two events');
+    const tieA = { ...first, atUtc: '2026-10-14T14:01:07Z', detail: 'tie A' };
+    const tieB = { ...second, atUtc: '2026-10-14T14:01:07Z', detail: 'tie B' };
+    const details = (events: ReplayArtifact['events']): string[] =>
+      buildReplayView({ ...artifact, events }).eventLog.rows.filter((row) => row.detail.startsWith('tie')).map((row) => row.detail);
+    expect(details([tieA, tieB, ...rest])).toEqual(['tie A', 'tie B']);
+    expect(details([tieB, tieA, ...rest])).toEqual(['tie B', 'tie A']);
+  });
+});
+
+describe('buildReplayView step contents', () => {
+  it('gives step 2 one schedule row per evidence row with dimension, count, denominator, verdict and threshold', () => {
+    const artifact = shippedArtifact();
+    const { rows } = buildReplayView(artifact).schedule;
+    expect(rows.map((row) => [row.count, row.denominator, row.threshold])).toEqual(
+      artifact.evidence.map((row) => [row.count, row.denominator, row.threshold]),
+    );
+    expect(rows[0]).toMatchObject({ dimension: 'Tag', label: 'Tag `batch=2026-10-14-b`', countText: '31 of 31 hard bounces', verdict: 'Cause' });
+    expect(rows.map((row) => row.verdict)).toEqual(['Cause', 'Clean', 'Ruled out', 'Ruled out']);
+    expect(rows.map((row) => row.dimension)).toEqual(['Tag', 'Tag', 'Provider', 'Configuration']);
+  });
+
+  it('marks a provider row unconfirmed until it carries a confirming source, which becomes its link', () => {
+    const artifact = shippedArtifact();
+    expect(buildReplayView(artifact).schedule.rows.map((row) => row.unconfirmed)).toEqual([false, false, true, false]);
+    const url = 'https://docs.aws.amazon.com/ses/latest/dg/send-email-concepts-deliverability.html';
+    const confirmed = artifact.evidence.map((row) => (row.dimension === 'provider' ? { ...row, confirmingSourceUrl: url } : row));
+    const provider = buildReplayView({ ...artifact, evidence: confirmed }).schedule.rows[2];
+    expect(provider).toMatchObject({ unconfirmed: false, sourceUrl: url });
+  });
+
+  it('names the closed lane and every other artifact lane as open in steps 3 and 4', () => {
+    expect(buildReplayView(shippedArtifact()).lanesLines).toEqual({
+      paused: 'Closed: fothering-bulk. Open: fothering-transactional, fothering-alerts.',
+      reopened: 'Reopened: fothering-bulk. Open throughout: fothering-transactional, fothering-alerts.',
+    });
+  });
+
+  it('reads "Open: <lane>" with one other lane', () => {
+    const view = buildReplayView({ ...shippedArtifact(), lanes: ['fothering-transactional', 'fothering-bulk'] });
+    expect(view.lanesLines.paused).toBe('Closed: fothering-bulk. Open: fothering-transactional.');
+    expect(view.boardDescriptions[2]).toContain('fothering-transactional keeps flowing.');
+  });
+
+  it('says closed, LANE CLOSED and the hold check with a passing hold check', () => {
+    const view = buildReplayView(shippedArtifact());
+    expect(view.tag.legend).toBe('LANE CLOSED');
+    expect(view.steps[2]?.heading).toBe('Paused, read back, then held');
+    expect(view.steps[2]?.paragraphs.join(' ')).toContain('A hold check finds no send accepted after 14:03 UTC.');
+    expect(view.email.subject).toBe('Closed: fothering-bulk, one lane in eu-central-1');
+  });
+
+  it('says paused and LANE PAUSED without a hold check, and no view string says closed', () => {
+    const { holdCheck: _dropped, ...rest } = shippedArtifact();
+    const view = buildReplayView(rest);
+    expect(view.tag.legend).toBe('LANE PAUSED');
+    expect(view.steps[2]?.heading).toBe('Paused, then read back');
+    expect(view.lanesLines.paused).toMatch(/^Paused: fothering-bulk\./);
+    expect(JSON.stringify(view)).not.toMatch(/\bclosed\b/i);
+  });
+
+  it('summarises the lane, the cause, the pause with its read-back and the reopen with its read-back', () => {
+    expect(buildReplayView(shippedArtifact()).summary).toEqual([
+      { time: '14:01', text: 'Hard bounces on fothering-bulk' },
+      { time: '14:02', text: 'Cause: batch=2026-10-14-b' },
+      { time: '14:03', text: 'Paused, read back false' },
+      { time: '15:20', text: 'Reopened by command, read back true' },
+    ]);
+  });
+
+  it('writes the step texts, the email and the tag from the artifact', () => {
+    const view = buildReplayView(shippedArtifact());
+    expect(view.h1).toBe('Replay: the fothering-bulk incident');
+    expect(view.intro).toBe('One incident, four steps. Times are illustrative.');
+    expect(view.steps.map((step) => [step.label, step.time])).toEqual([
+      ['Bounces arrive', '14:01'],
+      ['Cause named', '14:02'],
+      ['Paused, read back', '14:03'],
+      ['Reopened by command', '15:20'],
+    ]);
+    expect(view.steps[0]?.paragraphs).toEqual([
+      'Permanent bounces arrive on fothering-bulk only, each `550 5.1.1`, from 9 providers. The other lanes keep delivering.',
+    ]);
+    expect(view.schedule.caption).toBe('fothering-bulk, 13:01 to 14:01 UTC, 412 sends.');
+    expect(view.schedule.modelRole).toBe('Code approved one lane. The agent confirmed that option.');
+    expect(view.steps[2]?.paragraphs).toEqual([
+      '`PutConfigurationSetSendingOptions` turns sending off for fothering-bulk only. `GetConfigurationSet` reads `SendingOptions.SendingEnabled` as false. A hold check finds no send accepted after 14:03 UTC.',
+    ]);
+    expect(view.email).toEqual({
+      subject: 'Closed: fothering-bulk, one lane in eu-central-1',
+      disclosure: "Fothering's AI agent wrote the Why paragraph. Code wrote the rest.",
+      why: 'All 31 hard bounces carry batch=2026-10-14-b, and the earlier batch delivered cleanly.',
+      reopen: 'Run the reopen command for fothering-bulk.',
+    });
+    expect(view.reopenCommand).toContain('--configuration-set-name fothering-bulk --sending-enabled');
+    expect(view.steps[3]?.paragraphs).toEqual(['`GetConfigurationSet` then read `SendingEnabled` as true.']);
+    expect(view.tag).toMatchObject({
+      evidence: 'All 31 hard bounces in the window carry that tag: `550 5.1.1`, 9 providers.',
+      readBack: 'SendingOptions.SendingEnabled: false, 14:03 UTC',
+      replayReadBack: 'SendingEnabled: false, 14:03 UTC',
+      number: 'TAG 001',
+    });
+    expect(view.boardDescriptions).toEqual([
+      'Mail flows on all 3 lanes. Bounce marks appear on fothering-bulk.',
+      'Mail still flows on all 3 lanes, with bounce marks on fothering-bulk. Detection code has approved one lane.',
+      'fothering-bulk is stopped at a filled valve with a lockout tag, and its outlet is dotted. fothering-transactional, fothering-alerts keep flowing.',
+      'fothering-bulk flows again and the tag is off the valve. All 3 lanes flow.',
+    ]);
+    expect(view.landing.drawingTitle).toBe('Flow drawing of one SES account with 3 sending lanes');
+  });
+
+  it('words nothing in the generated view as recorded or captured', () => {
+    expect(JSON.stringify(buildReplayView(shippedArtifact()))).not.toMatch(/recorded|recording|captured|capture/i);
+  });
+});
+
+describe('buildReplayView event log', () => {
+  it('follows the step order and leaves an absent SMTP code or receiving domain empty, never a placeholder', () => {
+    const { rows } = buildReplayView(shippedArtifact()).eventLog;
+    expect(rows.map((row) => row.step)).toEqual([...rows.map((row) => row.step)].sort((a, b) => a - b));
+    expect(rows[0]).toMatchObject({ time: '14:01:07', kind: 'Bounce, Permanent', smtpCode: '550 5.1.1', receivingDomain: 'web.de' });
+    const evidenceRow = rows.find((row) => row.kind === 'Evidence record');
+    expect(evidenceRow).toMatchObject({ smtpCode: '', receivingDomain: '' });
+  });
+
+  it('captions the log from the label map and counts the hard bounces it shows', () => {
+    const { eventLog } = buildReplayView(shippedArtifact());
+    expect(eventLog.caption).toBe(PROVENANCE_LABELS.generated.caption);
+    expect(eventLog.note).toBe('Showing the first two hard bounces and every decision, call and email.');
+  });
+});
+
+describe('buildReplayView refusals', () => {
+  const artifact = shippedArtifact();
+  const cases: [string, ReplayArtifact, RegExp][] = [
+    ['a step 3 read-back of true', { ...artifact, pause: { ...artifact.pause, readBack: { ...artifact.pause.readBack, value: 'true' } } }, /: pause\.readBack\.value: /],
+    ['a failed hold check', { ...artifact, holdCheck: { atUtc: artifact.pause.atUtc, holdFromUtc: artifact.pause.atUtc, result: 'failed' } }, /: holdCheck\.result: /],
+    ['an agent that said unknown', { ...artifact, agent: { ...artifact.agent, outcome: 'unknown' } }, /: agent\.outcome: /],
+    ['a reopen read-back of false', { ...artifact, reopen: { ...artifact.reopen, readBack: { ...artifact.reopen.readBack, value: 'false' } } }, /: reopen\.readBack\.value: /],
+    ['a step with no event', { ...artifact, events: artifact.events.filter((event) => event.step !== 2) }, /: events: step 2 has no event/],
+    ['no evidence row with the verdict cause', { ...artifact, evidence: artifact.evidence.filter((row) => row.verdict !== 'cause') }, /: evidence: no row has the verdict cause/],
+    ['no bounce on the closed lane with an SMTP code', { ...artifact, events: artifact.events.map((event) => ({ ...event, smtpCode: undefined })) }, /: events: no bounce on fothering-bulk carries an SMTP code/],
+  ];
+
+  it.each(cases)('throws by name for %s', (_name, candidate, pattern) => {
+    expect(() => buildReplayView(candidate)).toThrow(/^packages\/web\/src\/fixtures\/replay-incident\.json: /);
+    expect(() => buildReplayView(candidate)).toThrow(pattern);
+  });
+});
+
+describe('the shipped artifact and lanes.json', () => {
+  it('lists exactly the lanes.json configuration sets', () => {
+    const laneMap = parseLaneMap(JSON.parse(readRepoText('lanes.json', repoRoot(WEB_ROOT))));
+    expect(new Set(shippedArtifact().lanes)).toEqual(new Set(laneMap.lanes.map((lane) => lane.configurationSet)));
+  });
+});
+
+describe('fixtureFindings', () => {
+  const shippedText = readFileSync(join(FIXTURES, 'replay-incident.json'), 'utf8');
+
+  it('passes every committed site fixture', () => {
+    const files = readdirSync(FIXTURES);
+    expect(files.length).toBeGreaterThan(0);
+    for (const name of files) expect(fixtureFindings(name, readFileSync(join(FIXTURES, name), 'utf8'))).toEqual([]);
+  });
+
+  it('fails a copy holding an address at a domain that is not reserved', () => {
+    const planted = shippedText.replace('"Reopen command run by the operator"', '"Reopen command run by ops@acme-mail.net"');
+    expect(planted).not.toBe(shippedText);
+    expect(fixtureFindings('replay-incident.json', planted)).toEqual([expect.stringMatching(/^replay-incident\.json:\d+: an email address at acme-mail\.net/)]);
+  });
+
+  it('fails a copy holding an IP outside the documentation ranges', () => {
+    const planted = shippedText.replace('"Delivered, stream receipts"', '"Delivered, stream receipts, from 10.1.2.3"');
+    expect(fixtureFindings('replay-incident.json', planted)).toEqual([expect.stringMatching(/^replay-incident\.json:\d+: an IP address outside /)]);
+  });
+
+  it('fails a copy holding a 12-digit number', () => {
+    const planted = shippedText.replace('"option-7d2e"', '"option-123456789012"');
+    expect(fixtureFindings('replay-incident.json', planted)).toEqual([expect.stringMatching(/^replay-incident\.json:\d+: a 12-digit number /)]);
+  });
+
+  it('passes the simulator address, the RFC 2606 names, a documentation IP and a manifest account id', () => {
+    const allowed = shippedText.replace(
+      '"Reopen command run by the operator"',
+      '"Sent to bounce@simulator.amazonses.com, ops@mail.example.org, a@b.test and from 192.0.2.10 and 203.0.113.7"',
+    );
+    expect(fixtureFindings('replay-incident.json', allowed)).toEqual([]);
+    const manifest = JSON.stringify(manifestFor(liveArtifact()));
+    expect(fixtureFindings('capture-manifest.json', manifest)).toEqual([]);
+    expect(fixtureFindings('replay-incident.json', manifest)).toHaveLength(2);
+  });
+
+  it('fails a manifest holding a 12-digit number other than its account id', () => {
+    const manifest = { ...manifestFor(liveArtifact()), requestIds: ['444455556666'] };
+    expect(fixtureFindings('capture-manifest.json', JSON.stringify(manifest))).toEqual([expect.stringMatching(/a 12-digit number/)]);
   });
 });
