@@ -186,6 +186,13 @@ describe('validateExplanation (D-78, R12)', () => {
     expect(checkOf(F1, closeOn(APPROVED))).toBe('ok');
   });
 
+  it('reads a bracket-defanged dot as a dot, so a defanged domain is judged like the plain one', () => {
+    for (const text of ['see evil[.]com', 'see evil(.)com', 'see evil{.}com', 'write to ops@evil[.]com']) {
+      expect(checkOf(text, closeOn(WITH_IDENTITY)), text).toBe('url');
+    }
+    expect(checkOf('the from-domain is news[.]example[.]com', closeOn(WITH_IDENTITY))).toBe('ok');
+  });
+
   it('rejects any occurrence of close or reopen, in any case or width', () => {
     const words = [
       'please reopen it',

@@ -178,14 +178,19 @@ function namesOnlyRecordDomains(normal: string, record: EvidenceRecord): boolean
   return tokens.every(([token]) => held.has(token));
 }
 
+// A dot written as [.], (.) or {.} is a defanged domain, so the domain, address and www tests read
+// it as a plain dot: a defanged invented domain fails and a defanged record-held one passes.
+const DEFANGED_DOT = /\[\.\]|\(\.\)|\{\.\}/g;
+
 function holdsNoUrl(text: string, context: ExplanationContext): boolean {
   const normal = folded(text);
+  const refanged = normal.replace(DEFANGED_DOT, '.');
   return (
     !SCHEME_URL.test(normal) &&
     !DEFANGED_URL.test(normal) &&
-    !WWW_TOKEN.test(normal) &&
-    !EMAIL_ADDRESS.test(normal) &&
-    namesOnlyRecordDomains(normal, context.record)
+    !WWW_TOKEN.test(refanged) &&
+    !EMAIL_ADDRESS.test(refanged) &&
+    namesOnlyRecordDomains(refanged, context.record)
   );
 }
 
