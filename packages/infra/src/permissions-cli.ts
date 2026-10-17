@@ -1,5 +1,5 @@
 import { existsSync, writeFileSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
+import { resolve } from 'node:path';
 import { collectPermissions, serializePermissions, synthesizePermissionTemplates } from './permissions.js';
 import { collectResources, serializeResources } from './resources.js';
 
