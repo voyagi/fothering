@@ -567,8 +567,73 @@ export function noInlineStyleRule(site: BuiltSite, _context: CheckContext): Find
   return [...onPages, ...inCss];
 }
 
-export function switchMarkupRule(_site: BuiltSite, _context: CheckContext): Finding[] {
-  return [];
+const THEME_CHOICES: readonly (readonly [string, string])[] = [['device', 'Device'], ['light', 'Light'], ['dark', 'Dark']];
+
+function elementsIn(root: BuiltElement, tag: string): BuiltElement[] {
+  const found: BuiltElement[] = [];
+  walk(root, (element) => {
+    if (element.tag === tag && !element.inSvg && element !== root) found.push(element);
+  });
+  return found;
+}
+
+interface ThemeRadio {
+  readonly attrs: Readonly<Record<string, string>>;
+  readonly label: string;
+}
+
+// A radio's label is the label wrapping it or the one whose for names its id.
+function themeRadios(fieldset: BuiltElement, page: BuiltPage): ThemeRadio[] {
+  const forLabels = new Map(elementsIn(page.root, 'label').filter((label) => label.attrs.for !== undefined).map((label) => [label.attrs.for ?? '', textOf(label)]));
+  const radios: ThemeRadio[] = [];
+  const visit = (element: BuiltElement, wrapping: BuiltElement | null): void => {
+    const label = element.tag === 'label' ? element : wrapping;
+    if (element.tag === 'input' && (element.attrs.type ?? '').toLowerCase() === 'radio') {
+      const byFor = element.attrs.id === undefined ? undefined : forLabels.get(element.attrs.id);
+      radios.push({ attrs: element.attrs, label: byFor ?? (label === null ? '' : textOf(label)) });
+    }
+    for (const child of element.children) {
+      if (typeof child !== 'string') visit(child, label);
+    }
+  };
+  visit(fieldset, null);
+  return radios;
+}
+
+function radioFindings(radios: readonly ThemeRadio[]): string[] {
+  if (radios.length !== THEME_CHOICES.length) return [`the theme fieldset holds ${radios.length} radio inputs, ${THEME_CHOICES.length} expected`];
+  const labels = radios.map((radio) => radio.label);
+  const expectedLabels = THEME_CHOICES.map(([, label]) => label);
+  if (labels.join(', ') !== expectedLabels.join(', ')) return [`the theme radios read ${labels.join(', ')}; ${expectedLabels.join(', ')} expected`];
+  const texts: string[] = [];
+  radios.forEach((radio, index) => {
+    const [value, label] = THEME_CHOICES[index] ?? ['', ''];
+    if (radio.attrs.name !== 'theme') texts.push(`the ${label} radio is not named theme`);
+    if (radio.attrs.value !== value) texts.push(`the ${label} radio has the value ${radio.attrs.value ?? 'none'}, ${value} expected`);
+    const checked = radio.attrs.checked !== undefined;
+    if (value === 'device' && !checked) texts.push('the Device radio is not checked in the markup');
+    if (value !== 'device' && checked) texts.push(`the ${label} radio is checked in the markup`);
+  });
+  return texts;
+}
+
+function switchFindings(page: BuiltPage): string[] {
+  const headers = elementsIn(page.root, 'header');
+  if (headers.length === 0) return ['the page has no header element'];
+  const fieldsets = headers.flatMap((header) => elementsIn(header, 'fieldset'));
+  if (fieldsets.length === 0) return ['the header holds no theme fieldset'];
+  if (fieldsets.length > 1) return [`the header holds ${fieldsets.length} fieldsets, 1 expected`];
+  const [fieldset] = fieldsets;
+  if (fieldset === undefined) return [];
+  const legend = fieldset.children.find((child): child is BuiltElement => typeof child !== 'string' && child.tag === 'legend');
+  const texts = legend === undefined || textOf(legend) === '' ? ['the theme fieldset has no legend'] : [];
+  return [...texts, ...radioFindings(themeRadios(fieldset, page))];
+}
+
+// AC-38: Device sits first and checked in the markup, so a visitor with nothing stored, or with
+// JavaScript off, reads the switch as following the OS.
+export function switchMarkupRule(site: BuiltSite, _context: CheckContext): Finding[] {
+  return site.pages.flatMap((page) => switchFindings(page).map((text) => ({ rule: 'switch-markup' as const, route: page.route, text })));
 }
 
 // Workers limits: 20,000 files per version on the Free plan and 25 MiB per file (AC-62).
