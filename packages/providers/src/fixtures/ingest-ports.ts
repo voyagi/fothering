@@ -243,13 +243,14 @@ export function createFixtureDecisionStore(options: FixtureOptions = {}, dryRun?
       const item = unexpiredDecisionItem(items.get(keyOf(key)), nowMs);
       return item === undefined ? undefined : structuredClone(item);
     },
-    async updateIfVersion(key, expectedVersion, attributes, nowMs) {
+    async updateIfVersion(key, expectedVersion, attributes, nowMs, expected = {}) {
       assertVersionedUpdate(key, expectedVersion, attributes);
       rejectUnmarshallable(attributes);
       rejectUnmarshallable(nowMs);
       await dryRun?.would('decisionStore.updateIfVersion', key.pk, { pk: key.pk, sk: key.sk, expectedVersion });
       const stored = items.get(keyOf(key));
       if (!isDecisionStoreItem(stored) || stored.version !== expectedVersion) return 'conflict';
+      if (Object.entries(expected).some(([name, value]) => stored[name] !== value)) return 'conflict';
       items.set(keyOf(key), {
         ...stored,
         ...structuredClone(attributes),

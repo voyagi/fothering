@@ -222,10 +222,13 @@ async function finalVerdictsOf(deps: DetectDeps, state: IncidentState, nowMs: nu
   return verdicts;
 }
 
-// A lost update reads the marker back rather than writing over whatever the other cycle set.
+// A lost update reads the marker back rather than writing over whatever the other cycle set. Every
+// marker write names the incident it read as well as the version: a marker put over an expired one
+// starts again at version 1, so the version alone could match a newer incident's marker.
 async function closeMarker(deps: DetectDeps, marker: Marker, configurationSet: string, nowMs: number): Promise<Marker | undefined> {
   const attributes = { incidentId: marker.incidentId, status: 'closed' };
-  const result = await deps.ports.decisionStore.updateIfVersion(incidentLaneKey(configurationSet), marker.version, attributes, nowMs);
+  const expected = { incidentId: marker.incidentId };
+  const result = await deps.ports.decisionStore.updateIfVersion(incidentLaneKey(configurationSet), marker.version, attributes, nowMs, expected);
   if (result === 'updated') return { ...marker, status: 'closed', version: marker.version + 1 };
   return readMarker(deps, configurationSet, nowMs);
 }
@@ -280,7 +283,8 @@ async function claimMarker(deps: DetectDeps, configurationSet: string, previous:
     const item = { ...incidentLaneKey(configurationSet), incidentId, status: 'open', version: 1, expiresAt: expiresAtFor(nowMs) };
     return (await store.putIfAbsent(item, nowMs)) === 'written';
   }
-  return (await store.updateIfVersion(incidentLaneKey(configurationSet), previous.version, { incidentId, status: 'open' }, nowMs)) === 'updated';
+  const expected = { incidentId: previous.incidentId };
+  return (await store.updateIfVersion(incidentLaneKey(configurationSet), previous.version, { incidentId, status: 'open' }, nowMs, expected)) === 'updated';
 }
 
 /**

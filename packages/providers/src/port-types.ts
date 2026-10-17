@@ -75,12 +75,17 @@ export interface DecisionStorePort {
   putIfAbsent(item: DecisionStoreItem, nowMs: number): Promise<'written' | 'duplicate'>;
   /** Answers undefined for an item whose expiresAt has passed, since GetItem applies no TTL filter. */
   getItem(key: RecordKey, nowMs: number): Promise<DecisionStoreItem | undefined>;
-  /** Sets the attributes, version + 1 and a fresh 30-day expiresAt, only while the stored version is expectedVersion. */
+  /**
+   * Sets the attributes, version + 1 and a fresh 30-day expiresAt, only while the stored version is
+   * expectedVersion and the stored item holds each expected attribute value. A put over an expired
+   * item starts its version again, so a version alone cannot tell that item from the one it replaced.
+   */
   updateIfVersion(
     key: RecordKey,
     expectedVersion: number,
     attributes: Readonly<Record<string, unknown>>,
     nowMs: number,
+    expected?: Readonly<Record<string, string>>,
   ): Promise<'updated' | 'conflict'>;
   /** Adds one invocation to both counters and the token reservation to the day, all or nothing. */
   reserveInvocation(request: ReservationRequest): Promise<ReservationResult>;

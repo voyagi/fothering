@@ -886,6 +886,16 @@ describe('the fixture decision store writes once and updates by version (D-66, A
     expect(await decisions.getItem(missing, TRACER_NOW_MS)).toBeUndefined();
   });
 
+  it('updates only while the stored item also holds each expected attribute value, and changes nothing otherwise', async () => {
+    const decisions = createFixtureDecisionStore();
+    await decisions.putIfAbsent({ ...STATE_KEY, expiresAt: NOW_SECONDS + 60, version: 1, incidentId: 'first', status: 'open' }, TRACER_NOW_MS);
+    expect(await decisions.updateIfVersion(STATE_KEY, 1, { status: 'closed' }, TRACER_NOW_MS, { incidentId: 'second' })).toBe('conflict');
+    expect(await decisions.updateIfVersion(STATE_KEY, 1, { status: 'closed' }, TRACER_NOW_MS, { note: 'first' })).toBe('conflict');
+    expect(await decisions.getItem(STATE_KEY, TRACER_NOW_MS)).toMatchObject({ version: 1, status: 'open' });
+    expect(await decisions.updateIfVersion(STATE_KEY, 1, { status: 'closed' }, TRACER_NOW_MS, { incidentId: 'first' })).toBe('updated');
+    expect(await decisions.getItem(STATE_KEY, TRACER_NOW_MS)).toMatchObject({ version: 2, status: 'closed', incidentId: 'first' });
+  });
+
   it('refuses an update naming an attribute it writes itself, and any put or update of a counter item', async () => {
     const decisions = createFixtureDecisionStore();
     await decisions.putIfAbsent({ ...STATE_KEY, expiresAt: NOW_SECONDS + 60, version: 1 }, TRACER_NOW_MS);

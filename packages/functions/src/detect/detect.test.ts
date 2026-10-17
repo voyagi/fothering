@@ -17,7 +17,7 @@ import {
 import { INCIDENT_TRANSITIONS } from '@fothering/core/incident';
 import { parseLaneMap, type LaneMap } from '@fothering/core/lanes';
 import { createLogger, type LogEntry } from '@fothering/core/log';
-import { UNCLASSIFIED } from '@fothering/core/records';
+import { RETENTION_SECONDS, UNCLASSIFIED } from '@fothering/core/records';
 import { scenarioRecords, type LaneScenario } from '@fothering/core/test/event-arbitraries';
 import { AGENT_UNAVAILABLE_REASONS } from '@fothering/core/agent-answer';
 import { TEST_ADDRESS_KEY_SET, createFixtureTableState } from '@fothering/providers/fixtures/ingest-ports';
@@ -182,7 +182,7 @@ function withDecisionStore(deps: DetectDeps, overrides: Partial<DecisionStorePor
   const wrapped: DecisionStorePort = {
     putIfAbsent: (item, nowMs) => store.putIfAbsent(item, nowMs),
     getItem: (key, nowMs) => store.getItem(key, nowMs),
-    updateIfVersion: (key, expectedVersion, attributes, nowMs) => store.updateIfVersion(key, expectedVersion, attributes, nowMs),
+    updateIfVersion: (key, expectedVersion, attributes, nowMs, expected) => store.updateIfVersion(key, expectedVersion, attributes, nowMs, expected),
     reserveInvocation: (request) => store.reserveInvocation(request),
     recordUsage: (usage) => store.recordUsage(usage),
     ...overrides,
@@ -294,6 +294,39 @@ describe('one spike is one incident across repeated cycles (D-53, D-54, D-55)', 
     expect(itemsWithSortKey(store, 'MARKER')[0]?.incidentId).toBe(opens ? laterId : INCIDENT_ID);
     expect((await storedItem(deps, laterId, 'EVIDENCE', laterNowMs)) !== undefined).toBe(opens);
     expect(summary.incidentsOpened).toBe(opens ? 1 : 0);
+  });
+
+  // A cycle that read the marker before its expiry still holds that marker's version after another
+  // cycle has put a new marker over the expired one, starting again at version 1. Every marker write
+  // names the incident it read, so the stale write misses the newer incident's marker.
+  it.each([
+    ['a stale cycle closing its own incident', 'closed', 'open', 1, false],
+    ['a stale cycle reopening the lane for a new spike', 'open', 'closed', 2, true],
+  ] as const)('leaves a newer incident marker put over the expired one alone: %s', async (_name, writes, newerStatus, newerVersion, reopening) => {
+    const { deps, store } = await builtCycle({ runtime: closeRuntime });
+    await runDetectionCycle(deps);
+    await runDetectionCycle(at(deps, QUIET_NOW_MS));
+    if (reopening) await runDetectionCycle(at(deps, CLOSE_NOW_MS));
+    const staleNowMs = reopening ? CLOSE_NOW_MS + 60_000 : CLOSE_NOW_MS;
+    if (reopening) await insert(deps, BAD_BATCH, staleNowMs);
+    const laneKey = incidentLaneKey(BULK);
+    const newer = {
+      ...laneKey,
+      incidentId: incidentIdFor(BULK, bucketStartMs(QUIET_NOW_MS)),
+      status: newerStatus,
+      version: newerVersion,
+      expiresAt: Math.floor(staleNowMs / 1000) + RETENTION_SECONDS,
+    };
+    const replaced = withDecisionStore(at(deps, staleNowMs), {
+      updateIfVersion: async (key, expectedVersion, attributes, nowMs, expected) => {
+        if (key.pk === laneKey.pk && key.sk === laneKey.sk && attributes.status === writes) store.items.set(`${laneKey.pk}\u0000${laneKey.sk}`, newer);
+        return deps.ports.decisionStore.updateIfVersion(key, expectedVersion, attributes, nowMs, expected);
+      },
+    });
+    const summary = await runDetectionCycle(replaced);
+
+    expect(await markerOf(deps, BULK, staleNowMs)).toEqual(newer);
+    expect(summary.incidentsOpened).toBe(0);
   });
 
   it('counts a false spike and a false recovery on the STATE item (MEAS-10)', async () => {
@@ -438,9 +471,9 @@ describe('one failing step never stops the other lanes of the cycle (steelman S3
     await runDetectionCycle(deps);
     await insert(deps, RECEIPT_BATCH, QUIET_NOW_MS);
     const failing = withDecisionStore(at(deps, QUIET_NOW_MS), {
-      updateIfVersion: async (key, expectedVersion, attributes, nowMs) => {
+      updateIfVersion: async (key, expectedVersion, attributes, nowMs, expected) => {
         if (key.pk === `INCIDENT#${INCIDENT_ID}`) throw namedError('InternalServerError');
-        return deps.ports.decisionStore.updateIfVersion(key, expectedVersion, attributes, nowMs);
+        return deps.ports.decisionStore.updateIfVersion(key, expectedVersion, attributes, nowMs, expected);
       },
     });
     const summary = await runDetectionCycle(failing);
@@ -1210,9 +1243,9 @@ describe('a deployed stack with the switch unset reserves nothing, and invokes o
     const { deps, store } = await builtCycle({ runtime: counting.runtime });
     const outcomeWrites: unknown[] = [];
     const watched = withDecisionStore(deps, {
-      updateIfVersion: async (key, expectedVersion, attributes, nowMs) => {
+      updateIfVersion: async (key, expectedVersion, attributes, nowMs, expected) => {
         if ('lastAgentOutcome' in attributes) outcomeWrites.push(attributes.lastAgentOutcome);
-        return deps.ports.decisionStore.updateIfVersion(key, expectedVersion, attributes, nowMs);
+        return deps.ports.decisionStore.updateIfVersion(key, expectedVersion, attributes, nowMs, expected);
       },
     });
     const dryRun = dryRunAgentCore(watched);
@@ -1480,12 +1513,12 @@ describe('each guard of the detection cycle has a case that fails without it', (
     await runDetectionCycle({ ...deps, agentRuntimeArn: undefined });
     let raced = false;
     const racing = withDecisionStore(at(deps, NOW_MS + BUCKET_MS), {
-      updateIfVersion: async (key, expectedVersion, attributes, nowMs) => {
+      updateIfVersion: async (key, expectedVersion, attributes, nowMs, expected) => {
         if (!raced && typeof attributes.agentClaim === 'object' && attributes.agentClaim !== null) {
           raced = true;
           await deps.ports.decisionStore.updateIfVersion(key, expectedVersion, { agentClaim: { attempt: 1, claimedAtMs: nowMs } }, nowMs);
         }
-        return deps.ports.decisionStore.updateIfVersion(key, expectedVersion, attributes, nowMs);
+        return deps.ports.decisionStore.updateIfVersion(key, expectedVersion, attributes, nowMs, expected);
       },
     });
     const summary = await runDetectionCycle(racing);
@@ -1576,9 +1609,9 @@ describe('each guard of the detection cycle has a case that fails without it', (
     const { deps, lines } = await builtCycle({ runtime: counting.runtime });
     await runDetectionCycle({ ...deps, agentRuntimeArn: undefined });
     const failing = withDecisionStore(at(deps, QUIET_NOW_MS), {
-      updateIfVersion: async (key, expectedVersion, attributes, nowMs) => {
+      updateIfVersion: async (key, expectedVersion, attributes, nowMs, expected) => {
         if (key.pk === `INCIDENT#${INCIDENT_ID}`) throw namedError('InternalServerError');
-        return deps.ports.decisionStore.updateIfVersion(key, expectedVersion, attributes, nowMs);
+        return deps.ports.decisionStore.updateIfVersion(key, expectedVersion, attributes, nowMs, expected);
       },
     });
     const summary = await runDetectionCycle(failing);
@@ -1595,8 +1628,8 @@ describe('each guard of the detection cycle has a case that fails without it', (
     await runDetectionCycle(at(deps, QUIET_NOW_MS));
     const stepsBefore = parsedLines(lines).filter((line) => line.event === 'incident-step').length;
     const conflicting = withDecisionStore(at(deps, CLOSE_NOW_MS), {
-      updateIfVersion: async (key, expectedVersion, attributes, nowMs) =>
-        'state' in attributes ? ('conflict' as const) : deps.ports.decisionStore.updateIfVersion(key, expectedVersion, attributes, nowMs),
+      updateIfVersion: async (key, expectedVersion, attributes, nowMs, expected) =>
+        'state' in attributes ? ('conflict' as const) : deps.ports.decisionStore.updateIfVersion(key, expectedVersion, attributes, nowMs, expected),
     });
     const summary = await runDetectionCycle(conflicting);
 
@@ -1611,12 +1644,12 @@ describe('each guard of the detection cycle has a case that fails without it', (
     await runDetectionCycle(at(deps, QUIET_NOW_MS));
     let raced = false;
     const racing = withDecisionStore(at(deps, CLOSE_NOW_MS), {
-      updateIfVersion: async (key, expectedVersion, attributes, nowMs) => {
+      updateIfVersion: async (key, expectedVersion, attributes, nowMs, expected) => {
         if (!raced && key.sk === 'MARKER') {
           raced = true;
           await deps.ports.decisionStore.updateIfVersion(key, expectedVersion, { incidentId: OTHER_ID, status: 'open' }, nowMs);
         }
-        return deps.ports.decisionStore.updateIfVersion(key, expectedVersion, attributes, nowMs);
+        return deps.ports.decisionStore.updateIfVersion(key, expectedVersion, attributes, nowMs, expected);
       },
     });
     const summary = await runDetectionCycle(racing);
@@ -1634,8 +1667,8 @@ describe('each guard of the detection cycle has a case that fails without it', (
   it('logs agent-outcome-unsaved when another cycle moved STATE before the outcome write', async () => {
     const { deps, lines } = await builtCycle({ runtime: async () => failed('model-error') });
     const conflicting = withDecisionStore(deps, {
-      updateIfVersion: async (key, expectedVersion, attributes, nowMs) =>
-        'lastAgentOutcome' in attributes ? ('conflict' as const) : deps.ports.decisionStore.updateIfVersion(key, expectedVersion, attributes, nowMs),
+      updateIfVersion: async (key, expectedVersion, attributes, nowMs, expected) =>
+        'lastAgentOutcome' in attributes ? ('conflict' as const) : deps.ports.decisionStore.updateIfVersion(key, expectedVersion, attributes, nowMs, expected),
     });
     await runDetectionCycle(conflicting);
     expect(lineOf(lines, 'agent-outcome-unsaved')).toEqual({

@@ -891,6 +891,26 @@ describe('createDynamoDecisionStore', () => {
     });
   });
 
+  it('adds each expected attribute to the version condition by its own placeholder, with no attribute to set as well', async () => {
+    const { store, calls } = decisionStoreAnswering(() => ({}));
+    await expect(store.updateIfVersion(STATE_ITEM_KEY, 3, { status: 'closed' }, DECISION_NOW_MS, { incidentId: 'first' })).resolves.toBe('updated');
+    await expect(store.updateIfVersion(STATE_ITEM_KEY, 3, {}, DECISION_NOW_MS, { incidentId: 'first' })).resolves.toBe('updated');
+    expect(calls.map((call) => call.input)).toMatchObject([
+      {
+        UpdateExpression: 'SET #a0 = :a0, version = :next, expiresAt = :expiresAt',
+        ConditionExpression: 'version = :expected AND #e0 = :e0',
+        ExpressionAttributeNames: { '#a0': 'status', '#e0': 'incidentId' },
+        ExpressionAttributeValues: { ':a0': 'closed', ':e0': 'first', ':expected': 3, ':next': 4 },
+      },
+      {
+        UpdateExpression: 'SET version = :next, expiresAt = :expiresAt',
+        ConditionExpression: 'version = :expected AND #e0 = :e0',
+        ExpressionAttributeNames: { '#e0': 'incidentId' },
+        ExpressionAttributeValues: { ':e0': 'first', ':expected': 3, ':next': 4 },
+      },
+    ]);
+  });
+
   it('maps a failed version condition to conflict, passes any other error on, and refuses a managed attribute unsent', async () => {
     let updates = 0;
     const { store, calls } = decisionStoreAnswering(() => {

@@ -236,14 +236,15 @@ function reservationItems(tableName: string, request: ReservationRequest): Trans
   ];
 }
 
-// Caller attributes go through placeholders: STATE and STATUS are DynamoDB reserved words, and an
-// attribute name is whatever the incident lifecycle chooses.
+// Caller attributes, set and expected alike, go through placeholders: STATE and STATUS are DynamoDB
+// reserved words, and an attribute name is whatever the incident lifecycle chooses.
 function versionedUpdateInput(
   tableName: string,
   key: RecordKey,
   expectedVersion: number,
   attributes: Readonly<Record<string, unknown>>,
   nowMs: number,
+  expected: Readonly<Record<string, string>>,
 ): UpdateCommandInput {
   const names: Record<string, string> = {};
   const values: Record<string, unknown> = {};
@@ -252,12 +253,17 @@ function versionedUpdateInput(
     values[`:a${index}`] = value;
     return `#a${index} = :a${index}`;
   });
+  const conditions = Object.entries(expected).map(([name, value], index) => {
+    names[`#e${index}`] = name;
+    values[`:e${index}`] = value;
+    return `#e${index} = :e${index}`;
+  });
   return {
     TableName: tableName,
     Key: tableKey(key),
     UpdateExpression: `SET ${[...assignments, `${VERSION_ATTRIBUTE} = :next`, `${TTL_ATTRIBUTE} = :expiresAt`].join(', ')}`,
-    ConditionExpression: `${VERSION_ATTRIBUTE} = :expected`,
-    ...(assignments.length === 0 ? {} : { ExpressionAttributeNames: names }),
+    ConditionExpression: [`${VERSION_ATTRIBUTE} = :expected`, ...conditions].join(' AND '),
+    ...(Object.keys(names).length === 0 ? {} : { ExpressionAttributeNames: names }),
     ExpressionAttributeValues: {
       ...values,
       ':expected': expectedVersion,
@@ -299,11 +305,11 @@ export function createDynamoDecisionStore(options: CreateDynamoEventStoreOptions
       return unexpiredDecisionItem(result.Item, nowMs);
     },
 
-    async updateIfVersion(key, expectedVersion, attributes, nowMs) {
+    async updateIfVersion(key, expectedVersion, attributes, nowMs, expected = {}) {
       assertVersionedUpdate(key, expectedVersion, attributes);
       const tableName = requireTableName(options.tableName);
       try {
-        await options.client().send(new UpdateCommand(versionedUpdateInput(tableName, key, expectedVersion, attributes, nowMs)));
+        await options.client().send(new UpdateCommand(versionedUpdateInput(tableName, key, expectedVersion, attributes, nowMs, expected)));
         return 'updated';
       } catch (error) {
         if (hasErrorName(error, CONDITIONAL_CHECK_FAILED)) return 'conflict';
