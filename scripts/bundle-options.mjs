@@ -42,6 +42,15 @@ export const CDK_TOOL_BUNDLE_BASE = Object.freeze({
   external: ['aws-cdk-lib', 'aws-cdk-lib/*', 'constructs'],
 });
 
+// The settings for the site tool (scripts/site-tool.mjs). Nothing stays external: the harness
+// imports workspace TypeScript, which Node cannot load from node_modules without a build step.
+export const SITE_TOOL_BUNDLE_BASE = Object.freeze({
+  bundle: true,
+  platform: 'node',
+  target: 'node22',
+  format: 'esm',
+});
+
 export function markCommonJsScope(dir) {
   writeFileSync(join(dir, 'package.json'), '{ "type": "commonjs" }\n');
 }

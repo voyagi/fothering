@@ -11,6 +11,18 @@ const tsParser = { parser: tseslint.parser, parserOptions: { ecmaVersion: 'lates
 
 const TEST_FILES = ['**/*.{test,spec}.{ts,tsx,js,jsx,mjs,cjs}'];
 
+const DRIVER_TEMPLATES = 'scripts/*.devbrowser.js';
+
+const SCRIPT_RULES = {
+  'no-undef': 'error',
+  'no-unused-vars': ['error', { caughtErrors: 'none' }],
+  'no-unreachable': 'error',
+  'no-dupe-keys': 'error',
+  'no-self-compare': 'error',
+  'use-isnan': 'error',
+  'valid-typeof': 'error',
+};
+
 // An agent built with no model would fall back to whatever the SDK defaults to, which is exactly
 // the kind of implicit choice the live providers wrapper exists to make explicit. So the rule
 // reports `new Agent()` and an options literal that names no model of its own (`new Agent({})`,
@@ -31,20 +43,45 @@ export default [
   // proven code for no user-facing gain.
   {
     files: ['scripts/**/*.{js,mjs,cjs}'],
+    ignores: [DRIVER_TEMPLATES],
     languageOptions: {
       ecmaVersion: 'latest',
       sourceType: 'module',
-      globals: { process: 'readonly', console: 'readonly', Buffer: 'readonly', URL: 'readonly' },
+      globals: {
+        process: 'readonly',
+        console: 'readonly',
+        Buffer: 'readonly',
+        URL: 'readonly',
+        setTimeout: 'readonly',
+        clearTimeout: 'readonly',
+        AbortController: 'readonly',
+      },
     },
-    rules: {
-      'no-undef': 'error',
-      'no-unused-vars': ['error', { caughtErrors: 'none' }],
-      'no-unreachable': 'error',
-      'no-dupe-keys': 'error',
-      'no-self-compare': 'error',
-      'use-isnan': 'error',
-      'valid-typeof': 'error',
+    rules: SCRIPT_RULES,
+  },
+  // dev-browser driver templates run in its QuickJS sandbox, not Node: no process, no require, only
+  // the sandbox's globals, plus the page globals that functions passed to page.evaluate() use once
+  // they run inside the browser.
+  {
+    files: [DRIVER_TEMPLATES],
+    languageOptions: {
+      ecmaVersion: 'latest',
+      sourceType: 'module',
+      globals: {
+        browser: 'readonly',
+        readFile: 'readonly',
+        writeFile: 'readonly',
+        saveScreenshot: 'readonly',
+        console: 'readonly',
+        setTimeout: 'readonly',
+        clearTimeout: 'readonly',
+        window: 'readonly',
+        document: 'readonly',
+        localStorage: 'readonly',
+        getComputedStyle: 'readonly',
+      },
     },
+    rules: SCRIPT_RULES,
   },
   // A test with no assertion passes forever, and two tests with one title hide each other in reports.
   {
