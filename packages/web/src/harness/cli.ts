@@ -2,7 +2,7 @@ import type { EventEmitter } from 'node:events';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { A11Y_MESSAGES, runA11yLive } from './gates.js';
+import { A11Y_MESSAGES, runA11yLive, runBuiltChecksCommand, runSiteE2e } from './gates.js';
 import { startPreviewServer, type PreviewServer } from './preview-server.js';
 
 export interface CliIo {
@@ -13,7 +13,13 @@ export interface CliIo {
   readonly waitForStop: (server: PreviewServer) => Promise<void>;
 }
 
-const VALUE_OPTIONS = new Set(['--repo-root', '--global-modules', '--dist']);
+const VALUE_OPTIONS = new Set(['--repo-root', '--global-modules', '--dist', '--expect', '--allow']);
+
+// An absent flag stays undefined: built-checks tells "no --expect" (zero findings required) apart
+// from an empty list.
+function idList(value: string | undefined): string[] | undefined {
+  return value?.split(',').map((id) => id.trim()).filter((id) => id !== '');
+}
 
 export function waitForSignal(source: EventEmitter = process): Promise<void> {
   return new Promise((resolveStop) => {
@@ -70,7 +76,16 @@ export async function main(argv: readonly string[], io: CliIo = PROCESS_IO): Pro
     return 1;
   }
   if (subcommand === 'preview') return preview(options, repoRoot, io);
-  if (subcommand !== 'a11y') {
+  if (subcommand === 'built-checks') {
+    return runBuiltChecksCommand({
+      repoRoot,
+      dist: options.get('--dist') ?? join(repoRoot, 'packages', 'web', 'dist'),
+      expect: idList(options.get('--expect')),
+      allow: idList(options.get('--allow')),
+      print: io.out,
+    });
+  }
+  if (subcommand !== 'a11y' && subcommand !== 'e2e') {
     io.err(A11Y_MESSAGES.unknownSubcommand(subcommand ?? ''));
     return 1;
   }
@@ -79,6 +94,7 @@ export async function main(argv: readonly string[], io: CliIo = PROCESS_IO): Pro
     io.err(A11Y_MESSAGES.missingOption('--global-modules'));
     return 1;
   }
+  if (subcommand === 'e2e') return runSiteE2e({ repoRoot, globalModules, print: io.out });
   return runA11yLive({ repoRoot, globalModules, homeDir: io.homeDir, print: io.out });
 }
 

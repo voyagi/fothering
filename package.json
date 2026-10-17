@@ -33,7 +33,8 @@
     "mutate": "stryker run",
     "build": "node scripts/build.mjs && npm run build -w @fothering/web",
     "permissions:snapshot": "node scripts/permissions-snapshot.mjs",
-    "a11y:live": "node scripts/site-tool.mjs a11y"
+    "a11y:live": "node scripts/site-tool.mjs a11y",
+    "test:e2e": "node scripts/site-tool.mjs e2e"
   },
   "devDependencies": {
     "@size-limit/file": "13.1.1",

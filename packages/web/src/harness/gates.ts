@@ -1,6 +1,6 @@
-import { existsSync, mkdtempSync, readdirSync, rmSync, statSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, relative, sep } from 'node:path';
+import { join } from 'node:path';
 import {
   AXE_VERSION,
   DEV_BROWSER_VERSION,
@@ -11,7 +11,8 @@ import {
   type DriverRun,
 } from './dev-browser.js';
 import { startPreviewServer, type PreviewServer } from './preview-server.js';
-import type { CheckContext } from '../checks/rules.js';
+import { filesIn, loadBuiltSite, NoBuiltPagesError, routeOf, type BuiltSite } from '../checks/built-site.js';
+import { isRegisteredRule, runBuiltChecks, type CheckContext, type Finding } from '../checks/rules.js';
 
 export interface ThemeSetup {
   readonly name: string;
@@ -92,8 +93,8 @@ const describeStop = (stop: FocusStop): string => `<${stop.tag}> at DOM index ${
 // Every line the harness prints, in one place. None may contain the uppercase skip word:
 // verify-ship repeats any such line under the step and refuses to let a PASS cover it.
 export const A11Y_MESSAGES = Object.freeze({
-  usage: () => '[site] usage: site-cli <a11y|preview> --repo-root <dir> [--global-modules <dir>] [--dist <dir>]',
-  unknownSubcommand: (name: string) => `[site] unknown subcommand "${name}"; expected a11y or preview`,
+  usage: () => '[site] usage: site-cli <a11y|e2e|built-checks|preview> --repo-root <dir> [--global-modules <dir>] [--dist <dir>] [--expect <id,id>] [--allow <id,id>]',
+  unknownSubcommand: (name: string) => `[site] unknown subcommand "${name}"; expected a11y, e2e, built-checks or preview`,
   missingOption: (name: string) => `[site] ${name} is required`,
   previewListening: (url: string) => `[preview] serving ${url}/ on 127.0.0.1; press Ctrl+C to stop`,
   previewFailed: (message: string) => `[preview] the preview server did not start: ${message}`,
@@ -234,21 +235,9 @@ function isAuditLine(value: unknown): value is AuditLine {
 // Every *.html under dist except 404.html is a route; Workers serves folder/index.html at /folder/
 // and page.html at /page. Sorted, so the audit order and its output never depend on the disk.
 export function routesFromDist(dist: string): string[] {
-  const files: string[] = [];
-  const visit = (folder: string): void => {
-    for (const entry of readdirSync(folder, { withFileTypes: true })) {
-      const path = join(folder, entry.name);
-      if (entry.isDirectory()) visit(path);
-      else if (entry.isFile() && entry.name.endsWith('.html') && entry.name !== '404.html') files.push(relative(dist, path).split(sep).join('/'));
-    }
-  };
-  visit(dist);
+  const pages = filesIn(dist).filter((file) => file.endsWith('.html') && file !== '404.html' && !file.endsWith('/404.html'));
   // Sorted as routes, not file paths, so / leads and the driver pins the theme on the landing page.
-  return files.map((file) => {
-    if (file === 'index.html') return '/';
-    if (file.endsWith('/index.html')) return `/${file.slice(0, -'index.html'.length)}`;
-    return `/${file.slice(0, -'.html'.length)}`;
-  }).sort();
+  return pages.map(routeOf).sort();
 }
 
 interface RunResult {
@@ -438,16 +427,97 @@ export const E2E_MESSAGES = Object.freeze({
   expectedMissing: (id: string) => `rule ${id} is expected and has no finding`,
 });
 
+// The one place the rules' context is built, so the e2e step and the built-checks subcommand can
+// never judge the same build differently.
 export function loadCheckContext(repoRoot: string): CheckContext {
-  return { repoRoot };
+  return Object.freeze({ repoRoot });
+}
+
+type Judged = { readonly ok: true; readonly pages: number; readonly findings: readonly Finding[] } | { readonly ok: false; readonly reason: string };
+
+function judgeBuiltSite(dist: string, repoRoot: string): Judged {
+  if (!existsSync(dist) || !statSync(dist).isDirectory()) return { ok: false, reason: E2E_MESSAGES.noDist(dist) };
+  let site: BuiltSite;
+  try {
+    site = loadBuiltSite(dist);
+  } catch (error) {
+    if (error instanceof NoBuiltPagesError) return { ok: false, reason: E2E_MESSAGES.noPages(dist) };
+    throw error;
+  }
+  return { ok: true, pages: site.pages.length, findings: runBuiltChecks(site, loadCheckContext(repoRoot)) };
+}
+
+const findingLine = (finding: Finding): string => E2E_MESSAGES.finding(finding.rule, finding.route, finding.text);
+
+export function judgeExpectation(findings: readonly Finding[], expect: readonly string[] | undefined, allow: readonly string[] | undefined): string[] {
+  const named = [...(expect ?? []), ...(allow ?? [])];
+  const unregistered = named.filter((id) => !isRegisteredRule(id));
+  if (unregistered.length > 0) return unregistered.map((id) => E2E_MESSAGES.unregistered(id));
+  if (expect === undefined && allow === undefined) {
+    const first = findings[0];
+    return first === undefined ? [] : [E2E_MESSAGES.findings(findings.length, findingLine(first))];
+  }
+  const counts = new Map<string, number>();
+  for (const finding of findings) counts.set(finding.rule, (counts.get(finding.rule) ?? 0) + 1);
+  const accepted = new Set(named);
+  const reasons: string[] = [];
+  for (const [id, count] of counts) {
+    if (!accepted.has(id)) reasons.push(E2E_MESSAGES.unexpected(id, count));
+  }
+  for (const id of expect ?? []) {
+    if (!counts.has(id)) reasons.push(E2E_MESSAGES.expectedMissing(id));
+  }
+  return reasons;
+}
+
+export interface BuiltChecksOptions {
+  readonly repoRoot: string;
+  readonly dist: string;
+  readonly expect?: readonly string[] | undefined;
+  readonly allow?: readonly string[] | undefined;
+  readonly print?: (line: string) => void;
+}
+
+export function runBuiltChecksCommand(options: BuiltChecksOptions): number {
+  const print = options.print ?? ((line: string) => console.log(line));
+  const failWith = (reasons: readonly string[]): number => {
+    for (const reason of reasons) print(E2E_MESSAGES.checksFail(reason));
+    return 1;
+  };
+  // Ids are checked before the build is read, so a typo in a later plan's tracer never reads as a
+  // missing finding.
+  const unregistered = [...(options.expect ?? []), ...(options.allow ?? [])].filter((id) => !isRegisteredRule(id));
+  if (unregistered.length > 0) return failWith(unregistered.map((id) => E2E_MESSAGES.unregistered(id)));
+  const judged = judgeBuiltSite(options.dist, options.repoRoot);
+  if (!judged.ok) return failWith([judged.reason]);
+  for (const finding of judged.findings) print(findingLine(finding));
+  const reasons = judgeExpectation(judged.findings, options.expect, options.allow);
+  if (reasons.length > 0) return failWith(reasons);
+  print(options.expect === undefined && options.allow === undefined ? E2E_MESSAGES.checksPass(judged.pages) : E2E_MESSAGES.expectPass(judged.pages));
+  return 0;
 }
 
 export interface SiteE2eOptions {
   readonly repoRoot: string;
+  // The rendered checks of a later plan drive dev-browser from the global npm folder.
   readonly globalModules: string;
   readonly print?: (line: string) => void;
 }
 
-export function runSiteE2e(_options: SiteE2eOptions): Promise<number> {
+export function runSiteE2e(options: SiteE2eOptions): Promise<number> {
+  const print = options.print ?? ((line: string) => console.log(line));
+  const dist = join(options.repoRoot, 'packages', 'web', 'dist');
+  const fail = (reason: string): Promise<number> => {
+    print(E2E_MESSAGES.fail(reason));
+    return Promise.resolve(1);
+  };
+  if (!existsSync(dist) || !statSync(dist).isDirectory()) return fail(E2E_MESSAGES.noDist(dist));
+  const judged = judgeBuiltSite(dist, options.repoRoot);
+  if (!judged.ok) return fail(judged.reason);
+  for (const finding of judged.findings) print(findingLine(finding));
+  const first = judged.findings[0];
+  if (first !== undefined) return fail(E2E_MESSAGES.findings(judged.findings.length, findingLine(first)));
+  print(E2E_MESSAGES.step('built-checks'));
+  print(E2E_MESSAGES.pass(judged.pages, 1));
   return Promise.resolve(0);
 }

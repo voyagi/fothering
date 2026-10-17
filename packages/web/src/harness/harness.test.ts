@@ -1,3 +1,4 @@
+import { spawnSync } from 'node:child_process';
 import { EventEmitter } from 'node:events';
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
@@ -616,6 +617,13 @@ describe('the built checks through the CLI and the e2e step (D-150, D-151)', () 
     const { code, out } = await builtChecks(dashed.dist);
     expect(code).toBe(1);
     expect(out.some((line) => line.startsWith('[built-checks] dash /: ') && line.includes('closed — one lane'))).toBe(true);
+  });
+
+  it('built-checks through the real entry, scripts/site-tool.mjs, exits 1 over the em-dash dist naming the route and the text', () => {
+    const run = spawnSync(process.execPath, [join(REPO_ROOT, 'scripts', 'site-tool.mjs'), 'built-checks', '--dist', dashed.dist], { cwd: REPO_ROOT, encoding: 'utf8' });
+    expect(run.status, run.stderr).toBe(1);
+    expect(run.stdout).toMatch(/^\[built-checks\] dash \/: .*closed — one lane/m);
+    expect(run.stdout).toContain(E2E_MESSAGES.checksFail(''));
   });
 
   it('built-checks over a clean dist returns 0', async () => {
