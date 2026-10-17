@@ -3,7 +3,10 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, describe, expect, it } from 'vitest';
+import { GET as robotsGet } from '../pages/robots.txt.js';
+import { GET as sitemapGet } from '../pages/sitemap.xml.js';
 import { readRepoText, repoRoot } from './repo-facts.js';
+import { headMeta, NOT_FOUND_ROUTE, renderRobots, renderSitemap, routeFor, ROUTES, SITE_ORIGIN, sitemapUrls, type SiteRoute } from './route-list.js';
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../../../..');
 
@@ -108,5 +111,112 @@ describe('readRepoText', () => {
 
   it('passes on a read failure other than a missing file', () => {
     expect(() => readRepoText('folder', root)).toThrow(/EISDIR/);
+  });
+});
+
+const LANDING_TITLE = 'Fothering: close the one SES lane that is going wrong';
+const LANDING_DESCRIPTION = 'Fothering reads Amazon SES events, pauses only the configuration set that is damaging the shared reputation, reads the setting back, and tells the operator by email.';
+
+describe('the route list (D-153)', () => {
+  it('holds an RFC 2606 reserved origin with no trailing slash until the deployed host is known', () => {
+    expect(SITE_ORIGIN).toMatch(/^https:\/\/[a-z-]+\.example$/);
+  });
+
+  it('holds / as sheet FTH-001 with the UI-SPEC 11.2 title and description, indexable', () => {
+    expect(ROUTES.map((route) => route.path)).toEqual(['/']);
+    expect(ROUTES[0]).toEqual({ path: '/', sheet: 'FTH-001', label: 'Landing', title: LANDING_TITLE, description: LANDING_DESCRIPTION, indexable: true });
+  });
+
+  it('holds the 404 title, description and Drawing cell text, with no path and not indexable', () => {
+    expect(NOT_FOUND_ROUTE).toEqual({
+      path: null,
+      title: 'No sheet at this address: Fothering',
+      description: 'This address is not one of the sheets of the Fothering site.',
+      drawing: 'Not in the sheet set',
+      indexable: false,
+    });
+  });
+
+  it('gives no two routes, the 404 page included, the same title or description', () => {
+    const all = [...ROUTES, NOT_FOUND_ROUTE];
+    expect(new Set(all.map((route) => route.title)).size).toBe(all.length);
+    expect(new Set(all.map((route) => route.description)).size).toBe(all.length);
+  });
+});
+
+describe('routeFor', () => {
+  const planted: readonly SiteRoute[] = [
+    ...ROUTES,
+    { path: '/replay/', sheet: 'FTH-002', label: 'Replay', title: 't', description: 'd', indexable: true },
+  ];
+
+  it('finds a route by its path with or without the trailing slash', () => {
+    expect(routeFor('/replay/', planted).sheet).toBe('FTH-002');
+    expect(routeFor('/replay', planted).sheet).toBe('FTH-002');
+  });
+
+  it('finds the landing page at / and at the empty path', () => {
+    expect(routeFor('/')).toBe(ROUTES[0]);
+    expect(routeFor('')).toBe(ROUTES[0]);
+  });
+
+  it('throws by name for a path the route list does not hold', () => {
+    expect(() => routeFor('/deploy/', planted)).toThrow('/deploy/: not in the route list; add its entry to ROUTES in packages/web/src/site/route-list.ts');
+  });
+});
+
+describe('headMeta', () => {
+  it('gives the title, description, og:title, og:description, og:type website and twitter:card summary', () => {
+    const landing = headMeta(routeFor('/'));
+    expect(landing.title).toBe(LANDING_TITLE);
+    expect(landing.metas).toEqual(expect.arrayContaining([
+      { name: 'description', content: LANDING_DESCRIPTION },
+      { property: 'og:title', content: LANDING_TITLE },
+      { property: 'og:description', content: LANDING_DESCRIPTION },
+      { property: 'og:type', content: 'website' },
+      { name: 'twitter:card', content: 'summary' },
+    ]));
+  });
+
+  it('gives canonical and og:url as SITE_ORIGIN plus the path', () => {
+    const landing = headMeta(routeFor('/'));
+    expect(landing.links).toEqual([{ rel: 'canonical', href: `${SITE_ORIGIN}/` }]);
+    expect(landing.metas).toContainEqual({ property: 'og:url', content: `${SITE_ORIGIN}/` });
+  });
+
+  it('gives the 404 page every item except canonical and og:url, since it answers at any unknown address', () => {
+    const notFound = headMeta(NOT_FOUND_ROUTE);
+    expect(notFound.title).toBe(NOT_FOUND_ROUTE.title);
+    expect(notFound.links).toEqual([]);
+    expect(notFound.metas.map((meta) => meta.name ?? meta.property)).toEqual(['description', 'og:title', 'og:description', 'og:type', 'twitter:card']);
+  });
+});
+
+describe('the sitemap and robots endpoints (AC-50, AC-51)', () => {
+  it('sitemap GET returns XML listing each indexable route once as an absolute URL from SITE_ORIGIN, never the 404', async () => {
+    const response = sitemapGet();
+    expect(response.headers.get('Content-Type')).toBe('application/xml; charset=utf-8');
+    const body = await response.text();
+    expect(body.startsWith('<?xml version="1.0" encoding="UTF-8"?>')).toBe(true);
+    expect(sitemapUrls(body)).toEqual(ROUTES.filter((route) => route.indexable).map((route) => `${SITE_ORIGIN}${route.path}`));
+    expect(body).not.toMatch(/404/);
+  });
+
+  it('renderSitemap leaves out a route that is not indexable and escapes XML characters', () => {
+    const xml = renderSitemap([{ path: '/a/', indexable: true }, { path: '/hidden/', indexable: false }, { path: '/b&c/', indexable: true }]);
+    expect(sitemapUrls(xml)).toEqual([`${SITE_ORIGIN}/a/`, `${SITE_ORIGIN}/b&c/`]);
+    expect(xml).toContain('/b&amp;c/');
+  });
+
+  it('sitemapUrls reads no URL from a sitemap with no loc element', () => {
+    expect(sitemapUrls('<urlset></urlset>')).toEqual([]);
+  });
+
+  it('robots GET returns User-agent *, Allow / and the sitemap URL', async () => {
+    const response = robotsGet();
+    expect(response.headers.get('Content-Type')).toBe('text/plain; charset=utf-8');
+    const lines = (await response.text()).split('\n');
+    expect(lines).toEqual(expect.arrayContaining(['User-agent: *', 'Allow: /', `Sitemap: ${SITE_ORIGIN}/sitemap.xml`]));
+    expect(renderRobots()).toBe(await robotsGet().text());
   });
 });

@@ -5,6 +5,7 @@ import {
   REGION_CLAIM_PATTERNS,
   THEME_RADIO_LIMIT,
 } from '../site/content.js';
+import type { SiteRoute } from '../site/route-list.js';
 import { textOf, walk, type BuiltElement, type BuiltPage, type BuiltSite } from './built-site.js';
 
 // Later plans' expected-red tracers name these ids, so an id is never renamed once a plan names it.
@@ -43,6 +44,8 @@ export interface CheckContext {
   readonly replyPromisePhrases: readonly string[];
   readonly consoleDeletePhrases: readonly string[];
   readonly bannedNames: readonly string[];
+  readonly siteOrigin: string;
+  readonly routes: readonly SiteRoute[];
 }
 
 const EXCERPT_RADIUS = 40;
@@ -273,6 +276,18 @@ export function thirdPartyReferenceRule(site: BuiltSite, _context: CheckContext)
   });
   const inCss = site.css.flatMap((file) => cssUrls(file.text).filter(isThirdParty).map((url) => ({ rule, route: fileRoute(file.file), text: `CSS url ${clip(url)}` })));
   return [...onPages, ...inCss];
+}
+
+export function pageMetadataRule(_site: BuiltSite, _context: CheckContext): Finding[] {
+  return [];
+}
+
+export function sitemapRule(_site: BuiltSite, _context: CheckContext): Finding[] {
+  return [];
+}
+
+export function robotsRule(_site: BuiltSite, _context: CheckContext): Finding[] {
+  return [];
 }
 
 // Workers limits: 20,000 files per version on the Free plan and 25 MiB per file (AC-62).

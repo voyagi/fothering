@@ -15,6 +15,7 @@ import { startPreviewServer, type PreviewServer } from './preview-server.js';
 import { filesIn, loadBuiltSite, NoBuiltPagesError, routeOf, type BuiltSite } from '../checks/built-site.js';
 import { checkFileBudget, isRegisteredRule, runBuiltChecks, type BudgetViolation, type CheckContext, type Finding } from '../checks/rules.js';
 import { BANNED_NAMES, CONSOLE_DELETE_PHRASES, REPLY_PROMISE_PHRASES, REPUTATION_PAGE_URL } from '../site/content.js';
+import { ROUTES, SITE_ORIGIN } from '../site/route-list.js';
 
 export interface ThemeSetup {
   readonly name: string;
@@ -474,6 +475,8 @@ export function loadCheckContext(repoRoot: string): CheckContext {
     replyPromisePhrases: REPLY_PROMISE_PHRASES,
     consoleDeletePhrases: CONSOLE_DELETE_PHRASES,
     bannedNames: BANNED_NAMES,
+    siteOrigin: SITE_ORIGIN,
+    routes: ROUTES,
   });
 }
 

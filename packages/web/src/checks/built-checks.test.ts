@@ -1,9 +1,10 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
-import { page, plantDist, REPO_ROOT, type PlantedDist } from '../test/planted-dist.js';
+import { completeSite, page, plantDist, REPO_ROOT, SHEET_HEAD_ITEMS, type PlantedDist } from '../test/planted-dist.js';
 import { loadCheckContext } from '../harness/gates.js';
 import { BANNED_NAMES, CONSOLE_DELETE_PHRASES, REPLY_PROMISE_PHRASES } from '../site/content.js';
+import { renderRobots, renderSitemap, SITE_ORIGIN } from '../site/route-list.js';
 import { filesIn, loadBuiltSite, NOT_FOUND_ROUTE, NoBuiltPagesError, type BuiltSite } from './built-site.js';
 import {
   bannedNameRule,
@@ -12,13 +13,16 @@ import {
   dashRule,
   exactThirtyDaysRule,
   formsCookiesAnalyticsRule,
+  pageMetadataRule,
   preR6WordsRule,
   regionClaimRule,
   replyPromiseRule,
+  robotsRule,
   RULE_IDS,
   runBuiltChecks,
   sesPercentageLinkRule,
   sesRateWordingRule,
+  sitemapRule,
   thirdPartyReferenceRule,
   unitFigureRule,
   type Finding,
@@ -136,10 +140,10 @@ describe('runBuiltChecks', () => {
     expect(runBuiltChecks(site, context).filter((finding) => finding.rule === 'dash')).toHaveLength(2);
   });
 
-  it('holds exactly the twelve rule ids the plan names', () => {
+  it('holds exactly the fifteen rule ids the plans name', () => {
     expect([...RULE_IDS].sort()).toEqual([
-      'banned-name', 'console-delete', 'dash', 'exact-30-days', 'forms-cookies-analytics', 'pre-r6-words',
-      'region-claim', 'reply-promise', 'ses-percentage-link', 'ses-rate-wording', 'third-party-reference', 'unit-figure',
+      'banned-name', 'console-delete', 'dash', 'exact-30-days', 'forms-cookies-analytics', 'page-metadata', 'pre-r6-words',
+      'region-claim', 'reply-promise', 'robots', 'ses-percentage-link', 'ses-rate-wording', 'sitemap', 'third-party-reference', 'unit-figure',
     ]);
   });
 });
@@ -363,6 +367,122 @@ describe('the rules over the less common shapes', () => {
   it('reports a list item holding a quoting paragraph once, at the paragraph', () => {
     const findings = sesPercentageLinkRule(casesSite(['<ul><li><p>SES reviews an account at 5% bounces.</p></li></ul>']), context);
     expect(findings).toHaveLength(1);
+  });
+});
+
+const TWO_SHEETS = { 'index.html': '<p>landing</p>', 'replay/index.html': '<p>replay</p>' };
+
+describe('the page metadata rule (AC-49, AC-E37)', () => {
+  it('passes a site whose every route, the 404 page included, carries the six items with its own title and description', () => {
+    expect(pageMetadataRule(siteOf(completeSite({ ...TWO_SHEETS, '404.html': '<p>none</p>' })), context)).toEqual([]);
+  });
+
+  for (const item of SHEET_HEAD_ITEMS) {
+    it(`fails a route without ${item}, naming the route and the item`, () => {
+      const findings = pageMetadataRule(siteOf(completeSite(TWO_SHEETS, { 'replay/index.html': { omit: [item] } })), context);
+      expect(findings.map((finding) => [finding.rule, finding.route])).toEqual([['page-metadata', '/replay/']]);
+      expect(findings[0]?.text).toContain(item);
+    });
+  }
+
+  it('fails a description whose content is blank', () => {
+    const findings = pageMetadataRule(siteOf(completeSite(TWO_SHEETS, { 'replay/index.html': { description: '  ' } })), context);
+    expect(findings.map((finding) => finding.text)).toContain('the page has no meta name="description" with content');
+  });
+
+  it('reads the head title, never an SVG title inside a drawing', () => {
+    const findings = pageMetadataRule(siteOf(completeSite({ 'index.html': '<svg><title>Lane drawing</title></svg>' }, { 'index.html': { omit: ['title'] } })), context);
+    expect(findings.map((finding) => finding.text)).toEqual(['the page has no title']);
+  });
+
+  it('fails two routes sharing a title, naming the second and the first', () => {
+    const findings = pageMetadataRule(siteOf(completeSite(TWO_SHEETS, { 'replay/index.html': { title: 'Planted sheet /' } })), context);
+    expect(findings.map((finding) => [finding.route, finding.text])).toEqual([['/replay/', 'the title "Planted sheet /" is also the title of /']]);
+  });
+
+  it('fails two routes sharing a description, naming the second and the first', () => {
+    const findings = pageMetadataRule(siteOf(completeSite(TWO_SHEETS, { 'replay/index.html': { description: 'What the planted sheet at / holds.' } })), context);
+    expect(findings.map((finding) => [finding.route, finding.text])).toEqual([['/replay/', 'the description "What the planted sheet at / holds." is also the description of /']]);
+  });
+});
+
+const sitemapOf = (paths: readonly string[]): string => renderSitemap(paths.map((path) => ({ path, indexable: true })));
+const without = (files: Readonly<Record<string, string>>, name: string): Record<string, string> => Object.fromEntries(Object.entries(files).filter(([file]) => file !== name));
+const sitemapFindings = (sitemap: string | null): Finding[] => {
+  const rest = without(completeSite(TWO_SHEETS), 'sitemap.xml');
+  return sitemapRule(siteOf(sitemap === null ? rest : { ...rest, 'sitemap.xml': sitemap }), context);
+};
+
+describe('the sitemap rule (AC-50, AC-E38, AC-E39)', () => {
+  it('passes a sitemap listing every built route once, from the same build, with the 404 page left out', () => {
+    expect(sitemapRule(siteOf(completeSite({ ...TWO_SHEETS, '404.html': '<p>none</p>' })), context)).toEqual([]);
+  });
+
+  it('fails a build with no sitemap', () => {
+    expect(sitemapFindings(null)).toEqual([{ rule: 'sitemap', route: 'file:sitemap.xml', text: 'dist/sitemap.xml is missing' }]);
+  });
+
+  it('fails a sitemap listing zero URLs', () => {
+    expect(sitemapFindings('<?xml version="1.0" encoding="UTF-8"?><urlset></urlset>')).toEqual([{ rule: 'sitemap', route: 'file:sitemap.xml', text: 'the sitemap lists zero URLs' }]);
+  });
+
+  it('fails a sitemap listing a route the build lacks', () => {
+    expect(sitemapFindings(sitemapOf(['/', '/replay/', '/ghost/'])).map((finding) => finding.text)).toEqual(['the sitemap lists /ghost/, which the build lacks']);
+  });
+
+  it('fails a sitemap listing a built route twice', () => {
+    expect(sitemapFindings(sitemapOf(['/', '/replay/', '/'])).map((finding) => finding.text)).toEqual(['the sitemap lists / 2 times']);
+  });
+
+  it('fails a sitemap listing the 404 page', () => {
+    expect(sitemapFindings(sitemapOf(['/', '/replay/', '/404.html'])).map((finding) => finding.text)).toEqual(['the sitemap lists the 404 page at /404.html']);
+  });
+
+  it('fails a built route missing from the sitemap, at that route', () => {
+    expect(sitemapFindings(sitemapOf(['/']))).toEqual([{ rule: 'sitemap', route: '/replay/', text: '/replay/ is a built route missing from the sitemap' }]);
+  });
+
+  it('fails a relative URL and a URL on another origin', () => {
+    const xml = `<urlset><url><loc>/</loc></url><url><loc>https://elsewhere.example/replay/</loc></url><url><loc>${SITE_ORIGIN}/</loc></url><url><loc>${SITE_ORIGIN}/replay/</loc></url></urlset>`;
+    expect(sitemapFindings(xml).map((finding) => finding.text)).toEqual([
+      `/ is not an absolute URL on ${SITE_ORIGIN}`,
+      `https://elsewhere.example/replay/ is not an absolute URL on ${SITE_ORIGIN}`,
+    ]);
+  });
+
+  it('leaves out a built route the route list marks not indexable', () => {
+    const site = siteOf({ ...completeSite(TWO_SHEETS), 'sitemap.xml': sitemapOf(['/']) });
+    const draft = { path: '/replay/', sheet: 'FTH-002', label: 'Replay', title: 't', description: 'd', indexable: false };
+    expect(sitemapRule(site, { ...context, routes: [draft] })).toEqual([]);
+  });
+});
+
+describe('the robots rule (AC-51)', () => {
+  const robotsFindings = (robots: string | null): Finding[] => {
+    const rest = without(completeSite(TWO_SHEETS), 'robots.txt');
+    return robotsRule(siteOf(robots === null ? rest : { ...rest, 'robots.txt': robots }), context);
+  };
+
+  it('passes the rendered robots.txt', () => {
+    expect(robotsFindings(renderRobots())).toEqual([]);
+  });
+
+  it('fails a build with no robots.txt', () => {
+    expect(robotsFindings(null)).toEqual([{ rule: 'robots', route: 'file:robots.txt', text: 'dist/robots.txt is missing' }]);
+  });
+
+  it('fails robots.txt without Allow: /', () => {
+    expect(robotsFindings(renderRobots().replace('Allow: /\n', '')).map((finding) => finding.text)).toEqual(['robots.txt has no "Allow: /" line']);
+  });
+
+  it('fails robots.txt without User-agent: *', () => {
+    expect(robotsFindings(renderRobots().replace('User-agent: *\n', '')).map((finding) => finding.text)).toEqual(['robots.txt has no "User-agent: *" line']);
+  });
+
+  it('fails robots.txt that names no sitemap or the sitemap on another origin', () => {
+    const expected = [`robots.txt does not name the sitemap at ${SITE_ORIGIN}/sitemap.xml`];
+    expect(robotsFindings('User-agent: *\nAllow: /\n').map((finding) => finding.text)).toEqual(expected);
+    expect(robotsFindings('User-agent: *\nAllow: /\nSitemap: https://elsewhere.example/sitemap.xml\n').map((finding) => finding.text)).toEqual(expected);
   });
 });
 
