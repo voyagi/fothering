@@ -43,7 +43,17 @@ import {
   type IdentityAuthFacts,
   type PlannedLookup,
 } from '@fothering/core/evidence-rows';
-import { openIncident, stepIncident, windowsNeedingFinalVerdict, type FinalVerdict, type IncidentState } from '@fothering/core/incident';
+import {
+  markerOf,
+  openIncident,
+  stateOf,
+  stepIncident,
+  storedStateOf,
+  windowsNeedingFinalVerdict,
+  type FinalVerdict,
+  type IncidentMarker,
+  type IncidentState,
+} from '@fothering/core/incident';
 import type { LaneEntry, LaneMap } from '@fothering/core/lanes';
 import type { LogEntry } from '@fothering/core/log';
 import { DETECT_FUNCTION_TIMEOUT_MS, MODEL_VALUES } from '@fothering/core/model-values';
@@ -92,11 +102,7 @@ interface FoldedLane {
   observed: ObservedLaneFacts;
 }
 
-interface Marker {
-  incidentId: string;
-  status: 'open' | 'closed';
-  version: number;
-}
+type Marker = IncidentMarker;
 
 /** What one cycle knows and has done for one lane; each step reads and moves only its own lane. */
 interface LaneView {
@@ -116,8 +122,6 @@ interface CycleCounts {
   invocations: number;
   failures: number;
 }
-
-type StoredState = Omit<IncidentState, 'version'>;
 
 type FailureEvent = 'lifecycle-failed' | 'opening-failed' | 'agent-attempt-failed';
 
@@ -179,34 +183,6 @@ async function foldLanes(deps: DetectDeps, nowMs: number): Promise<FoldedLane[]>
     });
   }
   return folded;
-}
-
-function markerOf(item: DecisionStoreItem | undefined): Marker | undefined {
-  if (item === undefined) return undefined;
-  const { incidentId, status, version } = item;
-  if (typeof incidentId !== 'string' || (status !== 'open' && status !== 'closed') || typeof version !== 'number') return undefined;
-  return { incidentId, status, version };
-}
-
-// The item's own version is the state's version, so updateIfVersion and stepIncident count alike.
-function storedStateOf(state: IncidentState): StoredState {
-  return {
-    incidentId: state.incidentId,
-    configurationSet: state.configurationSet,
-    status: state.status,
-    openingWindow: state.openingWindow,
-    openingFinalized: state.openingFinalized,
-    pendingRecovery: state.pendingRecovery,
-    falseSpikes: state.falseSpikes,
-    falseRecoveries: state.falseRecoveries,
-  };
-}
-
-function stateOf(item: DecisionStoreItem | undefined): IncidentState | undefined {
-  if (item === undefined || typeof item.version !== 'number') return undefined;
-  const stored = item.state as Partial<StoredState> | undefined;
-  if (stored?.status !== 'open' && stored?.status !== 'closed') return undefined;
-  return { ...(stored as StoredState), version: item.version };
 }
 
 async function readMarker(deps: DetectDeps, configurationSet: string, nowMs: number): Promise<Marker | undefined> {

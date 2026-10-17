@@ -259,7 +259,7 @@ export function buildEvidenceRecord(input: EvidenceRecordInput): EvidenceRecord 
 
 // D-65: the decision store shares the event table, under partition keys that never start with LANE#,
 // so a lane query or the recipient index can never reach one of these items.
-export const INCIDENT_PARTS = ['STATE', 'EVIDENCE', 'DECISION', 'COUNTER'] as const;
+export const INCIDENT_PARTS = ['STATE', 'EVIDENCE', 'DECISION', 'COUNTER', 'CLOSURE'] as const;
 export type IncidentPart = (typeof INCIDENT_PARTS)[number];
 
 const UTC_DATE = /^\d{4}-\d{2}-\d{2}$/;

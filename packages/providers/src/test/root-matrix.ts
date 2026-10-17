@@ -40,6 +40,7 @@ export const EXPECTED_KINDS: Readonly<Record<string, Readonly<Record<string, Kin
     listEmailIdentities: ['fixture', 'live', 'live'],
     listConfigurationSets: ['fixture', 'live', 'live'],
     getConfigurationSetEventDestinations: ['fixture', 'live', 'live'],
+    getConfigurationSetSending: ['fixture', 'not-built-until-phase-3', 'not-built-until-phase-3'],
     pauseConfigurationSet: ['fixture', 'dry-run', 'not-built-until-phase-3'],
     reopenConfigurationSet: ['fixture', 'dry-run', 'not-built-until-phase-3'],
     sendEmail: ['fixture', 'dry-run', 'not-built-until-phase-4'],

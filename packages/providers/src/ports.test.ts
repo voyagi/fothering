@@ -700,11 +700,11 @@ describe('the fixtures leave one dry-run line per mutating call (AC-4 dry-run ha
     expect(lines).toEqual(['(dry-run) WOULD ses.pauseConfigurationSet fothering-bulk {"configurationSet":"fothering-bulk"}']);
   });
 
-  it('turns reopen and send into one line each, with a fixed result for send', async () => {
+  it('turns reopen and send into one line each, the send answering a counted fixture message id', async () => {
     const { ses, lines } = sesWithLines();
     await ses.reopenConfigurationSet('fothering-bulk');
     const sent = await ses.sendEmail({ from: 'ops@example.org', to: ['jane@example.com'], subject: 's', text: 't' });
-    expect(sent).toEqual({ messageId: 'dry-run-not-sent' });
+    expect(sent).toEqual({ messageId: 'fixture-message-1' });
     expect(lines).toHaveLength(2);
     expect(lines[0]).toBe('(dry-run) WOULD ses.reopenConfigurationSet fothering-bulk {"configurationSet":"fothering-bulk"}');
     expect(lines[1]?.startsWith('(dry-run) WOULD ses.sendEmail example.org ')).toBe(true);

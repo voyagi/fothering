@@ -17,7 +17,49 @@ export interface IncidentState {
   version: number;
 }
 
-export const INCIDENT_TRANSITIONS = ['opened', 'spiking', 'watching', 'false-recovery', 'false-spike', 'closed'] as const;
+/** The lane marker `INCIDENT_LANE#<set>` / `MARKER`: which incident the lane holds and whether it is open. */
+export interface IncidentMarker {
+  incidentId: string;
+  status: IncidentStatus;
+  version: number;
+}
+
+/** The STATE item's `state` attribute: the item's own version is the state's version. */
+export type StoredIncidentState = Omit<IncidentState, 'version'>;
+
+// Detection and the action both read markers and STATE through these, so a reader can never drift
+// from the shape the writer stores. They take unknown so core needs nothing from the providers' item type.
+export function markerOf(item: unknown): IncidentMarker | undefined {
+  if (typeof item !== 'object' || item === null) return undefined;
+  const { incidentId, status, version } = item as Record<string, unknown>;
+  if (typeof incidentId !== 'string' || (status !== 'open' && status !== 'closed') || typeof version !== 'number') return undefined;
+  return { incidentId, status, version };
+}
+
+// The item's own version is the state's version, so updateIfVersion and stepIncident count alike.
+export function storedStateOf(state: IncidentState): StoredIncidentState {
+  return {
+    incidentId: state.incidentId,
+    configurationSet: state.configurationSet,
+    status: state.status,
+    openingWindow: state.openingWindow,
+    openingFinalized: state.openingFinalized,
+    pendingRecovery: state.pendingRecovery,
+    falseSpikes: state.falseSpikes,
+    falseRecoveries: state.falseRecoveries,
+  };
+}
+
+export function stateOf(item: unknown): IncidentState | undefined {
+  if (typeof item !== 'object' || item === null) return undefined;
+  const { version, state } = item as Record<string, unknown>;
+  if (typeof version !== 'number') return undefined;
+  const stored = state as Partial<StoredIncidentState> | null | undefined;
+  if (stored?.status !== 'open' && stored?.status !== 'closed') return undefined;
+  return { ...(stored as StoredIncidentState), version };
+}
+
+export const INCIDENT_TRANSITIONS =['opened', 'spiking', 'watching', 'false-recovery', 'false-spike', 'closed'] as const;
 export type IncidentTransition = (typeof INCIDENT_TRANSITIONS)[number];
 
 export type LifecycleVerdict = LaneVerdict | 'sends-pending';

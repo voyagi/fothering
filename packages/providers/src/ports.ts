@@ -188,17 +188,20 @@ export const PORT_TABLE = {
       'listEmailIdentities',
       'listConfigurationSets',
       'getConfigurationSetEventDestinations',
+      'getConfigurationSetSending',
       'pauseConfigurationSet',
       'reopenConfigurationSet',
       'sendEmail',
     ],
+    // The read-back changes nothing, so it is neither mutating nor gated: once its live side exists it
+    // stays live in 'deployed' whatever the switch, as the four reads do (SAFE-01).
     mutatingOperations: ['pauseConfigurationSet', 'reopenConfigurationSet', 'sendEmail'],
     gatedOperations: ['pauseConfigurationSet', 'reopenConfigurationSet', 'sendEmail'],
     fixture: (fixtures: FixtureOptions, dryRun: DryRunLog) =>
-      createFixtureSes({ recordings: fixtures.recordings?.ses ?? [], dryRun }),
+      createFixtureSes({ recordings: fixtures.recordings?.ses ?? [], dryRun, state: fixtures.sesState }),
     live: ({ liveClients }) =>
       brandPort(createSesReads({ client: resolveLiveClient(liveClients.sesv2, () => new SESv2Client({ region: LIVE_REGION })) }), 'live'),
-    notBuiltOperations: { pauseConfigurationSet: 3, reopenConfigurationSet: 3, sendEmail: 4 },
+    notBuiltOperations: { getConfigurationSetSending: 3, pauseConfigurationSet: 3, reopenConfigurationSet: 3, sendEmail: 4 },
     dryRun: (log: DryRunLog) => createSesDryRun(log),
   },
   // R6 reads the ROADMAP's "DNS behind the dry-run gate" as DNS behind this table: recorded answers in

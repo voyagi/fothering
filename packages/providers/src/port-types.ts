@@ -217,6 +217,21 @@ export interface FixtureOptions {
   store?: FixtureTableState;
   /** The next N reservations cancel as a transaction conflict and change nothing, so a test can show the retry. */
   transactionConflicts?: number;
+  /** The fixture SES's sending state and scripts, shared like store so two roots see one SES. */
+  sesState?: FixtureSesState;
+}
+
+/**
+ * What the fixture SES holds between calls. The put moves sendingEnabled and the read-back follows it
+ * unless getAnswers scripts another answer for that set, so a test can make the two disagree (AC-3).
+ * calls records every issued and resolved SES write and read-back in order.
+ */
+export interface FixtureSesState {
+  sendingEnabled: Map<string, boolean>;
+  putFaults: Map<string, 'throw'>;
+  getAnswers: Map<string, boolean | 'missing' | 'throw'>;
+  sendAnswers: ('accept' | 'throw')[];
+  calls: string[];
 }
 
 // The composition-root contracts (D-05, D-06): a runtimeContext picks fixture over live wholesale,
@@ -320,8 +335,18 @@ export interface SendEmailRequest {
   configurationSetName?: string;
 }
 
-/** The reads above plus the three operations that change what SES does, all gated by the live switch. */
+/** GetConfigurationSet's sending option; the key is absent when SES answered without it. */
+export interface ConfigurationSetSending {
+  readonly sendingEnabled?: boolean;
+}
+
+/**
+ * The reads above, the configuration-set read-back, and the three operations that change what SES
+ * does, all three gated by the live switch. The read-back sits here and not on SesReadPort, so the
+ * fact reads and detection can never reach it.
+ */
 export interface SesPort extends SesReadPort {
+  getConfigurationSetSending(configurationSet: string): Promise<ConfigurationSetSending>;
   pauseConfigurationSet(configurationSet: string): Promise<void>;
   reopenConfigurationSet(configurationSet: string): Promise<void>;
   sendEmail(request: SendEmailRequest): Promise<{ messageId: string }>;
