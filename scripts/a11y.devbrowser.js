@@ -28,6 +28,12 @@ for (const route of JOB.routes) {
     continue;
   }
 
+  // Read before axe runs, so the reading is the state the page's own head script and tokens.css left.
+  const theme = await page.evaluate(() => ({
+    dataTheme: document.documentElement.getAttribute('data-theme'),
+    ground: getComputedStyle(document.documentElement).getPropertyValue('--ground').trim(),
+  }));
+
   await page.evaluate(axeSource);
   const axe = await page.evaluate(async (cfg) => {
     const selected = window.axe.getRules(cfg.tags).map((rule) => rule.ruleId);
@@ -101,6 +107,7 @@ for (const route of JOB.routes) {
   console.log('AUDIT ' + JSON.stringify({
     route,
     status,
+    theme,
     axe,
     keyboard: { focusables: candidates.focusables, positiveTabindex: candidates.positiveTabindex, walk },
     overflow,

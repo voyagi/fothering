@@ -56,6 +56,13 @@ describe('the token source and tokens.css (D-140, AC-39, AC-63)', () => {
     expect(media).toBeLessThan(pinned ?? -1);
   });
 
+  it('paints the page with the ground and ink tokens after the blocks, so the canvas color-scheme switches is never left uncoloured', () => {
+    const css = renderTokensCss(source);
+    const page = /\nhtml \{([^}]*)\}\n$/.exec(css);
+    expect(declarations(page?.[1] ?? '')).toEqual(['background-color: var(--ground)', 'color: var(--ink)']);
+    expect(page?.index).toBeGreaterThan(blocks().order[2] ?? Number.POSITIVE_INFINITY);
+  });
+
   it('holds the six R14 type tokens, the 46ch measure and the tag literals equal in both themes', () => {
     const statics = new Map(source.static.map((token) => [token.name, token.value]));
     expect(statics.get('--text-small')).toBe('0.9375rem');

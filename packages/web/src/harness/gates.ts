@@ -16,6 +16,7 @@ import { filesIn, loadBuiltSite, NoBuiltPagesError, routeOf, type BuiltSite } fr
 import { checkFileBudget, isRegisteredRule, runBuiltChecks, type BudgetViolation, type CheckContext, type Finding } from '../checks/rules.js';
 import { BANNED_NAMES, CONSOLE_DELETE_PHRASES, REPLY_PROMISE_PHRASES, REPUTATION_PAGE_URL } from '../site/content.js';
 import { ROUTES, SITE_ORIGIN, sitemapUrls } from '../site/route-list.js';
+import { themedValue, TOKENS } from '../theme/head-script.js';
 
 export interface ThemeSetup {
   readonly name: string;
@@ -157,24 +158,46 @@ export interface ThemeReading {
   readonly ground: string;
 }
 
-export function tookHoldVerdict(_reading: ThemeReading, _expected: ThemeName): Verdict {
-  return { ok: true };
+// D-131: a theme took hold when the computed --ground is the token source's value for it, so the
+// verdict reads the one source the stylesheet is generated from.
+const groundFor = (theme: ThemeName): string => themedValue(TOKENS, '--ground', theme);
+
+export function tookHoldVerdict(reading: ThemeReading, expected: ThemeName): Verdict {
+  const wanted = groundFor(expected);
+  return reading.ground === wanted ? { ok: true } : { ok: false, reason: E2E_MESSAGES.themeNotTaken(expected, reading.ground, wanted) };
 }
 
-export function storedThemeVerdict(_reading: ThemeReading, _stored: ThemeName): Verdict {
-  return { ok: true };
+export function storedThemeVerdict(reading: ThemeReading, stored: ThemeName): Verdict {
+  if (reading.dataTheme !== stored) return { ok: false, reason: E2E_MESSAGES.themeAttribute(reading.dataTheme, stored) };
+  return tookHoldVerdict(reading, stored);
 }
 
-export function deviceVerdict(_dark: ThemeReading, _light: ThemeReading): Verdict {
-  return { ok: true };
+// AC-42: Device is no attribute at all, and the two readings come from one page with the OS
+// flipped in between, so only the CSS media block can have moved --ground.
+export function deviceVerdict(dark: ThemeReading, light: ThemeReading): Verdict {
+  const attribute = dark.dataTheme ?? light.dataTheme;
+  if (attribute !== null) return { ok: false, reason: E2E_MESSAGES.deviceAttribute(attribute) };
+  if (dark.ground === light.ground) return { ok: false, reason: E2E_MESSAGES.deviceStill(dark.ground) };
+  const darkHeld = tookHoldVerdict(dark, 'dark');
+  return darkHeld.ok ? tookHoldVerdict(light, 'light') : darkHeld;
 }
 
-export function pinVerdict(_before: ThemeReading, _after: ThemeReading): Verdict {
-  return { ok: true };
+// AC-E28: a stored Dark that equals the OS must still pin once the OS changes.
+export function pinVerdict(before: ThemeReading, after: ThemeReading): Verdict {
+  const held = storedThemeVerdict(before, 'dark');
+  if (!held.ok) return held;
+  return after.dataTheme === 'dark' && after.ground === groundFor('dark') ? { ok: true } : { ok: false, reason: E2E_MESSAGES.pinLost(after.dataTheme, after.ground) };
 }
 
-export function consoleVerdict(_errors: readonly string[]): Verdict {
-  return { ok: true };
+const CSP_REPORT = /Content Security Policy/i;
+
+// C5: Chromium reports a blocked inline script or style only as a console error. Any other console
+// error fails too, since nothing on these pages may throw or fail to load.
+export function consoleVerdict(errors: readonly string[]): Verdict {
+  const first = errors[0];
+  if (first === undefined) return { ok: true };
+  const csp = errors.find((text) => CSP_REPORT.test(text));
+  return { ok: false, reason: csp === undefined ? E2E_MESSAGES.consoleError(first) : E2E_MESSAGES.cspViolation(csp) };
 }
 
 export function overflowVerdict(scrollWidth: number, viewportWidth: number): Verdict {
@@ -238,10 +261,13 @@ export function axeReasons(axe: AxeReport, accepted: ReadonlyMap<string, number>
   return reasons;
 }
 
-export function auditReasons(line: AuditLine, width: number, accepted: ReadonlyMap<string, number>, expectedStatus = 200): string[] {
+export function auditReasons(line: AuditLine, width: number, accepted: ReadonlyMap<string, number>, expectedStatus = 200, expectedTheme: ThemeName = 'light'): string[] {
   if (line.status !== expectedStatus) return [A11Y_MESSAGES.status(line.status, expectedStatus)];
   if (line.axe === undefined || line.keyboard === undefined || line.overflow === undefined) return [A11Y_MESSAGES.axeAbsent()];
-  const reasons = axeReasons(line.axe, accepted);
+  const reasons: string[] = [];
+  const held: Verdict = line.theme === undefined ? { ok: false, reason: A11Y_MESSAGES.themeAbsent() } : tookHoldVerdict(line.theme, expectedTheme);
+  if (!held.ok) reasons.push(held.reason);
+  reasons.push(...axeReasons(line.axe, accepted));
   if (line.overflow.innerWidth !== width) reasons.push(A11Y_MESSAGES.viewport(line.overflow.innerWidth, width));
   const overflow = overflowVerdict(line.overflow.scrollWidth, width);
   if (!overflow.ok) reasons.push(overflow.reason);
@@ -254,6 +280,8 @@ const isObject = (value: unknown): value is Record<string, unknown> => typeof va
 const isStringList = (value: unknown): boolean => Array.isArray(value) && value.every((item) => typeof item === 'string');
 const isItemList = (value: unknown): boolean => Array.isArray(value) && value.every((item) => isObject(item) && typeof item.id === 'string' && Array.isArray(item.nodes));
 const isStopList = (value: unknown): boolean => Array.isArray(value) && value.every((item) => isObject(item) && typeof item.domIndex === 'number' && typeof item.tag === 'string');
+const isReading = (value: unknown): value is ThemeReading =>
+  isObject(value) && typeof value.ground === 'string' && (value.dataTheme === null || typeof value.dataTheme === 'string');
 
 function isAxeReport(value: unknown): boolean {
   return isObject(value) && typeof value.version === 'string' && isStringList(value.selected) && isStringList(value.ran)
@@ -266,7 +294,7 @@ function isAuditLine(value: unknown): value is AuditLine {
   if (!isObject(value) || typeof value.route !== 'string' || typeof value.status !== 'number') return false;
   const { keyboard, overflow } = value;
   if (value.axe === undefined && keyboard === undefined && overflow === undefined) return true;
-  return isAxeReport(value.axe)
+  return isAxeReport(value.axe) && (value.theme === undefined || isReading(value.theme))
     && isObject(keyboard) && isStopList(keyboard.focusables) && isStopList(keyboard.walk) && isStopList(keyboard.positiveTabindex)
     && isObject(overflow) && typeof overflow.scrollWidth === 'number' && typeof overflow.innerWidth === 'number';
 }
@@ -284,21 +312,32 @@ interface RunResult {
   readonly lines: Map<string, AuditLine>;
 }
 
-function readRun(run: DriverRun, label: string): RunResult {
+const printedLines = (run: DriverRun): string[] => run.stdoutLines.map((line) => line.trim()).filter((line) => line !== '');
+
+// Both driver templates end with `done`, so a run that stopped early never reads as a pass.
+function driverRunFailures(run: DriverRun, label: string, printed: readonly string[]): string[] {
   const failures: string[] = [];
-  const lines = new Map<string, AuditLine>();
   if (run.timedOut) failures.push(A11Y_MESSAGES.driverTimedOut(label));
   else if (run.exitCode !== 0) failures.push(A11Y_MESSAGES.driverExit(label, run.exitCode, run.stderr.trim().slice(-STDERR_TAIL)));
-  const printed = run.stdoutLines.map((line) => line.trim()).filter((line) => line !== '');
   if (printed.at(-1) !== 'done') failures.push(A11Y_MESSAGES.noDone(label));
+  return failures;
+}
+
+function parseJson(text: string): unknown {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return undefined;
+  }
+}
+
+function readRun(run: DriverRun, label: string): RunResult {
+  const printed = printedLines(run);
+  const failures = driverRunFailures(run, label, printed);
+  const lines = new Map<string, AuditLine>();
   for (const text of printed) {
     if (!text.startsWith('AUDIT ')) continue;
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(text.slice('AUDIT '.length));
-    } catch {
-      parsed = undefined;
-    }
+    const parsed = parseJson(text.slice('AUDIT '.length));
     if (isAuditLine(parsed)) lines.set(parsed.route, parsed);
     else failures.push(A11Y_MESSAGES.malformedAudit(label, text));
   }
@@ -350,11 +389,40 @@ function prepare(options: A11yLiveOptions, themes: readonly ThemeSetup[], widths
   if (!existsSync(join(dist, '404.html'))) return A11Y_MESSAGES.noNotFoundPage(dist);
   const difference = sitemapDifference(dist, routes);
   if (difference !== null) return difference;
-  const located = locateDevBrowser(options.globalModules);
+  const driver = locateDriver(options.globalModules, options.templatePath ?? join(options.repoRoot, 'scripts', 'a11y.devbrowser.js'));
+  if (typeof driver === 'string') return driver;
+  return { audited: [...routes, UNKNOWN_PATH], ...driver };
+}
+
+// The launcher and the template both rendered checks need, each refused by name when absent.
+function locateDriver(globalModules: string, templatePath: string): { readonly launcher: string; readonly templatePath: string } | string {
+  const located = locateDevBrowser(globalModules);
   if (!located.ok) return located.reason === 'missing' ? A11Y_MESSAGES.devBrowserMissing(located.path) : A11Y_MESSAGES.devBrowserVersion(located.found);
-  const templatePath = options.templatePath ?? join(options.repoRoot, 'scripts', 'a11y.devbrowser.js');
   if (!existsSync(templatePath)) return A11Y_MESSAGES.templateMissing(templatePath);
-  return { audited: [...routes, UNKNOWN_PATH], launcher: located.launcher, templatePath };
+  return { launcher: located.launcher, templatePath };
+}
+
+type Served<T> = { readonly ok: true; readonly value: T } | { readonly ok: false; readonly reason: string };
+
+// One preview server over the repo's dist under its _headers, so every rendered check runs under
+// the production CSP, and one scratch folder for the written drivers; both are gone afterwards.
+async function withPreview<T>(repoRoot: string, prefix: string, body: (server: PreviewServer, workDir: string) => Promise<T>): Promise<Served<T>> {
+  const workDir = mkdtempSync(join(tmpdir(), prefix));
+  let server: PreviewServer | undefined;
+  try {
+    try {
+      server = await startPreviewServer({
+        distDir: join(repoRoot, 'packages', 'web', 'dist'),
+        wranglerConfigPath: join(repoRoot, 'packages', 'web', 'wrangler.jsonc'),
+      });
+    } catch (error) {
+      return { ok: false, reason: A11Y_MESSAGES.serverFailed((error as Error).message) };
+    }
+    return { ok: true, value: await body(server, workDir) };
+  } finally {
+    await server?.close();
+    rmSync(workDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
+  }
 }
 
 interface AuditContext {
@@ -400,12 +468,17 @@ async function auditOne(context: AuditContext, theme: ThemeSetup, width: number)
     if (!lines.has(route)) failures.push(A11Y_MESSAGES.missingRoute(label, route));
   }
   for (const failure of failures) context.print(`[a11y] ${failure}`);
+  // D-131's three runs: light and dark are pinned by storage against the other OS scheme, and
+  // device stores nothing, so it expects whatever scheme the OS reports.
+  const expectedTheme: ThemeName = theme.stored ?? theme.os;
+  let held = 0;
   for (const [route, line] of lines) {
     for (const ruleId of line.axe?.selected ?? []) context.selected.add(ruleId);
     for (const item of line.axe?.incomplete ?? []) {
       if (context.accepted.has(item.id)) context.accepted.set(item.id, (context.accepted.get(item.id) ?? 0) + item.nodes.length);
     }
-    const reasons = auditReasons(line, width, context.accepted, EXPECTED_STATUS[route] ?? 200);
+    if (line.theme !== undefined && tookHoldVerdict(line.theme, expectedTheme).ok) held += 1;
+    const reasons = auditReasons(line, width, context.accepted, EXPECTED_STATUS[route] ?? 200, expectedTheme);
     if (reasons.length === 0) {
       context.print(A11Y_MESSAGES.routePassed(route, label, line.status, line.keyboard?.walk.length ?? 0));
     } else {
@@ -413,7 +486,32 @@ async function auditOne(context: AuditContext, theme: ThemeSetup, width: number)
       failures.push(`${route} ${label}: ${reasons.join('; ')}`);
     }
   }
+  if (held === context.prepared.audited.length) context.print(A11Y_MESSAGES.tookHold(label, groundFor(expectedTheme), held));
   return { failures, audits: context.prepared.audited.length };
+}
+
+async function auditAll(context: AuditContext, themes: readonly ThemeSetup[], widths: readonly number[]): Promise<number> {
+  const failures: string[] = [];
+  let audits = 0;
+  for (const theme of themes) {
+    for (const width of widths) {
+      const result = await auditOne(context, theme, width);
+      failures.push(...result.failures);
+      audits += result.audits;
+    }
+  }
+  const { print, accepted, selected } = context;
+  print(A11Y_MESSAGES.selectedRules([...selected].sort()));
+  if (ACCEPTED_INCOMPLETE.length === 0) print(A11Y_MESSAGES.acceptedNone());
+  for (const entry of ACCEPTED_INCOMPLETE) print(A11Y_MESSAGES.acceptedCount(entry.ruleId, accepted.get(entry.ruleId) ?? 0, entry.reason));
+  const first = failures[0];
+  if (first !== undefined) {
+    print(A11Y_MESSAGES.fail(A11Y_MESSAGES.failCount(failures.length, audits, first)));
+    return 1;
+  }
+  const matched = [...accepted.values()].reduce((sum, count) => sum + count, 0);
+  print(A11Y_MESSAGES.pass(context.prepared.audited.length, widths.length, themes.length, matched));
+  return 0;
 }
 
 export async function runA11yLive(options: A11yLiveOptions): Promise<number> {
@@ -430,45 +528,17 @@ export async function runA11yLive(options: A11yLiveOptions): Promise<number> {
     print(A11Y_MESSAGES.fail(staged.reason === 'missing' ? A11Y_MESSAGES.axeMissing(staged.path) : A11Y_MESSAGES.axeVersion(staged.found)));
     return 1;
   }
-  const workDir = mkdtempSync(join(tmpdir(), 'fothering-a11y-'));
-  let server: PreviewServer | undefined;
   try {
-    try {
-      server = await startPreviewServer({
-        distDir: join(options.repoRoot, 'packages', 'web', 'dist'),
-        wranglerConfigPath: join(options.repoRoot, 'packages', 'web', 'wrangler.jsonc'),
-      });
-    } catch (error) {
-      print(A11Y_MESSAGES.fail(A11Y_MESSAGES.serverFailed((error as Error).message)));
-      return 1;
-    }
-    const accepted = new Map(ACCEPTED_INCOMPLETE.map((entry) => [entry.ruleId, 0]));
-    const selected = new Set<string>();
-    const context: AuditContext = { prepared, server, axeFile: staged.name, workDir, print, accepted, selected, outerTimeoutMs: options.outerTimeoutMs };
-    const failures: string[] = [];
-    let audits = 0;
-    for (const theme of themes) {
-      for (const width of widths) {
-        const result = await auditOne(context, theme, width);
-        failures.push(...result.failures);
-        audits += result.audits;
-      }
-    }
-    print(A11Y_MESSAGES.selectedRules([...selected].sort()));
-    if (ACCEPTED_INCOMPLETE.length === 0) print(A11Y_MESSAGES.acceptedNone());
-    for (const entry of ACCEPTED_INCOMPLETE) print(A11Y_MESSAGES.acceptedCount(entry.ruleId, accepted.get(entry.ruleId) ?? 0, entry.reason));
-    const first = failures[0];
-    if (first !== undefined) {
-      print(A11Y_MESSAGES.fail(A11Y_MESSAGES.failCount(failures.length, audits, first)));
-      return 1;
-    }
-    const matched = [...accepted.values()].reduce((sum, count) => sum + count, 0);
-    print(A11Y_MESSAGES.pass(prepared.audited.length, widths.length, themes.length, matched));
-    return 0;
+    const served = await withPreview(options.repoRoot, 'fothering-a11y-', (server, workDir) => {
+      const accepted = new Map(ACCEPTED_INCOMPLETE.map((entry) => [entry.ruleId, 0]));
+      const context: AuditContext = { prepared, server, axeFile: staged.name, workDir, print, accepted, selected: new Set<string>(), outerTimeoutMs: options.outerTimeoutMs };
+      return auditAll(context, themes, widths);
+    });
+    if (served.ok) return served.value;
+    print(A11Y_MESSAGES.fail(served.reason));
+    return 1;
   } finally {
-    await server?.close();
     staged.remove();
-    rmSync(workDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
   }
 }
 
@@ -616,7 +686,7 @@ export function runBuiltChecksCommand(options: BuiltChecksOptions): number {
 
 export interface SiteE2eOptions {
   readonly repoRoot: string;
-  // The rendered checks of a later plan drive dev-browser from the global npm folder.
+  // The rendered step drives dev-browser from the global npm folder.
   readonly globalModules: string;
   readonly print?: (line: string) => void;
   readonly clientSecretsScript?: string;
@@ -672,14 +742,83 @@ function secondBuildStep(options: SiteE2eOptions, dist: string): string | null {
   }
 }
 
-// D-151's order. The size budget arrives in 05-09 and the rendered checks in 05-08, each as a step
-// here; a failing step stops the run with its reason, and the last line is PASS or FAIL.
-export function runSiteE2e(options: SiteE2eOptions): Promise<number> {
+const RENDERED_LABEL = 'rendered';
+const RENDERED_CHECKS = ['THEME', 'DEVICE', 'PIN'] as const;
+type RenderedCheck = (typeof RENDERED_CHECKS)[number];
+type CheckJudgement = { readonly verdict: Verdict; readonly detail: string } | null;
+
+// Each check line's record, judged once its shape is known; null means the line is not a record.
+const RENDERED_JUDGES: Readonly<Record<RenderedCheck, (value: unknown) => CheckJudgement>> = {
+  THEME: (value) => (isReading(value) ? { verdict: storedThemeVerdict(value, 'dark'), detail: `Dark stored on a light OS painted --ground ${value.ground}` } : null),
+  DEVICE: (value) => (isObject(value) && isReading(value.dark) && isReading(value.light)
+    ? { verdict: deviceVerdict(value.dark, value.light), detail: `--ground followed the OS from ${value.dark.ground} to ${value.light.ground} with no reload` }
+    : null),
+  PIN: (value) => (isObject(value) && isReading(value.before) && isReading(value.after)
+    ? { verdict: pinVerdict(value.before, value.after), detail: `Dark stored on a dark OS kept --ground ${value.after.ground} after the OS turned light` }
+    : null),
+};
+
+function judgeCheck(check: RenderedCheck, text: string | undefined): { verdict: Verdict; detail: string } {
+  if (text === undefined) return { verdict: { ok: false, reason: E2E_MESSAGES.renderedMissing(check) }, detail: '' };
+  const judged = RENDERED_JUDGES[check](parseJson(text.slice(check.length + 1)));
+  return judged ?? { verdict: { ok: false, reason: E2E_MESSAGES.renderedMalformed(text) }, detail: '' };
+}
+
+const consoleText = (text: string): string => {
+  const parsed = parseJson(text.slice('CONSOLE '.length));
+  return isObject(parsed) && typeof parsed.text === 'string' ? parsed.text : text;
+};
+
+function judgeRendered(run: DriverRun, print: (line: string) => void): string | null {
+  const printed = printedLines(run);
+  const [stopped] = driverRunFailures(run, RENDERED_LABEL, printed);
+  if (stopped !== undefined) return stopped;
+  const records = new Map<string, string>();
+  const consoleErrors: string[] = [];
+  for (const text of printed) {
+    const kind = text.split(' ', 1)[0] ?? '';
+    if (kind === 'CONSOLE') consoleErrors.push(consoleText(text));
+    else if ((RENDERED_CHECKS as readonly string[]).includes(kind)) records.set(kind, text);
+  }
+  const results: (readonly [string, { verdict: Verdict; detail: string }])[] = [
+    ...RENDERED_CHECKS.map((check) => [check, judgeCheck(check, records.get(check))] as const),
+    ['CONSOLE', { verdict: consoleVerdict(consoleErrors), detail: 'no console error, no Content Security Policy violation' }],
+  ];
+  const failed: string[] = [];
+  for (const [check, { verdict, detail }] of results) {
+    if (verdict.ok) {
+      print(E2E_MESSAGES.renderedOk(check, detail));
+    } else {
+      print(E2E_MESSAGES.renderedFailed(check, verdict.reason));
+      failed.push(`${check}: ${verdict.reason}`);
+    }
+  }
+  const first = failed[0];
+  return first === undefined ? null : E2E_MESSAGES.renderedFailures(failed.length, first);
+}
+
+// D-132's rendered layer, run on the landing page under the built _headers (C5, C6): a stored Dark
+// before first paint, Device following the OS live, the Dark pin (AC-E28) and every console error.
+async function renderedStep(options: SiteE2eOptions, print: (line: string) => void): Promise<string | null> {
+  const driver = locateDriver(options.globalModules, join(options.repoRoot, 'scripts', 'site.devbrowser.js'));
+  if (typeof driver === 'string') return driver;
+  const served = await withPreview(options.repoRoot, 'fothering-e2e-', async (server, workDir) => {
+    const written = writeDriver(driver.templatePath, { base: server.url, route: '/' }, join(workDir, 'site.js'));
+    if (!written.ok) return A11Y_MESSAGES.templateTokens(driver.templatePath, written.tokens);
+    const run = await runDriver({ launcher: driver.launcher, driverPath: written.path, timeoutSeconds: DRIVER_TIMEOUT_SECONDS });
+    return judgeRendered(run, print);
+  });
+  return served.ok ? served.value : served.reason;
+}
+
+// D-151's order. The size budget arrives in 05-09 as a step here; a failing step stops the run
+// with its reason, and the last line is PASS or FAIL.
+export async function runSiteE2e(options: SiteE2eOptions): Promise<number> {
   const print = options.print ?? ((line: string) => console.log(line));
   const dist = join(options.repoRoot, 'packages', 'web', 'dist');
   if (!existsSync(dist) || !statSync(dist).isDirectory()) {
     print(E2E_MESSAGES.fail(E2E_MESSAGES.noDist(dist)));
-    return Promise.resolve(1);
+    return 1;
   }
   let pages = 0;
   const builtChecks = (): string | null => {
@@ -690,20 +829,21 @@ export function runSiteE2e(options: SiteE2eOptions): Promise<number> {
     const first = judged.findings[0];
     return first === undefined ? null : E2E_MESSAGES.findings(judged.findings.length, findingLine(first));
   };
-  const steps: readonly (readonly [string, () => string | null])[] = [
+  const steps: readonly (readonly [string, () => string | null | Promise<string | null>])[] = [
     ['client-secrets', () => clientSecretsStep(options.clientSecretsScript ?? join(options.repoRoot, 'scripts', 'check-client-secrets.mjs'), dist, print)],
     ['file-budget', () => fileBudgetStep(dist, options.fileBudget ?? checkFileBudget)],
     ['built-checks', builtChecks],
     ['second-build', () => secondBuildStep(options, dist)],
+    ['rendered', () => renderedStep(options, print)],
   ];
   for (const [name, run] of steps) {
-    const reason = run();
+    const reason = await run();
     if (reason !== null) {
       print(E2E_MESSAGES.fail(reason));
-      return Promise.resolve(1);
+      return 1;
     }
     print(E2E_MESSAGES.step(name));
   }
   print(E2E_MESSAGES.pass(pages, steps.length));
-  return Promise.resolve(0);
+  return 0;
 }

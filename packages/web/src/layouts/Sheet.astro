@@ -1,5 +1,6 @@
 ---
 import { headMeta, type SheetRoute } from '../site/route-list.ts';
+import { HEAD_SCRIPT } from '../theme/head-script.ts';
 
 interface Props {
   route: SheetRoute;
@@ -12,6 +13,8 @@ const head = headMeta(Astro.props.route);
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <script is:inline set:html={HEAD_SCRIPT}></script>
+    <link rel="stylesheet" href="/tokens.css" />
     <title>{head.title}</title>
     {head.metas.map((attrs) => <meta {...attrs} />)}
     {head.links.map((attrs) => <link {...attrs} />)}
