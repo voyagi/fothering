@@ -1,8 +1,9 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
-import { completeSite, page, plantDist, REPO_ROOT, SHEET_HEAD_ITEMS, type PlantedDist } from '../test/planted-dist.js';
+import { completeSite, HEADERS_TEXT, page, plantDist, REPO_ROOT, SHEET_HEAD_ITEMS, THEME_HEAD, type PlantedDist } from '../test/planted-dist.js';
 import { loadCheckContext } from '../harness/gates.js';
+import { HEAD_SCRIPT, headScriptHash, renderTokensCss } from '../theme/head-script.js';
 import { BANNED_NAMES, CONSOLE_DELETE_PHRASES, REPLY_PROMISE_PHRASES } from '../site/content.js';
 import { renderRobots, renderSitemap, SITE_ORIGIN } from '../site/route-list.js';
 import { filesIn, loadBuiltSite, NOT_FOUND_ROUTE, NoBuiltPagesError, type BuiltSite } from './built-site.js';
@@ -13,6 +14,8 @@ import {
   dashRule,
   exactThirtyDaysRule,
   formsCookiesAnalyticsRule,
+  headScriptOrderRule,
+  noInlineStyleRule,
   pageMetadataRule,
   preR6WordsRule,
   regionClaimRule,
@@ -20,10 +23,13 @@ import {
   robotsRule,
   RULE_IDS,
   runBuiltChecks,
+  scriptHashRule,
   sesPercentageLinkRule,
   sesRateWordingRule,
   sitemapRule,
+  themeTokenBlocksRule,
   thirdPartyReferenceRule,
+  typeTokenDeclaredRule,
   unitFigureRule,
   type Finding,
 } from './rules.js';
@@ -146,11 +152,16 @@ describe('runBuiltChecks', () => {
     expect([...rules].filter((rule) => ['page-metadata', 'sitemap', 'robots'].includes(rule)).sort()).toEqual(['page-metadata', 'robots', 'sitemap']);
   });
 
-  it('holds exactly the fifteen rule ids the plans name', () => {
+  it('holds exactly the twenty rule ids the plans name', () => {
     expect([...RULE_IDS].sort()).toEqual([
-      'banned-name', 'console-delete', 'dash', 'exact-30-days', 'forms-cookies-analytics', 'page-metadata', 'pre-r6-words',
-      'region-claim', 'reply-promise', 'robots', 'ses-percentage-link', 'ses-rate-wording', 'sitemap', 'third-party-reference', 'unit-figure',
+      'banned-name', 'console-delete', 'dash', 'exact-30-days', 'forms-cookies-analytics', 'head-script-order', 'no-inline-style', 'page-metadata',
+      'pre-r6-words', 'region-claim', 'reply-promise', 'robots', 'script-hash', 'ses-percentage-link', 'ses-rate-wording', 'sitemap',
+      'theme-token-blocks', 'third-party-reference', 'type-token-declared', 'unit-figure',
     ]);
+  });
+
+  it('passes a complete planted site under every rule', () => {
+    expect(runBuiltChecks(siteOf(completeSite({ 'index.html': '<p>landing</p>', '404.html': '<p>none</p>' })), context)).toEqual([]);
   });
 });
 
@@ -489,6 +500,147 @@ describe('the robots rule (AC-51)', () => {
     const expected = [`robots.txt does not name the sitemap at ${SITE_ORIGIN}/sitemap.xml`];
     expect(robotsFindings('User-agent: *\nAllow: /\n').map((finding) => finding.text)).toEqual(expected);
     expect(robotsFindings('User-agent: *\nAllow: /\nSitemap: https://elsewhere.example/sitemap.xml\n').map((finding) => finding.text)).toEqual(expected);
+  });
+});
+
+const ONE_SHEET = { 'index.html': '<p>landing</p>' };
+const withFile = (name: string, text: string | null): Record<string, string> => {
+  const rest = without(completeSite(ONE_SHEET), name);
+  return text === null ? rest : { ...rest, [name]: text };
+};
+const sheetWithHead = (theme: string): Record<string, string> => completeSite(ONE_SHEET, { 'index.html': { theme } });
+const texts = (findings: readonly Finding[]): string[] => findings.map((finding) => finding.text);
+const DARK_MEDIA = '@media (prefers-color-scheme: dark) {';
+
+describe('the theme token blocks rule (AC-39, D-140)', () => {
+  it('passes the rendered tokens.css', () => {
+    expect(themeTokenBlocksRule(siteOf(completeSite(ONE_SHEET)), context)).toEqual([]);
+  });
+
+  it('fails a build with no tokens.css', () => {
+    expect(themeTokenBlocksRule(siteOf(withFile('tokens.css', null)), context)).toEqual([{ rule: 'theme-token-blocks', route: 'file:tokens.css', text: 'dist/tokens.css is missing' }]);
+  });
+
+  it('fails dark blocks whose declarations differ', () => {
+    const css = renderTokensCss().replace(`:root[data-theme="dark"] {\n  color-scheme: dark;\n  --ground: #0F1316;`, `:root[data-theme="dark"] {\n  color-scheme: dark;\n  --ground: #000000;`);
+    expect(css).not.toBe(renderTokensCss());
+    expect(texts(themeTokenBlocksRule(siteOf(withFile('tokens.css', css)), context))).toEqual(['the dark blocks under the media query and under :root[data-theme="dark"] differ']);
+  });
+
+  it('fails a missing media block, a missing pinned block and a light block without color-scheme light', () => {
+    const noMedia = renderTokensCss().replace(DARK_MEDIA, '@media (min-width: 1px) {');
+    expect(texts(themeTokenBlocksRule(siteOf(withFile('tokens.css', noMedia)), context))).toEqual(['tokens.css has no :root:not([data-theme="light"]) block under @media (prefers-color-scheme: dark)']);
+    const noPinned = renderTokensCss().replace(':root[data-theme="dark"]', ':root[data-theme="night"]');
+    expect(texts(themeTokenBlocksRule(siteOf(withFile('tokens.css', noPinned)), context))).toEqual(['tokens.css has no :root[data-theme="dark"] block']);
+    const noLight = renderTokensCss().replace('color-scheme: light', 'color-scheme: normal');
+    expect(texts(themeTokenBlocksRule(siteOf(withFile('tokens.css', noLight)), context))).toEqual(['the :root block does not declare color-scheme: light']);
+  });
+
+  it('fails dark blocks without color-scheme dark, and a dark token the light block never declares', () => {
+    const noScheme = renderTokensCss().replaceAll('color-scheme: dark', 'color-scheme: only dark');
+    expect(texts(themeTokenBlocksRule(siteOf(withFile('tokens.css', noScheme)), context))).toEqual(['the dark blocks do not declare color-scheme: dark']);
+    const stray = renderTokensCss().replaceAll('color-scheme: dark;', 'color-scheme: dark;\n  --stray: #000000;');
+    expect(texts(themeTokenBlocksRule(siteOf(withFile('tokens.css', stray)), context))).toEqual(['the dark blocks declare --stray, which the :root block does not']);
+  });
+});
+
+describe('the type token rule (AC-63 declaration half)', () => {
+  it('passes the rendered tokens.css', () => {
+    expect(typeTokenDeclaredRule(siteOf(completeSite(ONE_SHEET)), context)).toEqual([]);
+  });
+
+  it('fails a build with no tokens.css', () => {
+    expect(texts(typeTokenDeclaredRule(siteOf(withFile('tokens.css', null)), context))).toEqual(['dist/tokens.css is missing']);
+  });
+
+  it.each(['--text-lede', '--text-intro', '--text-narrative-headline', '--text-small', '--text-mono-value', '--text-schedule-compact'])('fails a tokens.css without %s on :root', (name) => {
+    const css = renderTokensCss().replace(new RegExp(`\\n  ${name}: [^;]*;`), '');
+    expect(css).not.toBe(renderTokensCss());
+    expect(texts(typeTokenDeclaredRule(siteOf(withFile('tokens.css', css)), context))).toEqual([`tokens.css declares no ${name} on :root`]);
+  });
+
+  it('fails --text-small and --text-mono-value at any size but 0.9375rem and 0.8125rem', () => {
+    const css = renderTokensCss().replace('--text-small: 0.9375rem', '--text-small: 15px').replace('--text-mono-value: 0.8125rem', '--text-mono-value: 0.8rem');
+    expect(texts(typeTokenDeclaredRule(siteOf(withFile('tokens.css', css)), context))).toEqual([
+      '--text-small is 15px, 0.9375rem expected',
+      '--text-mono-value is 0.8rem, 0.8125rem expected',
+    ]);
+  });
+});
+
+describe('the head script order rule (AC-40, Pitfall 4)', () => {
+  it('passes the layout head on every page', () => {
+    expect(headScriptOrderRule(siteOf(completeSite({ ...ONE_SHEET, '404.html': '<p>none</p>' })), context)).toEqual([]);
+  });
+
+  it('fails a theme script that follows a stylesheet link', () => {
+    const head = `<link rel="stylesheet" href="/tokens.css"><script>${HEAD_SCRIPT}</script>`;
+    expect(texts(headScriptOrderRule(siteOf(sheetWithHead(head)), context))).toEqual(['the theme script follows a stylesheet link']);
+  });
+
+  it.each(['defer', 'async', 'type="module"'])('fails a theme script carrying %s', (attribute) => {
+    const head = `<script ${attribute}>${HEAD_SCRIPT}</script><link rel="stylesheet" href="/tokens.css">`;
+    expect(texts(headScriptOrderRule(siteOf(sheetWithHead(head)), context))).toEqual([`the theme script carries ${attribute}`]);
+  });
+
+  it('fails a head with no inline script and one whose inline script is not HEAD_SCRIPT', () => {
+    expect(texts(headScriptOrderRule(siteOf(sheetWithHead('<link rel="stylesheet" href="/tokens.css">')), context))).toEqual(['the head holds no inline theme script']);
+    const altered = `<script>${HEAD_SCRIPT.replace('fothering-theme', 'other-theme')}</script><link rel="stylesheet" href="/tokens.css">`;
+    expect(texts(headScriptOrderRule(siteOf(sheetWithHead(altered)), context))).toEqual(['the inline head script is not the HEAD_SCRIPT text']);
+  });
+
+  it('reads only the head: an inline script in the body is not the theme script', () => {
+    const site = siteOf(completeSite({ 'index.html': `<script>${HEAD_SCRIPT}</script>` }, { 'index.html': { theme: '<link rel="stylesheet" href="/tokens.css">' } }));
+    expect(texts(headScriptOrderRule(site, context))).toEqual(['the head holds no inline theme script']);
+  });
+});
+
+describe('the script hash rule (D-149, C6, T-05-21, T-05-24)', () => {
+  it('passes inline scripts whose hashes equal the set in _headers', () => {
+    expect(scriptHashRule(siteOf(completeSite({ ...ONE_SHEET, '404.html': '<p>none</p>' })), context)).toEqual([]);
+  });
+
+  it('fails an inline script whose hash _headers lacks, at its route', () => {
+    const findings = scriptHashRule(siteOf(completeSite({ 'index.html': '<script>window.planted = 1;</script>' })), context);
+    expect(findings.map((finding) => finding.route)).toEqual(['/']);
+    expect(findings[0]?.text).toMatch(/^an inline script hashes to sha256-[A-Za-z0-9+/=]+, which _headers does not list$/);
+  });
+
+  it('fails a hash in _headers that no inline script has', () => {
+    const headers = HEADERS_TEXT.replace(`'sha256-${headScriptHash()}'`, `'sha256-${headScriptHash()}' 'sha256-AAAA'`);
+    expect(scriptHashRule(siteOf(withFile('_headers', headers)), context)).toEqual([{ rule: 'script-hash', route: 'file:_headers', text: '_headers lists sha256-AAAA, which no inline script has' }]);
+  });
+
+  it('fails a build with no _headers and one whose _headers has no script-src', () => {
+    expect(texts(scriptHashRule(siteOf(withFile('_headers', null)), context))).toEqual(['dist/_headers is missing']);
+    const findings = scriptHashRule(siteOf(withFile('_headers', '/*\n  X-Frame-Options: DENY\n')), context);
+    expect(findings.map((finding) => finding.route)).toEqual(['/']);
+  });
+});
+
+describe('the inline style rule (C6)', () => {
+  it('passes a site with no style attribute, style element or data: URL', () => {
+    expect(noInlineStyleRule(siteOf(completeSite({ 'index.html': '<p>plain</p><img src="/a.png" alt="a">' })), context)).toEqual([]);
+  });
+
+  it('fails a style attribute, also inside SVG, and a style element, at the route', () => {
+    const site = siteOf(completeSite({ 'index.html': '<p style="color: red">x</p><svg><rect style="fill: red"/></svg><style>p { color: red }</style>' }));
+    expect(texts(noInlineStyleRule(site, context))).toEqual(['a style attribute on <p>', 'a style attribute on <rect>', 'a style element']);
+  });
+
+  it('fails a data: URL in an attribute and in built CSS', () => {
+    const site = siteOf({ ...completeSite({ 'index.html': '<img src="data:image/png;base64,AAAA" alt="a"><img srcset="/a.png 1x, DATA:image/png;base64,AAAA 2x" alt="b">' }), '_astro/site.css': 'p { background: url("data:image/png;base64,AAAA") }' });
+    expect(noInlineStyleRule(site, context).map((finding) => [finding.route, finding.text])).toEqual([
+      ['/', 'img src holds a data: URL'],
+      ['/', 'img srcset holds a data: URL'],
+      ['file:_astro/site.css', 'a CSS url() holds a data: URL'],
+    ]);
+  });
+});
+
+describe('the built layout head (05-08 wiring)', () => {
+  it('a planted sheet carries the theme head before its metadata', () => {
+    expect(completeSite(ONE_SHEET)['index.html']).toContain(`<head><meta charset="utf-8">${THEME_HEAD}<title>`);
   });
 });
 

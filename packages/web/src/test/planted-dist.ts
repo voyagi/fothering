@@ -1,8 +1,9 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { NOT_FOUND_ROUTE, routeOf } from '../checks/built-site.js';
 import { renderRobots, renderSitemap } from '../site/route-list.js';
+import { HEAD_SCRIPT, renderTokensCss } from '../theme/head-script.js';
 
 // This file sits four folders below the repo root, like the harness tests.
 export const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../../../..');
@@ -42,7 +43,13 @@ export interface SheetHead {
   readonly title?: string;
   readonly description?: string;
   readonly omit?: readonly SheetHeadItem[];
+  // What stands where the layout puts the head script and the tokens.css link.
+  readonly theme?: string;
 }
+
+// The head the layout writes before any metadata: the hashed theme script, then the tokens link.
+export const THEME_HEAD = `<script>${HEAD_SCRIPT}</script><link rel="stylesheet" href="/tokens.css">`;
+export const HEADERS_TEXT = readFileSync(join(REPO_ROOT, 'packages', 'web', 'public', '_headers'), 'utf8');
 
 export function sheetHead(route: string, options: SheetHead = {}): string {
   const title = options.title ?? `Planted sheet ${route}`;
@@ -56,11 +63,11 @@ export function sheetHead(route: string, options: SheetHead = {}): string {
     'twitter:card': '<meta name="twitter:card" content="summary">',
   };
   const omitted = new Set(options.omit ?? []);
-  return SHEET_HEAD_ITEMS.filter((item) => !omitted.has(item)).map((item) => items[item]).join('');
+  return (options.theme ?? THEME_HEAD) + SHEET_HEAD_ITEMS.filter((item) => !omitted.has(item)).map((item) => items[item]).join('');
 }
 
-// A planted build the metadata, sitemap and robots rules pass, so a case can plant one fault and
-// see only the rule it aims at fire.
+// A planted build every head and file rule passes, so a case can plant one fault and see only the
+// rule it aims at fire.
 export function completeSite(bodies: Readonly<Record<string, string>>, heads: Readonly<Record<string, SheetHead>> = {}): Record<string, string> {
   const files: Record<string, string> = {};
   const paths: string[] = [];
@@ -69,5 +76,11 @@ export function completeSite(bodies: Readonly<Record<string, string>>, heads: Re
     files[file] = page(body, sheetHead(route, heads[file]));
     if (route !== NOT_FOUND_ROUTE) paths.push(route);
   }
-  return { ...files, 'sitemap.xml': renderSitemap(paths.map((path) => ({ path, indexable: true }))), 'robots.txt': renderRobots() };
+  return {
+    ...files,
+    'sitemap.xml': renderSitemap(paths.map((path) => ({ path, indexable: true }))),
+    'robots.txt': renderRobots(),
+    'tokens.css': renderTokensCss(),
+    '_headers': HEADERS_TEXT,
+  };
 }

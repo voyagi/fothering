@@ -883,7 +883,7 @@ describe('the built checks through the CLI and the e2e step (D-150, D-151)', () 
     return { code, lines };
   }
 
-  const renderedTree = (): ReturnType<typeof plantDist> => plantSite({ ...completeSite({ 'index.html': '<p>closed - one lane</p>' }), 'tokens.css': ':root {}' });
+  const renderedTree = (): ReturnType<typeof plantDist> => plantSite(completeSite({ 'index.html': '<p>closed - one lane</p>' }));
 
   function stubScript(name: string, exitCode: number): string {
     const path = join(PLANT, 'stubs', `${name}.mjs`);

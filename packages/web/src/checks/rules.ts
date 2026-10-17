@@ -25,6 +25,11 @@ export const RULE_IDS = Object.freeze([
   'page-metadata',
   'sitemap',
   'robots',
+  'theme-token-blocks',
+  'head-script-order',
+  'script-hash',
+  'no-inline-style',
+  'type-token-declared',
 ] as const);
 
 export type RuleId = (typeof RULE_IDS)[number];
@@ -378,6 +383,26 @@ export function robotsRule(site: BuiltSite, context: CheckContext): Finding[] {
   return required.filter(([pattern]) => !lines.some((line) => pattern.test(line))).map(([, text]) => ({ rule, route, text }));
 }
 
+export function themeTokenBlocksRule(_site: BuiltSite, _context: CheckContext): Finding[] {
+  return [];
+}
+
+export function typeTokenDeclaredRule(_site: BuiltSite, _context: CheckContext): Finding[] {
+  return [];
+}
+
+export function headScriptOrderRule(_site: BuiltSite, _context: CheckContext): Finding[] {
+  return [];
+}
+
+export function scriptHashRule(_site: BuiltSite, _context: CheckContext): Finding[] {
+  return [];
+}
+
+export function noInlineStyleRule(_site: BuiltSite, _context: CheckContext): Finding[] {
+  return [];
+}
+
 // Workers limits: 20,000 files per version on the Free plan and 25 MiB per file (AC-62).
 const MAX_FILES = 20_000;
 const MAX_FILE_BYTES = 25 * 1024 * 1024;
@@ -413,6 +438,11 @@ const RULES: Readonly<Record<RuleId, Rule>> = {
   'page-metadata': pageMetadataRule,
   'sitemap': sitemapRule,
   'robots': robotsRule,
+  'theme-token-blocks': themeTokenBlocksRule,
+  'head-script-order': headScriptOrderRule,
+  'script-hash': scriptHashRule,
+  'no-inline-style': noInlineStyleRule,
+  'type-token-declared': typeTokenDeclaredRule,
 };
 
 // Every rule runs over the whole site and every hit is kept, so one report names them all.
