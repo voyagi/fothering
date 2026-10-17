@@ -336,6 +336,82 @@ export function storageVerdict(reading: StorageReading): Verdict {
   return outside.length === 0 ? { ok: true } : { ok: false, reason: E2E_MESSAGES.storageKeys(outside) };
 }
 
+export interface LinesReading {
+  readonly route: string;
+  readonly blocks: number;
+  readonly lines: readonly string[];
+}
+
+export function lineVerdict(_readings: readonly LinesReading[]): Verdict {
+  return { ok: true };
+}
+
+export interface IdentifierReading {
+  readonly text: string;
+  readonly lines: readonly string[];
+}
+
+export function identifierBreakVerdict(_reading: IdentifierReading): Verdict {
+  return { ok: true };
+}
+
+export interface Box {
+  readonly left: number;
+  readonly top: number;
+  readonly right: number;
+  readonly bottom: number;
+}
+
+export interface DrawingReading {
+  readonly box: Box;
+  readonly texts: readonly { readonly text: string; readonly box: Box }[];
+}
+
+export interface OverlapReading {
+  readonly tag: Box | null;
+  readonly drawings: readonly DrawingReading[];
+}
+
+export function overlapVerdict(_reading: OverlapReading): Verdict {
+  return { ok: true };
+}
+
+export interface FlowControlBox {
+  readonly label: string;
+  readonly width: number;
+  readonly height: number;
+}
+
+export interface FlowState {
+  readonly running: number;
+  readonly labels: readonly string[];
+}
+
+export interface FlowReading {
+  readonly route: string;
+  readonly width: number;
+  readonly movingOnLoad: boolean;
+  readonly controls: readonly FlowControlBox[];
+  readonly afterClick: FlowState;
+  readonly afterReload: FlowState;
+  readonly reduced: number;
+  readonly storedRunningReduced: number;
+  readonly storedStopped: number;
+}
+
+export function flowVerdict(_reading: FlowReading): Verdict {
+  return { ok: true };
+}
+
+export interface FlowTabReading {
+  readonly width: number;
+  readonly flows: readonly { readonly flowStep: number | null; readonly nextStep: number | null }[];
+}
+
+export function flowTabVerdict(_reading: FlowTabReading): Verdict {
+  return { ok: true };
+}
+
 const NOT_FOUND_LOAD = /^Failed to load resource: the server responded with a status of 404\b/;
 
 // Chromium logs the unknown address's own 404 as a console error; that answer is the 404 page
@@ -745,6 +821,26 @@ export const E2E_MESSAGES = Object.freeze({
   foreignRequest: (page: string, origins: readonly string[]) => `request(s) left the page's origin ${page}: ${origins.join(', ')}`,
   storageKeys: (keys: readonly string[]) => `storage holds ${keys.join(', ')}; only fothering-theme and fothering-flow in localStorage are allowed`,
   sizeLimit: (status: number | null) => `size-limit exited ${String(status)}, 0 expected; the client scripts are over the budget in packages/web/package.json or were not measured`,
+  noProseBlocks: () => 'the line test measured zero prose blocks across the site, so no line was checked',
+  lineTooLong: (route: string, characters: number, line: string) => `${route}: a rendered line holds ${characters} characters, at most 80 allowed: "${line.slice(0, 60)}"`,
+  identifierBreak: (text: string, lines: readonly string[]) => `the identifier ${text} breaks as ${lines.map((line) => JSON.stringify(line)).join(' / ')}, and may break only right after a dot`,
+  tagOverlap: (text: string) => `the lockout tag covers the drawing text "${text}"`,
+  textOutside: (text: string) => `the drawing text "${text}" extends past its drawing's box`,
+  noDrawingText: () => 'no route measured a drawing text at 320, so the tag and label check proved nothing',
+  flowNoControl: (width: number) => `at ${width} px a flow animation runs on load and no Stop flow control is visible`,
+  flowControlWithoutMotion: (width: number) => `at ${width} px a Stop flow control is visible and no flow animation runs on load`,
+  flowSmallControl: (width: number, controlWidth: number, controlHeight: number) => `at ${width} px a Stop flow control measures ${controlWidth} by ${controlHeight} px, 44 by 44 at least`,
+  flowStillRunning: (width: number, running: number) => `at ${width} px ${running} flow animation(s) still run after every Stop flow control was used`,
+  flowLabel: (width: number, labels: readonly string[]) => `at ${width} px the flow controls read ${labels.join(', ') || 'nothing'} after the stop, Run flow expected`,
+  flowReloadRuns: (width: number, running: number) => `at ${width} px the stopped flow runs again after a reload (${running} running animation(s))`,
+  flowReduced: (width: number, running: number) => `at ${width} px ${running} flow animation(s) run under reduced motion with no stored choice`,
+  flowStoredRunning: (width: number) => `at ${width} px a stored running choice runs no flow under reduced motion`,
+  flowStoredStopped: (width: number, running: number) => `at ${width} px a stored stopped choice leaves ${running} flow animation(s) running`,
+  flowTabUnreached: (width: number) => `at ${width} px Tab never reaches a visible Stop flow control`,
+  flowTabLate: (width: number) => `at ${width} px Tab reaches a Stop flow control after the next section's first focusable element`,
+  copyBuildPassed: () => 'the project copy with an artifact whose provenance is measured built, and a broken artifact must fail the build',
+  copyBuildUnnamed: (tail: string) => `the project copy with a broken artifact failed without naming the artifact file and its events or provenance field: ${tail}`,
+  copyBuildLeft: (folder: string) => `the project copy folder ${folder} is still on disk after the build`,
 });
 
 export interface SecondBuildRun {
@@ -866,6 +962,7 @@ export interface SiteE2eOptions {
   readonly fileBudget?: (files: readonly { readonly path: string; readonly bytes: number }[]) => BudgetViolation[];
   readonly secondBuild?: (outDir: string) => SecondBuildRun;
   readonly sizeLimit?: () => SizeRun;
+  readonly brokenArtifactBuild?: () => CopyBuildRun;
 }
 
 export interface SizeRun {
@@ -919,6 +1016,23 @@ function secondBuildStep(options: SiteE2eOptions, dist: string): string | null {
   } finally {
     remove();
   }
+}
+
+export interface CopyBuildOptions {
+  readonly repoRoot: string;
+  // A file inside the web project, by its path from packages/web, and the text it is replaced with.
+  readonly swap: { readonly path: string; readonly text: string };
+  readonly id?: string;
+}
+
+export interface CopyBuildRun {
+  readonly status: number | null;
+  readonly output: string;
+  readonly folder: string;
+}
+
+export function copyBuild(options: CopyBuildOptions): CopyBuildRun {
+  return { status: 0, output: '', folder: join(options.repoRoot, 'dist', `site-copy-${options.id ?? 'stub'}`) };
 }
 
 const RENDERED_LABEL = 'rendered';

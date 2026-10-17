@@ -18,7 +18,13 @@ import {
   axeReasons,
   compareBuilds,
   consoleVerdict,
+  copyBuild,
   countAccepted,
+  flowTabVerdict,
+  flowVerdict,
+  identifierBreakVerdict,
+  lineVerdict,
+  overlapVerdict,
   deviceVerdict,
   fontsVerdict,
   isExpectedNotFound,
@@ -39,7 +45,13 @@ import {
   type AcceptedIncomplete,
   type AuditLine,
   type AxeReport,
+  type Box,
+  type CopyBuildRun,
+  type DrawingReading,
+  type FlowReading,
+  type FlowState,
   type FocusStop,
+  type LinesReading,
   type FontsReading,
   type KeyboardReport,
   type RequestsReading,
@@ -939,6 +951,162 @@ describe('cli main', () => {
   });
 });
 
+const prose = (lines: readonly string[], blocks = 1): LinesReading[] => [{ route: '/', blocks, lines }];
+
+describe('lineVerdict (AC-64, AC-E53, AC-E54)', () => {
+  it('passes a line of 80 grapheme clusters', () => {
+    expect(lineVerdict(prose(['a'.repeat(80)]))).toEqual({ ok: true });
+  });
+
+  it('fails a line of 81 grapheme clusters, naming the route and the count', () => {
+    expect(lineVerdict(prose(['a'.repeat(81)]))).toEqual({ ok: false, reason: E2E_MESSAGES.lineTooLong('/', 81, 'a'.repeat(81)) });
+  });
+
+  it('does not count trailing spaces', () => {
+    expect(lineVerdict(prose([`${'a'.repeat(80)}   `]))).toEqual({ ok: true });
+  });
+
+  it('counts an emoji and a letter with a combining mark as one cluster each', () => {
+    const emoji = String.fromCodePoint(0x1f44d);
+    const accented = `e${String.fromCharCode(0x301)}`;
+    const line = `${'a'.repeat(78)}${emoji}${accented}`;
+    expect(line.length).toBe(82);
+    expect(lineVerdict(prose([line]))).toEqual({ ok: true });
+    expect(lineVerdict(prose([`${line}a`])).ok).toBe(false);
+  });
+
+  it('fails, never passes, when it measured zero prose blocks', () => {
+    expect(lineVerdict(prose([], 0))).toEqual({ ok: false, reason: E2E_MESSAGES.noProseBlocks() });
+    expect(lineVerdict([])).toEqual({ ok: false, reason: E2E_MESSAGES.noProseBlocks() });
+  });
+});
+
+describe('identifierBreakVerdict (AC-E55)', () => {
+  const verdict = (lines: readonly string[]) => identifierBreakVerdict({ text: lines.join(''), lines });
+
+  it('passes SendingOptions.SendingEnabled broken right after the dot', () => {
+    expect(verdict(['SendingOptions.', 'SendingEnabled'])).toEqual({ ok: true });
+  });
+
+  it('fails SendingOptions.SendingEnabled broken inside a name', () => {
+    expect(verdict(['SendingOpt', 'ions.SendingEnabled'])).toEqual({ ok: false, reason: E2E_MESSAGES.identifierBreak('SendingOptions.SendingEnabled', ['SendingOpt', 'ions.SendingEnabled']) });
+  });
+
+  it('passes an identifier without a dot on one line', () => {
+    expect(verdict(['batch=2026-10-14-b'])).toEqual({ ok: true });
+  });
+
+  it('fails an identifier without a dot broken anywhere', () => {
+    expect(verdict(['batch=2026-', '10-14-b']).ok).toBe(false);
+  });
+});
+
+const box = (left: number, top: number, right: number, bottom: number): Box => ({ left, top, right, bottom });
+const drawing = (texts: readonly [string, Box][]): DrawingReading => ({ box: box(0, 0, 300, 200), texts: texts.map(([text, at]) => ({ text, box: at })) });
+
+describe('overlapVerdict (AC-65)', () => {
+  it('passes a tag clear of every drawing text', () => {
+    expect(overlapVerdict({ tag: box(0, 150, 200, 400), drawings: [drawing([['fothering-bulk', box(10, 100, 120, 115)]])] })).toEqual({ ok: true });
+  });
+
+  it('fails a tag overlapping one SVG text box', () => {
+    expect(overlapVerdict({ tag: box(0, 150, 200, 400), drawings: [drawing([['SendingEnabled: false', box(150, 140, 290, 155)]])] })).toEqual({ ok: false, reason: E2E_MESSAGES.tagOverlap('SendingEnabled: false') });
+  });
+
+  it('passes a tag whose edge touches a text box', () => {
+    expect(overlapVerdict({ tag: box(0, 150, 200, 400), drawings: [drawing([['label', box(150, 135, 290, 150)]])] })).toEqual({ ok: true });
+  });
+
+  it('fails an SVG text box one pixel past its SVG box', () => {
+    expect(overlapVerdict({ tag: null, drawings: [drawing([['SendingEnabled: false', box(150, 140, 301, 155)]])] })).toEqual({ ok: false, reason: E2E_MESSAGES.textOutside('SendingEnabled: false') });
+  });
+});
+
+const flowState = (running: number, labels: readonly string[] = ['Run flow']): FlowState => ({ running, labels });
+const healthyFlow: FlowReading = {
+  route: '/',
+  width: 320,
+  movingOnLoad: true,
+  controls: [{ label: 'Stop flow', width: 88, height: 44 }],
+  afterClick: flowState(0),
+  afterReload: flowState(0),
+  reduced: 0,
+  storedRunningReduced: 3,
+  storedStopped: 0,
+};
+const stillRoute: FlowReading = { ...healthyFlow, movingOnLoad: false, controls: [], afterClick: flowState(0, []), afterReload: flowState(0, []), storedRunningReduced: 0 };
+
+describe('flowVerdict (AC-43, AC-44, AC-E31, AC-E32, UI-SPEC E3)', () => {
+  it('passes a moving route whose visible Stop flow stops it for good, and a still route with no control', () => {
+    expect(flowVerdict(healthyFlow)).toEqual({ ok: true });
+    expect(flowVerdict(stillRoute)).toEqual({ ok: true });
+  });
+
+  it('fails a route moving on load with no visible flow control', () => {
+    expect(flowVerdict({ ...healthyFlow, controls: [] })).toEqual({ ok: false, reason: E2E_MESSAGES.flowNoControl(320) });
+  });
+
+  it('fails running animations left after clicking every visible control', () => {
+    expect(flowVerdict({ ...healthyFlow, afterClick: flowState(2) })).toEqual({ ok: false, reason: E2E_MESSAGES.flowStillRunning(320, 2) });
+  });
+
+  it('fails a control that does not read Run flow after the click', () => {
+    expect(flowVerdict({ ...healthyFlow, afterClick: flowState(0, ['Stop flow']) })).toEqual({ ok: false, reason: E2E_MESSAGES.flowLabel(320, ['Stop flow']) });
+  });
+
+  it('fails a reload that runs the flow again after a stop', () => {
+    expect(flowVerdict({ ...healthyFlow, afterReload: flowState(3) })).toEqual({ ok: false, reason: E2E_MESSAGES.flowReloadRuns(320, 3) });
+  });
+
+  it('fails a visible control on a route with no motion on load', () => {
+    expect(flowVerdict({ ...stillRoute, controls: healthyFlow.controls })).toEqual({ ok: false, reason: E2E_MESSAGES.flowControlWithoutMotion(320) });
+  });
+
+  it('fails a reduced-motion run with no stored choice and a running animation', () => {
+    expect(flowVerdict({ ...healthyFlow, reduced: 1 })).toEqual({ ok: false, reason: E2E_MESSAGES.flowReduced(320, 1) });
+  });
+
+  it('fails a stored running choice under reduced motion with no running animation', () => {
+    expect(flowVerdict({ ...healthyFlow, storedRunningReduced: 0 })).toEqual({ ok: false, reason: E2E_MESSAGES.flowStoredRunning(320) });
+  });
+
+  it('fails a stored stopped choice that leaves the flow running', () => {
+    expect(flowVerdict({ ...healthyFlow, storedStopped: 2 })).toEqual({ ok: false, reason: E2E_MESSAGES.flowStoredStopped(320, 2) });
+  });
+
+  it('fails a control smaller than 44 by 44 pixels', () => {
+    expect(flowVerdict({ ...healthyFlow, controls: [{ label: 'Stop flow', width: 88, height: 43 }] })).toEqual({ ok: false, reason: E2E_MESSAGES.flowSmallControl(320, 88, 43) });
+  });
+});
+
+describe('flowTabVerdict (AC-E33, held-out)', () => {
+  it('passes a Stop flow button reached before the first focusable of the next section', () => {
+    expect(flowTabVerdict({ width: 1440, flows: [{ flowStep: 6, nextStep: 7 }] })).toEqual({ ok: true });
+    expect(flowTabVerdict({ width: 1440, flows: [{ flowStep: 6, nextStep: null }] })).toEqual({ ok: true });
+  });
+
+  it('fails a Stop flow button reached after the first focusable of the next section', () => {
+    expect(flowTabVerdict({ width: 1440, flows: [{ flowStep: 9, nextStep: 7 }] })).toEqual({ ok: false, reason: E2E_MESSAGES.flowTabLate(1440) });
+  });
+
+  it('fails a Stop flow button Tab never reaches', () => {
+    expect(flowTabVerdict({ width: 320, flows: [{ flowStep: null, nextStep: 7 }] })).toEqual({ ok: false, reason: E2E_MESSAGES.flowTabUnreached(320) });
+  });
+});
+
+describe('copyBuild (AC-12, AC-E10 build half)', () => {
+  it('builds a project copy with an artifact whose provenance is measured and fails naming the field and the file, leaving no folder', () => {
+    const artifact = JSON.parse(readFileSync(join(REPO_ROOT, 'packages', 'web', 'src', 'fixtures', 'replay-incident.json'), 'utf8')) as { events: { provenance: string }[] };
+    const [first] = artifact.events;
+    if (first === undefined) throw new Error('the committed artifact holds no event');
+    first.provenance = 'measured';
+    const run = copyBuild({ repoRoot: REPO_ROOT, swap: { path: 'src/fixtures/replay-incident.json', text: JSON.stringify(artifact) }, id: 'harness-test' });
+    expect(run.status).not.toBe(0);
+    expect(run.output).toContain('packages/web/src/fixtures/replay-incident.json: events[0].provenance:');
+    expect(existsSync(run.folder)).toBe(false);
+  }, 240_000);
+});
+
 describe('the built checks through the CLI and the e2e step (D-150, D-151)', () => {
   const trees: ReturnType<typeof plantDist>[] = [];
   const plantSite = (files: Record<string, string>): ReturnType<typeof plantDist> => {
@@ -1021,21 +1189,32 @@ describe('the built checks through the CLI and the e2e step (D-150, D-151)', () 
     expect((await builtChecks(both.dist, '--expect', 'dash', '--allow', 'reply-promise')).code).toBe(0);
   });
 
-  const copyBuild = (dist: string, change?: (outDir: string) => void) => (outDir: string): SecondBuildRun => {
+  const copyDist = (dist: string, change?: (outDir: string) => void) => (outDir: string): SecondBuildRun => {
     cpSync(dist, outDir, { recursive: true });
     change?.(outDir);
     return { status: 0, output: '' };
   };
 
   type SiteLines = Partial<Record<'THEME' | 'DEVICE' | 'PIN' | 'STORAGE', unknown>>;
-  type RouteLines = Partial<Record<'SWITCH' | 'FONTS' | 'REQUESTS', (route: string) => unknown>>;
+  type RouteLines = Partial<Record<'SWITCH' | 'FONTS' | 'REQUESTS' | 'LINES' | 'NARROW', (route: string) => unknown>>;
+  type WidthLines = Partial<Record<'FLOW' | 'TABFLOW', (route: string, width: number) => unknown>>;
   // The planted tree's one page, then the unknown address that answers with the 404 page.
   const SITE_ROUTES = ['/', UNKNOWN_PATH];
+  const healthyLines = (route: string): LinesReading => ({ route, blocks: 1, lines: ['closed - one lane'] });
+  // The landing carries the one drawing; its tag hangs clear of the drawing text.
+  const healthyNarrow = (route: string): unknown => ({
+    route,
+    tag: route === '/' ? box(0, 200, 266, 500) : null,
+    drawings: route === '/' ? [drawing([['fothering-bulk', box(10, 100, 120, 115)]])] : [],
+    identifiers: route === '/' ? [{ text: 'SendingOptions.SendingEnabled', lines: ['SendingOptions.', 'SendingEnabled'] }] : [],
+  });
+  const healthyFlowLine = (route: string, width: number): FlowReading => (route === '/' ? { ...healthyFlow, route, width } : { ...stillRoute, route, width });
+  const healthyTab = (route: string, width: number): unknown => ({ route, width, flows: route === '/' ? [{ flowStep: 6, nextStep: null }] : [] });
 
   // What a healthy site driver prints: a Dark stored on a light OS, Device following the OS with no
   // reload, Dark stored on a dark OS kept when the OS turns light, then the switch, fonts and
   // requests of every route and the storage keys left after using the switch.
-  function siteLines(overrides: SiteLines = {}, consoleErrors: readonly string[] = [], routeOverrides: RouteLines = {}): string[] {
+  function siteLines(overrides: SiteLines = {}, consoleErrors: readonly string[] = [], routeOverrides: RouteLines = {}, widthOverrides: WidthLines = {}): string[] {
     const checks: SiteLines = {
       THEME: DARK_PINNED,
       DEVICE: { dark: reading(null, DARK_GROUND), light: reading(null, LIGHT_GROUND) },
@@ -1043,15 +1222,20 @@ describe('the built checks through the CLI and the e2e step (D-150, D-151)', () 
       STORAGE: { local: ['fothering-theme'], session: [] },
       ...overrides,
     };
-    const perRoute: Required<RouteLines> = { SWITCH: healthySwitch, FONTS: healthyFonts, REQUESTS: healthyRequests, ...routeOverrides } as Required<RouteLines>;
+    const perRoute = { SWITCH: healthySwitch, FONTS: healthyFonts, REQUESTS: healthyRequests, LINES: healthyLines, NARROW: healthyNarrow, ...routeOverrides } as Required<RouteLines>;
+    const perWidth = { FLOW: healthyFlowLine, TABFLOW: healthyTab, ...widthOverrides } as Required<WidthLines>;
+    const printed = (check: string, value: unknown): string[] => (value === undefined ? [] : [`${check} ${JSON.stringify(value)}`]);
     return [
-      ...Object.entries(checks).filter(([, value]) => value !== undefined).map(([check, value]) => `${check} ${JSON.stringify(value)}`),
-      ...Object.entries(perRoute).flatMap(([check, make]) => SITE_ROUTES.map((route) => make(route)).filter((value) => value !== undefined).map((value) => `${check} ${JSON.stringify(value)}`)),
+      ...Object.entries(checks).flatMap(([check, value]) => printed(check, value)),
+      ...Object.entries(perRoute).flatMap(([check, make]) => SITE_ROUTES.flatMap((route) => printed(check, make(route)))),
+      ...Object.entries(perWidth).flatMap(([check, make]) => SITE_ROUTES.flatMap((route) => [320, 1440].flatMap((width) => printed(check, make(route, width))))),
       ...consoleErrors.map((text) => `CONSOLE ${JSON.stringify({ type: 'error', text })}`),
     ];
   }
 
   const passingSize = (): SizeRun => ({ status: 0, output: '  Size limit: 2 kB\n  Size:       688 B brotlied' });
+  const REFUSED_ARTIFACT = "packages/web/src/fixtures/replay-incident.json: events[0].provenance: 'measured' is not one of doc-derived, simulator-captured, live, generated. Use one of those values.";
+  const refusedCopy = (): CopyBuildRun => ({ status: 1, output: REFUSED_ARTIFACT, folder: join(PLANT, 'gone') });
 
   // The rendered step needs a launcher, the Workers config and the driver template under the planted
   // root; the stand-in launcher only reads the job out of the written driver and prints the lines.
@@ -1066,7 +1250,7 @@ describe('the built checks through the CLI and the e2e step (D-150, D-151)', () 
   async function e2e(tree: ReturnType<typeof plantDist>, extra: Partial<SiteE2eOptions> = {}, site?: SiteScenario): Promise<{ code: number; lines: string[] }> {
     const lines: string[] = [];
     const globalModules = plantBrowser(tree, site);
-    const code = await runSiteE2e({ repoRoot: tree.root, globalModules, print: (line) => lines.push(line), clientSecretsScript: SECRETS_SCRIPT, secondBuild: copyBuild(tree.dist), sizeLimit: passingSize, ...extra });
+    const code = await runSiteE2e({ repoRoot: tree.root, globalModules, print: (line) => lines.push(line), clientSecretsScript: SECRETS_SCRIPT, secondBuild: copyDist(tree.dist), sizeLimit: passingSize, brokenArtifactBuild: refusedCopy, ...extra });
     allOutput.push(...lines);
     return { code, lines };
   }
@@ -1084,8 +1268,8 @@ describe('the built checks through the CLI and the e2e step (D-150, D-151)', () 
     const { code, lines } = await e2e(tree);
     expect(code).toBe(0);
     const steps = lines.filter((line) => line.startsWith('[e2e] step '));
-    expect(steps).toEqual(['client-secrets', 'file-budget', 'size', 'built-checks', 'second-build', 'rendered'].map((name) => E2E_MESSAGES.step(name)));
-    expect(lines.at(-1)).toBe(E2E_MESSAGES.pass(1, 6));
+    expect(steps).toEqual(['client-secrets', 'file-budget', 'size', 'built-checks', 'second-build', 'copy-build', 'rendered'].map((name) => E2E_MESSAGES.step(name)));
+    expect(lines.at(-1)).toBe(E2E_MESSAGES.pass(1, 7));
     expect(existsSync(join(tree.root, 'dist', 'site-second-build'))).toBe(false);
   });
 
@@ -1120,6 +1304,62 @@ describe('the built checks through the CLI and the e2e step (D-150, D-151)', () 
     }
     expect(rendered.find((text) => text.startsWith('[e2e] rendered STORAGE: ok, '))).toContain('fothering-theme');
     expect(rendered.at(-1)).toBe(E2E_MESSAGES.renderedOk('CONSOLE', 'no console error, no Content Security Policy violation'));
+  });
+
+  it('the copy-build step fails when the broken artifact builds, and when the build failure names neither the file nor the field', async () => {
+    const built = await e2e(renderedTree(), { brokenArtifactBuild: () => ({ status: 0, output: '', folder: join(PLANT, 'gone') }) });
+    expect(built.code).toBe(1);
+    expect(built.lines.at(-1)).toBe(E2E_MESSAGES.fail(E2E_MESSAGES.copyBuildPassed()));
+    const unnamed = await e2e(renderedTree(), { brokenArtifactBuild: () => ({ status: 1, output: 'vite exploded', folder: join(PLANT, 'gone') }) });
+    expect(unnamed.lines.at(-1)).toBe(E2E_MESSAGES.fail(E2E_MESSAGES.copyBuildUnnamed('vite exploded')));
+    expect(unnamed.lines).not.toContain(E2E_MESSAGES.step('rendered'));
+  });
+
+  it('the copy-build step fails when the project copy folder is left behind', async () => {
+    const left = join(PLANT, 'left-copy');
+    mkdirSync(left, { recursive: true });
+    const { code, lines } = await e2e(renderedTree(), { brokenArtifactBuild: () => ({ status: 1, output: REFUSED_ARTIFACT, folder: left }) });
+    expect(code).toBe(1);
+    expect(lines.at(-1)).toBe(E2E_MESSAGES.fail(E2E_MESSAGES.copyBuildLeft(left)));
+  });
+
+  it('the rendered step prints the flow lines naming movingOnLoad for every route at 320 and 1440, and the measured prose blocks', async () => {
+    const { code, lines } = await e2e(renderedTree());
+    expect(code).toBe(0);
+    const flow = lines.find((line) => line.startsWith('[e2e] rendered FLOW: ok, '));
+    for (const route of SITE_ROUTES) {
+      for (const width of [320, 1440]) expect(flow, `${route} ${width}`).toContain(`${route} at ${width} px movingOnLoad ${String(route === '/')}`);
+    }
+    expect(lines).toContain(E2E_MESSAGES.renderedOk('LINES', '2 prose block(s) measured at 1440 px, the longest line 17 characters'));
+    expect(lines.find((line) => line.startsWith('[e2e] rendered NARROW: ok, '))).toContain('1 drawing text(s)');
+    expect(lines.find((line) => line.startsWith('[e2e] rendered TABFLOW: ok, '))).toBeDefined();
+  });
+
+  it('the rendered step fails a moving route with no visible flow control, a long line, a covered label and a late Tab stop, naming the route', async () => {
+    const widthOverrides: WidthLines = {
+      FLOW: (route, width) => ({ ...healthyFlowLine(route, width), ...(route === '/' && width === 320 ? { controls: [] } : {}) }),
+      TABFLOW: (route, width) => (route === '/' ? { route, width, flows: [{ flowStep: 9, nextStep: 7 }] } : healthyTab(route, width)),
+    };
+    const routeOverrides: RouteLines = {
+      LINES: (route) => ({ ...healthyLines(route), lines: [route === '/' ? 'a'.repeat(81) : 'short'] }),
+      NARROW: (route) => (route === '/' ? { route, tag: box(0, 100, 266, 500), drawings: [drawing([['fothering-bulk', box(10, 100, 120, 115)]])], identifiers: [] } : healthyNarrow(route)),
+    };
+    const { code, lines } = await e2e(renderedTree(), {}, { lines: siteLines({}, [], routeOverrides, widthOverrides) });
+    expect(code).toBe(1);
+    expect(lines).toContain(E2E_MESSAGES.renderedFailed('FLOW', `/: ${E2E_MESSAGES.flowNoControl(320)}`));
+    expect(lines).toContain(E2E_MESSAGES.renderedFailed('LINES', E2E_MESSAGES.lineTooLong('/', 81, 'a'.repeat(81))));
+    expect(lines).toContain(E2E_MESSAGES.renderedFailed('NARROW', `/: ${E2E_MESSAGES.tagOverlap('fothering-bulk')}`));
+    expect(lines).toContain(E2E_MESSAGES.renderedFailed('TABFLOW', `/: ${E2E_MESSAGES.flowTabLate(320)}; /: ${E2E_MESSAGES.flowTabLate(1440)}`));
+  });
+
+  it('the rendered step fails a run that measured zero prose blocks, no drawing text, or no flow line for a width', async () => {
+    const routeOverrides: RouteLines = { LINES: (route) => ({ route, blocks: 0, lines: [] }), NARROW: (route) => ({ route, tag: null, drawings: [], identifiers: [] }) };
+    const widthOverrides: WidthLines = { FLOW: (route, width) => (width === 320 ? undefined : healthyFlowLine(route, width)) };
+    const { code, lines } = await e2e(renderedTree(), {}, { lines: siteLines({}, [], routeOverrides, widthOverrides) });
+    expect(code).toBe(1);
+    expect(lines).toContain(E2E_MESSAGES.renderedFailed('LINES', E2E_MESSAGES.noProseBlocks()));
+    expect(lines).toContain(E2E_MESSAGES.renderedFailed('NARROW', E2E_MESSAGES.noDrawingText()));
+    expect(lines.find((line) => line.startsWith('[e2e] rendered FLOW: failed: '))).toContain(E2E_MESSAGES.renderedMissingRoute('FLOW', '/ at 320 px'));
   });
 
   it('the rendered step fails a route whose switch, fonts or requests verdict fails, naming the route', async () => {
@@ -1206,21 +1446,21 @@ describe('the built checks through the CLI and the e2e step (D-150, D-151)', () 
     const tree = renderedTree();
     const lines: string[] = [];
     const absent = join(tree.root, 'no-global');
-    expect(await runSiteE2e({ repoRoot: tree.root, globalModules: absent, print: (line) => lines.push(line), clientSecretsScript: SECRETS_SCRIPT, secondBuild: copyBuild(tree.dist), sizeLimit: passingSize })).toBe(1);
+    expect(await runSiteE2e({ repoRoot: tree.root, globalModules: absent, print: (line) => lines.push(line), clientSecretsScript: SECRETS_SCRIPT, secondBuild: copyDist(tree.dist), sizeLimit: passingSize, brokenArtifactBuild: refusedCopy })).toBe(1);
     expect(lines.at(-1)).toBe(E2E_MESSAGES.fail(A11Y_MESSAGES.devBrowserMissing(join(absent, 'dev-browser'))));
     const globalModules = plantBrowser(tree);
     rmSync(join(tree.root, 'scripts', 'site.devbrowser.js'));
     lines.length = 0;
-    expect(await runSiteE2e({ repoRoot: tree.root, globalModules, print: (line) => lines.push(line), clientSecretsScript: SECRETS_SCRIPT, secondBuild: copyBuild(tree.dist), sizeLimit: passingSize })).toBe(1);
+    expect(await runSiteE2e({ repoRoot: tree.root, globalModules, print: (line) => lines.push(line), clientSecretsScript: SECRETS_SCRIPT, secondBuild: copyDist(tree.dist), sizeLimit: passingSize, brokenArtifactBuild: refusedCopy })).toBe(1);
     expect(lines.at(-1)).toBe(E2E_MESSAGES.fail(A11Y_MESSAGES.templateMissing(join(tree.root, 'scripts', 'site.devbrowser.js'))));
     write(join(tree.root, 'scripts', 'site.devbrowser.js'), 'console.log("done");\n');
     lines.length = 0;
-    expect(await runSiteE2e({ repoRoot: tree.root, globalModules, print: (line) => lines.push(line), clientSecretsScript: SECRETS_SCRIPT, secondBuild: copyBuild(tree.dist), sizeLimit: passingSize })).toBe(1);
+    expect(await runSiteE2e({ repoRoot: tree.root, globalModules, print: (line) => lines.push(line), clientSecretsScript: SECRETS_SCRIPT, secondBuild: copyDist(tree.dist), sizeLimit: passingSize, brokenArtifactBuild: refusedCopy })).toBe(1);
     expect(lines.at(-1)).toBe(E2E_MESSAGES.fail(A11Y_MESSAGES.templateTokens(join(tree.root, 'scripts', 'site.devbrowser.js'), 0)));
     plantBrowser(tree);
     write(join(tree.root, 'packages', 'web', 'wrangler.jsonc'), '{ "assets": { "html_handling": "none", "not_found_handling": "404-page" } }');
     lines.length = 0;
-    expect(await runSiteE2e({ repoRoot: tree.root, globalModules, print: (line) => lines.push(line), clientSecretsScript: SECRETS_SCRIPT, secondBuild: copyBuild(tree.dist), sizeLimit: passingSize })).toBe(1);
+    expect(await runSiteE2e({ repoRoot: tree.root, globalModules, print: (line) => lines.push(line), clientSecretsScript: SECRETS_SCRIPT, secondBuild: copyDist(tree.dist), sizeLimit: passingSize, brokenArtifactBuild: refusedCopy })).toBe(1);
     expect(lines.at(-1)).toMatch(/^\[e2e\] FAIL: the preview server did not start: .*assets\.html_handling is "none"/);
     allOutput.push(...lines);
   });
@@ -1236,7 +1476,7 @@ describe('the built checks through the CLI and the e2e step (D-150, D-151)', () 
 
   it('runSiteE2e fails when the second build differs from the first in one byte, naming the file', async () => {
     const tree = plantSite(completeSite({ 'index.html': '<p>clean</p>', 'replay/index.html': '<p>replay</p>' }));
-    const differing = copyBuild(tree.dist, (outDir) => writeFileSync(join(outDir, 'replay', 'index.html'), `${page('<p>replay</p>')} `));
+    const differing = copyDist(tree.dist, (outDir) => writeFileSync(join(outDir, 'replay', 'index.html'), `${page('<p>replay</p>')} `));
     const { code, lines } = await e2e(tree, { secondBuild: differing });
     expect(code).toBe(1);
     expect(lines.at(-1)).toBe(E2E_MESSAGES.fail(E2E_MESSAGES.buildDiffers('replay/index.html')));
@@ -1313,6 +1553,10 @@ describe('the built checks through the CLI and the e2e step (D-150, D-151)', () 
       invalidChecked: ['blue', null], domOrder: [['light']], boxOrder: [320, []], noBoxOrder: [], arrowStill: [null],
       fontMissing: ['Red Hat Mono'], fontNotLoaded: ['Red Hat Mono'], fontCheckFalse: ['Red Hat Mono'], fontControl: ['x'],
       noRequests: [], foreignRequest: ['http://127.0.0.1:1', ['https://x.test']], storageKeys: [['x']], sizeLimit: [1],
+      noProseBlocks: [], lineTooLong: ['/', 81, 'x'], identifierBreak: ['a.b', ['a', '.b']], tagOverlap: ['x'], textOutside: ['x'], noDrawingText: [],
+      flowNoControl: [320], flowControlWithoutMotion: [320], flowSmallControl: [320, 40, 40], flowStillRunning: [320, 1], flowLabel: [320, ['Stop flow']],
+      flowReloadRuns: [320, 1], flowReduced: [320, 1], flowStoredRunning: [320], flowStoredStopped: [320, 1], flowTabUnreached: [320], flowTabLate: [320],
+      copyBuildPassed: [], copyBuildUnnamed: ['x'], copyBuildLeft: ['d'],
     };
     const rendered = Object.entries(samples).map(([key, args]) => (E2E_MESSAGES[key as keyof typeof E2E_MESSAGES] as (...a: unknown[]) => string)(...args));
     expect(rendered).toHaveLength(Object.keys(E2E_MESSAGES).length);
