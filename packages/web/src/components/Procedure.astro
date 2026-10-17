@@ -1,0 +1,34 @@
+---
+// A procedure is one process line with a valve and a numeral per step; the step that closes is drawn
+// with the filled valve (DESIGN.md Procedure).
+interface Step {
+  title: string;
+  text: string;
+  // Set when the step's text carries an artifact value.
+  provenance?: string;
+}
+
+interface Props {
+  steps: readonly Step[];
+  closingStep: number;
+}
+
+const { steps, closingStep } = Astro.props;
+---
+<ol class={`procedure steps-${steps.length}`}>
+  {steps.map((step, index) => (
+    <li>
+      <div class="valve">
+        <span class="n">{index + 1}</span>
+        <svg viewBox="0 0 64 36" aria-hidden="true">
+          <path class={index + 1 === closingStep ? 'dwg-valve-shut' : 'dwg-valve-open'} d="M8 8 l24 10 -24 10 z M56 8 l-24 10 24 10 z" />
+        </svg>
+        <span class="pipe" aria-hidden="true"></span>
+      </div>
+      <div>
+        <h3>{step.title}</h3>
+        <p data-provenance={step.provenance}>{step.text}</p>
+      </div>
+    </li>
+  ))}
+</ol>

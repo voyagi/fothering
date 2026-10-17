@@ -1,0 +1,116 @@
+---
+// One SES account as a flow drawing: one line per artifact lane, the closed lane drawn last so its
+// valve stem drops clear to the hung tag (UI-SPEC Q10). The wide drawing shows above 620px and the
+// narrow one at 620px and below; both are generated from the same lanes.
+interface Props {
+  id: string;
+  lanes: readonly string[];
+  closedLane: string;
+  region: string;
+  provenance: string;
+  title: string;
+  description: string;
+  // Field and value as SES reads them back, and the clock time of that read.
+  readBack: { field: string; value: string; time: string };
+}
+
+const { id, lanes, closedLane, region, provenance, title, description, readBack } = Astro.props;
+const ordered = [...lanes.filter((lane) => lane !== closedLane), closedLane];
+const closedIndex = ordered.length - 1;
+const readBackLabel = `${readBack.field}: ${readBack.value}`;
+
+const wide = (() => {
+  const ys = ordered.map((_, index) => 50 + 80 * index);
+  const closedY = ys[closedIndex] ?? 50;
+  const boxHeight = closedY - 50 + 56;
+  return { ys, closedY, boxHeight, boxMid: 22 + boxHeight / 2, height: closedY + 60 };
+})();
+const narrow = (() => {
+  const ys = ordered.map((_, index) => 40 + 64 * index);
+  const closedY = ys[closedIndex] ?? 40;
+  const boxHeight = closedY - 40 + 40;
+  return { ys, closedY, boxHeight, boxMid: 16 + boxHeight / 2, height: closedY + 68 };
+})();
+const valve = (left: number, y: number, half: number, depth: number): string =>
+  `M${left} ${y - half} l${depth} ${half} -${depth} ${half} z M${left + 2 * depth} ${y - half} l-${depth} ${half} ${depth} ${half} z`;
+const arrow = (x: number, y: number, size: number): string => `M${x} ${y - size / 2} l${size} ${size / 2} -${size} ${size / 2} z`;
+---
+<svg class="dwg dwg-wide" viewBox={`0 0 760 ${wide.height}`} role="img" aria-labelledby={`${id}-wide-title ${id}-wide-desc`} data-drawing="wide" data-provenance={provenance}>
+  <title id={`${id}-wide-title`}>{title}</title>
+  <desc id={`${id}-wide-desc`}>{description}</desc>
+  <rect class="dwg-source" x="8" y="22" width="112" height={wide.boxHeight} />
+  <line class="dwg-bus" x1="120" y1="50" x2="120" y2={wide.closedY} />
+  <text class="dwg-source-name" x="64" y={wide.boxMid - 4} text-anchor="middle">SES</text>
+  <text class="dwg-caption-text" x="64" y={wide.boxMid + 16} text-anchor="middle">{region}</text>
+  {ordered.map((lane, index) => {
+    const y = wide.ys[index] ?? 0;
+    const closed = index === closedIndex;
+    return (
+      <g data-lane={lane} data-lane-state={closed ? 'closed' : 'open'}>
+        <text class="dwg-lane" x="130" y={y - 12}>{lane}</text>
+        {closed ? (
+          <Fragment>
+            <line class="dwg-pipe" x1="120" y1={y} x2="252" y2={y} />
+            <line class="dwg-pipe dwg-dotted" x1="300" y1={y} x2="700" y2={y} />
+            <line class="dwg-flow flow-dash" x1="124" y1={y} x2="252" y2={y} />
+            <path class="dwg-valve-shut" d={valve(252, y, 12, 24)} />
+            <line class="dwg-stem" x1="276" y1={y + 12} x2="276" y2={wide.height} />
+            <path class="dwg-arrow" d={arrow(190, y, 14)} />
+            <line class="dwg-leader" x1="292" y1={y - 9} x2="341" y2={y - 32} />
+            <circle class="dwg-bubble" cx="356" cy={y - 40} r="17" />
+            <text class="dwg-bubble-text" x="356" y={y - 35.5} text-anchor="middle">RB</text>
+            <text class="dwg-caption-text" x="381" y={y - 36}>{`read-back ${readBack.time}`}</text>
+            <rect class="dwg-outlet-shut" x="706" y={y - 14} width="40" height="28" rx="2" />
+            <text class="dwg-state-text" x="696" y={y + 34} text-anchor="end">{readBackLabel}</text>
+          </Fragment>
+        ) : (
+          <Fragment>
+            <line class="dwg-pipe" x1="120" y1={y} x2="700" y2={y} />
+            <line class="dwg-flow flow-dash" x1="124" y1={y} x2="700" y2={y} />
+            <path class="dwg-valve-open" d={valve(400, y, 10, 24)} />
+            <path class="dwg-arrow" d={arrow(580, y, 14)} />
+            <rect class="dwg-outlet" x="706" y={y - 14} width="40" height="28" rx="2" />
+            <path class="dwg-outlet" d={`M706 ${y - 12} l20 14 20 -14`} />
+            <text class="dwg-caption-text" x="696" y={y + 34} text-anchor="end">sending</text>
+          </Fragment>
+        )}
+      </g>
+    );
+  })}
+</svg>
+<svg class="dwg dwg-narrow" viewBox={`0 0 360 ${narrow.height}`} role="img" aria-labelledby={`${id}-narrow-title ${id}-narrow-desc`} data-drawing="narrow" data-provenance={provenance}>
+  <title id={`${id}-narrow-title`}>{title}</title>
+  <desc id={`${id}-narrow-desc`}>{description}</desc>
+  <rect class="dwg-source" x="4" y="16" width="50" height={narrow.boxHeight} />
+  <text class="dwg-source-name dwg-source-name-narrow" x="29" y={narrow.boxMid + 5} text-anchor="middle">SES</text>
+  <line class="dwg-bus" x1="54" y1="40" x2="54" y2={narrow.closedY} />
+  {ordered.map((lane, index) => {
+    const y = narrow.ys[index] ?? 0;
+    const closed = index === closedIndex;
+    return (
+      <g data-lane={lane} data-lane-state={closed ? 'closed' : 'open'}>
+        <text class="dwg-lane" x="66" y={y - 12}>{lane}</text>
+        {closed ? (
+          <Fragment>
+            <line class="dwg-pipe" x1="54" y1={y} x2="174" y2={y} />
+            <line class="dwg-pipe dwg-dotted" x1="214" y1={y} x2="310" y2={y} />
+            <line class="dwg-flow flow-dash" x1="58" y1={y} x2="174" y2={y} />
+            <path class="dwg-valve-shut" d={valve(174, y, 10, 20)} />
+            <line class="dwg-stem" x1="194" y1={y + 10} x2="194" y2={narrow.height} />
+            <path class="dwg-arrow" d={arrow(112, y, 12)} />
+            <rect class="dwg-outlet-shut" x="316" y={y - 10} width="36" height="22" rx="2" />
+            <text class="dwg-state-text" x="356" y={y - 16} text-anchor="end">{readBackLabel}</text>
+          </Fragment>
+        ) : (
+          <Fragment>
+            <line class="dwg-pipe" x1="54" y1={y} x2="310" y2={y} />
+            <line class="dwg-flow flow-dash" x1="58" y1={y} x2="310" y2={y} />
+            <path class="dwg-arrow" d={arrow(254, y, 12)} />
+            <rect class="dwg-outlet" x="316" y={y - 10} width="36" height="22" rx="2" />
+            <path class="dwg-outlet" d={`M316 ${y - 8} l18 11 18 -11`} />
+          </Fragment>
+        )}
+      </g>
+    );
+  })}
+</svg>

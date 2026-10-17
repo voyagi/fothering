@@ -1,0 +1,47 @@
+---
+// A drawing's table. The first cell of every row is its row header; a cell may carry a state mark,
+// whose name is always printed beside it (UI-SPEC section 7, StateMark).
+type Mark = 'open' | 'later';
+
+interface Cell {
+  text: string;
+  mark?: Mark;
+  attrs?: Record<string, string>;
+}
+
+interface Row {
+  header: string;
+  cells: readonly Cell[];
+  attrs?: Record<string, string>;
+}
+
+interface Props {
+  columns: readonly string[];
+  rows: readonly Row[];
+  // Column indexes hidden at 620px and below.
+  narrowHidden?: readonly number[];
+  caption?: string;
+  variant?: 'schedule' | 'ruled';
+}
+
+const { columns, rows, narrowHidden = [], caption, variant = 'schedule' } = Astro.props;
+const hide = (column: number): string | undefined => (narrowHidden.includes(column) ? 'hide-narrow' : undefined);
+---
+<table class={variant}>
+  {caption !== undefined && <caption>{caption}</caption>}
+  <thead>
+    <tr>{columns.map((column, index) => <th scope="col" class={hide(index)}>{column}</th>)}</tr>
+  </thead>
+  <tbody>
+    {rows.map((row) => (
+      <tr {...row.attrs}>
+        <th scope="row">{row.header}</th>
+        {row.cells.map((cell, index) => (
+          <td class={hide(index + 1)} {...cell.attrs}>
+            {cell.mark === undefined ? <span class="cell-text">{cell.text}</span> : <span class={`state ${cell.mark}`}>{cell.text}</span>}
+          </td>
+        ))}
+      </tr>
+    ))}
+  </tbody>
+</table>

@@ -1,15 +1,134 @@
 ---
-import { parseLaneMap } from '@fothering/core/lanes';
+import FlowSwitch from '../components/FlowSwitch.astro';
+import LaneDrawing from '../components/LaneDrawing.astro';
+import LockoutTag from '../components/LockoutTag.astro';
+import Procedure from '../components/Procedure.astro';
+import Schedule from '../components/Schedule.astro';
 import Sheet from '../layouts/Sheet.astro';
-import { readRepoText, repoRoot } from '../site/repo-facts.ts';
+import { LANDING_SECTIONS, LIMITS_FIXED_ROWS, LIMITS_REPLAY_ROW, NO_MEASURED_NUMBER_SENTENCE, type LandingSectionId } from '../site/content.ts';
+import { PROVENANCE_LABELS } from '../site/labels.ts';
+import { buildReplayView, loadReplayArtifact } from '../site/replay-view.ts';
 import { routeFor } from '../site/route-list.ts';
 
-const laneMap = parseLaneMap(JSON.parse(readRepoText('lanes.json', repoRoot(process.cwd()))));
-const configurationSets = laneMap.lanes.map((lane) => lane.configurationSet);
+const artifact = loadReplayArtifact(process.cwd());
+const view = buildReplayView(artifact);
+const label = PROVENANCE_LABELS[artifact.provenance];
+const heading = (id: LandingSectionId): string => LANDING_SECTIONS.find((section) => section.id === id)?.heading ?? '';
+const { field, value, atUtc } = artifact.pause.readBack;
+const readBack = { field: field.slice(field.lastIndexOf('.') + 1), value, time: atUtc.slice(11, 16) };
+
+const steps = [
+  { title: 'Watch every event', text: 'Sends, deliveries, bounces, complaints, rejects and delays arrive through EventBridge, grouped by configuration set and by your message tags.' },
+  { title: 'Name the cause, or say unknown', text: 'Detection code traces a spike to one import batch, template, receiving provider or missing authentication record, with the events that show it.' },
+  {
+    title: 'Close one lane, then read it back',
+    text: `Sending is switched off for that configuration set only, then confirmed through a second call, like the filled valve on ${artifact.closedLane} in row 1.`,
+    provenance: artifact.provenance,
+  },
+  { title: 'Tell you by email', text: 'You get what it saw, what it closed, what stays open, and the command that reopens the lane. Nothing reopens until you run it.' },
+];
+
+const refusals = [
+  'Close a lane on a guess. When the evidence does not settle the cause, nothing closes, and the email says what code found.',
+  'Pause your whole account. The smallest closure that stops the damage is one configuration set.',
+  'Reopen on its own, or report a closure the read-back did not confirm. A lane reopens only when you run the reopen command.',
+  'Keep recipient addresses. Event records hold the receiving domain and a keyed hash, in eu-central-1, and expire 30 days after the send; deletion follows within a few days.',
+];
+
+const limitsRows = [
+  {
+    header: LIMITS_REPLAY_ROW.part,
+    attrs: { 'data-limits-row': LIMITS_REPLAY_ROW.id, 'data-provenance': artifact.provenance },
+    cells: [{ text: label.limitsState, mark: label.limitsMark, attrs: { 'data-limits-state': '' } }, { text: label.limitsNote }],
+  },
+  ...LIMITS_FIXED_ROWS.map((row) => ({
+    header: row.part,
+    attrs: { 'data-limits-row': row.id },
+    cells: [{ text: row.state, mark: row.mark, attrs: { 'data-limits-state': '' } }, { text: row.note }],
+  })),
+];
 ---
 <Sheet route={routeFor('/')}>
-  <h1>Fothering</h1>
-  <ul>
-    {configurationSets.map((name) => <li>{name}</li>)}
-  </ul>
+  <div class="row">
+    <div class="rail" aria-hidden="true">1</div>
+    <section class="moment" aria-labelledby="moment-title">
+      <div class="claim">
+        <h1 id="moment-title" class="landing-title">{heading('moment')}</h1>
+        <p class="lede" data-lede data-model-role>Fothering reads the events your Amazon SES configuration sets publish. When one stream starts damaging the reputation they share, its code pauses that one configuration set, reads the setting back, and tells you by email. An agent on Amazon Bedrock AgentCore explains the evidence, and can only confirm the lane code approved or say unknown.</p>
+        <div class="actions">
+          <a class="button" href="/replay/">Replay the incident
+            <svg viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M3 8h9M8.5 4l4 4-4 4" stroke="currentColor" stroke-width="1.8" /></svg>
+          </a>
+          <a class="textlink" href="/deploy/">Deploy into your AWS account</a>
+        </div>
+      </div>
+      <div class="drawing">
+        <LaneDrawing
+          id="landing-drawing"
+          lanes={artifact.lanes}
+          closedLane={artifact.closedLane}
+          region={artifact.region}
+          provenance={artifact.provenance}
+          title={view.landing.drawingTitle}
+          description={view.landing.drawingDescription}
+          readBack={readBack}
+        />
+        <LockoutTag tag={view.tag} provenance={artifact.provenance} row={1} evidence />
+        <div class="caption-row">
+          <p class="caption" data-provenance={artifact.provenance}>{view.caption}{view.captionLinkHref !== undefined && <Fragment> <a href={view.captionLinkHref}>How SES counts reputation</a></Fragment>}</p>
+          <FlowSwitch />
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <div class="row">
+    <div class="rail" aria-hidden="true">2</div>
+    <section class="sheet" aria-labelledby="procedure-title">
+      <div class="sheet-head">
+        <h2 id="procedure-title">{heading('procedure')}</h2>
+        <p>The order is fixed, the way an isolation procedure is. A step that cannot finish stops the sequence and closes nothing.</p>
+      </div>
+      <Procedure steps={steps} closingStep={3} />
+    </section>
+  </div>
+
+  <div class="row">
+    <div class="rail" aria-hidden="true">3</div>
+    <section class="sheet refusals" aria-labelledby="refusals-title">
+      <h2 id="refusals-title">{heading('refusals')}</h2>
+      <ul class="refuse">
+        {refusals.map((refusal) => (
+          <li>
+            <svg viewBox="0 0 22 22" fill="none" aria-hidden="true"><circle cx="11" cy="11" r="9.5" stroke="currentColor" stroke-width="1.8" /><path d="M4.5 17.5l13-13" stroke="currentColor" stroke-width="1.8" /></svg>
+            <span>{refusal}</span>
+          </li>
+        ))}
+      </ul>
+    </section>
+  </div>
+
+  <div class="row">
+    <div class="rail" aria-hidden="true">4</div>
+    <section class="sheet" aria-labelledby="limits-title" data-limits>
+      <div class="sheet-head">
+        <h2 id="limits-title">{heading('limits')}</h2>
+        <p>This is a hackathon build. {NO_MEASURED_NUMBER_SENTENCE}</p>
+      </div>
+      <Schedule variant="ruled" columns={['Part', 'State', 'Note']} narrowHidden={[2]} rows={limitsRows} />
+    </section>
+  </div>
+
+  <div class="row">
+    <div class="rail" aria-hidden="true">5</div>
+    <section class="close" aria-labelledby="close-title">
+      <div>
+        <h2 id="close-title">Watch it close one lane</h2>
+        <p>The replay plays in this browser. Nothing to install, no AWS account needed.</p>
+      </div>
+      <a class="button" href="/replay/">Replay the incident
+        <svg viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M3 8h9M8.5 4l4 4-4 4" stroke="currentColor" stroke-width="1.8" /></svg>
+      </a>
+    </section>
+  </div>
 </Sheet>

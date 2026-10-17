@@ -1,0 +1,13 @@
+---
+// An identifier may end a line only right after one of its dots (UI-SPEC section 6), so the break
+// opportunities are emitted here, a space inside one (an SMTP code) is made non-breaking, and the
+// CSS forbids every other break.
+interface Props {
+  value: string;
+}
+
+const NO_BREAK_SPACE = String.fromCharCode(0xa0);
+const { value } = Astro.props;
+const parts = value.split('.').map((part) => part.replaceAll(' ', NO_BREAK_SPACE));
+---
+<code class="identifier" data-identifier>{parts.map((part, index) => (index < parts.length - 1 ? <Fragment>{part}.<wbr /></Fragment> : part))}</code>
