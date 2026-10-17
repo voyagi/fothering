@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
+import { readActionLiveConfig } from './action/root.js';
 import { readForgetLiveConfig } from './forget/root.js';
 import { readIngestLiveConfig } from './ingest/root.js';
 
@@ -47,6 +48,20 @@ describe('readIngestLiveConfig', () => {
   it('leaves out each key whose variable is unset', () => {
     unsetAll();
     const config = readIngestLiveConfig();
+    expect(config).toEqual({});
+    expect(Object.keys(config)).toHaveLength(0);
+  });
+});
+
+describe('readActionLiveConfig', () => {
+  it('reads the table name and nothing else', () => {
+    setAll();
+    expect(readActionLiveConfig()).toEqual({ tableName: TABLE_NAME });
+  });
+
+  it('leaves out the table name when its variable is unset', () => {
+    unsetAll();
+    const config = readActionLiveConfig();
     expect(config).toEqual({});
     expect(Object.keys(config)).toHaveLength(0);
   });

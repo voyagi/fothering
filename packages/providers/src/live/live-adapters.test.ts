@@ -55,6 +55,7 @@ import { createDynamoDecisionStore, createDynamoEventStore } from './event-store
 import { AddressKeySecretError, createSecretsManagerAddressKey } from './address-key.js';
 import { createSqsDeadLetter } from './dead-letter.js';
 import { createSesReads } from './ses-reads.js';
+import { createSesWrites } from './ses-writes.js';
 import { createLiveAgentCore, createLiveBedrockModel } from './agent-adapters.js';
 import { PortBackedModel } from '../port-backed-model.js';
 import { NetworkGuardError } from '../test/guards.js';
@@ -1250,6 +1251,80 @@ describe('createSesReads', () => {
 
     await expect(reads.getEmailIdentity('gone.example.com')).resolves.toBeUndefined();
     await expect(reads.getEmailIdentity('busy.example.com')).rejects.toBeInstanceOf(TooManyRequestsException);
+  });
+});
+
+describe('createSesWrites', () => {
+  function sesClient(): SESv2Client {
+    return new SESv2Client({ region: REGION, credentials: FAKE_CREDENTIALS });
+  }
+
+  const REQUEST = { from: 'Fothering <ops@example.org>', to: ['operator@example.org'], subject: 'A subject', text: 'A body.', configurationSetName: 'fothering-alerts' };
+
+  // SendingEnabled is optional on the wire, so both directions always send it explicitly (R11).
+  it('pauses with PutConfigurationSetSendingOptions and SendingEnabled false, and reopens with true', async () => {
+    const client = sesClient();
+    const calls = stubSend(client, () => ({}));
+    const writes = createSesWrites({ client: () => client });
+
+    await expect(writes.pauseConfigurationSet('fothering-bulk')).resolves.toBeUndefined();
+    await expect(writes.reopenConfigurationSet('fothering-bulk')).resolves.toBeUndefined();
+
+    expect(calls).toEqual([
+      { name: 'PutConfigurationSetSendingOptionsCommand', input: { ConfigurationSetName: 'fothering-bulk', SendingEnabled: false } },
+      { name: 'PutConfigurationSetSendingOptionsCommand', input: { ConfigurationSetName: 'fothering-bulk', SendingEnabled: true } },
+    ]);
+  });
+
+  it.each([
+    ['SendingEnabled false', '{"sendingEnabled":false}', { SendingOptions: { SendingEnabled: false } }],
+    ['SendingEnabled true', '{"sendingEnabled":true}', { SendingOptions: { SendingEnabled: true } }],
+    ['no SendingOptions', '{}', { ConfigurationSetName: 'fothering-bulk' }],
+    ['SendingOptions holding no SendingEnabled', '{}', { SendingOptions: {} }],
+  ])('reads a configuration set answering %s back as %s (AC-E1)', async (_case, expected, response) => {
+    const client = sesClient();
+    const calls = stubSend(client, () => response);
+    const writes = createSesWrites({ client: () => client });
+
+    expect(JSON.stringify(await writes.getConfigurationSetSending('fothering-bulk'))).toBe(expected);
+    expect(calls).toEqual([{ name: 'GetConfigurationSetCommand', input: { ConfigurationSetName: 'fothering-bulk' } }]);
+  });
+
+  it('passes a read-back error on for the caller to map to pause-unknown', async () => {
+    const client = sesClient();
+    stubSend(client, () => {
+      throw new TooManyRequestsException({ message: 'Too many requests.', $metadata: {} });
+    });
+    await expect(createSesWrites({ client: () => client }).getConfigurationSetSending('fothering-bulk')).rejects.toBeInstanceOf(TooManyRequestsException);
+  });
+
+  it('sends simple text content through the given set with no reply-to, header, attachment, tenant or list option', async () => {
+    const client = sesClient();
+    const calls = stubSend(client, () => ({ MessageId: 'ses-message-1' }));
+
+    await expect(createSesWrites({ client: () => client }).sendEmail(REQUEST)).resolves.toEqual({ messageId: 'ses-message-1' });
+
+    expect(calls).toEqual([
+      {
+        name: 'SendEmailCommand',
+        input: {
+          FromEmailAddress: REQUEST.from,
+          Destination: { ToAddresses: REQUEST.to },
+          Content: { Simple: { Subject: { Data: REQUEST.subject }, Body: { Text: { Data: REQUEST.text, Charset: 'UTF-8' } } } },
+          ConfigurationSetName: 'fothering-alerts',
+        },
+      },
+    ]);
+  });
+
+  it.each([
+    ['no MessageId', {}],
+    ['an empty MessageId', { MessageId: '' }],
+  ])('throws MissingMessageIdError when SES answers %s', async (_case, response) => {
+    const client = sesClient();
+    stubSend(client, () => response);
+    const sent = createSesWrites({ client: () => client }).sendEmail(REQUEST);
+    await expect(sent).rejects.toMatchObject({ name: 'MissingMessageIdError' });
   });
 });
 

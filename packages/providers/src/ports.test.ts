@@ -365,11 +365,12 @@ describe('the real port table', () => {
   // is exactly live, and only then is it the not-built phase; an ungated one is live or not built.
   it.each<[string, string, ResolvedKind, ResolvedKind]>([
     ['ses', 'getEmailIdentity', 'live', 'live'],
+    ['ses', 'getConfigurationSetSending', 'live', 'live'],
     ['dns', 'resolveMx', 'live', 'live'],
     ['dns', 'resolveTxt', 'live', 'live'],
-    ['ses', 'pauseConfigurationSet', 'dry-run', 'not-built-until-phase-3'],
-    ['ses', 'reopenConfigurationSet', 'dry-run', 'not-built-until-phase-3'],
-    ['ses', 'sendEmail', 'dry-run', 'not-built-until-phase-4'],
+    ['ses', 'pauseConfigurationSet', 'dry-run', 'live'],
+    ['ses', 'reopenConfigurationSet', 'dry-run', 'live'],
+    ['ses', 'sendEmail', 'dry-run', 'live'],
     ['bedrockModel', 'stream', 'dry-run', 'live'],
     ['agentCore', 'invokeAgentRuntime', 'dry-run', 'live'],
     ['replyBucket', 'getReplyObject', 'not-built-until-phase-4', 'not-built-until-phase-4'],
@@ -391,10 +392,20 @@ describe('the real port table', () => {
     }
   });
 
+  // AC-24: every SES operation has a live side now, so no SES row carries a not-built map at all.
+  it('gives the ses row no not-built operations, so every SES operation has a live side', () => {
+    expect(Object.hasOwn(PORT_TABLE.ses, 'notBuiltOperations')).toBe(false);
+  });
+
+  // The read-back changes nothing, so like the four reads it is neither mutating nor gated (SAFE-01).
+  it('lists the configuration-set read-back on the ses row as neither mutating nor gated', () => {
+    const row: PortRow = PORT_TABLE.ses;
+    expect(row.operations).toContain('getConfigurationSetSending');
+    expect(row.mutatingOperations).not.toContain('getConfigurationSetSending');
+    expect(row.gatedOperations).not.toContain('getConfigurationSetSending');
+  });
+
   it.each<[keyof ResolvedPorts, string, string, unknown[]]>([
-    ['ses', 'pauseConfigurationSet', 'phase 3', ['fothering-bulk']],
-    ['ses', 'reopenConfigurationSet', 'phase 3', ['fothering-bulk']],
-    ['ses', 'sendEmail', 'phase 4', [{ from: 'ops@example.org', to: [], subject: 's', text: 't' }]],
     ['replyBucket', 'getReplyObject', 'phase 4', ['key']],
   ])('rejects %s.%s with a NotBuiltError naming %s once the switch is live', async (portName, operation, phase, args) => {
     const { ports } = resolvePortTable({ runtimeContext: 'deployed', switchValue: 'live', dryRunSink: NO_LINES });

@@ -1,13 +1,15 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ACTION_FUNCTION_TIMEOUT_MS, HOLD_MS } from '@fothering/core/close-values';
 import { closureClaimItem } from '@fothering/core/closure';
 import { createFixtureTableState } from '@fothering/providers/fixtures/ingest-ports';
 import type { DecisionStoreItem, DecisionStorePort, FixtureSesState, FixtureTableState, Recording } from '@fothering/providers/port-types';
 import { MAX_IDENTITY_READS, SES_READ_SPACING_MS } from '@fothering/providers/ses-facts';
+import { assertRootMatrix } from '@fothering/providers/test/root-matrix';
 import {
   BAD_BATCH,
   BULK,
   COMPLETE_SES_RECORDINGS,
+  LANES,
   NOW_MS,
   RECEIPT_BATCH,
   TRANSACTIONAL,
@@ -397,5 +399,78 @@ describe('no closure item and no log line carries an address or a recipient hash
       expect(text).not.toContain('@');
       expect(hashes.filter((hash) => text.includes(hash))).toEqual([]);
     }
+  });
+});
+
+describe('buildActionRoot holds the composition-root rules (AC-24)', () => {
+  it('resolves every operation of every row to its expected kind over 2 contexts and 7 switch values', () => {
+    expect(() => assertRootMatrix(buildActionRoot)).not.toThrow();
+  });
+
+  it.each(['laneMap', 'wait'] as const)('refuses a %s override outside runtimeContext test', (name) => {
+    const overrides = { laneMap: LANES, wait: async () => {} };
+    const build = () => buildActionRoot({ runtimeContext: 'deployed', switchValue: undefined, dryRunSink: () => {}, [name]: overrides[name] });
+    expect(build).toThrow(`a ${name} override is accepted only in runtimeContext test`);
+  });
+
+  // AC-P4, type half: the act is typed over ActionDeps, whose SES port has no reopen operation.
+  it('hands the act an SES port with no reopen operation', () => {
+    const { ports } = buildActionRoot({ runtimeContext: 'test', switchValue: undefined });
+    expect(Object.keys(ports.ses).sort()).toEqual([
+      'getConfigurationSetEventDestinations',
+      'getConfigurationSetSending',
+      'getEmailIdentity',
+      'listConfigurationSets',
+      'listEmailIdentities',
+      'pauseConfigurationSet',
+      'sendEmail',
+    ]);
+  });
+
+  it('builds no SES client until a port method runs, and reads back live whatever the switch', async () => {
+    let built = 0;
+    // A stand-in with the one method the adapter calls: this package builds no AWS client itself.
+    const sesv2 = () => {
+      built += 1;
+      return { send: async () => ({ SendingOptions: { SendingEnabled: false } }) };
+    };
+    const deps = buildActionRoot({ runtimeContext: 'deployed', switchValue: undefined, liveClients: { sesv2 }, dryRunSink: () => {} });
+    expect(built).toBe(0);
+    expect(deps.kinds.ses?.getConfigurationSetSending).toBe('live');
+
+    await expect(deps.ports.ses.getConfigurationSetSending(BULK)).resolves.toEqual({ sendingEnabled: false });
+    await deps.ports.ses.getConfigurationSetSending(BULK);
+    expect(built).toBe(1);
+  });
+});
+
+describe('the action entry', () => {
+  afterEach(() => {
+    vi.doUnmock('./root.js');
+    vi.resetModules();
+  });
+
+  it('builds no root when the module loads, then one deployed root for every invocation of the container', async () => {
+    vi.resetModules();
+    const built: unknown[] = [];
+    vi.doMock('./root.js', async (importOriginal) => {
+      const actual = await importOriginal<typeof import('./root.js')>();
+      return {
+        ...actual,
+        buildActionRoot: (options: unknown) => {
+          built.push(options);
+          return actual.buildActionRoot({ runtimeContext: 'test', switchValue: undefined, now: () => ACT_MS });
+        },
+      };
+    });
+
+    const { handler } = await import('./handler.js');
+    expect(built).toHaveLength(0);
+    const first = await handler();
+    await handler();
+
+    expect(built).toHaveLength(1);
+    expect(built[0]).toMatchObject({ runtimeContext: 'deployed' });
+    expect(first.acted).toEqual([]);
   });
 });
