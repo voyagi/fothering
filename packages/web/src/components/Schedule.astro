@@ -40,6 +40,8 @@ interface Props {
 const { columns, rows, narrowHidden = [], monoColumns = [], caption, captionAttrs = {}, variant = 'schedule', compact = false, stack = false } = Astro.props;
 const classes = (column: number): string | undefined =>
   [narrowHidden.includes(column) ? 'hide-narrow' : '', monoColumns.includes(column) ? 'mono' : ''].filter((name) => name !== '').join(' ') || undefined;
+// A column header is a label like its siblings; only the column's values are set in mono.
+const headClass = (column: number): string | undefined => (narrowHidden.includes(column) ? 'hide-narrow' : undefined);
 const tableClass = [variant, compact ? 'compact' : '', stack ? 'stack' : ''].filter((name) => name !== '').join(' ');
 // display: block or grid drops table semantics in some engines, so a table that stacks or whose rows
 // become grids states its roles.
@@ -50,7 +52,7 @@ const spans = (text: string): string[] => text.split('`');
 <table class={tableClass} role={role('table')}>
   {caption !== undefined && <caption {...captionAttrs}>{caption}</caption>}
   <thead role={role('rowgroup')}>
-    <tr role={role('row')}>{columns.map((column, index) => <th scope="col" class={classes(index)} role={role('columnheader')}>{column}</th>)}</tr>
+    <tr role={role('row')}>{columns.map((column, index) => <th scope="col" class={headClass(index)} role={role('columnheader')}>{column}</th>)}</tr>
   </thead>
   <tbody role={role('rowgroup')}>
     {rows.map((row) => (
