@@ -1,10 +1,10 @@
-import { Duration, Stack, type StackProps } from 'aws-cdk-lib';
+import { CfnOutput, Duration, Stack, type StackProps } from 'aws-cdk-lib';
 import { Rule, Schedule } from 'aws-cdk-lib/aws-events';
 import { LambdaFunction as LambdaFunctionTarget } from 'aws-cdk-lib/aws-events-targets';
 import { Effect, PolicyStatement } from 'aws-cdk-lib/aws-iam';
 import { Function as LambdaFunction } from 'aws-cdk-lib/aws-lambda';
 import type { Construct } from 'constructs';
-import { ACTION_FUNCTION_TIMEOUT_MS } from '@fothering/core/close-values';
+import { ACTION_FUNCTION_TIMEOUT_MS, REOPEN_FUNCTION_TIMEOUT_MS } from '@fothering/core/close-values';
 import { isStaticallyCloseable } from '@fothering/core/closeability';
 import type { LaneMap } from '@fothering/core/lanes';
 import type { IngestStack } from './ingest-stack.js';
@@ -15,6 +15,8 @@ export interface ActionStackProps extends StackProps {
   readonly laneMap: LaneMap;
   /** Directory holding the bundled action handler (dist/action in a build, a stub folder in synth tests). */
   readonly actionAssetDir: string;
+  /** Directory holding the bundled reopen handler (dist/reopen in a build, a stub folder in synth tests). */
+  readonly reopenAssetDir: string;
   readonly ingest: Pick<IngestStack, 'table'>;
 }
 
@@ -79,5 +81,29 @@ export class ActionStack extends Stack {
 
     alarmOnAny(this, 'ActionErrorsAlarm', actionFunction.metricErrors({ period: ALARM_PERIOD, statistic: 'Sum' }));
     alarmOnErrorLines(this, 'Action', actionRole.logGroup);
+
+    // D-104: the reopen reads its pause pointer and closure by key and moves them by conditional
+    // update (the claim, the outcome and the lane-hour counter), so no Query, PutItem, DeleteItem or Scan.
+    const reopenRole = createFunctionRole(this, 'Reopen', [
+      new PolicyStatement({
+        effect: Effect.ALLOW,
+        actions: ['dynamodb:GetItem', 'dynamodb:UpdateItem'],
+        resources: [props.ingest.table.tableArn],
+      }),
+      ...pauseStatement(staticallyCloseableArns(this, props.laneMap)),
+    ]);
+
+    // No schedule and no alarm: the operator runs it by hand and reads its result from the invoke.
+    const reopenFunction = new LambdaFunction(this, 'ReopenFunction', {
+      ...functionBase(props.reopenAssetDir, reopenRole),
+      timeout: Duration.millis(REOPEN_FUNCTION_TIMEOUT_MS),
+      memorySize: 256,
+      environment: {
+        FOTHERING_TABLE_NAME: props.ingest.table.tableName,
+        ...liveSwitchEnvironment(this),
+      },
+    });
+
+    new CfnOutput(this, 'ReopenFunctionName', { value: reopenFunction.functionName });
   }
 }

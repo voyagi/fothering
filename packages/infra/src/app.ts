@@ -10,4 +10,5 @@ addFotheringStacks(new App(), {
   agentAssetDir: 'dist/agent',
   detectAssetDir: 'dist/detect',
   actionAssetDir: 'dist/action',
+  reopenAssetDir: 'dist/reopen',
 });

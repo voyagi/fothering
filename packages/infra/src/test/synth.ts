@@ -25,7 +25,7 @@ type Resources = Record<string, { Type: string; Properties?: Record<string, unkn
 
 // The deployed context plus whatever a test adds, over stub bundles, so a synth loads aws-cdk-lib
 // and hashes a few small folders and nothing more. The detection and action functions reuse the ingest
-// stub folder: a stub bundle only has to exist to be hashed. The assembly goes inside the stub folder: an
+// stub folder and the reopen function the forget one: a stub bundle only has to exist to be hashed. The assembly goes inside the stub folder: an
 // App with no outdir writes to a new temp folder of its own, which nothing ever removes. A synth that
 // throws returns no dispose to its caller, so the folder is removed here before the error goes on.
 export function synthStacks(extraContext: Record<string, unknown> = {}): SynthesizedStacks {
@@ -38,6 +38,7 @@ export function synthStacks(extraContext: Record<string, unknown> = {}): Synthes
       ...assets,
       detectAssetDir: assets.ingestAssetDir,
       actionAssetDir: assets.ingestAssetDir,
+      reopenAssetDir: assets.forgetAssetDir,
     });
     return {
       laneMap,

@@ -40,8 +40,8 @@ export interface PermissionDiff {
 
 const STACK_IDS =[INGEST_STACK_ID, RUNTIME_STACK_ID, DETECTION_STACK_ID, ACTION_STACK_ID] as const;
 
-// The detection and action functions reuse the ingest stub folder: a stub bundle only has to exist to
-// be hashed.
+// The detection and action functions reuse the ingest stub folder and the reopen function the forget
+// one: a stub bundle only has to exist to be hashed.
 export function synthesizePermissionTemplates(): StackTemplates {
   const assets = createStubAssets();
   try {
@@ -51,6 +51,7 @@ export function synthesizePermissionTemplates(): StackTemplates {
       ...assets,
       detectAssetDir: assets.ingestAssetDir,
       actionAssetDir: assets.ingestAssetDir,
+      reopenAssetDir: assets.forgetAssetDir,
     });
     const assembly = app.synth();
     return Object.fromEntries(STACK_IDS.map((id) => [id, assembly.getStackByName(id).template as CfnTemplate]));

@@ -22,6 +22,7 @@ export interface FotheringStackOptions {
   readonly agentAssetDir: string;
   readonly detectAssetDir: string;
   readonly actionAssetDir: string;
+  readonly reopenAssetDir: string;
 }
 
 interface FotheringStacks {
@@ -54,6 +55,7 @@ export function addFotheringStacks(app: App, options: FotheringStackOptions): Fo
     env: ENV,
     laneMap: options.laneMap,
     actionAssetDir: options.actionAssetDir,
+    reopenAssetDir: options.reopenAssetDir,
     ingest,
   });
   return { ingest, runtime, detection, action };
