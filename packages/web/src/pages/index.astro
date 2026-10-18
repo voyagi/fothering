@@ -7,9 +7,12 @@ import Schedule from '../components/Schedule.astro';
 import Sheet from '../layouts/Sheet.astro';
 import { LANDING_SECTIONS, LIMITS_FIXED_ROWS, LIMITS_REPLAY_ROW, NO_MEASURED_NUMBER_SENTENCE, type LandingSectionId } from '../site/content.ts';
 import { PROVENANCE_LABELS } from '../site/labels.ts';
+import { readDeployRegion, repoRoot } from '../site/repo-facts.ts';
 import { buildReplayView, loadReplayArtifact } from '../site/replay-view.ts';
 import { routeFor } from '../site/route-list.ts';
 
+// The Region comes from the stacks' pin, as on the deploy and privacy pages, never typed here.
+const region = readDeployRegion(repoRoot(process.cwd()));
 const artifact = loadReplayArtifact(process.cwd());
 const view = buildReplayView(artifact);
 const label = PROVENANCE_LABELS[artifact.provenance];
@@ -32,7 +35,7 @@ const refusals = [
   'Close a lane on a guess. When the evidence does not settle the cause, nothing closes, and the email says what code found.',
   'Pause your whole account. The smallest closure that stops the damage is one configuration set.',
   'Reopen on its own, or report a closure the read-back did not confirm. A lane reopens only when you run the reopen command.',
-  'Keep recipient addresses. Event records hold the receiving domain and a keyed hash, in eu-central-1, and expire 30 days after the send; deletion follows within a few days.',
+  `Keep recipient addresses. Event records hold the receiving domain and a keyed hash, in ${region}, and expire 30 days after the send; deletion follows within a few days.`,
 ];
 
 const limitsRows = [
