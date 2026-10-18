@@ -291,6 +291,13 @@ function boardDescriptions(closedLane: string, lanes: readonly string[], openLan
   ];
 }
 
+// With one lane nothing else flows, so the description names the paused lane as the only one.
+function drawingDescription(closedLane: string, openLanes: readonly string[], held: boolean, pausedAt: string): string {
+  const stopped = `is stopped at a ${held ? 'closed' : 'filled'} valve that carries a lockout tag, with a read-back instrument at ${pausedAt} UTC.`;
+  if (openLanes.length === 0) return `${closedLane}, the only lane from the SES account, ${stopped}`;
+  return `Mail flows from the SES account through ${openLanes.join(', ')}. ${closedLane} ${stopped}`;
+}
+
 function firstEventTime(events: readonly ReplayEvent[], step: number): string {
   const event = events.find((candidate) => candidate.step === step);
   return event === undefined ? '' : clockTime(event.atUtc);
@@ -394,7 +401,7 @@ export function buildReplayView(artifact: ReplayArtifact): ReplayView {
     },
     landing: {
       drawingTitle: `Flow drawing of one SES account with ${String(artifact.lanes.length)} sending lanes`,
-      drawingDescription: `Mail flows from the SES account through ${openLanes.join(', ')}. ${artifact.closedLane} is stopped at a ${held ? 'closed' : 'filled'} valve that carries a lockout tag, with a read-back instrument at ${pausedAt} UTC.`,
+      drawingDescription: drawingDescription(artifact.closedLane, openLanes, held, pausedAt),
     },
     eventLog: {
       caption: label.caption,
