@@ -1633,7 +1633,8 @@ export function accessibilityStatementRule(site: BuiltSite, _context: CheckConte
   return [...said, ...criterionFindings(page)].map((text) => ({ rule: 'accessibility-statement' as const, route: ACCESSIBILITY_ROUTE, text }));
 }
 
-// Workers limits: 20,000 files per version on the Free plan and 25 MiB per file (AC-62).
+// Workers limits: 20,000 files per version on the Free plan and 25 MiB per file (AC-62). The check
+// below uses >= on purpose, so a build must stay at least one file and one byte under each limit.
 const MAX_FILES = 20_000;
 const MAX_FILE_BYTES = 25 * 1024 * 1024;
 
