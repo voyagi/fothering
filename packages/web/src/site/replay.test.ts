@@ -356,6 +356,13 @@ describe('buildReplayView event log', () => {
     expect(view.lanesLines).toEqual({ paused: 'Closed: fothering-bulk. No other lane.', reopened: 'Reopened: fothering-bulk. No other lane.' });
     expect(view.boardDescriptions[2]).toBe('fothering-bulk is stopped at a filled valve with a lockout tag, and its outlet is dotted.');
     expect(view.steps[0]?.paragraphs[0]).toMatch(/providers\.$/);
+    expect(view.landing.drawingDescription).toBe('fothering-bulk, the only lane from the SES account, is stopped at a closed valve that carries a lockout tag, with a read-back instrument at 14:03 UTC.');
+  });
+
+  it('names the open lanes the landing drawing shows flowing', () => {
+    expect(buildReplayView(shippedArtifact()).landing.drawingDescription).toBe(
+      'Mail flows from the SES account through fothering-transactional, fothering-alerts. fothering-bulk is stopped at a closed valve that carries a lockout tag, with a read-back instrument at 14:03 UTC.',
+    );
   });
 
   it('carries the simulator caption link and a provider-free configuration label', () => {
