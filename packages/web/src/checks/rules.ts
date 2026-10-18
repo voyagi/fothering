@@ -61,6 +61,7 @@ export const RULE_IDS = Object.freeze([
   'replay-panels',
   'type-token-use',
   'identifier-break',
+  'command-pair',
   'deploy-page',
   'deploy-commands',
   'deploy-permissions',
@@ -1041,6 +1042,57 @@ export function identifierBreakRule(site: BuiltSite, _context: CheckContext): Fi
   return site.pages.flatMap((page) => identifierBreakFindings(page).map((text) => ({ rule: 'identifier-break' as const, route: page.route, text })));
 }
 
+// UI-SPEC line 209 and the 05-12 finish review: a command block wraps only between its units, the
+// spans directly inside its code element, and a flag with the value after it is one unit. Between
+// units and inside a pair stands one space or a line break and nothing else, and nothing sits
+// outside the code element, so the copied text is the command itself.
+const SEPARATOR = /^[ \n]$/;
+const isLoneToken = (text: string): boolean => text !== '' && !/\s/.test(text);
+
+function separatorFindings(element: BuiltElement): string[] {
+  return element.children.filter((child): child is string => typeof child === 'string' && !SEPARATOR.test(child))
+    .map((text) => `the command block holds ${JSON.stringify(text)} between its units, where only one space or a line break belongs, so the copied text is not the command`);
+}
+
+function splitPairFindings(code: BuiltElement): string[] {
+  const texts: string[] = [];
+  code.children.forEach((child, index) => {
+    const between = code.children[index + 1];
+    const value = code.children[index + 2];
+    if (typeof child === 'string' || between !== ' ' || value === undefined || typeof value === 'string') return;
+    const flag = rawText(child);
+    const next = rawText(value);
+    if (isLoneToken(flag) && flag.startsWith('-') && isLoneToken(next) && !next.startsWith('-')) {
+      texts.push(`the command block keeps the flag ${flag} apart from its value ${next}, so a line can end between them`);
+    }
+  });
+  return texts;
+}
+
+function commandBlockFindings(pre: BuiltElement): string[] {
+  const codes = pre.children.filter((child): child is BuiltElement => typeof child !== 'string' && child.tag === 'code');
+  const outside = pre.children.filter((child) => typeof child === 'string' || child.tag !== 'code').map((child) => (typeof child === 'string' ? child : rawText(child))).join('');
+  const texts = outside === '' ? [] : [`the command block holds ${JSON.stringify(outside)} outside its code element, so the copied text is not the command`];
+  for (const code of codes) {
+    texts.push(...separatorFindings(code), ...splitPairFindings(code));
+    // A pair is a unit holding token spans; a single token's span holds only its text.
+    for (const unit of code.children) {
+      if (typeof unit !== 'string' && unit.children.some((child) => typeof child !== 'string')) texts.push(...separatorFindings(unit));
+    }
+  }
+  return texts;
+}
+
+export function commandPairRule(site: BuiltSite, _context: CheckContext): Finding[] {
+  return site.pages.flatMap((page) => {
+    const texts: string[] = [];
+    walk(page.root, (element) => {
+      if (element.tag === 'pre' && (element.attrs.class ?? '').split(/\s+/).includes('command')) texts.push(...commandBlockFindings(element));
+    });
+    return texts.map((text) => ({ rule: 'command-pair' as const, route: page.route, text }));
+  });
+}
+
 export const DEPLOY_ROUTE = '/deploy/';
 
 const deployPage = (site: BuiltSite): BuiltPage | undefined => site.pages.find((page) => page.route === DEPLOY_ROUTE);
@@ -1338,6 +1390,7 @@ const RULES: Readonly<Record<RuleId, Rule>> = {
   'replay-panels': replayPanelsRule,
   'type-token-use': typeTokenUseRule,
   'identifier-break': identifierBreakRule,
+  'command-pair': commandPairRule,
   'deploy-page': deployPageRule,
   'deploy-commands': deployCommandsRule,
   'deploy-permissions': deployPermissionsRule,

@@ -338,7 +338,11 @@ table.schedule { width: 100%; border-collapse: collapse; font-size: var(--text-c
 .message-body .disclosure { padding-bottom: var(--space-12); border-bottom: var(--w-rule) solid var(--rule); font-size: var(--text-small); line-height: 1.45; color: var(--ink-2); }
 pre.command { margin: 0; padding: var(--space-12) var(--space-md); background: var(--ground); border: var(--w-rule) solid var(--rule); white-space: pre-wrap; overflow-wrap: anywhere; font: 500 var(--text-mono-value)/1.5 var(--font-mono); font-feature-settings: "tnum" 1; }
 pre.command code { font: inherit; }
-pre.command code > span { display: inline-block; max-inline-size: 100%; }
+/* Each unit is one atomic box that moves to the next line whole while it fits. A flag with its value
+   is a unit of two token boxes: shrink-to-fit keeps it on one line until it is wider than the
+   block, and only then does it wrap, at the space between its tokens. A token wider than the
+   column breaks inside itself (overflow-wrap above), as the last resort. */
+pre.command code > span, pre.command code > span > span { display: inline-block; max-inline-size: 100%; }
 
 /* Replay. Which step shows is CSS alone: the root's data-step (written before first paint from a
    valid hash, then by replay.ts) against each part's data-steps list; no data-step means step 1. */
@@ -454,7 +458,9 @@ ol.steps { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); marg
 /* The box keeps the sentence at the measure, its own padding and outline added outside it. */
 .notice { grid-column: 1 / -1; margin: var(--space-sm) 0 0; max-inline-size: calc(var(--measure) + 2 * var(--space-md) + 2 * var(--w-outline)); padding: var(--space-12) var(--space-md); border: var(--w-outline) dashed var(--ink); }
 .notice b { margin-right: var(--space-12); font: 600 var(--text-label)/1 var(--font-mono); letter-spacing: 0.05em; }
-.procedure pre.command { margin-top: var(--space-12); padding: var(--space-sm) var(--space-12); }
+/* An even 8px inset in the narrow step columns, so a flag and its value (-c fothering:live=live,
+   about 172px at mono-value) keeps one line in a five-column step from 1280px up. */
+.procedure pre.command { margin-top: var(--space-12); padding: var(--space-sm); }
 /* Element-qualified so a note inside a procedure step keeps its label face over .procedure p. */
 p.command-note { margin: var(--space-sm) 0 0; font: 500 var(--text-label)/1.4 var(--font-mono); color: var(--label); }
 .command-inline > span { display: inline-block; }
