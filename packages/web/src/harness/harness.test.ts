@@ -26,6 +26,8 @@ import {
   noScriptVerdict,
   provenanceCopyVerdict,
   REPLAY_INVALID_HASHES,
+  REPLAY_LAYOUT_WIDTHS,
+  replayLayoutVerdict,
   replayVerdict,
   flowTabVerdict,
   flowVerdict,
@@ -65,6 +67,7 @@ import {
   type FontsReading,
   type KeyboardReport,
   type NoScriptReading,
+  type ReplayLayoutReading,
   type ReplayReading,
   type RequestsReading,
   type SecondBuildRun,
@@ -1261,6 +1264,83 @@ describe('noScriptVerdict (AC-10, AC-E7)', () => {
   });
 });
 
+// Stacked (960 and below) the board keeps one height and draws the tag's place off the paused step;
+// beside the story the tag simply comes off, so the board's height follows the step.
+const healthyLayout = (width: number): ReplayLayoutReading => ({
+  route: '/replay/',
+  width,
+  steps: [1, 2, 3, 4].map((step) => ({
+    step,
+    boardHeight: width <= 960 ? 638 + (step === 2 ? 0.5 : 0) : step === 3 ? 647 : 398,
+    phantom: width <= 960 && step !== 3,
+  })),
+  phantomExposed: 0,
+  evidence: { tableRight: 1200.5, panelRight: 1201 },
+  logRows: [
+    { header: '14:01:07', baselines: [1500.25, 1500.25, 1500.75, 1500.25] },
+    { header: '14:01:12', baselines: [1560, 1560, 1560, 1560] },
+  ],
+  identifiers: [{ text: 'batch=2026-10-14-b', weight: '500' }, { text: '14:01:07', weight: '500' }],
+});
+const layoutReason = (reading: ReplayLayoutReading): string => {
+  const verdict = replayLayoutVerdict(reading);
+  return verdict.ok ? '' : verdict.reason;
+};
+const withStep = (reading: ReplayLayoutReading, step: number, change: Partial<ReplayLayoutReading['steps'][number]>): ReplayLayoutReading => ({
+  ...reading,
+  steps: reading.steps.map((item) => (item.step === step ? { ...item, ...change } : item)),
+});
+
+describe('replayLayoutVerdict (AC-6, UI-SPEC 6 and 10.3)', () => {
+  it('passes a healthy layout at every layout width', () => {
+    for (const width of REPLAY_LAYOUT_WIDTHS) expect(replayLayoutVerdict(healthyLayout(width)), String(width)).toEqual({ ok: true });
+  });
+
+  it('fails a stacked board whose height changes by more than 1 px between steps, and passes 1 px', () => {
+    expect(layoutReason(withStep(healthyLayout(960), 3, { boardHeight: 900 }))).toBe(E2E_MESSAGES.layoutBoardHeight(960, [638, 638.5, 900, 638]));
+    expect(replayLayoutVerdict(withStep(healthyLayout(320), 4, { boardHeight: 639 }))).toEqual({ ok: true });
+  });
+
+  it('fails a run that did not measure the board on all four steps', () => {
+    expect(layoutReason({ ...healthyLayout(320), steps: healthyLayout(320).steps.slice(0, 3) })).toBe(E2E_MESSAGES.layoutStepsMissing(320));
+  });
+
+  it('fails a stacked reserved slot that draws no place for the tag off the paused step', () => {
+    expect(layoutReason(withStep(healthyLayout(960), 1, { phantom: false }))).toBe(E2E_MESSAGES.layoutPhantomMissing(960, 1));
+    expect(layoutReason(withStep(healthyLayout(320), 4, { phantom: false }))).toBe(E2E_MESSAGES.layoutPhantomMissing(320, 4));
+  });
+
+  it('fails a drawn tag place on the paused step, and one beside the story', () => {
+    expect(layoutReason(withStep(healthyLayout(320), 3, { phantom: true }))).toBe(E2E_MESSAGES.layoutPhantomShown(320, 3));
+    expect(layoutReason(withStep(healthyLayout(961), 2, { phantom: true }))).toBe(E2E_MESSAGES.layoutPhantomShown(961, 2));
+  });
+
+  it('fails a drawn tag place outside aria-hidden', () => {
+    expect(layoutReason({ ...healthyLayout(960), phantomExposed: 1 })).toBe(E2E_MESSAGES.layoutPhantomExposed(960, 1));
+  });
+
+  it('fails an evidence schedule whose right edge passes its panel, and one the run never measured', () => {
+    expect(layoutReason({ ...healthyLayout(1280), evidence: { tableRight: 1220, panelRight: 1201 } })).toBe(E2E_MESSAGES.layoutEvidenceSpill(1280, 1220, 1201));
+    expect(layoutReason({ ...healthyLayout(961), evidence: null })).toBe(E2E_MESSAGES.layoutEvidenceMissing(961));
+  });
+
+  it('fails a log row whose cells sit on baselines more than 1 px apart, where the log is a table', () => {
+    const logRows = [{ header: '14:01:07', baselines: [1498, 1500.5, 1500.5, 1500.5] }];
+    expect(layoutReason({ ...healthyLayout(1280), logRows })).toBe(E2E_MESSAGES.layoutBaseline(1280, '14:01:07', [1498, 1500.5, 1500.5, 1500.5]));
+    expect(replayLayoutVerdict({ ...healthyLayout(320), logRows })).toEqual({ ok: true });
+  });
+
+  it('fails a table log the run never measured', () => {
+    expect(layoutReason({ ...healthyLayout(1024), logRows: [] })).toBe(E2E_MESSAGES.layoutLogMissing(1024));
+  });
+
+  it('fails an identifier that computes a weight other than 500, and a run that measured none', () => {
+    const identifiers = [{ text: 'fothering-bulk', weight: '600' }];
+    expect(layoutReason({ ...healthyLayout(1440), identifiers })).toBe(E2E_MESSAGES.layoutIdentifierWeight(1440, 'fothering-bulk', '600'));
+    expect(layoutReason({ ...healthyLayout(320), identifiers: [] })).toBe(E2E_MESSAGES.layoutIdentifiersMissing(320));
+  });
+});
+
 describe('the copy-build verdicts (AC-14, AC-17)', () => {
   const trees: ReturnType<typeof plantDist>[] = [];
   afterAll(() => {
@@ -1433,7 +1513,10 @@ describe('the built checks through the CLI and the e2e step (D-150, D-151)', () 
   // What a healthy site driver prints: a Dark stored on a light OS, Device following the OS with no
   // reload, Dark stored on a dark OS kept when the OS turns light, then the switch, fonts and
   // requests of every route and the storage keys left after using the switch.
-  const healthyReplayLines = (): string[] => [320, 1440].flatMap((width) => [`REPLAY ${JSON.stringify(healthyReplay(width))}`, `NOSCRIPT ${JSON.stringify(healthyNoScript(width))}`]);
+  const healthyReplayLines = (): string[] => [
+    ...[320, 1440].flatMap((width) => [`REPLAY ${JSON.stringify(healthyReplay(width))}`, `NOSCRIPT ${JSON.stringify(healthyNoScript(width))}`]),
+    ...REPLAY_LAYOUT_WIDTHS.map((width) => `LAYOUT ${JSON.stringify(healthyLayout(width))}`),
+  ];
 
   function siteLines(overrides: SiteLines = {}, consoleErrors: readonly string[] = [], routeOverrides: RouteLines = {}, widthOverrides: WidthLines = {}, replayLines: readonly string[] = healthyReplayLines()): string[] {
     const checks: SiteLines = {
@@ -1561,6 +1644,19 @@ describe('the built checks through the CLI and the e2e step (D-150, D-151)', () 
     expect(failing.code).toBe(1);
     expect(failing.lines).toContain(E2E_MESSAGES.renderedFailed('REPLAY', `/replay/: ${E2E_MESSAGES.replaySameStep(1440, 2)}`));
     expect(failing.lines).toContain(E2E_MESSAGES.renderedFailed('NOSCRIPT', `/replay/: ${E2E_MESSAGES.noScriptControls(320, 1)}`));
+  });
+
+  it('the rendered step judges the replay layout at every layout width, and fails a missing or failing width by name', async () => {
+    const healthy = await e2e(renderedTree());
+    expect(healthy.lines.find((line) => line.startsWith('[e2e] rendered LAYOUT: ok, '))).toContain('961');
+    const withoutLayout = healthyReplayLines().filter((line) => !line.startsWith('LAYOUT {"route":"/replay/","width":961,'));
+    const missing = await e2e(renderedTree(), {}, { lines: siteLines({}, [], {}, {}, withoutLayout) });
+    expect(missing.code).toBe(1);
+    expect(missing.lines).toContain(E2E_MESSAGES.renderedFailed('LAYOUT', E2E_MESSAGES.renderedMissingRoute('LAYOUT', '/replay/ at 961 px')));
+    const spilled = healthyReplayLines().map((line) => (line.startsWith('LAYOUT {"route":"/replay/","width":1280,') ? `LAYOUT ${JSON.stringify({ ...healthyLayout(1280), evidence: { tableRight: 1220, panelRight: 1201 } })}` : line));
+    const failing = await e2e(renderedTree(), {}, { lines: siteLines({}, [], {}, {}, spilled) });
+    expect(failing.code).toBe(1);
+    expect(failing.lines).toContain(E2E_MESSAGES.renderedFailed('LAYOUT', `/replay/: ${E2E_MESSAGES.layoutEvidenceSpill(1280, 1220, 1201)}`));
   });
 
   it('the copy-build step fails when the project copy folder is left behind', async () => {

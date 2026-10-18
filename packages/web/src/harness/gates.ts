@@ -609,6 +609,37 @@ export function noScriptVerdict(reading: NoScriptReading): Verdict {
   return verdictOf(reasons);
 }
 
+// The replay's layout where its two arrangements meet: the board stacks above the story at 960 px and
+// below, sits beside it from 961 px up (where the story column is narrowest), and the log stacks at
+// 620 px and below.
+export const REPLAY_LAYOUT_WIDTHS = Object.freeze([320, 960, 961, 1024, 1280, 1440]);
+
+export interface ReplayLayoutStep {
+  readonly step: number;
+  readonly boardHeight: number;
+  // The tag's drawn place is rendered and visible on this step.
+  readonly phantom: boolean;
+}
+
+export interface ReplayLayoutReading {
+  readonly route: string;
+  readonly width: number;
+  readonly steps: readonly ReplayLayoutStep[];
+  // Drawn tag places outside an aria-hidden subtree, so in the accessibility tree.
+  readonly phantomExposed: number;
+  // On step 2, the right edges of the evidence schedule and of the panel holding it.
+  readonly evidence: { readonly tableRight: number; readonly panelRight: number } | null;
+  // On step 4, with every row shown, the first baseline of each cell of each log row.
+  readonly logRows: readonly { readonly header: string; readonly baselines: readonly number[] }[];
+  // The computed weight of every identifier in step 2's schedule and in the log's mono cells.
+  readonly identifiers: readonly { readonly text: string; readonly weight: string }[];
+}
+
+// Stub until the layout check is written.
+export function replayLayoutVerdict(reading: ReplayLayoutReading): Verdict {
+  return reading.route === '' ? { ok: false, reason: '' } : { ok: true };
+}
+
 const LANDING = '/';
 const REPLAY = '/replay/';
 const hasClass = (element: BuiltElement, name: string): boolean => (element.attrs.class ?? '').split(/\s+/).includes(name);
@@ -1099,6 +1130,17 @@ export const E2E_MESSAGES = Object.freeze({
   noScriptBoard: (width: number, steps: string, displayed: boolean) => `at ${width} px with the js class removed the board part for steps ${steps} is ${displayed ? 'shown' : 'hidden'}, against the paused step`,
   noScriptNoBoard: (width: number) => `at ${width} px with the js class removed the run measured no board part`,
   noScriptTag: (width: number) => `at ${width} px with the js class removed the lockout tag does not show`,
+  layoutStepsMissing: (width: number) => `at ${width} px the layout run did not measure the board on all four steps`,
+  layoutBoardHeight: (width: number, heights: readonly number[]) => `at ${width} px the board measures ${heights.join(', ')} px tall on steps 1 to 4, one height within 1 px expected`,
+  layoutPhantomMissing: (width: number, step: number) => `at ${width} px the reserved tag slot shows no drawn place for the tag on step ${step}`,
+  layoutPhantomShown: (width: number, step: number) => `at ${width} px the tag's drawn place shows on step ${step}, where the board ${step === 3 ? 'hangs the tag itself' : 'reserves no slot'}`,
+  layoutPhantomExposed: (width: number, count: number) => `at ${width} px ${count} drawn tag place(s) sit outside aria-hidden, in the accessibility tree`,
+  layoutEvidenceMissing: (width: number) => `at ${width} px the run measured no evidence schedule on step 2`,
+  layoutEvidenceSpill: (width: number, tableRight: number, panelRight: number) => `at ${width} px the step 2 evidence schedule ends at x ${tableRight}, past its panel's edge at x ${panelRight}`,
+  layoutLogMissing: (width: number) => `at ${width} px the run measured no event log row`,
+  layoutBaseline: (width: number, header: string, baselines: readonly number[]) => `at ${width} px the log row ${header} sets its cells on baselines ${baselines.join(', ')}, one baseline within 1 px expected`,
+  layoutIdentifiersMissing: (width: number) => `at ${width} px the run measured no identifier in the evidence schedule or the log`,
+  layoutIdentifierWeight: (width: number, text: string, weight: string) => `at ${width} px the identifier ${text} computes weight ${weight}, 500 expected`,
   copyStampMissing: (route: string) => `${route} carries no provenance stamp in the project copy`,
   copyStamp: (route: string, found: string, expected: string) => `the stamp on ${route} reads ${found}, ${expected} expected for the copy's provenance`,
   copyCauseMissing: (where: string, cause: string) => `${where} does not show the copy's cause ${cause}`,
