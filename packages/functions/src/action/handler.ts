@@ -1,13 +1,14 @@
 import { readLiveSwitch } from '@fothering/providers/live-switch';
 import { memoPerContainer } from '../shared/container-memo.js';
 import { runActionCycle, type ActionRunSummary } from './action.js';
-import { buildActionRoot, readActionLiveConfig } from './root.js';
+import { buildActionRoot, readActionLiveConfig, readActionOperatorConfig } from './root.js';
 
 const actionDeps = memoPerContainer(() =>
   buildActionRoot({
     runtimeContext: 'deployed',
     switchValue: readLiveSwitch(),
     liveConfig: readActionLiveConfig(),
+    operator: readActionOperatorConfig(),
   }),
 );
 

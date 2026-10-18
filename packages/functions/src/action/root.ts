@@ -38,13 +38,23 @@ export interface BuildActionRootOptions extends RootOptions {
 // lane map and the real spacing (D-24's rule for the lane map).
 const TEST_ONLY_OVERRIDES = ['laneMap', 'wait'] as const;
 
+// The address key is read for the dry-run send line alone, which pseudonymizes From and To (D-104).
 export function readActionLiveConfig(): LiveConfig {
   const tableName = process.env.FOTHERING_TABLE_NAME;
-  return tableName !== undefined ? { tableName } : {};
+  const addressKeySecretId = process.env.FOTHERING_ADDRESS_KEY_SECRET_ID;
+  return {
+    ...(tableName !== undefined ? { tableName } : {}),
+    ...(addressKeySecretId !== undefined ? { addressKeySecretId } : {}),
+  };
 }
 
 export function readActionOperatorConfig(): OperatorConfig {
-  return {};
+  const from = process.env.FOTHERING_FROM_ADDRESS;
+  const to = process.env.FOTHERING_OPERATOR_ADDRESS;
+  return {
+    ...(from !== undefined ? { from } : {}),
+    ...(to !== undefined ? { to } : {}),
+  };
 }
 
 // Each operation is named, never spread from the resolved port, so the reopen operation cannot ride

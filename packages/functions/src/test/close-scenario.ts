@@ -333,15 +333,22 @@ function holdCheckBacksClosed(closure: Closure): boolean {
   return outcome === 'closed' && holdEndMs !== null && holdCheckedAtMs !== null && holdCheckedAtMs >= holdEndMs + HOLD_CHECK_DELAY_MS && sendsAfterHold === 0;
 }
 
+// A closure a passed hold check backs may say closed as its outcome and as the kind of its email.
+function allowedClosedWords(closure: Closure): number {
+  if (!holdCheckBacksClosed(closure)) return 0;
+  return closure.email?.kind === 'closed' ? 2 : 1;
+}
+
 /**
- * AC-6: the word closed may appear only as the outcome of a closure a passed hold check backs, or as a
- * log line's outcome value. Each closure or line holding it anywhere else is returned as a violation.
+ * AC-6: the word closed may appear only as the outcome of a closure a passed hold check backs, the kind
+ * of that closure's email, or a log line's outcome value. Each closure or line holding it anywhere else
+ * is returned as a violation.
  */
 export function closedWordViolations(input: { closures: readonly Closure[]; logLines: readonly string[] }): string[] {
   const violations: string[] = [];
   for (const closure of input.closures) {
     const text = JSON.stringify(closure);
-    const allowed = holdCheckBacksClosed(closure) ? 1 : 0;
+    const allowed = allowedClosedWords(closure);
     if (occurrences(text, CLOSED_WORD) > allowed) violations.push(`closure ${closure.incidentId} says closed without a passed hold check`);
   }
   for (const line of input.logLines) {

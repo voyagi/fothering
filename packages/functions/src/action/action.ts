@@ -1,5 +1,5 @@
 import { actionGate } from '@fothering/core/agent-answer';
-import { HOLD_MS } from '@fothering/core/close-values';
+import { EMAIL_SEND_ATTEMPTS, HOLD_MS } from '@fothering/core/close-values';
 import { configurationRefusals, type SesConfigurationFacts } from '@fothering/core/closeability';
 import {
   actionCloseabilityRefusal,
@@ -19,6 +19,7 @@ import {
   type ActionRefusal,
   type Closure,
   type ClosureOutcome,
+  type EMAIL_REFUSALS,
   type FreshnessRefusal,
   type OtherLaneReading,
   type PausePointer,
@@ -26,9 +27,12 @@ import {
   type StoredDecision,
 } from '@fothering/core/closure';
 import { reserveLaneAttempt } from '@fothering/core/counters';
-import { evidenceRecordSchema, incidentItemKey, incidentLaneKey, incidentPauseKey, type EvidenceRecord } from '@fothering/core/evidence-record';
+import { FROM_DISPLAY_NAME } from '@fothering/core/disclosure';
+import { evidenceRecordSchema, incidentItemKey, incidentLaneKey, incidentPauseKey, recordHash, type EvidenceRecord } from '@fothering/core/evidence-record';
 import { markerOf, stateOf, type IncidentMarker, type IncidentState } from '@fothering/core/incident';
-import { expiresAtFor } from '@fothering/core/records';
+import { emailAttemptDue, emailKindOf, renderOperatorEmail, type RenderedEmail } from '@fothering/core/operator-email';
+import { SES_ID_PATTERN, expiresAtFor } from '@fothering/core/records';
+import { LiveConfigMissingError, requireLiveConfig, type SendEmailRequest } from '@fothering/providers/port-types';
 import { SES_READ_SPACING_MS, readSesFacts } from '@fothering/providers/ses-facts';
 import type { ActionDeps } from './root.js';
 
@@ -396,14 +400,19 @@ async function holdCheck(run: Run, closure: Closure & { holdEndMs: number }): Pr
 
 // D-88 source (b): the closure each lane's pause pointer names, together with every incident source (a)
 // reached, each once per run.
-async function holdChecks(run: Run, reached: ReadonlySet<string>): Promise<ActionRunSummary['acted']> {
+async function incidentsReached(run: Run, reached: ReadonlySet<string>): Promise<ReadonlySet<string>> {
   const { deps } = run;
-  const store = deps.ports.decisionStore;
   const incidentIds = new Set(reached);
   for (const lane of deps.laneMap.lanes) {
-    const pointer = pausePointerOf(await store.getItem(incidentPauseKey(lane.configurationSet), deps.now()));
+    const pointer = pausePointerOf(await deps.ports.decisionStore.getItem(incidentPauseKey(lane.configurationSet), deps.now()));
     if (pointer !== undefined) incidentIds.add(pointer.incidentId);
   }
+  return incidentIds;
+}
+
+async function holdChecks(run: Run, incidentIds: ReadonlySet<string>): Promise<ActionRunSummary['acted']> {
+  const { deps } = run;
+  const store = deps.ports.decisionStore;
   const acted: ActionRunSummary['acted'] = [];
   for (const incidentId of incidentIds) {
     const closure = parseClosure(await store.getItem(closureKey(incidentId), deps.now()));
@@ -418,6 +427,111 @@ async function holdChecks(run: Run, reached: ReadonlySet<string>): Promise<Actio
   return acted;
 }
 
+type EmailRefusal = (typeof EMAIL_REFUSALS)[number];
+
+interface Addresses {
+  from: string;
+  to: string;
+  configurationSet: string;
+}
+
+function refuseEmail(deps: ActionDeps, incidentId: string, reason: EmailRefusal): undefined {
+  deps.log.error({ event: 'email-refused', incidentId, reason });
+  return undefined;
+}
+
+// D-109 and D-107: exactly one operator-alert lane carries the email, and both addresses must be set;
+// the refusal names neither address.
+function addressesOf(deps: ActionDeps, incidentId: string): Addresses | undefined {
+  const alertLanes = deps.laneMap.lanes.filter((lane) => lane.operatorAlert);
+  const [alertLane] = alertLanes;
+  if (alertLanes.length !== 1 || alertLane === undefined) return refuseEmail(deps, incidentId, 'operator-alert-lane-count');
+  try {
+    return {
+      from: requireLiveConfig(deps.operator.from, 'FOTHERING_FROM_ADDRESS'),
+      to: requireLiveConfig(deps.operator.to, 'FOTHERING_OPERATOR_ADDRESS'),
+      configurationSet: alertLane.configurationSet,
+    };
+  } catch (error) {
+    if (error instanceof LiveConfigMissingError) return refuseEmail(deps, incidentId, 'operator-config-missing');
+    throw error;
+  }
+}
+
+// The email renders only a record that parses, belongs to the incident and still matches its hash, so
+// a tampered record a gate refusal stopped never has its numbers printed.
+async function trustedRecord(deps: ActionDeps, incidentId: string): Promise<EvidenceRecord | undefined> {
+  const parsed = evidenceRecordSchema.safeParse(await loadRecord(deps, incidentId));
+  if (!parsed.success || parsed.data.incidentId !== incidentId || recordHash(parsed.data) !== parsed.data.hash) return undefined;
+  return parsed.data;
+}
+
+async function renderFor(deps: ActionDeps, closure: Closure): Promise<RenderedEmail | undefined> {
+  const decisionItem = await deps.ports.decisionStore.getItem(incidentItemKey(closure.incidentId, 'DECISION'), deps.now());
+  return renderOperatorEmail({ closure, record: await trustedRecord(deps, closure.incidentId), decision: decisionOf(decisionItem), laneMap: deps.laneMap });
+}
+
+type EmailState = NonNullable<Closure['email']>;
+
+async function sendClaimed(run: Run, act: Pick<Act, 'incidentId' | 'version'>, claimed: EmailState, request: SendEmailRequest): Promise<void> {
+  const { deps } = run;
+  const { incidentId } = act;
+  try {
+    // SES may accept a message and still answer with a timeout or a server error, so a retried attempt
+    // can deliver a second copy; one extra email is the accepted limit (03-RESEARCH Pitfall 15).
+    const { messageId } = await deps.ports.ses.sendEmail(request);
+    const storedId = SES_ID_PATTERN.test(messageId) ? messageId : null;
+    if (await updateClosure(run, act, { email: { ...claimed, sentAtMs: deps.now(), messageId: storedId } })) {
+      deps.log.info({ event: 'email-sent', incidentId, ...(storedId === null ? {} : { messageId: storedId }) });
+    }
+  } catch (error) {
+    const errorName = error instanceof Error ? error.name : 'UnknownError';
+    if (claimed.attempts >= EMAIL_SEND_ATTEMPTS) {
+      if (await updateClosure(run, act, { email: { ...claimed, failed: true } })) deps.log.error({ event: 'email-failed', incidentId, errorName });
+      return;
+    }
+    await updateClosure(run, act, { email: { ...claimed, claimedAtMs: null } });
+    deps.log.info({ event: 'email-attempt-failed', incidentId, attempt: claimed.attempts, errorName });
+  }
+}
+
+// D-89 step 13: each attempt is claimed by a versioned update before the send, so two runs reaching one
+// closure never send one attempt twice (AC-E29).
+async function sendOperatorEmail(run: Run, closure: Closure): Promise<void> {
+  const { deps } = run;
+  const addresses = addressesOf(deps, closure.incidentId);
+  if (addresses === undefined) return;
+  const rendered = await renderFor(deps, closure);
+  if (rendered === undefined) return;
+  const act = { incidentId: closure.incidentId, version: closure.version };
+  const claimed: EmailState = {
+    kind: rendered.kind,
+    attempts: (closure.email?.attempts ?? 0) + 1,
+    claimedAtMs: deps.now(),
+    sentAtMs: null,
+    messageId: null,
+    failed: false,
+  };
+  if (!(await updateClosure(run, act, { email: claimed }))) return;
+  await sendClaimed(run, act, claimed, {
+    from: `${FROM_DISPLAY_NAME} <${addresses.from}>`,
+    to: [addresses.to],
+    subject: rendered.subject,
+    text: rendered.text,
+    configurationSetName: addresses.configurationSet,
+  });
+}
+
+// D-88 source (c): every closure sources (a) and (b) reached that ended in a state that sends (D-109),
+// read again after the hold checks so a closed outcome written in this run is mailed in this run.
+async function operatorEmails(run: Run, incidentIds: ReadonlySet<string>): Promise<void> {
+  const { deps } = run;
+  for (const incidentId of incidentIds) {
+    const closure = parseClosure(await deps.ports.decisionStore.getItem(closureKey(incidentId), deps.now()));
+    if (closure !== undefined && emailKindOf(closure.outcome) !== undefined && emailAttemptDue(closure, deps.now())) await sendOperatorEmail(run, closure);
+  }
+}
+
 /** One scheduled run over every lane-map lane. */
 export async function runActionCycle(deps: ActionDeps): Promise<ActionRunSummary> {
   const run = newRun(deps);
@@ -430,6 +544,8 @@ export async function runActionCycle(deps: ActionDeps): Promise<ActionRunSummary
     const incidentId = item.kind === 'act' ? item.act.incidentId : item.incidentId;
     if (outcome !== undefined) acted.push({ incidentId, outcome });
   }
-  acted.push(...(await holdChecks(run, reached)));
+  const incidentIds = await incidentsReached(run, reached);
+  acted.push(...(await holdChecks(run, incidentIds)));
+  await operatorEmails(run, incidentIds);
   return { acted };
 }
