@@ -59,7 +59,7 @@ export function stateOf(item: unknown): IncidentState | undefined {
   return { ...(stored as StoredIncidentState), version };
 }
 
-export const INCIDENT_TRANSITIONS =['opened', 'spiking', 'watching', 'false-recovery', 'false-spike', 'closed'] as const;
+export const INCIDENT_TRANSITIONS = ['opened', 'spiking', 'watching', 'false-recovery', 'false-spike', 'closed'] as const;
 export type IncidentTransition = (typeof INCIDENT_TRANSITIONS)[number];
 
 export type LifecycleVerdict = LaneVerdict | 'sends-pending';

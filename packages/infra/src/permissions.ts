@@ -38,7 +38,7 @@ export interface PermissionDiff {
   extra: PermissionEntry[];
 }
 
-const STACK_IDS =[INGEST_STACK_ID, RUNTIME_STACK_ID, DETECTION_STACK_ID, ACTION_STACK_ID] as const;
+const STACK_IDS = [INGEST_STACK_ID, RUNTIME_STACK_ID, DETECTION_STACK_ID, ACTION_STACK_ID] as const;
 
 // The detection and action functions reuse the ingest stub folder and the reopen function the forget
 // one: a stub bundle only has to exist to be hashed.
