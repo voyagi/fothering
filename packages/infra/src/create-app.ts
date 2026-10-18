@@ -1,5 +1,6 @@
 import type { App } from 'aws-cdk-lib';
 import type { LaneMap } from '@fothering/core/lanes';
+import { applyAccountSendingDeny } from './account-deny.js';
 import { ActionStack } from './action-stack.js';
 import { DetectionStack } from './detection-stack.js';
 import { IngestStack } from './ingest-stack.js';
@@ -31,8 +32,10 @@ interface FotheringStacks {
 }
 
 // One place builds the stacks, so the deployed app, the synth tests and the permissions snapshot
-// cannot describe different sets of resources.
+// cannot describe different sets of resources. The account-level Deny is applied to the app here for
+// the same reason, and so reaches every role any stack adds later.
 export function addFotheringStacks(app: App, options: FotheringStackOptions): FotheringStacks {
+  applyAccountSendingDeny(app);
   const ingest = new IngestStack(app, INGEST_STACK_ID, {
     env: ENV,
     laneMap: options.laneMap,

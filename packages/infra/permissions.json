@@ -133,9 +133,39 @@
     "stack": "FotheringAction",
     "role": "ActionRole60B0EDF7",
     "kind": "permission",
+    "effect": "Deny",
+    "action": "ses:PutAccountSendingAttributes",
+    "resource": "\"*\"",
+    "principal": null,
+    "condition": null
+  },
+  {
+    "stack": "FotheringAction",
+    "role": "ActionRole60B0EDF7",
+    "kind": "permission",
     "effect": "Allow",
     "action": "ses:PutConfigurationSetSendingOptions",
     "resource": "{\"Fn::Join\":[\"\",[\"arn:aws:ses:eu-central-1:\",{\"Ref\":\"AWS::AccountId\"},\":configuration-set/fothering-bulk\"]]}",
+    "principal": null,
+    "condition": null
+  },
+  {
+    "stack": "FotheringAction",
+    "role": "ActionRole60B0EDF7",
+    "kind": "permission",
+    "effect": "Deny",
+    "action": "ses:UpdateAccountSendingEnabled",
+    "resource": "\"*\"",
+    "principal": null,
+    "condition": null
+  },
+  {
+    "stack": "FotheringAction",
+    "role": "ActionRole60B0EDF7",
+    "kind": "permission",
+    "effect": "Deny",
+    "action": "ses:UpdateConfigurationSetSendingEnabled",
+    "resource": "\"*\"",
     "principal": null,
     "condition": null
   },
@@ -292,6 +322,36 @@
   {
     "stack": "FotheringDetection",
     "role": "DetectRoleDEDAD076",
+    "kind": "permission",
+    "effect": "Deny",
+    "action": "ses:PutAccountSendingAttributes",
+    "resource": "\"*\"",
+    "principal": null,
+    "condition": null
+  },
+  {
+    "stack": "FotheringDetection",
+    "role": "DetectRoleDEDAD076",
+    "kind": "permission",
+    "effect": "Deny",
+    "action": "ses:UpdateAccountSendingEnabled",
+    "resource": "\"*\"",
+    "principal": null,
+    "condition": null
+  },
+  {
+    "stack": "FotheringDetection",
+    "role": "DetectRoleDEDAD076",
+    "kind": "permission",
+    "effect": "Deny",
+    "action": "ses:UpdateConfigurationSetSendingEnabled",
+    "resource": "\"*\"",
+    "principal": null,
+    "condition": null
+  },
+  {
+    "stack": "FotheringDetection",
+    "role": "DetectRoleDEDAD076",
     "kind": "trust",
     "effect": "Allow",
     "action": "sts:AssumeRole",
@@ -352,6 +412,36 @@
   {
     "stack": "FotheringIngest",
     "role": "ForgetRole9C1F5950",
+    "kind": "permission",
+    "effect": "Deny",
+    "action": "ses:PutAccountSendingAttributes",
+    "resource": "\"*\"",
+    "principal": null,
+    "condition": null
+  },
+  {
+    "stack": "FotheringIngest",
+    "role": "ForgetRole9C1F5950",
+    "kind": "permission",
+    "effect": "Deny",
+    "action": "ses:UpdateAccountSendingEnabled",
+    "resource": "\"*\"",
+    "principal": null,
+    "condition": null
+  },
+  {
+    "stack": "FotheringIngest",
+    "role": "ForgetRole9C1F5950",
+    "kind": "permission",
+    "effect": "Deny",
+    "action": "ses:UpdateConfigurationSetSendingEnabled",
+    "resource": "\"*\"",
+    "principal": null,
+    "condition": null
+  },
+  {
+    "stack": "FotheringIngest",
+    "role": "ForgetRole9C1F5950",
     "kind": "trust",
     "effect": "Allow",
     "action": "sts:AssumeRole",
@@ -396,6 +486,36 @@
     "effect": "Allow",
     "action": "secretsmanager:GetSecretValue",
     "resource": "{\"Ref\":\"AddressKey1F8FD90D\"}",
+    "principal": null,
+    "condition": null
+  },
+  {
+    "stack": "FotheringIngest",
+    "role": "IngestRoleAF8AE6D8",
+    "kind": "permission",
+    "effect": "Deny",
+    "action": "ses:PutAccountSendingAttributes",
+    "resource": "\"*\"",
+    "principal": null,
+    "condition": null
+  },
+  {
+    "stack": "FotheringIngest",
+    "role": "IngestRoleAF8AE6D8",
+    "kind": "permission",
+    "effect": "Deny",
+    "action": "ses:UpdateAccountSendingEnabled",
+    "resource": "\"*\"",
+    "principal": null,
+    "condition": null
+  },
+  {
+    "stack": "FotheringIngest",
+    "role": "IngestRoleAF8AE6D8",
+    "kind": "permission",
+    "effect": "Deny",
+    "action": "ses:UpdateConfigurationSetSendingEnabled",
+    "resource": "\"*\"",
     "principal": null,
     "condition": null
   },
@@ -526,6 +646,36 @@
     "effect": "Allow",
     "action": "logs:PutLogEvents",
     "resource": "{\"Fn::Join\":[\"\",[\"arn:aws:logs:eu-central-1:\",{\"Ref\":\"AWS::AccountId\"},\":log-group:\",{\"Ref\":\"RuntimeLogs92941AA6\"},\":log-stream:*\"]]}",
+    "principal": null,
+    "condition": null
+  },
+  {
+    "stack": "FotheringRuntime",
+    "role": "RuntimeRoleFD8790A4",
+    "kind": "permission",
+    "effect": "Deny",
+    "action": "ses:PutAccountSendingAttributes",
+    "resource": "\"*\"",
+    "principal": null,
+    "condition": null
+  },
+  {
+    "stack": "FotheringRuntime",
+    "role": "RuntimeRoleFD8790A4",
+    "kind": "permission",
+    "effect": "Deny",
+    "action": "ses:UpdateAccountSendingEnabled",
+    "resource": "\"*\"",
+    "principal": null,
+    "condition": null
+  },
+  {
+    "stack": "FotheringRuntime",
+    "role": "RuntimeRoleFD8790A4",
+    "kind": "permission",
+    "effect": "Deny",
+    "action": "ses:UpdateConfigurationSetSendingEnabled",
+    "resource": "\"*\"",
     "principal": null,
     "condition": null
   },

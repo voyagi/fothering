@@ -1,8 +1,10 @@
 import { App } from 'aws-cdk-lib';
 import { Template } from 'aws-cdk-lib/assertions';
 import { expect } from 'vitest';
+import { isStaticallyCloseable } from '@fothering/core/closeability';
 import { parseLaneMap, type LaneMap } from '@fothering/core/lanes';
 import lanesJson from '../../../../lanes.json' with { type: 'json' };
+import { ACCOUNT_SENDING_ACTIONS } from '../account-deny.js';
 import { cdkJsonContext } from '../cdk-context.js';
 import { ACTION_STACK_ID, addFotheringStacks, DETECTION_STACK_ID, RUNTIME_STACK_ID } from '../create-app.js';
 import type { PermissionEntry } from '../permissions.js';
@@ -123,28 +125,63 @@ const NO_ROLE_MAY_HOLD = [
   'bedrock-agentcore:CreateEvent',
 ];
 const PAUSE_ACTION = 'ses:PutConfigurationSetSendingOptions';
+// D-104 names both pausing roles by their id in the action stack, so the reopen role needs no rule of
+// its own when it joins.
 const PAUSING_ROLE_PREFIXES = ['ActionRole', 'ReopenRole'];
-const SES_WRITES = [
-  'ses:PutAccountSendingAttributes',
-  'ses:UpdateAccountSendingEnabled',
-  'ses:UpdateConfigurationSetSendingEnabled',
-  'ses:SendEmail',
-  'ses:SendRawEmail',
-  'ses:SendBulkEmail',
-];
+const MODEL_SERVICES = ['bedrock', 'bedrock-agentcore'];
+const SES_WRITES = [...ACCOUNT_SENDING_ACTIONS, 'ses:SendEmail', 'ses:SendRawEmail', 'ses:SendBulkEmail'];
+const CONFIGURATION_SET_ARN_TAIL = /:configuration-set\/([^*?]+)$/;
+
+function lastJoinedPart(value: unknown): unknown {
+  if (typeof value !== 'object' || value === null) return undefined;
+  const join = (value as Record<string, unknown>)['Fn::Join'];
+  const parts: unknown = Array.isArray(join) ? join[1] : undefined;
+  return Array.isArray(parts) ? parts.at(-1) : undefined;
+}
+
+// The one configuration set a granted resource names, or undefined when it names anything wider (a *,
+// a wildcard in the name, a part only a deploy can resolve).
+function pausedSetName(resource: string | null): string | undefined {
+  if (resource === null) return undefined;
+  const value: unknown = JSON.parse(resource);
+  const tail = typeof value === 'string' ? value : lastJoinedPart(value);
+  return typeof tail === 'string' ? CONFIGURATION_SET_ARN_TAIL.exec(tail)?.[1] : undefined;
+}
+
+function roleKey(entry: PermissionEntry): string {
+  return `${entry.stack}/${entry.role}`;
+}
+
+// Every role holding the pause beside any action of a model service: the action must stay code's
+// alone, so no role a model drives may also be able to close a lane.
+function modelPairings(allows: readonly PermissionEntry[]): string[] {
+  const pausing = new Set(allows.filter((entry) => grantsAction(entry.action, PAUSE_ACTION)).map(roleKey));
+  const modelRoles = new Set(
+    allows.filter((entry) => MODEL_SERVICES.some((service) => reachesService(entry.action, service))).map(roleKey),
+  );
+  return [...pausing].filter((role) => modelRoles.has(role)).map((role) => `${role}: holds ${PAUSE_ACTION} beside a bedrock or bedrock-agentcore action`);
+}
 
 // Every Allow grant that breaks the boundaries the stacks promise: the runtime reaches no SES,
 // DynamoDB or S3 action, only the detection role may invoke the runtime, no role may invoke it for a
 // user or run commands in it or write AgentCore Memory, no role may change account-level sending or
-// send, and only the action stack's pausing roles may pause a configuration set.
-export function permissionViolations(entries: readonly PermissionEntry[]): string[] {
+// send, only the action stack's pausing roles may pause a configuration set and only on a statically
+// closeable lane, and no role pairs the pause with a model action.
+export function permissionViolations(entries: readonly PermissionEntry[], laneMap: LaneMap): string[] {
+  const closeable = new Set(laneMap.lanes.filter(isStaticallyCloseable).map((lane) => lane.configurationSet));
+  const allows = entries.filter((entry) => entry.kind === 'permission' && entry.effect === 'Allow');
   const violations: string[] = [];
-  for (const entry of entries) {
-    if (entry.kind !== 'permission' || entry.effect !== 'Allow') continue;
-    const where = `${entry.stack}/${entry.role} ${entry.action}`;
+  for (const entry of allows) {
+    const where = `${roleKey(entry)} ${entry.action}`;
     const isDetectRole = entry.stack === DETECTION_STACK_ID && entry.role.startsWith('DetectRole');
     const isPausingRole = entry.stack === ACTION_STACK_ID && PAUSING_ROLE_PREFIXES.some((prefix) => entry.role.startsWith(prefix));
-    if (!isPausingRole && grantsAction(entry.action, PAUSE_ACTION)) violations.push(`${where}: only a pausing role may hold ${PAUSE_ACTION}`);
+    if (grantsAction(entry.action, PAUSE_ACTION)) {
+      if (!isPausingRole) violations.push(`${where}: only a pausing role may hold ${PAUSE_ACTION}`);
+      const paused = pausedSetName(entry.resource);
+      if (paused === undefined || !closeable.has(paused)) {
+        violations.push(`${where}: ${PAUSE_ACTION} reaches a configuration set outside the statically closeable lanes`);
+      }
+    }
     for (const service of RUNTIME_FORBIDDEN_SERVICES) {
       if (entry.stack === RUNTIME_STACK_ID && reachesService(entry.action, service)) violations.push(`${where}: the runtime role reaches ${service}`);
     }
@@ -153,7 +190,19 @@ export function permissionViolations(entries: readonly PermissionEntry[]): strin
       if (grantsAction(entry.action, probe)) violations.push(`${where}: no role may hold ${probe}`);
     }
   }
-  return violations;
+  return [...violations, ...modelPairings(allows)];
+}
+
+// Every role, read from its trust entry so a role holding no permission at all is still seen, that
+// lacks an unconditional Deny on * for one of the account-level actions.
+export function denyViolations(entries: readonly PermissionEntry[]): string[] {
+  const roles = [...new Set(entries.filter((entry) => entry.kind === 'trust').map(roleKey))];
+  const denies = entries.filter((entry) => entry.kind === 'permission' && entry.effect === 'Deny' && entry.resource === '"*"' && entry.condition === null);
+  return roles.flatMap((role) =>
+    ACCOUNT_SENDING_ACTIONS.filter((action) => !denies.some((entry) => roleKey(entry) === role && grantsAction(entry.action, action))).map(
+      (action) => `${role}: no Deny on * for ${action}`,
+    ),
+  );
 }
 
 // Every statement each IAM role carries, from its inline policies and from the standalone

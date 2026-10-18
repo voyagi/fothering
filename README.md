@@ -68,20 +68,30 @@ until you remove it; the test suite fails when `cdk.json` carries it.
 
 ## Deploy and remove
 
-The app has three stacks: `FotheringIngest` (the event table, the ingest and forget functions),
-`FotheringRuntime` (the agent on AgentCore Runtime) and `FotheringDetection` (the detection
-function and its schedule). Detection imports the table and the runtime ARN from the other two, so
-`npx cdk deploy --all` deploys `FotheringIngest` and `FotheringRuntime` before
-`FotheringDetection`, and `npx cdk destroy --all` removes `FotheringDetection` first. Neither of the
-other two stacks can be removed or replace the table or the runtime while detection is deployed.
+The app has four stacks: `FotheringIngest` (the event table, the ingest and forget functions),
+`FotheringRuntime` (the agent on AgentCore Runtime), `FotheringDetection` (the detection function
+and its schedule) and `FotheringAction` (the action function and its schedule). Detection imports
+the table and the runtime ARN from the first two. `FotheringAction` imports the table from
+`FotheringIngest` and depends on neither `FotheringRuntime` nor `FotheringDetection`. Neither the
+ingest nor the runtime stack can be removed, or replace the table or the runtime, while a stack
+that imports from it is deployed.
 
-Run from the owner's account, in `eu-central-1`:
+`FotheringAction` holds the only SES write in the app: pausing a configuration set and reading the
+setting back, granted on the lanes `lanes.json` lets the action close and on no other set. A
+deployment without it holds no SES write at all, so detection can be deployed and watched on its
+own first. Every role in every stack also carries an explicit Deny on the three actions that change
+account-level sending, so no grant added later can stop the whole account.
+
+Run from the owner's account, in `eu-central-1`. Deploy the first three stacks, check them in the
+CloudFormation console, then deploy `FotheringAction` last. Remove it first:
 
 ```sh
 npm run build
 npx cdk bootstrap             # once, before the first deploy
-npx cdk deploy --all
-npx cdk destroy --all
+npx cdk deploy FotheringIngest FotheringRuntime FotheringDetection
+npx cdk deploy FotheringAction
+npx cdk destroy FotheringAction
+npx cdk destroy FotheringIngest FotheringRuntime FotheringDetection
 ```
 
 The detection function runs every five minutes. It reads SES configuration and DNS only when a
@@ -89,11 +99,15 @@ spike opens an incident, and it may invoke the runtime and write its own inciden
 decision and counter items to the table. It invokes the runtime for an incident that stored events
 opened, at most three times per incident and six times a UTC day.
 
-To deploy with the switch on, pass the context key. Do this only after a dry-run week you are
-happy with:
+The action function also runs every five minutes. It reads the decisions detection stored, checks
+the SES configuration again, and pauses a set only when the decision and the checks still agree.
+
+To deploy with the switch on, pass the context key on each deploy. Do this only after a dry-run
+week you are happy with:
 
 ```sh
-npx cdk deploy --all -c fothering:live=live
+npx cdk deploy FotheringIngest FotheringRuntime FotheringDetection -c fothering:live=live
+npx cdk deploy FotheringAction -c fothering:live=live
 ```
 
 To try the model on its own, deploy only the runtime with the switch on and invoke it once with the
