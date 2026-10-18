@@ -21,9 +21,48 @@ export interface Segment {
 // of capitalised words (a product name, say) turns mono unasked.
 export const LOG_API_NAMES = Object.freeze(['PutConfigurationSetSendingOptions', 'GetConfigurationSet', 'SendingOptions.SendingEnabled', 'SendingEnabled']);
 
-// Stub until the segmenter is written: backtick spans only.
+// A term is a whole token: no word character, dot, equals sign or hyphen touches its start, and its
+// end meets the text's end, a character outside those, or a full stop that ends the sentence.
+const CONTINUES = /[\w.=-]/;
+const startsToken = (text: string, at: number): boolean => at === 0 || !CONTINUES.test(text.charAt(at - 1));
+function endsToken(text: string, end: number): boolean {
+  if (end === text.length) return true;
+  const next = text.charAt(end);
+  if (next === '.') return end + 1 === text.length || /\s/.test(text.charAt(end + 1));
+  return !CONTINUES.test(next);
+}
+
+interface Term {
+  readonly text: string;
+  readonly kind: SegmentKind;
+}
+
+function plainSegments(text: string, terms: readonly Term[]): Segment[] {
+  const segments: Segment[] = [];
+  let plain = '';
+  let at = 0;
+  while (at < text.length) {
+    const found = terms.find((term) => text.startsWith(term.text, at) && startsToken(text, at) && endsToken(text, at + term.text.length));
+    if (found === undefined) {
+      plain += text.charAt(at);
+      at += 1;
+      continue;
+    }
+    if (plain !== '') segments.push({ kind: 'text', text: plain });
+    plain = '';
+    segments.push({ kind: found.kind, text: found.text });
+    at += found.text.length;
+  }
+  if (plain !== '') segments.push({ kind: 'text', text: plain });
+  return segments;
+}
+
+// Backtick spans the view wrote are code; in the text between them every listed term is found,
+// the longest first, so SendingOptions.SendingEnabled is never read as SendingEnabled.
 export function textSegments(text: string, terms: IdentifierTerms, apiNames: readonly string[] = []): Segment[] {
-  void terms;
-  void apiNames;
-  return text.split('`').map((part, index) => ({ kind: index % 2 === 1 ? 'code' : 'text', text: part }));
+  const listed: Term[] = [
+    ...terms.names.map((name) => ({ text: name, kind: 'name' as const })),
+    ...[...terms.values, ...apiNames].map((value) => ({ text: value, kind: 'code' as const })),
+  ].filter((term) => term.text !== '').sort((first, second) => second.text.length - first.text.length);
+  return text.split('`').flatMap((part, index) => (index % 2 === 1 ? [{ kind: 'code' as const, text: part }] : plainSegments(part, listed)));
 }

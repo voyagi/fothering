@@ -1392,9 +1392,9 @@ describe('replayLayoutVerdict (AC-6, UI-SPEC 6 and 10.3)', () => {
   });
 
   it('holds an identifier set in the face around it to its breaks, not to mono 500', () => {
-    const identifiers = [{ text: 'fothering-bulk', weight: '700', family: '"Red Hat Display", sans-serif', lines: ['fothering-bulk'], face: 'inherit' }];
-    expect(replayLayoutVerdict({ ...healthyLayout(1280), identifiers })).toEqual({ ok: true });
-    const broken = [{ ...identifiers[0], lines: ['fothering-', 'bulk'] }];
+    const inherited = { text: 'fothering-bulk', weight: '700', family: '"Red Hat Display", sans-serif', lines: ['fothering-bulk'], face: 'inherit' };
+    expect(replayLayoutVerdict({ ...healthyLayout(1280), identifiers: [inherited] })).toEqual({ ok: true });
+    const broken = [{ ...inherited, lines: ['fothering-', 'bulk'] }];
     expect(layoutReason({ ...healthyLayout(1280), identifiers: broken })).toBe(E2E_MESSAGES.layoutIdentifierBreak(1280, 'fothering-bulk', ['fothering-', 'bulk']));
   });
 

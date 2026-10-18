@@ -8,6 +8,7 @@ import {
   type ReplayArtifact,
   type ReplayEvent,
 } from '@fothering/core/replay-artifact';
+import type { IdentifierTerms } from './identifier-text.js';
 import { PROVENANCE_LABELS, type ProvenanceLabel } from './labels.js';
 import { readRepoText } from './repo-facts.js';
 
@@ -88,6 +89,9 @@ export interface ReplayView {
   tag: ReplayTag;
   landing: { drawingTitle: string; drawingDescription: string };
   eventLog: { caption: string; note: string; rows: EventLogRow[] };
+  // The configuration set names and message tag values the replay names, which the page renders
+  // through the Identifier component wherever they appear (UI-SPEC lines 207 and 208).
+  identifierTerms: IdentifierTerms;
 }
 
 // Messages name the file by its repository path whatever root was read, so a build log points at
@@ -344,6 +348,10 @@ export function buildReplayView(artifact: ReplayArtifact): ReplayView {
       caption: label.caption,
       note: logNote(permanentBounces),
       rows: events.map(logRow),
+    },
+    identifierTerms: {
+      names: [...artifact.lanes],
+      values: [cause, ...artifact.evidence.filter((row) => row.dimension === 'tag').map((row) => row.subject)].filter((value, index, all) => all.indexOf(value) === index),
     },
   };
 }

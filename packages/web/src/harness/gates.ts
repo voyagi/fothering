@@ -16,6 +16,7 @@ import { filesIn, loadBuiltSite, NoBuiltPagesError, routeOf, textOf, walk, type 
 import { checkFileBudget, isRegisteredRule, runBuiltChecks, type BudgetViolation, type CheckContext, type Finding } from '../checks/rules.js';
 import { BANNED_NAMES, CONSOLE_DELETE_PHRASES, REPLY_PROMISE_PHRASES, REPUTATION_PAGE_URL } from '../site/content.js';
 import type { Provenance } from '@fothering/core/records';
+import { LOG_API_NAMES } from '../site/identifier-text.js';
 import { PROVENANCE_LABELS } from '../site/labels.js';
 import { buildReplayView, loadReplayArtifact } from '../site/replay-view.js';
 import { ROUTES, SITE_ORIGIN, sitemapUrls } from '../site/route-list.js';
@@ -633,9 +634,10 @@ export function noScriptVerdict(reading: NoScriptReading): Verdict {
 }
 
 // The replay's layout where its arrangements meet: the board stacks above the story at 960 px and
-// below and sits beside it from 961 px up (where the story column is narrowest); the log, whose lane
-// and tag values never break, stacks at 960 px and below too.
-export const REPLAY_LAYOUT_WIDTHS = Object.freeze([320, 620, 960, 961, 1024, 1280, 1440]);
+// below and sits beside it from 961 px up (where the story column is narrowest); the log stacks only
+// where its own width is under its table's need, so it is a table from 760 px and blocks at 620 px
+// and below, with 740 and 760 bracketing the change.
+export const REPLAY_LAYOUT_WIDTHS = Object.freeze([320, 620, 740, 760, 800, 960, 961, 1024, 1280, 1440]);
 
 export interface ReplayLayoutStep {
   readonly step: number;
@@ -681,7 +683,8 @@ export interface ReplayLayoutReading {
 }
 
 const STACKED_BOARD_WIDTH = 960;
-const STACKED_LOG_WIDTH = 960;
+const LOG_TABLE_FROM = 760;
+const LOG_STACKED_TO = 620;
 const IDENTIFIER_WEIGHT = '500';
 const IDENTIFIER_FAMILY = 'Red Hat Mono';
 const spread = (values: readonly number[]): number => Math.max(...values) - Math.min(...values);
@@ -709,19 +712,20 @@ function boardReasons(reading: ReplayLayoutReading): string[] {
 function typeReasons(reading: ReplayLayoutReading): string[] {
   const { width, logRows, identifiers } = reading;
   const reasons: string[] = [];
-  if (width > STACKED_LOG_WIDTH) {
+  if (reading.logForm === 'table') {
     if (logRows.length === 0) reasons.push(E2E_MESSAGES.layoutLogMissing(width));
     for (const row of logRows) {
       if (row.baselines.length > 0 && spread(row.baselines) > BOX_TOLERANCE) reasons.push(E2E_MESSAGES.layoutBaseline(width, row.header, row.baselines));
     }
   }
   if (identifiers.length === 0) reasons.push(E2E_MESSAGES.layoutIdentifiersMissing(width));
-  for (const { text, weight, family, lines, parts } of identifiers) {
-    if (weight !== IDENTIFIER_WEIGHT) reasons.push(E2E_MESSAGES.layoutIdentifierWeight(width, text, weight));
-    if (!family.includes(IDENTIFIER_FAMILY)) reasons.push(E2E_MESSAGES.layoutIdentifierFamily(width, text, family));
+  for (const { text, weight, family, lines, parts, face } of identifiers) {
+    if (face !== 'inherit' && weight !== IDENTIFIER_WEIGHT) reasons.push(E2E_MESSAGES.layoutIdentifierWeight(width, text, weight));
+    if (face !== 'inherit' && !family.includes(IDENTIFIER_FAMILY)) reasons.push(E2E_MESSAGES.layoutIdentifierFamily(width, text, family));
     if (!identifierBreakVerdict({ text, lines, ...(parts === undefined ? {} : { parts }) }).ok) reasons.push(E2E_MESSAGES.layoutIdentifierBreak(width, text, lines.map((line) => line.trim())));
   }
   for (const name of reading.plainApiNames) reasons.push(E2E_MESSAGES.layoutPlainApiName(width, name));
+  for (const where of reading.plainTerms) reasons.push(E2E_MESSAGES.layoutPlainTerm(width, where));
   reading.scrollWidths.forEach((scrollWidth, index) => {
     if (!overflowVerdict(scrollWidth, width).ok) reasons.push(E2E_MESSAGES.layoutScroll(width, index + 1, scrollWidth));
   });
@@ -736,9 +740,17 @@ function headerReasons(reading: ReplayLayoutReading): string[] {
   return reading.logHeaders.filter(({ type }) => type !== LOG_HEADER_TYPE).map(({ text, type }) => E2E_MESSAGES.layoutHeaderType(reading.width, text, type, LOG_HEADER_TYPE));
 }
 
+// The comp keeps the log a four-column table wherever it fits; it stacks only below its own need.
+function logFormReasons(reading: ReplayLayoutReading): string[] {
+  const { width, logForm } = reading;
+  if (width >= LOG_TABLE_FROM && logForm !== 'table') return [E2E_MESSAGES.layoutLogForm(width, logForm, 'table')];
+  if (width <= LOG_STACKED_TO && logForm !== 'stack') return [E2E_MESSAGES.layoutLogForm(width, logForm, 'stack')];
+  return [];
+}
+
 export function replayLayoutVerdict(reading: ReplayLayoutReading): Verdict {
   const { width, evidence } = reading;
-  const reasons = [...boardReasons(reading), ...headerReasons(reading)];
+  const reasons = [...boardReasons(reading), ...logFormReasons(reading), ...headerReasons(reading)];
   if (evidence === null) reasons.push(E2E_MESSAGES.layoutEvidenceMissing(width));
   else if (evidence.tableRight > evidence.panelRight + EDGE_TOLERANCE) reasons.push(E2E_MESSAGES.layoutEvidenceSpill(width, evidence.tableRight, evidence.panelRight));
   reasons.push(...typeReasons(reading));
@@ -1774,8 +1786,9 @@ const isReplayLayoutReading = (value: unknown): value is ReplayLayoutReading => 
   && (value.evidence === null || (isObject(value.evidence) && isNumber(value.evidence.tableRight) && isNumber(value.evidence.panelRight)))
   && Array.isArray(value.logRows) && value.logRows.every((row) => isObject(row) && typeof row.header === 'string' && Array.isArray(row.baselines) && row.baselines.every(isNumber))
   && Array.isArray(value.identifiers) && value.identifiers.every((item) => isObject(item) && typeof item.text === 'string' && typeof item.weight === 'string'
-    && typeof item.family === 'string' && isStringList(item.lines) && (item.parts === undefined || isStringList(item.parts)))
-  && isStringList(value.plainApiNames)
+    && typeof item.family === 'string' && isStringList(item.lines) && (item.parts === undefined || isStringList(item.parts))
+    && (item.face === undefined || typeof item.face === 'string'))
+  && isStringList(value.plainApiNames) && isStringList(value.plainTerms) && (value.logForm === 'table' || value.logForm === 'stack')
   && Array.isArray(value.scrollWidths) && value.scrollWidths.every(isNumber)
   && Array.isArray(value.logHeaders) && value.logHeaders.every((item) => isObject(item) && typeof item.text === 'string' && typeof item.type === 'string');
 
@@ -1858,8 +1871,11 @@ async function renderedStep(options: SiteE2eOptions, dist: string, print: (line:
   const driver = locateDriver(options.globalModules, join(options.repoRoot, 'scripts', 'site.devbrowser.js'));
   if (typeof driver === 'string') return driver;
   const routes = [...routesFromDist(dist), UNKNOWN_PATH];
+  // The names and tag values the replay must render as identifiers, from the one artifact.
+  const { names, values } = loadCheckContext(options.repoRoot).replay.identifierTerms;
+  const identifierTerms = [...names, ...values];
   const served = await withPreview(options.repoRoot, 'fothering-e2e-', async (server, workDir) => {
-    const written = writeDriver(driver.templatePath, { base: server.url, route: '/', routes, widths: AXE_CONFIG.widths, hangWidths: HANG_WIDTHS, families: SITE_FAMILIES, replayRoute: REPLAY, invalidHashes: REPLAY_INVALID_HASHES, layoutWidths: REPLAY_LAYOUT_WIDTHS }, join(workDir, 'site.js'));
+    const written = writeDriver(driver.templatePath, { base: server.url, route: '/', routes, widths: AXE_CONFIG.widths, hangWidths: HANG_WIDTHS, families: SITE_FAMILIES, replayRoute: REPLAY, invalidHashes: REPLAY_INVALID_HASHES, layoutWidths: REPLAY_LAYOUT_WIDTHS, identifierTerms, apiNames: LOG_API_NAMES }, join(workDir, 'site.js'));
     if (!written.ok) return A11Y_MESSAGES.templateTokens(driver.templatePath, written.tokens);
     const run = await runDriver({ launcher: driver.launcher, driverPath: written.path, timeoutSeconds: DRIVER_TIMEOUT_SECONDS });
     return judgeRendered(run, routes, print);

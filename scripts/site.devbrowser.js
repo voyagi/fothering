@@ -495,16 +495,28 @@ const layoutStep = (step) => page.evaluate((args) => {
   // word-mode API name carries its word parts, whose ends are its allowed breaks.
   const partsOf = (element) => (element.hasAttribute('data-identifier-words')
     ? { parts: Array.from(element.children).filter((child) => child.tagName === 'SPAN').map((child) => child.textContent) } : {});
+  const faceOf = (element) => (element.hasAttribute('data-identifier-face') ? { face: element.getAttribute('data-identifier-face') } : {});
   reading.identifiers = Array.from(document.querySelectorAll('[data-identifier], tr[data-log-step] .mono')).filter(visible)
     .map((element) => {
       const style = getComputedStyle(element);
-      return { text: element.textContent.trim(), weight: style.fontWeight, family: style.fontFamily, lines: linesOf(element), ...partsOf(element) };
+      return { text: element.textContent.trim(), weight: style.fontWeight, family: style.fontFamily, lines: linesOf(element), ...partsOf(element), ...faceOf(element) };
     });
-  // An API operation name (capitalised words run together) left as plain text in a log Detail cell.
-  const API_NAME = /[A-Z][a-z]+(?:[A-Z][a-z]+)+/g;
+  // Text outside every identifier: drawings, command blocks and hidden parts aside.
+  const plainNodes = (root) => textNodes(root).filter((node) => {
+    const parent = node.parentElement;
+    return parent.closest('[data-identifier], svg, pre, script, style') === null && visible(parent);
+  });
+  // A listed SES API name left as plain text in a log Detail cell.
   reading.plainApiNames = Array.from(document.querySelectorAll('tr[data-log-step] td[data-col="Detail"]')).filter(visible)
-    .flatMap((cell) => textNodes(cell).filter((node) => node.parentElement.closest('[data-identifier]') === null))
-    .flatMap((node) => node.textContent.match(API_NAME) ?? []);
+    .flatMap((cell) => plainNodes(cell))
+    .flatMap((node) => args.apiNames.filter((name) => node.textContent.includes(name)));
+  // A configuration set name or tag value written as plain text anywhere on the page, as a whole
+  // token: nothing word-like touches its start, and its end meets a space, punctuation or a full stop.
+  const escape = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const tokenOf = (term) => new RegExp('(^|[^\\w.=-])' + escape(term) + '(?=$|[^\\w.=-]|\\.(\\s|$))');
+  reading.plainTerms = plainNodes(document.body).flatMap((node) => args.terms
+    .filter((term) => tokenOf(term).test(node.textContent))
+    .map((term) => term + ' in ' + node.parentElement.tagName.toLowerCase()));
   if (args.step === 2) {
     const panel = document.querySelector('[data-wordcount="step"][data-steps="2"]');
     const table = panel === null ? null : panel.querySelector('table');
@@ -524,6 +536,8 @@ const layoutStep = (step) => page.evaluate((args) => {
     };
     const rows = Array.from(document.querySelectorAll('tr[data-log-step]')).filter(visible);
     const logTable = rows.length === 0 ? null : rows[0].closest('table');
+    const logHead = logTable === null ? null : logTable.querySelector('thead');
+    reading.logForm = logHead !== null && getComputedStyle(logHead).display !== 'none' ? 'table' : 'stack';
     reading.logHeaders = logTable === null ? [] : Array.from(logTable.querySelectorAll('thead th')).filter(visible).map((header) => {
       const style = getComputedStyle(header);
       return { text: header.textContent.trim(), type: [style.fontWeight, style.fontSize, style.letterSpacing, style.textTransform].join(' ') };
@@ -534,7 +548,7 @@ const layoutStep = (step) => page.evaluate((args) => {
     }));
   }
   return reading;
-}, { step });
+}, { step, terms: JOB.identifierTerms, apiNames: JOB.apiNames });
 
 const layoutRun = async (width) => {
   const steps = [];
@@ -544,7 +558,9 @@ const layoutRun = async (width) => {
   let logHeaders = [];
   const identifiers = [];
   const plainApiNames = [];
+  const plainTerms = [];
   const scrollWidths = [];
+  let logForm = 'stack';
   for (const step of [1, 2, 3, 4]) {
     await loadReplay(width, '#step-' + step);
     const reading = await layoutStep(step);
@@ -555,15 +571,19 @@ const layoutRun = async (width) => {
     if (step === 4) {
       logRows = reading.logRows;
       logHeaders = reading.logHeaders;
+      logForm = reading.logForm;
     }
     for (const name of reading.plainApiNames) {
       if (!plainApiNames.includes(name)) plainApiNames.push(name);
+    }
+    for (const where of reading.plainTerms) {
+      if (!plainTerms.includes(where)) plainTerms.push(where);
     }
     for (const item of reading.identifiers) {
       if (!identifiers.some((seen) => seen.text === item.text && seen.weight === item.weight && seen.lines.join('|') === item.lines.join('|'))) identifiers.push(item);
     }
   }
-  return { route: JOB.replayRoute, width, steps, phantomExposed, evidence, logRows, identifiers, logHeaders, plainApiNames, scrollWidths };
+  return { route: JOB.replayRoute, width, steps, phantomExposed, evidence, logRows, identifiers, logHeaders, plainApiNames, plainTerms, scrollWidths, logForm };
 };
 
 if (JOB.routes.includes(JOB.replayRoute)) {
