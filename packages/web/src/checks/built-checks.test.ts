@@ -1692,7 +1692,8 @@ describe('the accessibility statement rule (AC-53, UI-SPEC E13)', () => {
     expect(accessibilityTexts(accessibilityStatementRule, accessibilityBody())).toEqual([]);
   });
 
-  it.each(['target', 'audit-date', 'tool', 'drawings', 'contact'])('fails a statement missing the %s item, naming it', (id) => {
+  // Every committed statement, limitations included, so one added later is covered without an edit here.
+  it.each(accessibilityStatements().map((statement) => statement.id))('fails a statement missing the %s item, naming it', (id) => {
     const missing = STATEMENTS.find((statement) => statement.id === id);
     expect(missing).toEqual(expect.objectContaining({ id, text: expect.any(String) }));
     const text = missing?.text ?? '';
