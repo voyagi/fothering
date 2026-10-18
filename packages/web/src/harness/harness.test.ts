@@ -43,6 +43,7 @@ import {
   keyboardVerdict,
   loadCheckContext,
   overflowVerdict,
+  pageErrorVerdict,
   pinVerdict,
   requestsVerdict,
   routesFromDist,
@@ -672,9 +673,19 @@ describe('the rendered theme verdicts (D-131, AC-42, AC-E28, C5)', () => {
 
   it('a Content Security Policy console line fails the rendered run, any other console error too', () => {
     const csp = "Executing inline script violates the following Content Security Policy directive 'script-src 'self''.";
+    const failedLoad = 'Failed to load resource: net::ERR_CONNECTION_REFUSED';
     expect(consoleVerdict([])).toEqual({ ok: true });
     expect(consoleVerdict([csp])).toEqual({ ok: false, reason: E2E_MESSAGES.cspViolation(csp) });
-    expect(consoleVerdict(['Uncaught TypeError: x is not a function'])).toEqual({ ok: false, reason: E2E_MESSAGES.consoleError('Uncaught TypeError: x is not a function') });
+    expect(consoleVerdict([failedLoad])).toEqual({ ok: false, reason: E2E_MESSAGES.consoleError(failedLoad) });
+  });
+
+  // An uncaught exception reaches the driver as a pageerror event, never as a console message, in
+  // the record shape the committed driver prints (read from a real dev-browser 0.2.9 run).
+  it('an uncaught page exception fails the rendered run, naming its type, message and page', () => {
+    const thrown = { name: 'TypeError', message: 'x is not a function', url: 'http://127.0.0.1:4000/replay/' };
+    expect(pageErrorVerdict([])).toEqual({ ok: true });
+    expect(pageErrorVerdict([thrown])).toEqual({ ok: false, reason: E2E_MESSAGES.pageError('TypeError', 'x is not a function', 'http://127.0.0.1:4000/replay/') });
+    expect(E2E_MESSAGES.pageError('TypeError', 'x is not a function', 'http://127.0.0.1:4000/replay/')).toContain('x is not a function');
   });
 
   it('only the 404 page answering the unknown address is an expected 404 console line', () => {
@@ -881,6 +892,12 @@ describe('the driver template and its writer (C2, T-05-04)', () => {
     for (const name of templates) {
       expect(readFileSync(join(REPO_ROOT, 'scripts', name), 'utf8'), name).not.toMatch(/addInitScript/);
     }
+  });
+
+  it('the committed site driver listens for uncaught page exceptions and prints each as a PAGEERROR line', () => {
+    const source = readFileSync(join(REPO_ROOT, 'scripts', 'site.devbrowser.js'), 'utf8');
+    expect(source).toMatch(/page\.on\(\s*'pageerror'\s*,/);
+    expect(source).toMatch(/console\.log\(\s*'PAGEERROR '\s*\+\s*JSON\.stringify\(/);
   });
 });
 
@@ -1618,7 +1635,14 @@ describe('the built checks through the CLI and the e2e step (D-150, D-151)', () 
     ...REPLAY_LAYOUT_WIDTHS.map((width) => `LAYOUT ${JSON.stringify(healthyLayout(width))}`),
   ];
 
-  function siteLines(overrides: SiteLines = {}, consoleErrors: readonly string[] = [], routeOverrides: RouteLines = {}, widthOverrides: WidthLines = {}, replayLines: readonly string[] = healthyReplayLines()): string[] {
+  // The driver prints console errors and uncaught page exceptions as two different records, the
+  // second in the shape a real dev-browser 0.2.9 pageerror event gives.
+  interface DriverErrors {
+    readonly console?: readonly string[];
+    readonly page?: readonly { readonly name: string; readonly message: string; readonly url: string }[];
+  }
+
+  function siteLines(overrides: SiteLines = {}, errors: DriverErrors = {}, routeOverrides: RouteLines = {}, widthOverrides: WidthLines = {}, replayLines: readonly string[] = healthyReplayLines()): string[] {
     const checks: SiteLines = {
       THEME: DARK_PINNED,
       DEVICE: { dark: reading(null, DARK_GROUND), light: reading(null, LIGHT_GROUND) },
@@ -1635,7 +1659,8 @@ describe('the built checks through the CLI and the e2e step (D-150, D-151)', () 
       ...Object.entries(perRoute).flatMap(([check, make]) => SITE_ROUTES.flatMap((route) => printed(check, make(route)))),
       ...Object.entries(perWidth).flatMap(([check, make]) => SITE_ROUTES.flatMap((route) => widthsOf(check).flatMap((width) => printed(check, make(route, width))))),
       ...replayLines,
-      ...consoleErrors.map((text) => `CONSOLE ${JSON.stringify({ type: 'error', text })}`),
+      ...(errors.console ?? []).map((text) => `CONSOLE ${JSON.stringify({ type: 'error', text })}`),
+      ...(errors.page ?? []).map((record) => `PAGEERROR ${JSON.stringify(record)}`),
     ];
   }
 
@@ -1737,10 +1762,10 @@ describe('the built checks through the CLI and the e2e step (D-150, D-151)', () 
     const healthy = await e2e(renderedTree());
     expect(healthy.lines.find((line) => line.startsWith('[e2e] rendered REPLAY: ok, '))).toBeDefined();
     expect(healthy.lines.find((line) => line.startsWith('[e2e] rendered NOSCRIPT: ok, '))).toContain('js class removed');
-    const missing = await e2e(renderedTree(), {}, { lines: siteLines({}, [], {}, {}, healthyReplayLines().filter((line) => !line.startsWith('REPLAY {"route":"/replay/","width":320'))) });
+    const missing = await e2e(renderedTree(), {}, { lines: siteLines({}, {},{}, {}, healthyReplayLines().filter((line) => !line.startsWith('REPLAY {"route":"/replay/","width":320'))) });
     expect(missing.lines).toContain(E2E_MESSAGES.renderedFailed('REPLAY', E2E_MESSAGES.renderedMissingRoute('REPLAY', '/replay/ at 320 px')));
     const moved = [320, 1440].flatMap((width) => [`REPLAY ${JSON.stringify({ ...healthyReplay(width), sameStepMutations: width === 1440 ? 2 : 0 })}`, `NOSCRIPT ${JSON.stringify({ ...healthyNoScript(width), controls: width === 320 ? 1 : 0 })}`]);
-    const failing = await e2e(renderedTree(), {}, { lines: siteLines({}, [], {}, {}, moved) });
+    const failing = await e2e(renderedTree(), {}, { lines: siteLines({}, {},{}, {}, moved) });
     expect(failing.code).toBe(1);
     expect(failing.lines).toContain(E2E_MESSAGES.renderedFailed('REPLAY', `/replay/: ${E2E_MESSAGES.replaySameStep(1440, 2)}`));
     expect(failing.lines).toContain(E2E_MESSAGES.renderedFailed('NOSCRIPT', `/replay/: ${E2E_MESSAGES.noScriptControls(320, 1)}`));
@@ -1750,11 +1775,11 @@ describe('the built checks through the CLI and the e2e step (D-150, D-151)', () 
     const healthy = await e2e(renderedTree());
     expect(healthy.lines.find((line) => line.startsWith('[e2e] rendered LAYOUT: ok, '))).toContain('961');
     const withoutLayout = healthyReplayLines().filter((line) => !line.startsWith('LAYOUT {"route":"/replay/","width":961,'));
-    const missing = await e2e(renderedTree(), {}, { lines: siteLines({}, [], {}, {}, withoutLayout) });
+    const missing = await e2e(renderedTree(), {}, { lines: siteLines({}, {},{}, {}, withoutLayout) });
     expect(missing.code).toBe(1);
     expect(missing.lines).toContain(E2E_MESSAGES.renderedFailed('LAYOUT', E2E_MESSAGES.renderedMissingRoute('LAYOUT', '/replay/ at 961 px')));
     const spilled = healthyReplayLines().map((line) => (line.startsWith('LAYOUT {"route":"/replay/","width":1280,') ? `LAYOUT ${JSON.stringify({ ...healthyLayout(1280), evidence: { tableRight: 1220, panelRight: 1201 } })}` : line));
-    const failing = await e2e(renderedTree(), {}, { lines: siteLines({}, [], {}, {}, spilled) });
+    const failing = await e2e(renderedTree(), {}, { lines: siteLines({}, {},{}, {}, spilled) });
     expect(failing.code).toBe(1);
     expect(failing.lines).toContain(E2E_MESSAGES.renderedFailed('LAYOUT', `/replay/: ${E2E_MESSAGES.layoutEvidenceSpill(1280, 1220, 1201)}`));
   });
@@ -1788,7 +1813,7 @@ describe('the built checks through the CLI and the e2e step (D-150, D-151)', () 
       LINES: (route) => ({ ...healthyLines(route), lines: [route === '/' ? 'a'.repeat(81) : 'short'] }),
       NARROW: (route) => (route === '/' ? { route, tag: box(0, 100, 266, 500), drawings: [drawing([['fothering-bulk', box(10, 100, 120, 115)]])], identifiers: [] } : healthyNarrow(route)),
     };
-    const { code, lines } = await e2e(renderedTree(), {}, { lines: siteLines({}, [], routeOverrides, widthOverrides) });
+    const { code, lines } = await e2e(renderedTree(), {}, { lines: siteLines({}, {},routeOverrides, widthOverrides) });
     expect(code).toBe(1);
     expect(lines).toContain(E2E_MESSAGES.renderedFailed('FLOW', `/: ${E2E_MESSAGES.flowNoControl(320)}`));
     expect(lines).toContain(E2E_MESSAGES.renderedFailed('LINES', E2E_MESSAGES.lineTooLong('/', 81, 'a'.repeat(81))));
@@ -1800,17 +1825,17 @@ describe('the built checks through the CLI and the e2e step (D-150, D-151)', () 
     expect(HANG_WIDTHS).toEqual([320, 961, 1280, 1440]);
     const healthy = await e2e(renderedTree());
     expect(healthy.lines.find((line) => line.startsWith('[e2e] rendered HANG: ok, '))).toContain('/ at 1280 px 18 px of stem');
-    const stuck = await e2e(renderedTree(), {}, { lines: siteLines({}, [], {}, { HANG: (route, width) => (route === '/' && width === 1280 ? { ...hanging(5), width } : healthyHang(route, width)) }) });
+    const stuck = await e2e(renderedTree(), {}, { lines: siteLines({}, {},{}, { HANG: (route, width) => (route === '/' && width === 1280 ? { ...hanging(5), width } : healthyHang(route, width)) }) });
     expect(stuck.code).toBe(1);
     expect(stuck.lines).toContain(E2E_MESSAGES.renderedFailed('HANG', `/: ${E2E_MESSAGES.tagStuck(1280, 5)}`));
-    const none = await e2e(renderedTree(), {}, { lines: siteLines({}, [], {}, { HANG: (route, width) => ({ route, width, hanging: false, visibleStem: 0, tagTop: 0, valveBottom: 0 }) }) });
+    const none = await e2e(renderedTree(), {}, { lines: siteLines({}, {},{}, { HANG: (route, width) => ({ route, width, hanging: false, visibleStem: 0, tagTop: 0, valveBottom: 0 }) }) });
     expect(none.lines).toContain(E2E_MESSAGES.renderedFailed('HANG', E2E_MESSAGES.noHungTag()));
   });
 
   it('the rendered step fails a run that measured zero prose blocks, no drawing text, or no flow line for a width', async () => {
     const routeOverrides: RouteLines = { LINES: (route) => ({ route, blocks: 0, lines: [] }), NARROW: (route) => ({ route, tag: null, drawings: [], identifiers: [] }) };
     const widthOverrides: WidthLines = { FLOW: (route, width) => (width === 320 ? undefined : healthyFlowLine(route, width)) };
-    const { code, lines } = await e2e(renderedTree(), {}, { lines: siteLines({}, [], routeOverrides, widthOverrides) });
+    const { code, lines } = await e2e(renderedTree(), {}, { lines: siteLines({}, {},routeOverrides, widthOverrides) });
     expect(code).toBe(1);
     expect(lines).toContain(E2E_MESSAGES.renderedFailed('LINES', E2E_MESSAGES.noProseBlocks()));
     expect(lines).toContain(E2E_MESSAGES.renderedFailed('NARROW', E2E_MESSAGES.noDrawingText()));
@@ -1818,13 +1843,13 @@ describe('the built checks through the CLI and the e2e step (D-150, D-151)', () 
   });
 
   it('the rendered step fails a route whose switch, fonts or requests verdict fails, naming the route', async () => {
-    const switchFails = await e2e(renderedTree(), {}, { lines: siteLines({}, [], { SWITCH: (route) => ({ ...healthySwitch(route), deviceStored: route === UNKNOWN_PATH ? 'dark' : null }) }) });
+    const switchFails = await e2e(renderedTree(), {}, { lines: siteLines({}, {},{ SWITCH: (route) => ({ ...healthySwitch(route), deviceStored: route === UNKNOWN_PATH ? 'dark' : null }) }) });
     expect(switchFails.code).toBe(1);
     expect(switchFails.lines).toContain(E2E_MESSAGES.renderedFailed('SWITCH', `${UNKNOWN_PATH}: ${E2E_MESSAGES.deviceStored('dark')}`));
-    const fontsFail = await e2e(renderedTree(), {}, { lines: siteLines({}, [], { FONTS: (route) => ({ ...healthyFonts(route), control: { family: 'x', present: true } }) }) });
+    const fontsFail = await e2e(renderedTree(), {}, { lines: siteLines({}, {},{ FONTS: (route) => ({ ...healthyFonts(route), control: { family: 'x', present: true } }) }) });
     expect(fontsFail.lines).toContain(E2E_MESSAGES.renderedFailed('FONTS', SITE_ROUTES.map((route) => `${route}: ${E2E_MESSAGES.fontControl('x')}`).join('; ')));
     const foreign = (route: string): RequestsReading => ({ ...healthyRequests(route), requests: [...healthyRequests(route).requests, 'https://fonts.gstatic.com/s/x.woff2'] });
-    const requestsFail = await e2e(renderedTree(), {}, { lines: siteLines({}, [], { REQUESTS: foreign }) });
+    const requestsFail = await e2e(renderedTree(), {}, { lines: siteLines({}, {},{ REQUESTS: foreign }) });
     expect(requestsFail.lines).toContain(E2E_MESSAGES.renderedFailed('REQUESTS', SITE_ROUTES.map((route) => `${route}: ${E2E_MESSAGES.foreignRequest(BASE, ['https://fonts.gstatic.com'])}`).join('; ')));
   });
 
@@ -1839,7 +1864,7 @@ describe('the built checks through the CLI and the e2e step (D-150, D-151)', () 
   });
 
   it('the rendered step fails a route with no switch, fonts or requests line, and a storage key outside the two', async () => {
-    const missing = await e2e(renderedTree(), {}, { lines: siteLines({}, [], { FONTS: (route) => (route === UNKNOWN_PATH ? undefined : healthyFonts(route)) }) });
+    const missing = await e2e(renderedTree(), {}, { lines: siteLines({}, {},{ FONTS: (route) => (route === UNKNOWN_PATH ? undefined : healthyFonts(route)) }) });
     expect(missing.code).toBe(1);
     expect(missing.lines).toContain(E2E_MESSAGES.renderedFailed('FONTS', E2E_MESSAGES.renderedMissingRoute('FONTS', UNKNOWN_PATH)));
     const storage = await e2e(renderedTree(), {}, { lines: siteLines({ STORAGE: { local: ['fothering-theme', 'other'], session: [] } }) });
@@ -1885,9 +1910,20 @@ describe('the built checks through the CLI and the e2e step (D-150, D-151)', () 
 
   it('the rendered step fails a Content Security Policy console error (C5)', async () => {
     const csp = "Applying inline style violates the following Content Security Policy directive 'default-src 'self''.";
-    const { code, lines } = await e2e(renderedTree(), {}, { lines: siteLines({}, [csp]) });
+    const { code, lines } = await e2e(renderedTree(), {}, { lines: siteLines({}, { console: [csp] }) });
     expect(code).toBe(1);
     expect(lines).toContain(E2E_MESSAGES.renderedFailed('CONSOLE', E2E_MESSAGES.cspViolation(csp)));
+  });
+
+  it('the rendered step fails an uncaught page exception by name while the console check stays clean', async () => {
+    const thrown = { name: 'TypeError', message: "Cannot read properties of null (reading 'addEventListener')", url: 'http://127.0.0.1:4000/replay/' };
+    const { code, lines } = await e2e(renderedTree(), {}, { lines: siteLines({}, { page: [thrown] }) });
+    expect(code).toBe(1);
+    expect(lines).toContain(E2E_MESSAGES.renderedFailed('PAGEERROR', E2E_MESSAGES.pageError(thrown.name, thrown.message, thrown.url)));
+    expect(lines).toContain(E2E_MESSAGES.renderedOk('CONSOLE', 'no console error, no Content Security Policy violation'));
+    const unreadable = await e2e(renderedTree(), {}, { lines: [...siteLines(), 'PAGEERROR {not json'] });
+    expect(unreadable.code).toBe(1);
+    expect(unreadable.lines).toContain(E2E_MESSAGES.renderedFailed('PAGEERROR', E2E_MESSAGES.pageError('unreadable record', 'PAGEERROR {not json', '')));
   });
 
   it('the rendered step fails a missing check line and a malformed one by name', async () => {
@@ -2014,7 +2050,7 @@ describe('the built checks through the CLI and the e2e step (D-150, D-151)', () 
       clientSecrets: [2], tooManyFiles: [20_000, 20_000], fileTooLarge: ['f', 1, 1], secondBuildFailed: [1, 'x'],
       buildDiffers: ['f'], buildMissing: ['f', 'd'],
       themeNotTaken: ['dark', '#000000', '#0F1316'], themeAttribute: [null, 'dark'], deviceAttribute: ['dark'], deviceStill: ['#000000'],
-      pinLost: [null, '#000000'], cspViolation: ['x'], consoleError: ['x'], renderedOk: ['THEME', 'x'], renderedFailed: ['THEME', 'x'],
+      pinLost: [null, '#000000'], cspViolation: ['x'], consoleError: ['x'], pageError: ['TypeError', 'x', ''], renderedOk: ['THEME', 'x'], renderedFailed: ['THEME', 'x'],
       renderedMissing: ['THEME'], renderedMalformed: ['THEME x'], renderedFailures: [1, 'x'],
       renderedMissingRoute: ['FONTS', '/'], deviceStored: ['dark'], choiceMissing: ['dark'], choiceNotStored: ['light', null],
       choiceNotKept: ['dark', null, null], osNotFollowed: ['#F5F7F8', '#F5F7F8', '#F5F7F8', '#0F1316'], invalidMissing: ['DARK'],

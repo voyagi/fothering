@@ -17,6 +17,12 @@ page.on('console', (message) => {
   const location = message.location();
   consoleErrors.push({ text: message.text(), url: location && location.url ? location.url : '' });
 });
+// An uncaught exception never reaches the console listener: the browser raises it as pageerror.
+const pageErrors = [];
+page.on('pageerror', (error) => {
+  const message = error && error.message !== undefined ? error.message : error;
+  pageErrors.push({ name: error && error.name ? String(error.name) : '', message: String(message), url: page.url() });
+});
 let requests = [];
 page.on('request', (request) => {
   requests.push(request.url());
@@ -619,5 +625,6 @@ const storage = await page.evaluate(() => {
 });
 console.log('STORAGE ' + JSON.stringify(storage));
 
+for (const error of pageErrors) console.log('PAGEERROR ' + JSON.stringify(error));
 for (const error of consoleErrors) console.log('CONSOLE ' + JSON.stringify({ type: 'error', text: error.text, url: error.url }));
 console.log('done');

@@ -246,12 +246,25 @@ export function pinVerdict(before: ThemeReading, after: ThemeReading): Verdict {
 const CSP_REPORT = /Content Security Policy/i;
 
 // C5: Chromium reports a blocked inline script or style only as a console error. Any other console
-// error fails too, since nothing on these pages may throw or fail to load.
+// error fails too, since nothing on these pages may fail to load.
 export function consoleVerdict(errors: readonly string[]): Verdict {
   const first = errors[0];
   if (first === undefined) return { ok: true };
   const csp = errors.find((text) => CSP_REPORT.test(text));
   return { ok: false, reason: csp === undefined ? E2E_MESSAGES.consoleError(first) : E2E_MESSAGES.cspViolation(csp) };
+}
+
+export interface PageErrorRecord {
+  readonly name: string;
+  readonly message: string;
+  readonly url: string;
+}
+
+// An uncaught exception never arrives as a console message: the browser raises it as a pageerror
+// event, which the driver prints as its own PAGEERROR line. Nothing on these pages may throw.
+export function pageErrorVerdict(errors: readonly PageErrorRecord[]): Verdict {
+  const first = errors[0];
+  return first === undefined ? { ok: true } : { ok: false, reason: E2E_MESSAGES.pageError(first.name, first.message, first.url) };
 }
 
 export interface ChosenTheme {
@@ -1216,6 +1229,8 @@ export const E2E_MESSAGES = Object.freeze({
   pinLost: (dataTheme: string | null, ground: string) => `the stored Dark did not hold after the OS turned light: data-theme ${dataTheme ?? 'absent'}, --ground ${ground}`,
   cspViolation: (text: string) => `the page reported a Content Security Policy violation: ${text.slice(0, 200)}`,
   consoleError: (text: string) => `the page logged a console error: ${text.slice(0, 200)}`,
+  pageError: (name: string, message: string, url: string) =>
+    `the page threw an uncaught ${name === '' ? 'exception' : name}${url === '' ? '' : ` on ${url}`}: ${message.slice(0, 200)}`,
   renderedOk: (check: string, detail: string) => `[e2e] rendered ${check}: ok, ${detail}`,
   renderedFailed: (check: string, reason: string) => `[e2e] rendered ${check}: failed: ${reason}`,
   renderedMissing: (check: string) => `the driver printed no ${check} line, so the check did not run`,
@@ -1894,6 +1909,13 @@ const consoleRecord = (text: string): { readonly text: string; readonly url: str
   return { text: parsed.text, url: typeof parsed.url === 'string' ? parsed.url : '' };
 };
 
+// A PAGEERROR line that does not parse still names a throw, so it fails with its own text.
+const pageErrorRecord = (text: string): PageErrorRecord => {
+  const parsed = parseJson(text.slice('PAGEERROR '.length));
+  if (!isObject(parsed) || typeof parsed.message !== 'string') return { name: 'unreadable record', message: text, url: '' };
+  return { name: typeof parsed.name === 'string' ? parsed.name : '', message: parsed.message, url: typeof parsed.url === 'string' ? parsed.url : '' };
+};
+
 function judgeRendered(run: DriverRun, routes: readonly string[], print: (line: string) => void, privacyText: string | null): string | null {
   const printed = printedLines(run);
   const [stopped] = driverRunFailures(run, RENDERED_LABEL, printed);
@@ -1901,12 +1923,14 @@ function judgeRendered(run: DriverRun, routes: readonly string[], print: (line: 
   const records = new Map<string, string>();
   const routeLines = new Map<string, string[]>([...ROUTE_CHECKS, ...MEASURE_CHECKS, ...REPLAY_CHECKS].map((check) => [check, []]));
   const consoleErrors: string[] = [];
+  const pageErrors: PageErrorRecord[] = [];
   for (const text of printed) {
     const kind = text.split(' ', 1)[0] ?? '';
     if (kind === 'CONSOLE') {
       const record = consoleRecord(text);
       if (!isExpectedNotFound(record)) consoleErrors.push(record.text);
     }
+    else if (kind === 'PAGEERROR') pageErrors.push(pageErrorRecord(text));
     else if ((RENDERED_CHECKS as readonly string[]).includes(kind) || kind === 'STORAGE') records.set(kind, text);
     else routeLines.get(kind)?.push(text);
   }
@@ -1927,6 +1951,7 @@ function judgeRendered(run: DriverRun, routes: readonly string[], print: (line: 
       `the stacked board held one height with the tag's place drawn, the step 2 schedule stayed inside its panel, log cells shared a baseline, log headers took the label style, every API name in the log was a mono identifier, no step scrolled sideways and identifiers computed 500 and broke only after a dot or between an API name's words on ${REPLAY} at ${REPLAY_LAYOUT_WIDTHS.join(', ')} px`,
       REPLAY_LAYOUT_WIDTHS)],
     ['STORAGE', judgeStorage(records.get('STORAGE'), privacyText)],
+    ['PAGEERROR', { verdict: pageErrorVerdict(pageErrors), detail: 'no uncaught exception on any page' }],
     ['CONSOLE', { verdict: consoleVerdict(consoleErrors), detail: 'no console error, no Content Security Policy violation' }],
   ];
   const failed: string[] = [];
@@ -1944,8 +1969,8 @@ function judgeRendered(run: DriverRun, routes: readonly string[], print: (line: 
 
 // D-132's rendered layer under the built _headers (C5, C6): on the landing page a stored Dark
 // before first paint, Device following the OS live and the Dark pin (AC-E28); on every built route
-// and the 404 page the switch, the faces and the request origins; then the storage keys and every
-// console error.
+// and the 404 page the switch, the faces and the request origins; then the storage keys, every
+// uncaught page exception and every console error.
 async function renderedStep(options: SiteE2eOptions, dist: string, print: (line: string) => void): Promise<string | null> {
   const driver = locateDriver(options.globalModules, join(options.repoRoot, 'scripts', 'site.devbrowser.js'));
   if (typeof driver === 'string') return driver;
