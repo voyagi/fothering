@@ -13,6 +13,15 @@ import {
 const SNAPSHOT_URL = new URL('../permissions.json', import.meta.url);
 
 const SES_READS = ['ses:GetConfigurationSetEventDestinations', 'ses:GetEmailIdentity', 'ses:ListConfigurationSets', 'ses:ListEmailIdentities'];
+const PAUSE_ACTIONS = ['ses:GetConfigurationSet', 'ses:PutConfigurationSetSendingOptions'];
+
+// Written out rather than imported, so a change to the Aspect's own list cannot pass by moving this
+// expectation with it.
+const ACCOUNT_LEVEL_ACTIONS = ['ses:PutAccountSendingAttributes', 'ses:UpdateAccountSendingEnabled', 'ses:UpdateConfigurationSetSendingEnabled'];
+const ACCOUNT_SENDING_DENY = {
+  PolicyName: 'AccountSendingDeny',
+  PolicyDocument: { Version: '2012-10-17', Statement: [{ Effect: 'Deny', Action: ACCOUNT_LEVEL_ACTIONS, Resource: '*' }] },
+};
 
 function committedSnapshot(): PermissionEntry[] {
   return JSON.parse(readFileSync(SNAPSHOT_URL, 'utf8')) as PermissionEntry[];
@@ -48,7 +57,7 @@ function rolesOf(entries: readonly PermissionEntry[], stack: string, prefix: str
 }
 
 function actionsOf(entries: readonly PermissionEntry[]): string[] {
-  return [...new Set(entries.filter((entry) => entry.kind === 'permission').map((entry) => entry.action))].sort();
+  return [...new Set(entries.filter((entry) => entry.kind === 'permission' && entry.effect === 'Allow').map((entry) => entry.action))].sort();
 }
 
 describe('the permissions snapshot', () => {
@@ -59,7 +68,7 @@ describe('the permissions snapshot', () => {
     synthesized = collectPermissions(templates);
   }, 60_000);
 
-  it('equals the permissions the three stacks synthesize, in both directions', () => {
+  it('equals the permissions the four stacks synthesize, in both directions', () => {
     const committed = committedSnapshot();
     expect(committed.length).toBeGreaterThan(0);
     expect(diffPermissions(committed, synthesized)).toEqual({ missing: [], extra: [] });
@@ -89,8 +98,8 @@ describe('the permissions snapshot', () => {
     expect(widenedDiff.missing).toHaveLength(1);
     expect(widenedDiff.extra.map((entry) => entry.principal)).toEqual(['{"AWS":"*"}']);
 
-    // The committed file holds no Deny, so this pair is built from a plant of its own: the same
-    // statement as a Deny, then as an Allow.
+    // The committed Deny entries are all account-level ones on *, so this pair is built from a plant of
+    // its own: the same table statement as a Deny, then as an Allow.
     const denied = clone(templates);
     const denyStatement = statementIn(denied, 'FotheringIngest', 'AWS::IAM::Policy', 'dynamodb:PutItem');
     denyStatement.Effect = 'Deny';
@@ -133,14 +142,45 @@ describe('the permissions snapshot', () => {
     );
   });
 
-  it('holds no SES action outside the four reads, and those only on the detection role', () => {
-    const sesEntries = synthesized.filter((entry) => entry.action.toLowerCase().startsWith('ses:'));
+  it('holds exactly the actions of the action role', () => {
+    expect(actionsOf(rolesOf(synthesized, 'FotheringAction', 'ActionRole')).join(',')).toBe(
+      'dynamodb:GetItem,dynamodb:PutItem,dynamodb:Query,dynamodb:UpdateItem,logs:CreateLogStream,logs:PutLogEvents,ses:GetConfigurationSet,ses:GetConfigurationSetEventDestinations,ses:GetEmailIdentity,ses:ListConfigurationSets,ses:ListEmailIdentities,ses:PutConfigurationSetSendingOptions',
+    );
+  });
+
+  it('allows SES actions on the detection and action roles only: the four reads, and on the action role the pause and its read-back', () => {
+    const sesEntries = synthesized.filter((entry) => entry.effect === 'Allow' && entry.action.toLowerCase().startsWith('ses:'));
     expect(sesEntries.length).toBeGreaterThan(0);
     for (const entry of sesEntries) {
-      expect(entry.stack).toBe('FotheringDetection');
-      expect(entry.role).toMatch(/^DetectRole/);
-      expect(SES_READS).toContain(entry.action);
+      expect(`${entry.stack}/${entry.role.replace(/[0-9A-F]{8}$/, '')}`).toMatch(/^(FotheringDetection\/DetectRole|FotheringAction\/ActionRole)$/);
+      expect(entry.stack === 'FotheringAction' ? [...SES_READS, ...PAUSE_ACTIONS] : SES_READS).toContain(entry.action);
     }
+  });
+
+  it('gives every role in the four stacks the AccountSendingDeny inline policy, beside the policies it already held', () => {
+    let roles = 0;
+    for (const [stack, template] of Object.entries(templates)) {
+      for (const [logicalId, resource] of Object.entries(template.Resources ?? {})) {
+        if (resource.Type !== 'AWS::IAM::Role') continue;
+        roles += 1;
+        const policies = (resource.Properties?.Policies ?? []) as Array<{ PolicyName: string }>;
+        expect(policies.map((policy) => policy.PolicyName), `${stack}/${logicalId} policy names`).toContain('AccountSendingDeny');
+        expect(policies).toContainEqual(ACCOUNT_SENDING_DENY);
+        expect(policies.filter((policy) => policy.PolicyName === 'AccountSendingDeny')).toHaveLength(1);
+      }
+    }
+    expect(roles).toBe(5);
+  });
+
+  it('holds Deny entries only for the account-level actions on *, three per role, and every other permission entry is Allow', () => {
+    const denies = synthesized.filter((entry) => entry.kind === 'permission' && entry.effect === 'Deny');
+    expect(denies).toHaveLength(15);
+    for (const entry of denies) {
+      expect(ACCOUNT_LEVEL_ACTIONS).toContain(entry.action);
+      expect(entry.resource).toBe('"*"');
+      expect(entry.condition).toBeNull();
+    }
+    for (const entry of synthesized.filter((candidate) => candidate.kind === 'permission' && candidate.effect !== 'Deny')) expect(entry.effect).toBe('Allow');
   });
 
   it('holds exactly the actions of the ingest, forget and runtime roles', () => {
@@ -166,6 +206,7 @@ describe('the permissions snapshot', () => {
   it('records who may assume each role, with the runtime role tied to this account', () => {
     const trust = synthesized.filter((entry) => entry.kind === 'trust');
     expect(trust.map((entry) => [entry.role.replace(/[0-9A-F]{8}$/, ''), entry.principal, entry.action])).toEqual([
+      ['ActionRole', '{"Service":"lambda.amazonaws.com"}', 'sts:AssumeRole'],
       ['DetectRole', '{"Service":"lambda.amazonaws.com"}', 'sts:AssumeRole'],
       ['ForgetRole', '{"Service":"lambda.amazonaws.com"}', 'sts:AssumeRole'],
       ['IngestRole', '{"Service":"lambda.amazonaws.com"}', 'sts:AssumeRole'],
@@ -175,7 +216,6 @@ describe('the permissions snapshot', () => {
     expect(runtimeTrust?.condition).toBe(
       '{"ArnLike":{"aws:SourceArn":{"Fn::Join":["",["arn:aws:bedrock-agentcore:eu-central-1:",{"Ref":"AWS::AccountId"},":*"]]}},"StringEquals":{"aws:SourceAccount":{"Ref":"AWS::AccountId"}}}',
     );
-    for (const entry of synthesized.filter((candidate) => candidate.kind === 'permission')) expect(entry.effect).toBe('Allow');
   });
 });
 
