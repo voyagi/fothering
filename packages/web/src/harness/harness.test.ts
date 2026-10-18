@@ -1266,6 +1266,7 @@ describe('noScriptVerdict (AC-10, AC-E7)', () => {
 
 // Stacked (960 and below) the board keeps one height and draws the tag's place off the paused step;
 // beside the story the tag simply comes off, so the board's height follows the step.
+const HEADER_TYPE = '600 12px 0.6px uppercase';
 const healthyLayout = (width: number): ReplayLayoutReading => ({
   route: '/replay/',
   width,
@@ -1285,6 +1286,7 @@ const healthyLayout = (width: number): ReplayLayoutReading => ({
     { text: '14:01:07', weight: '500', lines: ['14:01:07'] },
     { text: 'SendingOptions.SendingEnabled', weight: '500', lines: ['SendingOptions.', 'SendingEnabled'] },
   ],
+  logHeaders: width > 960 ? ['Time UTC', 'Kind', 'Lane', 'Detail'].map((text) => ({ text, type: HEADER_TYPE })) : [],
 });
 const layoutReason = (reading: ReplayLayoutReading): string => {
   const verdict = replayLayoutVerdict(reading);
@@ -1345,6 +1347,11 @@ describe('replayLayoutVerdict (AC-6, UI-SPEC 6 and 10.3)', () => {
     const identifiers = [{ text: 'fothering-bulk', weight: '600', lines: ['fothering-bulk'] }];
     expect(layoutReason({ ...healthyLayout(1440), identifiers })).toBe(E2E_MESSAGES.layoutIdentifierWeight(1440, 'fothering-bulk', '600'));
     expect(layoutReason({ ...healthyLayout(320), identifiers: [] })).toBe(E2E_MESSAGES.layoutIdentifiersMissing(320));
+  });
+
+  it('fails a log header set unlike the other log headers', () => {
+    const logHeaders = [{ text: 'Time UTC', type: '500 13px normal none' }, ...['Kind', 'Lane', 'Detail'].map((text) => ({ text, type: HEADER_TYPE }))];
+    expect(layoutReason({ ...healthyLayout(1280), logHeaders })).toBe(E2E_MESSAGES.layoutHeaderType(1280, 'Time UTC', '500 13px normal none', HEADER_TYPE));
   });
 
   it('fails an identifier that breaks anywhere but right after a dot', () => {
@@ -1930,7 +1937,7 @@ describe('the built checks through the CLI and the e2e step (D-150, D-151)', () 
       noScriptPanels: [320, ['1']], noScriptControls: [320, 1], noScriptBoard: [320, '3', false], noScriptNoBoard: [320], noScriptTag: [320],
       layoutStepsMissing: [320], layoutBoardHeight: [960, [638, 900]], layoutPhantomMissing: [960, 1], layoutPhantomShown: [1280, 2], layoutPhantomExposed: [960, 1],
       layoutEvidenceMissing: [961], layoutEvidenceSpill: [1280, 1220, 1201], layoutLogMissing: [1024], layoutBaseline: [1280, '14:01:07', [1498, 1500]],
-      layoutIdentifiersMissing: [320], layoutIdentifierWeight: [1440, 'fothering-bulk', '600'], layoutIdentifierBreak: [960, 'a-b', ['a-', 'b']],
+      layoutIdentifiersMissing: [320], layoutIdentifierWeight: [1440, 'fothering-bulk', '600'], layoutIdentifierBreak: [960, 'a-b', ['a-', 'b']], layoutHeaderType: [1280, 'Time UTC', '500 13px', '600 12px'],
       copyStampMissing: ['/'], copyStamp: ['/', 'FIXTURE RUN', 'SIMULATOR RUN'], copyCauseMissing: ['/', 'batch=x'], copyOldCause: ['/', 'x'],
       copyVariantFailed: ['cause', 1, 'x'], copyVariantUnjudged: ['cause'],
     };

@@ -634,6 +634,8 @@ export interface ReplayLayoutReading {
   // Every identifier shown on a step (the log's mono cells included): its computed weight and the
   // rendered lines it occupies.
   readonly identifiers: readonly { readonly text: string; readonly weight: string; readonly lines: readonly string[] }[];
+  // The computed type (weight, size, tracking, case) of each column header in the log, where it shows.
+  readonly logHeaders: readonly { readonly text: string; readonly type: string }[];
 }
 
 const STACKED_BOARD_WIDTH = 960;
@@ -1188,6 +1190,7 @@ export const E2E_MESSAGES = Object.freeze({
   layoutBaseline: (width: number, header: string, baselines: readonly number[]) => `at ${width} px the log row ${header} sets its cells on baselines ${baselines.join(', ')}, one baseline within 1 px expected`,
   layoutIdentifiersMissing: (width: number) => `at ${width} px the run measured no identifier in the evidence schedule or the log`,
   layoutIdentifierWeight: (width: number, text: string, weight: string) => `at ${width} px the identifier ${text} computes weight ${weight}, 500 expected`,
+  layoutHeaderType: (width: number, text: string, type: string, expected: string) => `at ${width} px the log header ${text} is set ${type}, unlike its sibling headers (${expected})`,
   layoutIdentifierBreak: (width: number, text: string, lines: readonly string[]) => `at ${width} px ${E2E_MESSAGES.identifierBreak(text, lines)}`,
   copyStampMissing: (route: string) => `${route} carries no provenance stamp in the project copy`,
   copyStamp: (route: string, found: string, expected: string) => `the stamp on ${route} reads ${found}, ${expected} expected for the copy's provenance`,
