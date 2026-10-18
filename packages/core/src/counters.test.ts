@@ -46,9 +46,15 @@ describe('the counter module only reserves and records (AC-22)', () => {
     expect(functions.join(',')).toBe('recordUsage,reserveInvocation,reserveLaneAttempt');
   });
 
-  it('never lowers, resets or deletes a counter attribute over any sequence of reserve and record calls', async () => {
+  it('never lowers, resets or deletes a counter attribute over any sequence of reserve, record and lane attempt calls', async () => {
     const step = fc.oneof(
       fc.record({ kind: fc.constant('reserve' as const), incident: fc.integer({ min: 0, max: 2 }), dayOffsetMs: fc.constantFrom(0, 86_400_000) }),
+      // D-99: a lane-hour counter is a counter too, so it joins the sequences.
+      fc.record({
+        kind: fc.constant('lane' as const),
+        configurationSet: fc.constantFrom('fothering-bulk', 'fothering-transactional'),
+        hourOffsetMs: fc.constantFrom(0, 3_600_000),
+      }),
       fc.record({
         kind: fc.constant('record' as const),
         incident: fc.integer({ min: 0, max: 2 }),
@@ -63,11 +69,13 @@ describe('the counter module only reserves and records (AC-22)', () => {
         const { table, store } = storeOver();
         let previous = new Map<string, Record<string, number>>();
         for (const action of steps) {
-          const incidentId = incidentIdOf(action.incident);
-          const nowMs = NOW_MS + action.dayOffsetMs;
-          if (action.kind === 'reserve') await reserveInvocation(store, { incidentId, nowMs });
-          else {
-            const input = { incidentId, reservedAtMs: nowMs, usage: { inputTokens: action.inputTokens, outputTokens: action.outputTokens }, modelCalls: action.modelCalls };
+          if (action.kind === 'lane') {
+            await reserveLaneAttempt(store, { configurationSet: action.configurationSet, nowMs: NOW_MS + action.hourOffsetMs });
+          } else if (action.kind === 'reserve') {
+            await reserveInvocation(store, { incidentId: incidentIdOf(action.incident), nowMs: NOW_MS + action.dayOffsetMs });
+          } else {
+            const usage = { inputTokens: action.inputTokens, outputTokens: action.outputTokens };
+            const input = { incidentId: incidentIdOf(action.incident), reservedAtMs: NOW_MS + action.dayOffsetMs, usage, modelCalls: action.modelCalls };
             await recordUsage(store, input).catch((error: unknown) => {
               if (!(error instanceof RangeError)) throw error;
             });

@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import fc from 'fast-check';
 import { BUCKET_MS, bucketStartMs } from '@fothering/core/buckets';
 import { ACTION_FUNCTION_TIMEOUT_MS, HOLD_CHECK_DELAY_MS, HOLD_MS, LANE_HOUR_ATTEMPT_CAP } from '@fothering/core/close-values';
 import { closureClaimItem, closureKey, parseClosure, type Closure } from '@fothering/core/closure';
@@ -12,6 +13,7 @@ import {
   type EvidenceRecordInput,
 } from '@fothering/core/evidence-record';
 import { RETENTION_SECONDS } from '@fothering/core/records';
+import { propertySeed } from '@fothering/core/test/property-seed';
 import { spikeWindowFor, type BucketWindow, type LaneFold } from '@fothering/core/window-fold';
 import { createFixtureTableState } from '@fothering/providers/fixtures/ingest-ports';
 import { createFixtureSesState } from '@fothering/providers/fixtures/later-ports';
@@ -1037,6 +1039,107 @@ describe('no refusal and no dry run takes a lane-hour attempt (AC-E18)', () => {
     await runActionCycle(withDryRunWrites(deps, []));
     expect((await storedClosure(deps, INCIDENT_ID, T))?.outcome).toBe('dry-run');
     expect(await laneHourItem(deps, T)).toBeUndefined();
+  });
+});
+
+describe('concurrent runs leave one closure, at most one pause and one hold-check outcome (R4)', () => {
+  it('leaves one CLOSURE item and at most one put across 8 roots run together, and a ninth run makes no SES call (AC-9)', async () => {
+    const { store } = await seeded();
+    const sesState = createFixtureSesState();
+    const roots = Array.from({ length: 8 }, () => buildTestActionRoot({ store, sesState, now: () => T, yieldBetweenOperations: true }).deps);
+
+    await Promise.all(roots.map((deps) => runActionCycle(deps)));
+
+    const closures = [...store.items.values()].filter((item) => {
+      const { pk, sk } = item as DecisionStoreItem;
+      return pk === `INCIDENT#${INCIDENT_ID}` && sk === 'CLOSURE';
+    });
+    expect(closures).toHaveLength(1);
+    expect(putsOf(sesState).length).toBeLessThanOrEqual(1);
+    expect((await storedClosure(buildTestActionRoot({ store, now: () => T }).deps, INCIDENT_ID, T))?.outcome).toBe('paused');
+    const callsBefore = sesState.calls.length;
+    await runActionCycle(buildTestActionRoot({ store, sesState, now: () => T + 60_000 }).deps);
+    expect(sesState.calls.slice(callsBefore)).toEqual([]);
+  });
+
+  it('makes one versioned update to closed when two hold checks race on one paused closure (AC-E6)', async () => {
+    const { store } = await pausedAtT();
+    const closedWrites: string[] = [];
+    const counted = (deps: ActionDeps): ActionDeps => {
+      const inner = deps.ports.decisionStore;
+      return withStore(deps, {
+        updateIfVersion: async (key, expectedVersion, attributes, nowMs, expected) => {
+          const result = await inner.updateIfVersion(key, expectedVersion, attributes, nowMs, expected);
+          if (attributes.outcome === 'closed') closedWrites.push(result);
+          return result;
+        },
+      });
+    };
+    const roots = [0, 1].map(() => counted(buildTestActionRoot({ store, now: () => HOLD_CHECK_MS, yieldBetweenOperations: true }).deps));
+
+    await Promise.all(roots.map((deps) => runActionCycle(deps)));
+
+    expect(closedWrites.filter((result) => result === 'updated')).toEqual(['updated']);
+    expect((await storedClosure(buildTestActionRoot({ store, now: () => HOLD_CHECK_MS }).deps, INCIDENT_ID, HOLD_CHECK_MS))?.outcome).toBe('closed');
+  });
+
+  // R2 precision backstop: the timestamp travels as an ISO string, as SES writes mail.timestamp, and is
+  // compared only as the integer Date.parse gives back.
+  it('gives not-holding exactly when the one Send record is at or after the hold end, over ISO timestamps near it', async () => {
+    const { store } = await pausedAtT();
+    const paused = structuredClone(store.items);
+    await fc.assert(
+      fc.asyncProperty(fc.oneof(fc.constantFrom(-1, 0, 1), fc.integer({ min: -3_000, max: 3_000 })), async (offsetMs) => {
+        const { deps } = buildTestActionRoot({ store: { items: structuredClone(paused) }, now: () => HOLD_CHECK_MS });
+        const mailTimestampMs = Date.parse(new Date(HOLD_END_MS + offsetMs).toISOString());
+        await deps.ports.eventStore.putIfAbsent(sendRecordAt(BULK, mailTimestampMs, 'boundary-send'));
+        await runActionCycle(deps);
+        expect((await storedClosure(deps, INCIDENT_ID, HOLD_CHECK_MS))?.outcome).toBe(offsetMs >= 0 ? 'not-holding' : 'closed');
+      }),
+      { seed: propertySeed(), numRuns: 60 },
+    );
+  });
+});
+
+const FRESHNESS_CASES = ['fresh', 'newer-incident-elsewhere', 'marker-moved', 'state-closed', 'too-old'] as const;
+const CLOSEABILITY_CASES = ['complete', 'default-set', 'missing-event-type'] as const;
+
+function recordingsFor(closeability: (typeof CLOSEABILITY_CASES)[number]): readonly Recording[] {
+  if (closeability === 'default-set') {
+    return withRecording('ses.getEmailIdentity', 'example.org', { defaultConfigurationSet: BULK, dkimStatus: 'SUCCESS', dkimSigningEnabled: true, identityType: 'DOMAIN' });
+  }
+  return closeability === 'missing-event-type' ? bulkDestinationWithout('DELIVERY_DELAY') : COMPLETE_SES_RECORDINGS;
+}
+
+describe('no combination of failed preconditions pauses (AC-P1)', () => {
+  it('puts exactly once when the decision, the gate, freshness, closeability and the cap all pass, and never otherwise', async () => {
+    const { root } = await seeded();
+    const record = await storedRecord(root().deps, INCIDENT_ID, NOW_MS);
+    const optionId = record.approvedOptions[0]?.optionId;
+    await fc.assert(
+      fc.asyncProperty(
+        fc.constantFrom('close' as const, 'unknown' as const),
+        fc.constantFrom('honest' as const, 'option-not-approved' as const),
+        fc.constantFrom(...FRESHNESS_CASES),
+        fc.constantFrom(...CLOSEABILITY_CASES),
+        fc.integer({ min: 0, max: LANE_HOUR_ATTEMPT_CAP }),
+        async (decision, gate, freshness, closeability, reserved) => {
+          const nowMs = freshness === 'too-old' ? record.window.toBucketMs + 3_600_001 : T;
+          const { deps, sesState } = buildTestActionRoot({ store: createFixtureTableState(), now: () => nowMs, recordings: recordingsFor(closeability) });
+          const decided = decision === 'close' ? { outcome: 'close', optionId: gate === 'honest' ? optionId : 'option-planted' } : { outcome: 'unknown' };
+          const stateStatus = freshness === 'state-closed' ? 'closed' : 'open';
+          await plantIncident(deps, { configurationSet: BULK, incidentId: INCIDENT_ID, openingWindow: record.window, stateStatus, record, decision: { ...decided, explanation: 'planted' }, nowMs: NOW_MS });
+          if (freshness === 'newer-incident-elsewhere') await plantReceiptIncident(deps, spikeWindowFor(LATER_MS));
+          await prefillLaneAttempts(deps, reserved, nowMs);
+
+          await runActionCycle(freshness === 'marker-moved' ? afterClaim(deps, () => moveMarker(deps, BULK, NEXT_BULK_INCIDENT_ID, nowMs)) : deps);
+
+          const allPass = decision === 'close' && gate === 'honest' && freshness === 'fresh' && closeability === 'complete' && reserved < LANE_HOUR_ATTEMPT_CAP;
+          expect(putsOf(sesState)).toHaveLength(allPass ? 1 : 0);
+        },
+      ),
+      { seed: propertySeed(), numRuns: 40 },
+    );
   });
 });
 

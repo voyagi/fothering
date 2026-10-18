@@ -244,6 +244,8 @@ export interface FixtureOptions {
   transactionConflicts?: number;
   /** The fixture SES's sending state and scripts, shared like store so two roots see one SES. */
   sesState?: FixtureSesState;
+  /** Off by default. Every store operation first yields a macrotask, never between its check and its set. */
+  yieldBetweenOperations?: boolean;
 }
 
 /**

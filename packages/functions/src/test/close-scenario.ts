@@ -124,6 +124,8 @@ export interface TestActionRootInput {
   dryRunSink?: DryRunSink;
   laneMap?: LaneMap;
   recordings?: readonly Recording[];
+  /** Every fixture store operation yields a macrotask first, so roots sharing the store interleave (Pitfall 9). */
+  yieldBetweenOperations?: boolean;
 }
 
 export interface TestActionRoot {
@@ -139,7 +141,12 @@ export function buildTestActionRoot(input: TestActionRootInput): TestActionRoot 
   const deps = buildActionRoot({
     runtimeContext: 'test',
     switchValue: undefined,
-    fixtures: { store: input.store, sesState, recordings: { ses: input.recordings ?? COMPLETE_SES_RECORDINGS } },
+    fixtures: {
+      store: input.store,
+      sesState,
+      recordings: { ses: input.recordings ?? COMPLETE_SES_RECORDINGS },
+      ...(input.yieldBetweenOperations === undefined ? {} : { yieldBetweenOperations: input.yieldBetweenOperations }),
+    },
     now: input.now,
     wait: async (ms) => {
       waits.push(ms);
