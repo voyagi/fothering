@@ -221,6 +221,26 @@ describe('assertPublishable', () => {
     ]);
   });
 
+  it('refuses a simulator-captured artifact whose events are generated, naming the first one', () => {
+    const artifact: ReplayArtifact = { ...shipped(), provenance: 'simulator-captured' };
+    expect(errorsOf(assertPublishable(artifact, undefined))).toEqual([
+      "provenance is simulator-captured but events[0].provenance is generated. Record every event as simulator-captured, or label the artifact by what its events are.",
+    ]);
+  });
+
+  it('names the first event whose provenance differs from the artifact, for every non-live provenance', () => {
+    const base = shipped();
+    for (const label of ['doc-derived', 'simulator-captured', 'generated'] as const) {
+      const other = label === 'doc-derived' ? 'generated' : 'doc-derived';
+      const events = base.events.map((event, index) => ({ ...event, provenance: index === 2 ? other : label }));
+      const errors = errorsOf(assertPublishable({ ...base, provenance: label, events }, undefined));
+      expect(errors, label).toHaveLength(1);
+      expect(errors[0], label).toMatch(new RegExp(`^provenance is ${label} but events\\[2\\]\\.provenance is `));
+      const matching = base.events.map((event) => ({ ...event, provenance: label }));
+      expect(assertPublishable({ ...base, provenance: label, events: matching }, undefined), label).toEqual({ ok: true });
+    }
+  });
+
   it('reports every failing manifest item, not only the first', () => {
     const artifact = liveCopy();
     const manifest = { ...completeManifest(artifact), sesMessageIds: [], requestIds: [], accountId: '1' };
