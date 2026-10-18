@@ -191,11 +191,11 @@ function refusalWords(code: string): string {
   return Object.hasOwn(REASON_SENTENCES, code) ? REASON_SENTENCES[code as ConfigurationRefusal] : code;
 }
 
-// D-102 and AC-E25: the lanes as the act stored them, never a fresh read; the incident's own set is
-// told in what happened and never listed here.
-function openLines(closure: Closure): string[] {
-  const others = closure.lanes.filter((lane) => lane.configurationSet !== closure.configurationSet);
-  const lines = others.map((lane) => {
+// D-102 and AC-E25: the lanes as the act stored them, never a fresh read. After a pause the incident's
+// own set is told in what happened and left out here; when nothing was paused it stays open too.
+function openLines(closure: Closure, withOwnLane: boolean): string[] {
+  const listed = closure.lanes.filter((lane) => withOwnLane || lane.configurationSet !== closure.configurationSet);
+  const lines = listed.map((lane) => {
     const refusals = lane.configurationRefusals.map(refusalWords);
     const tail = refusals.length === 0 ? 'Nothing in its configuration stops Fothering from pausing it.' : refusals.join(' ');
     return `${lane.configurationSet}: ${LANE_STATE_WORDS[lane.state]}. ${tail}`;
@@ -228,14 +228,85 @@ function section(heading: string, lines: readonly string[]): EmailSection {
   return { heading, lines };
 }
 
-function closedSections(input: RenderInput): EmailSection[] {
+const UNCONFIRMED_READ_BACK: Readonly<Record<'threw' | 'missing', string>> = {
+  threw: 'did not complete',
+  missing: 'answered without a sending state',
+};
+
+function pauseUnknownLines(closure: Closure): string[] {
+  const { readBack } = closure;
+  if (readBack === 'threw' || readBack === 'missing') {
+    return [`The read-back at ${timeOf(closure.readBackAtMs)} ${UNCONFIRMED_READ_BACK[readBack]}, so Fothering cannot confirm the pause took.`];
+  }
+  return ['The run that requested it stopped before reading the set back, so Fothering cannot confirm the pause took.'];
+}
+
+function pauseFailedLines(closure: Closure): string[] {
+  const set = closure.configurationSet;
+  if (closure.readBack === true) {
+    return [`Read back at ${timeOf(closure.readBackAtMs)}: SES answered SendingEnabled true for ${set}, so the pause did not take and ${set} is still sending.`];
+  }
+  return [`SES did not accept the pause request, so the pause did not take and ${set} may still be sending.`];
+}
+
+function notHoldingLines(closure: Closure): string[] {
+  const set = closure.configurationSet;
+  const lines = [
+    `Fothering paused sending on the configuration set ${set}.`,
+    `Pause requested at ${timeOf(closure.pauseRequestedAtMs)}.`,
+    `Read back at ${timeOf(closure.readBackAtMs)}: SES answered SendingEnabled false for ${set}.`,
+    `Hold check at ${timeOf(closure.holdCheckedAtMs)}, Send records seen accepted on ${set} from ${timeOf(closure.holdEndMs)} through ${timeOf(closure.holdCheckedThroughMs)}: ${closure.sendsAfterHold ?? NOT_RECORDED}.`,
+    'Fothering cannot confirm the pause is holding.',
+  ];
+  if (closure.holdCheckedThroughMs !== closure.holdCheckedAtMs) lines.push('The check read the stored events only up to that time, since the run that checked came late.');
+  return lines;
+}
+
+function notConfirmedHappened(closure: Closure): string[] {
+  if (closure.outcome === 'not-holding') return notHoldingLines(closure);
+  const requested = `Fothering requested a pause of ${closure.configurationSet} at ${timeOf(closure.pauseRequestedAtMs)}.`;
+  return [requested, ...(closure.outcome === 'pause-failed' ? pauseFailedLines(closure) : pauseUnknownLines(closure))];
+}
+
+// A pause that did not take leaves the set sending, so there is nothing to reopen (D-111).
+function pausedSections(input: RenderInput, happened: readonly string[]): EmailSection[] {
   const set = input.closure.configurationSet;
+  const reopen = input.closure.outcome === 'pause-failed' ? [] : [section(SECTION_HEADINGS.reopen, reopenLines(set))];
   return [
-    section(SECTION_HEADINGS.happened, closedHappened(input.closure)),
+    section(SECTION_HEADINGS.happened, happened),
     section(SECTION_HEADINGS.saw, sawLines(input.record)),
-    section(SECTION_HEADINGS.open, openLines(input.closure)),
+    section(SECTION_HEADINGS.open, openLines(input.closure, false)),
     section(SECTION_HEADINGS.app, [PAUSED_APP_SENTENCE]),
-    section(SECTION_HEADINGS.reopen, reopenLines(set)),
+    ...reopen,
+    section(SECTION_HEADINGS.limits, [ACCOUNT_PAUSE_LIMIT_SENTENCE]),
+    section(SECTION_HEADINGS.reference, referenceLines(input)),
+  ];
+}
+
+// D-92: phase 2 stores an agent unknown and a cap-reached DECISION alike, and only the DECISION's own
+// reason tells them apart.
+function reasonCodeOf(input: RenderInput): ReasonCode {
+  const { reason } = input.closure;
+  if (reason === 'no-close' && input.decision?.reason === 'cap-reached') return 'cap-reached';
+  return reason !== null && Object.hasOwn(REASON_SENTENCES, reason) ? (reason as ReasonCode) : 'no-close';
+}
+
+// AC-E30: a record with neither a question nor a fix, or no record at all, still names the lane and the code.
+function foundLines(record: EvidenceRecord | undefined, configurationSet: string, code: ReasonCode): string[] {
+  const lines: string[] = [];
+  if (record !== undefined && record.question !== null) lines.push(record.question);
+  if (record !== undefined && record.fix !== null) lines.push(`Suggested fix: ${record.fix.text}`);
+  return lines.length > 0 ? lines : [`Lane: ${configurationSet}. Reason code: ${code}.`];
+}
+
+function unknownSections(input: RenderInput): EmailSection[] {
+  const set = input.closure.configurationSet;
+  const code = reasonCodeOf(input);
+  return [
+    section(SECTION_HEADINGS.happened, [`Fothering saw a spike on ${set}.`, 'Nothing was paused.', REASON_SENTENCES[code]]),
+    section(SECTION_HEADINGS.saw, sawLines(input.record)),
+    section(SECTION_HEADINGS.found, foundLines(input.record, set, code)),
+    section(SECTION_HEADINGS.open, openLines(input.closure, true)),
     section(SECTION_HEADINGS.limits, [ACCOUNT_PAUSE_LIMIT_SENTENCE]),
     section(SECTION_HEADINGS.reference, referenceLines(input)),
   ];
@@ -246,10 +317,21 @@ function textOf(sections: readonly EmailSection[]): string {
   return `${body}\n\n${AUTOMATED_SENDER_FOOTER}\n`;
 }
 
+function sectionsOf(kind: EmailKind, input: RenderInput): EmailSection[] {
+  if (kind === 'unknown') return unknownSections(input);
+  return pausedSections(input, kind === 'closed' ? closedHappened(input.closure) : notConfirmedHappened(input.closure));
+}
+
+function subjectTemplateOf(kind: EmailKind, outcome: ClosureOutcome): keyof typeof SUBJECTS {
+  if (kind === 'closed' || kind === 'unknown') return kind;
+  return outcome === 'not-holding' || outcome === 'pause-unknown' ? outcome : 'pause-failed';
+}
+
 /** D-109: undefined for an outcome that sends nothing. */
 export function renderOperatorEmail(input: RenderInput): RenderedEmail | undefined {
-  const kind = emailKindOf(input.closure.outcome);
-  if (kind !== 'closed') return undefined;
-  const sections = closedSections(input);
-  return { kind, subject: subjectFor('closed', input.closure.configurationSet), text: textOf(sections), sections };
+  const { outcome } = input.closure;
+  const kind = emailKindOf(outcome);
+  if (kind === undefined || outcome === null) return undefined;
+  const sections = sectionsOf(kind, input);
+  return { kind, subject: subjectFor(subjectTemplateOf(kind, outcome), input.closure.configurationSet), text: textOf(sections), sections };
 }

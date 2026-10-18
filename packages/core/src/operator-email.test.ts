@@ -402,17 +402,131 @@ describe('each kind has a fixed section order (AC-E28)', () => {
 
   it('renders the not-holding fixture exactly', () => {
     expect(render(NOT_HOLDING)?.kind).toBe('not-confirmed');
-    expect(render(NOT_HOLDING)?.text).toMatchInlineSnapshot();
+    expect(render(NOT_HOLDING)?.text).toMatchInlineSnapshot(`
+      "What happened
+      Fothering paused sending on the configuration set fothering-bulk.
+      Pause requested at 2026-10-11T12:03:00.000Z.
+      Read back at 2026-10-11T12:03:02.000Z: SES answered SendingEnabled false for fothering-bulk.
+      Hold check at 2026-10-11T12:09:00.000Z, Send records seen accepted on fothering-bulk from 2026-10-11T12:04:00.000Z through 2026-10-11T12:09:00.000Z: 2.
+      Fothering cannot confirm the pause is holding.
+
+      What Fothering saw
+      Evidence window: 2026-10-11T11:05:00.000Z to 2026-10-11T12:00:00.000Z.
+      Permanent bounces: 15 of 200 recipient-sends. Fothering lane hard-bounce ratio (permanent bounces over recipient-sends): 7.50%.
+      Complaints: 0 of 200 recipient-sends. Fothering lane complaint ratio (complaints over recipient-sends): 0.00%.
+      These ratios count only the events Fothering stores for this lane. They are not the reputation figures SES shows for the account.
+      Cause, batch import-0915: 15 permanent bounces and 0 complaints of 40 recipient-sends, hard-bounce ratio 37.50%, complaint ratio 0.00%.
+      Isolation verdict: confined.
+
+      What stays open
+      fothering-transactional: no incident is open on it. The lane map marks this set transactional, so Fothering never pauses it.
+      fothering-alerts: no incident is open on it. This set carries the operator email, so Fothering never pauses it. The lane map marks this set transactional, so Fothering never pauses it.
+
+      What your app sees
+      In a test send through a paused configuration set, SES refused the message with SendingPausedException, and the error message named the configuration set.
+
+      How to reopen
+      Find the name of the reopen function:
+      aws cloudformation describe-stacks \\
+        --region eu-central-1 \\
+        --stack-name FotheringAction \\
+        --query "Stacks[0].Outputs[?OutputKey=='ReopenFunctionName'].OutputValue" \\
+        --output text
+      Then run this, with that name in place of <ReopenFunctionName stack output>:
+      aws lambda invoke \\
+        --region eu-central-1 \\
+        --function-name <ReopenFunctionName stack output> \\
+        --cli-binary-format raw-in-base64-out \\
+        --cli-read-timeout 60 \\
+        --payload '{"configurationSet":"fothering-bulk"}' \\
+        result.json
+      Reopening a configuration set resets its SES reputation metrics, so the history SES keeps for fothering-bulk starts again.
+      Fothering pauses a lane at most once per incident, and an incident stays open while fothering-bulk keeps spiking and for at least 14 hours after it goes quiet, since SES can still report bounces from deliveries it retried for that long. If you reopen fothering-bulk inside that time and it spikes again, Fothering makes no new evidence record or decision, does not pause it again and sends no new email, so watch fothering-bulk yourself until then.
+
+      Limits
+      If AWS pauses sending for the whole account, this email cannot be sent either, so silence from Fothering is not a sign that all is well.
+
+      Reference
+      Incident: b438b20ed0d68cfbd10c0469111d7d6a
+      Evidence record hash: fac57751391000299915362daaa54d8b0b9621146c8116e53a618cd61d9714b6
+      Option: opt-72a061ae5504378bcdac5f73
+
+      Sent by Fothering, an automated agent. Replies to this address are not read by Fothering.
+      "
+    `);
   });
 
   it('renders the pause-failed fixture exactly', () => {
     expect(render(PAUSE_FAILED)?.kind).toBe('not-confirmed');
-    expect(render(PAUSE_FAILED)?.text).toMatchInlineSnapshot();
+    expect(render(PAUSE_FAILED)?.text).toMatchInlineSnapshot(`
+      "What happened
+      Fothering requested a pause of fothering-bulk at 2026-10-11T12:03:00.000Z.
+      Read back at 2026-10-11T12:03:02.000Z: SES answered SendingEnabled true for fothering-bulk, so the pause did not take and fothering-bulk is still sending.
+
+      What Fothering saw
+      Evidence window: 2026-10-11T11:05:00.000Z to 2026-10-11T12:00:00.000Z.
+      Permanent bounces: 15 of 200 recipient-sends. Fothering lane hard-bounce ratio (permanent bounces over recipient-sends): 7.50%.
+      Complaints: 0 of 200 recipient-sends. Fothering lane complaint ratio (complaints over recipient-sends): 0.00%.
+      These ratios count only the events Fothering stores for this lane. They are not the reputation figures SES shows for the account.
+      Cause, batch import-0915: 15 permanent bounces and 0 complaints of 40 recipient-sends, hard-bounce ratio 37.50%, complaint ratio 0.00%.
+      Isolation verdict: confined.
+
+      What stays open
+      fothering-transactional: no incident is open on it. The lane map marks this set transactional, so Fothering never pauses it.
+      fothering-alerts: no incident is open on it. This set carries the operator email, so Fothering never pauses it. The lane map marks this set transactional, so Fothering never pauses it.
+
+      What your app sees
+      In a test send through a paused configuration set, SES refused the message with SendingPausedException, and the error message named the configuration set.
+
+      Limits
+      If AWS pauses sending for the whole account, this email cannot be sent either, so silence from Fothering is not a sign that all is well.
+
+      Reference
+      Incident: b438b20ed0d68cfbd10c0469111d7d6a
+      Evidence record hash: fac57751391000299915362daaa54d8b0b9621146c8116e53a618cd61d9714b6
+      Option: opt-72a061ae5504378bcdac5f73
+
+      Sent by Fothering, an automated agent. Replies to this address are not read by Fothering.
+      "
+    `);
   });
 
   it('renders the unknown fixture exactly', () => {
     expect(render(refusedClosure('newer-incident-elsewhere'), CLOSE_DECISION, ASKING_RECORD)?.kind).toBe('unknown');
-    expect(render(refusedClosure('newer-incident-elsewhere'), CLOSE_DECISION, ASKING_RECORD)?.text).toMatchInlineSnapshot();
+    expect(render(refusedClosure('newer-incident-elsewhere'), CLOSE_DECISION, ASKING_RECORD)?.text).toMatchInlineSnapshot(`
+      "What happened
+      Fothering saw a spike on fothering-bulk.
+      Nothing was paused.
+      Another lane opened a newer incident after this evidence was gathered, so the evidence no longer described the account and Fothering paused nothing.
+
+      What Fothering saw
+      Evidence window: 2026-10-11T11:05:00.000Z to 2026-10-11T12:00:00.000Z.
+      Permanent bounces: 15 of 200 recipient-sends. Fothering lane hard-bounce ratio (permanent bounces over recipient-sends): 7.50%.
+      Complaints: 0 of 200 recipient-sends. Fothering lane complaint ratio (complaints over recipient-sends): 0.00%.
+      These ratios count only the events Fothering stores for this lane. They are not the reputation figures SES shows for the account.
+      Cause, batch import-0915: 15 permanent bounces and 0 complaints of 40 recipient-sends, hard-bounce ratio 37.50%, complaint ratio 0.00%.
+      Isolation verdict: confined.
+
+      What code found
+      Two lanes spiked in the same window, fothering-bulk and fothering-transactional. Which of them should be paused?
+      Suggested fix: Publish the DKIM records SES gives for news.example.com.
+
+      What stays open
+      fothering-transactional: no incident is open on it. The lane map marks this set transactional, so Fothering never pauses it.
+      fothering-bulk: an incident is open on it. Nothing in its configuration stops Fothering from pausing it.
+      fothering-alerts: no incident is open on it. This set carries the operator email, so Fothering never pauses it. The lane map marks this set transactional, so Fothering never pauses it.
+
+      Limits
+      If AWS pauses sending for the whole account, this email cannot be sent either, so silence from Fothering is not a sign that all is well.
+
+      Reference
+      Incident: b438b20ed0d68cfbd10c0469111d7d6a
+      Evidence record hash: 6600e372569dfe0f44e5db024a25f2b6946002f30b0d2f0a6edf4e2d191bb4a3
+      Option: opt-72a061ae5504378bcdac5f73
+
+      Sent by Fothering, an automated agent. Replies to this address are not read by Fothering.
+      "
+    `);
   });
 });
 
