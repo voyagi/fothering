@@ -1,5 +1,5 @@
 import { ACTION_FUNCTION_TIMEOUT_MS, EMAIL_SEND_ATTEMPTS } from './close-values.js';
-import type { Closure, ClosureOutcome, EMAIL_KINDS, LANE_STATES, StoredDecision } from './closure.js';
+import type { ActionRefusal, Closure, ClosureOutcome, EMAIL_KINDS, LANE_STATES, StoredDecision } from './closure.js';
 import type { ConfigurationRefusal } from './closeability.js';
 import { AUTOMATED_SENDER_FOOTER } from './disclosure.js';
 import type { EvidenceRecord } from './evidence-record.js';
@@ -33,6 +33,7 @@ export interface RenderInput {
 export const SECTION_HEADINGS = {
   happened: 'What happened',
   saw: 'What Fothering saw',
+  found: 'What code found',
   explanation: "The model's explanation",
   open: 'What stays open',
   app: 'What your app sees',
@@ -65,7 +66,30 @@ export const LANE_STATE_WORDS: Readonly<Record<(typeof LANE_STATES)[number], str
   'paused-by-fothering': 'Fothering paused it for an earlier incident',
 };
 
-export const REASON_SENTENCES: Readonly<Record<ConfigurationRefusal, string>> = {
+export type ReasonCode = ActionRefusal | 'cap-reached' | ConfigurationRefusal;
+
+// D-112: one plain sentence per refusal and decision code. The incident lifecycle's own status is
+// never named here (Pitfall 10), and no sentence says closed.
+export const REASON_SENTENCES: Readonly<Record<ReasonCode, string>> = {
+  'no-close': 'The agent did not settle on one cause it could act on, so Fothering paused nothing.',
+  'cap-reached': 'The limit on agent calls was reached before the agent answered, so code alone decided and Fothering paused nothing.',
+  'record-missing': 'The evidence record for this incident could not be found, so Fothering paused nothing.',
+  'record-invalid': 'The evidence record for this incident did not pass its schema check, so Fothering paused nothing.',
+  'incident-mismatch': 'The evidence record names a different incident, so Fothering paused nothing.',
+  'hash-mismatch': 'The evidence record no longer matches its hash, so Fothering paused nothing.',
+  'option-set-tampered': 'The approved options on the evidence record do not match what code computed, so Fothering paused nothing.',
+  'option-not-approved': 'The agent chose an option the evidence record does not approve, so Fothering paused nothing.',
+  'decision-differs': 'The agent decided differently from what code computed from the evidence, so Fothering paused nothing.',
+  'lane-not-in-map': 'The lane the agent named is not in the lane map, so Fothering paused nothing.',
+  'ses-facts-unavailable': 'The SES configuration could not be read before acting, so Fothering paused nothing.',
+  'ses-facts-bound': 'The account holds more sending identities than Fothering reads before acting, so Fothering paused nothing.',
+  'incident-not-open': 'The incident was no longer the open one on its lane when the action ran, so its evidence no longer described the lane and Fothering paused nothing.',
+  'newer-incident-elsewhere': 'Another lane opened a newer incident after this evidence was gathered, so the evidence no longer described the account and Fothering paused nothing.',
+  'record-too-old': 'The evidence was more than one spike window old when the action ran, so Fothering paused nothing.',
+  'record-not-closeable': 'The evidence record says this lane cannot be paused safely, so Fothering paused nothing.',
+  'configuration-not-closeable': 'The lane map or the SES configuration rules out pausing this lane, so Fothering paused nothing.',
+  'lane-already-paused': 'Fothering already holds a pause on this lane from an earlier incident, so it paused nothing new.',
+  'lane-cap-reached': 'This lane used up its pause and reopen attempts for the hour, so Fothering paused nothing.',
   'multiple-declared-streams': 'The lane map declares more than one stream on this set, so Fothering never pauses it.',
   'operator-alert': 'This set carries the operator email, so Fothering never pauses it.',
   transactional: 'The lane map marks this set transactional, so Fothering never pauses it.',

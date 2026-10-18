@@ -3,7 +3,8 @@ import fc from 'fast-check';
 import { BUCKET_MS, bucketStartMs } from '@fothering/core/buckets';
 import { ACTION_FUNCTION_TIMEOUT_MS, HOLD_CHECK_DELAY_MS, HOLD_MS, LANE_HOUR_ATTEMPT_CAP } from '@fothering/core/close-values';
 import type { ConfigurationRefusal } from '@fothering/core/closeability';
-import { closureClaimItem, closureKey, decisionOf, parseClosure, type Closure } from '@fothering/core/closure';
+import { closureClaimItem, closureKey, decisionOf, parseClosure, type Closure, type FreshnessRefusal } from '@fothering/core/closure';
+import { AUTOMATED_SENDER_FOOTER } from '@fothering/core/disclosure';
 import { reserveLaneAttempt } from '@fothering/core/counters';
 import {
   buildEvidenceRecord,
@@ -50,6 +51,7 @@ import {
   LANES,
   NOW_MS,
   OPERATOR,
+  PAUSED_AT_MS,
   RECEIPT_BATCH,
   TRANSACTIONAL,
   buildTestActionRoot,
@@ -68,6 +70,7 @@ import {
   sendRecordAt,
   storedClosure,
   storedRecord,
+  type EmailOfClosure,
   type TestActionRootInput,
 } from '../test/close-scenario.js';
 import { runActionCycle } from './action.js';
@@ -1306,24 +1309,23 @@ function sendLinesOf(lines: readonly string[]): string[] {
   return lines.filter((line) => line.startsWith(SEND_LINE_PREFIX));
 }
 
+/** A test root with the operator configured, its sends, dry-run lines and log lines captured. */
+function emailRoot(input: TestActionRootInput): EmailRun {
+  const dryRunLines: string[] = [];
+  const logLines: string[] = [];
+  const root = buildTestActionRoot({ operator: OPERATOR, dryRunSink: (line) => dryRunLines.push(line), logSink: (line) => logLines.push(line), ...input });
+  const captured = capturingSends(root.deps);
+  return { deps: captured.deps, sesState: root.sesState, requests: captured.requests, dryRunLines, logLines };
+}
+
 // 03-04's seeded close paused at T, then the hold-check run at T + 360,000 with the operator configured.
 async function closedEmailRun(): Promise<EmailRun> {
   const store = createFixtureTableState();
   const sesState = createFixtureSesState();
   await seedClosedLane({ store, sesState, through: 'paused', operator: OPERATOR });
-  const dryRunLines: string[] = [];
-  const logLines: string[] = [];
-  const root = buildTestActionRoot({
-    store,
-    sesState,
-    now: () => HOLD_CHECKED_AT_MS,
-    operator: OPERATOR,
-    dryRunSink: (line) => dryRunLines.push(line),
-    logSink: (line) => logLines.push(line),
-  });
-  const captured = capturingSends(root.deps);
-  await runActionCycle(captured.deps);
-  return { deps: captured.deps, sesState, requests: captured.requests, dryRunLines, logLines };
+  const run = emailRoot({ store, sesState, now: () => HOLD_CHECKED_AT_MS });
+  await runActionCycle(run.deps);
+  return run;
 }
 
 async function renderedFromStore(deps: ActionDeps, incidentId: string, nowMs: number): Promise<{ closure: Closure | undefined; record: EvidenceRecord; email: RenderedEmail | undefined }> {
@@ -1453,5 +1455,253 @@ describe('a closed lane becomes one closed-path email sent once through fotherin
     expect(dryRunLines.filter((line) => line.includes('ses.sendEmail'))).toEqual([]);
     expect(loggedEvents(logLines, 'email-refused')).toEqual([{ event: 'email-refused', level: 'error', incidentId: RECEIPT_INCIDENT_ID, reason: 'operator-config-missing' }]);
     expect(logLines.filter((line) => line.includes('@'))).toEqual([]);
+  });
+});
+
+const UNKNOWN_BULK_SUBJECT = `[Fothering] Spike on ${BULK}: nothing was paused`;
+
+const FRESHNESS_EMAIL_CASES: readonly { label: string; reason: FreshnessRefusal; change: (deps: ActionDeps) => Promise<ActionDeps> }[] = [
+  {
+    label: 'a later incident on another lane',
+    reason: 'newer-incident-elsewhere',
+    change: async (deps) => {
+      await plantReceiptIncident(deps, spikeWindowFor(LATER_MS));
+      return deps;
+    },
+  },
+  { label: 'a marker moved after the claim', reason: 'incident-not-open', change: async (deps) => afterClaim(deps, () => moveMarker(deps, BULK, incidentIdOf(BULK, LATER_MS), ACT_MS)) },
+  {
+    label: 'a STATE no longer open',
+    reason: 'incident-not-open',
+    change: async (deps) => {
+      await closeState(deps, INCIDENT_ID, NOW_MS);
+      return deps;
+    },
+  },
+  { label: 'a record one spike window old', reason: 'record-too-old', change: async (deps) => at(deps, (await storedRecord(deps, INCIDENT_ID, NOW_MS)).window.toBucketMs + 3_600_001) },
+];
+
+describe('an incident where nothing was paused gets one unknown-path email (R10)', () => {
+  it.each(FRESHNESS_EMAIL_CASES)('ends $label with one unknown-path email naming $reason in plain words (AC-8, email half)', async ({ reason, change }) => {
+    const { store } = await seeded();
+    const run = emailRoot({ store, now: () => ACT_MS });
+
+    await runActionCycle(await change(run.deps));
+
+    expect(sendLinesOf(run.dryRunLines)).toHaveLength(1);
+    expect(run.requests.map((request) => request.subject)).toEqual([UNKNOWN_BULK_SUBJECT]);
+    expect(run.requests[0]?.text).toContain(REASON_SENTENCES[reason]);
+    expect(putsOf(run.sesState)).toEqual([]);
+  });
+
+  it('renders a complete template-only email for a cap-reached DECISION (AC-E26)', async () => {
+    const { store } = await seeded(failingRuntime);
+    const run = emailRoot({ store, now: () => ACT_MS });
+    await plantDecision(run.deps, INCIDENT_ID, { outcome: 'unknown', reason: 'cap-reached', items: ['incident'] }, NOW_MS);
+
+    await runActionCycle(run.deps);
+
+    const { email } = await renderedFromStore(run.deps, INCIDENT_ID, ACT_MS);
+    expect(run.requests.map((request) => request.text)).toEqual([email?.text]);
+    expect(email?.sections.map((part) => part.heading)).toEqual([
+      SECTION_HEADINGS.happened,
+      SECTION_HEADINGS.saw,
+      SECTION_HEADINGS.found,
+      SECTION_HEADINGS.open,
+      SECTION_HEADINGS.limits,
+      SECTION_HEADINGS.reference,
+    ]);
+    expect(email?.text).toContain(REASON_SENTENCES['cap-reached']);
+    expect(email?.text.trimEnd().split('\n').at(-1)).toBe(AUTOMATED_SENDER_FOOTER);
+  });
+
+  it('sends no email for a pause the operator reopened before its hold check (D-94)', async () => {
+    const { store, deps, sesState } = await pausedAtT();
+    await plantReopened(deps, INCIDENT_ID);
+    const run = emailRoot({ store, sesState, now: () => HOLD_CHECK_MS });
+
+    await runActionCycle(run.deps);
+
+    expect(run.requests).toEqual([]);
+    expect(sendLinesOf(run.dryRunLines)).toEqual([]);
+  });
+});
+
+function sendsIssued(state: FixtureSesState): number {
+  return state.calls.filter((call) => call === 'send-issued').length;
+}
+
+async function closedLaneScripted(answers: readonly ('accept' | 'throw')[]): Promise<{ store: FixtureTableState; sesState: FixtureSesState }> {
+  const store = createFixtureTableState();
+  const sesState = createFixtureSesState();
+  await seedClosedLane({ store, sesState, through: 'paused', operator: OPERATOR });
+  sesState.sendAnswers.push(...answers);
+  return { store, sesState };
+}
+
+async function runsOneMinuteApart(store: FixtureTableState, sesState: FixtureSesState, count: number, logLines: string[]): Promise<void> {
+  for (let index = 0; index < count; index += 1) {
+    const { deps } = buildTestActionRoot({ store, sesState, now: () => HOLD_CHECKED_AT_MS + index * 60_000, operator: OPERATOR, logSink: (line) => logLines.push(line) });
+    await runActionCycle(deps);
+  }
+}
+
+describe('each email attempt is claimed before the send and retried at most 3 times (AC-E29, D-96)', () => {
+  it('retries a send that throws on later runs and stops at the first success', async () => {
+    const { store, sesState } = await closedLaneScripted(['throw', 'throw', 'accept']);
+
+    await runsOneMinuteApart(store, sesState, 4, []);
+
+    const closure = await storedClosure(buildTestActionRoot({ store, now: () => HOLD_CHECKED_AT_MS }).deps, INCIDENT_ID, HOLD_CHECKED_AT_MS);
+    expect(closure?.email).toMatchObject({ kind: 'closed', attempts: 3, failed: false, messageId: 'fixture-message-1', sentAtMs: HOLD_CHECKED_AT_MS + 120_000 });
+    expect(sendsIssued(sesState)).toBe(3);
+    expect(sesState.calls.filter((call) => call === 'send-resolved')).toHaveLength(1);
+  });
+
+  it('marks the email failed after the third throw, logs one email-failed line and tries no fourth time', async () => {
+    const { store, sesState } = await closedLaneScripted(['throw', 'throw', 'throw', 'accept']);
+    const logLines: string[] = [];
+
+    await runsOneMinuteApart(store, sesState, 5, logLines);
+
+    const closure = await storedClosure(buildTestActionRoot({ store, now: () => HOLD_CHECKED_AT_MS }).deps, INCIDENT_ID, HOLD_CHECKED_AT_MS);
+    expect(closure?.email).toMatchObject({ attempts: 3, failed: true, sentAtMs: null, messageId: null });
+    expect(sendsIssued(sesState)).toBe(3);
+    expect(loggedEvents(logLines, 'email-failed')).toEqual([{ event: 'email-failed', level: 'error', incidentId: INCIDENT_ID, errorName: 'FixtureSesFault' }]);
+    expect(loggedEvents(logLines, 'email-attempt-failed')).toHaveLength(2);
+  });
+
+  it('counts a claim left with no send past the timeout as a spent attempt, and leaves a younger one alone', async () => {
+    const { store, sesState } = await closedLaneScripted([]);
+    const { deps } = buildTestActionRoot({ store, sesState, now: () => HOLD_CHECKED_AT_MS });
+    await runActionCycle(deps);
+    const closure = await storedClosure(deps, INCIDENT_ID, HOLD_CHECKED_AT_MS);
+    const stranded = { kind: 'closed', attempts: 1, claimedAtMs: HOLD_CHECKED_AT_MS, sentAtMs: null, messageId: null, failed: false };
+    await deps.ports.decisionStore.updateIfVersion(closureKey(INCIDENT_ID), closure?.version ?? -1, { email: stranded }, HOLD_CHECKED_AT_MS);
+
+    await runActionCycle(buildTestActionRoot({ store, sesState, now: () => HOLD_CHECKED_AT_MS + ACTION_FUNCTION_TIMEOUT_MS - 1, operator: OPERATOR }).deps);
+    expect(sendsIssued(sesState)).toBe(0);
+    await runActionCycle(buildTestActionRoot({ store, sesState, now: () => HOLD_CHECKED_AT_MS + ACTION_FUNCTION_TIMEOUT_MS, operator: OPERATOR }).deps);
+
+    expect(sendsIssued(sesState)).toBe(1);
+    expect((await storedClosure(deps, INCIDENT_ID, HOLD_CHECKED_AT_MS))?.email).toMatchObject({ attempts: 2, failed: false, messageId: 'fixture-message-1' });
+  });
+
+  it('never sends one attempt twice from two runs reaching the closure together', async () => {
+    const { store, sesState } = await closedLaneScripted([]);
+    await runActionCycle(buildTestActionRoot({ store, sesState, now: () => HOLD_CHECKED_AT_MS }).deps);
+    const roots = [0, 1].map(() => buildTestActionRoot({ store, sesState, now: () => HOLD_CHECKED_AT_MS + 60_000, operator: OPERATOR, yieldBetweenOperations: true }).deps);
+
+    await Promise.all(roots.map((deps) => runActionCycle(deps)));
+
+    expect(sendsIssued(sesState)).toBe(1);
+    expect((await storedClosure(buildTestActionRoot({ store, now: () => HOLD_CHECKED_AT_MS }).deps, INCIDENT_ID, HOLD_CHECKED_AT_MS))?.email?.attempts).toBe(1);
+  });
+});
+
+describe('concurrent runs send one email per incident (R4)', () => {
+  it('leaves one would-send line across 8 roots run together for one incident, and a ninth run sends nothing (AC-9, email half)', async () => {
+    const { store } = await seeded(decidingRuntime, [RECEIPT_BATCH]);
+    const sesState = createFixtureSesState();
+    const dryRunLines: string[] = [];
+    const rootAt = (nowMs: number, yieldBetweenOperations: boolean): ActionDeps =>
+      buildTestActionRoot({ store, sesState, now: () => nowMs, operator: OPERATOR, dryRunSink: (line) => dryRunLines.push(line), yieldBetweenOperations }).deps;
+
+    await Promise.all(Array.from({ length: 8 }, () => runActionCycle(rootAt(ACT_MS, true))));
+    expect(sendLinesOf(dryRunLines)).toHaveLength(1);
+    await runActionCycle(rootAt(ACT_MS + 60_000, false));
+
+    expect(sendLinesOf(dryRunLines)).toHaveLength(1);
+  });
+
+  it('sends one email when two hold checks race on one paused closure (AC-E6, email half)', async () => {
+    const { store, sesState } = await pausedAtT();
+    const dryRunLines: string[] = [];
+    const roots = [0, 1].map(
+      () => buildTestActionRoot({ store, sesState, now: () => HOLD_CHECK_MS, operator: OPERATOR, dryRunSink: (line) => dryRunLines.push(line), yieldBetweenOperations: true }).deps,
+    );
+
+    await Promise.all(roots.map((deps) => runActionCycle(deps)));
+
+    expect(sendLinesOf(dryRunLines)).toHaveLength(1);
+    expect(sendsIssued(sesState)).toBe(1);
+  });
+});
+
+// The subject goes in with the body: the word rule binds the whole email.
+async function storedEmailOf(deps: ActionDeps, incidentId: string, nowMs: number): Promise<EmailOfClosure[]> {
+  const { closure, email } = await renderedFromStore(deps, incidentId, nowMs);
+  return closure === undefined || email === undefined ? [] : [{ kind: email.kind, text: `${email.subject}\n\n${email.text}`, closure }];
+}
+
+describe('closed appears only in a closed-path email a passed hold check backs (AC-6, email half)', () => {
+  it('finds no violation over the closed, not-holding and unknown emails, and reports a not-holding closure given the closed template', async () => {
+    const closed = await closedEmailRun();
+    const notHolding = await pausedAtT();
+    await notHolding.deps.ports.eventStore.putIfAbsent(sendRecordAt(BULK, HOLD_END_MS + 1, 'after-hold'));
+    const notHoldingRun = emailRoot({ store: notHolding.store, sesState: notHolding.sesState, now: () => HOLD_CHECK_MS });
+    await runActionCycle(notHoldingRun.deps);
+    const unknown = await seeded(decidingRuntime, [RECEIPT_BATCH]);
+    const unknownRun = emailRoot({ store: unknown.store, now: () => ACT_MS });
+    await runActionCycle(unknownRun.deps);
+
+    const emails = [
+      ...(await storedEmailOf(closed.deps, INCIDENT_ID, HOLD_CHECKED_AT_MS)),
+      ...(await storedEmailOf(notHoldingRun.deps, INCIDENT_ID, HOLD_CHECK_MS)),
+      ...(await storedEmailOf(unknownRun.deps, RECEIPT_INCIDENT_ID, ACT_MS)),
+    ];
+    expect(emails.map((email) => email.kind).sort()).toEqual(['closed', 'not-confirmed', 'unknown']);
+    const logLines = [...closed.logLines, ...notHoldingRun.logLines, ...unknownRun.logLines];
+    expect(closedWordViolations({ closures: emails.map((email) => email.closure), logLines, emails })).toEqual([]);
+    const closedText = emails.find((email) => email.kind === 'closed')?.text ?? '';
+    const notHoldingClosure = emails.find((email) => email.kind === 'not-confirmed')?.closure;
+    if (notHoldingClosure === undefined) throw new Error('no not-holding closure was stored');
+    expect(closedWordViolations({ closures: [], logLines: [], emails: [{ kind: 'closed', text: closedText, closure: notHoldingClosure }] })).toHaveLength(1);
+  });
+
+  it('keeps every closure and log line of the email runs free of a lane ratio called the account rate (AC-P8)', async () => {
+    const closed = await closedEmailRun();
+    const closure = await storedClosure(closed.deps, INCIDENT_ID, HOLD_CHECKED_AT_MS);
+    for (const text of [JSON.stringify(closure), ...closed.logLines, ...closed.requests.map((request) => request.text)]) {
+      expect(text).not.toMatch(/SES bounce rate|SES complaint rate|your bounce rate/i);
+      expect(text).not.toMatch(/reply with|reply to this|send us/i);
+    }
+  });
+});
+
+function everyKindIsFixture(deps: ActionDeps): boolean {
+  return Object.values(deps.kinds).every((row) => Object.values(row).every((kind) => kind === 'fixture'));
+}
+
+describe('end to end on fixtures, a close and an unknown each end in one email (AC-25)', () => {
+  it('pauses on a stored close, writes closed past the boundary and would-sends exactly one closed-path email', async () => {
+    const store = createFixtureTableState();
+    const sesState = createFixtureSesState();
+    const dryRunLines: string[] = [];
+    await seedIncidents({ store, runtime: closeRuntime, scenarios: [BAD_BATCH], nowMs: NOW_MS });
+    const pausing = emailRoot({ store, sesState, now: () => PAUSED_AT_MS, dryRunSink: (line) => dryRunLines.push(line) });
+    await runActionCycle(pausing.deps);
+    expect((await storedClosure(pausing.deps, INCIDENT_ID, PAUSED_AT_MS))?.outcome).toBe('paused');
+
+    const checking = emailRoot({ store, sesState, now: () => HOLD_CHECKED_AT_MS, dryRunSink: (line) => dryRunLines.push(line) });
+    await runActionCycle(checking.deps);
+
+    expect((await storedClosure(checking.deps, INCIDENT_ID, HOLD_CHECKED_AT_MS))?.outcome).toBe('closed');
+    expect(sendLinesOf(dryRunLines)).toHaveLength(1);
+    expect([...pausing.requests, ...checking.requests].map((request) => request.subject)).toEqual([`[Fothering] ${BULK} closed: sending paused and holding`]);
+    expect(sesState.calls.filter((call) => call.startsWith('put-issued') && call.endsWith(':true'))).toEqual([]);
+    expect(everyKindIsFixture(checking.deps)).toBe(true);
+  });
+
+  it('ends the paired unknown fixture with one unknown-path email and no pause', async () => {
+    const { store } = await seeded(decidingRuntime, [RECEIPT_BATCH]);
+    const run = emailRoot({ store, now: () => ACT_MS });
+
+    await runActionCycle(run.deps);
+
+    expect(sendLinesOf(run.dryRunLines)).toHaveLength(1);
+    expect(run.requests.map((request) => request.subject)).toEqual([`[Fothering] Spike on ${TRANSACTIONAL}: nothing was paused`]);
+    expect(putsOf(run.sesState)).toEqual([]);
+    expect(everyKindIsFixture(run.deps)).toBe(true);
   });
 });

@@ -339,13 +339,24 @@ function allowedClosedWords(closure: Closure): number {
   return closure.email?.kind === 'closed' ? 2 : 1;
 }
 
+/** A rendered operator email beside the closure it was rendered from. */
+export interface EmailOfClosure {
+  kind: string;
+  text: string;
+  closure: Closure;
+}
+
 /**
  * AC-6: the word closed may appear only as the outcome of a closure a passed hold check backs, the kind
- * of that closure's email, or a log line's outcome value. Each closure or line holding it anywhere else
- * is returned as a violation.
+ * of that closure's email, a log line's outcome value, or a closed-path email whose closure a passed
+ * hold check backs. Each closure, line or email holding it anywhere else is returned as a violation.
  */
-export function closedWordViolations(input: { closures: readonly Closure[]; logLines: readonly string[] }): string[] {
+export function closedWordViolations(input: { closures: readonly Closure[]; logLines: readonly string[]; emails?: readonly EmailOfClosure[] }): string[] {
   const violations: string[] = [];
+  for (const email of input.emails ?? []) {
+    const allowed = email.kind === 'closed' && holdCheckBacksClosed(email.closure);
+    if (!allowed && occurrences(email.text, CLOSED_WORD) > 0) violations.push(`a ${email.kind} email for ${email.closure.incidentId} says closed without a passed hold check`);
+  }
   for (const closure of input.closures) {
     const text = JSON.stringify(closure);
     const allowed = allowedClosedWords(closure);
