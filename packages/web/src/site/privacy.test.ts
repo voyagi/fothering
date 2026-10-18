@@ -144,6 +144,23 @@ describe('the model-role lists (AC-24, AC-25, AC-E18)', () => {
     expect(claimsIn(negated(sentence))).toEqual([]);
   });
 
+  // WR-07: one planted positive per subject shape, each beside its negative.
+  it.each([
+    ['It approves a lane.', 'lane-choice', 'It never approves a lane.'],
+    ["Fothering's agent approves a lane.", 'lane-choice', "Fothering's agent never approves a lane."],
+    ['The agent then pauses the lane.', 'lane-change', 'The agent then never pauses the lane.'],
+    ['The model adds a lane to the approved set.', 'lane-choice', 'The model never adds a lane to the approved set.'],
+  ])('matches "%s" as the %s claim and not "%s"', (sentence, claim, negative) => {
+    expect(claimsIn(sentence)).toEqual([claim]);
+    expect(claimsIn(negative)).toEqual([]);
+  });
+
+  it('keeps every negation out of the one word allowed between subject and verb', () => {
+    for (const sentence of ['The model does not pick a lane.', 'The model cannot pick a lane.', 'It no longer pauses the lane.', 'The agent not once pauses the lane.']) {
+      expect(claimsIn(sentence), sentence).toEqual([]);
+    }
+  });
+
   it('keeps the runtime-role sentence only while the runtime role holds no data action', () => {
     const ids = (holdsNone: boolean): string[] => modelStatements(holdsNone).map((statement) => statement.id);
     expect(ids(true)).toContain('runtime-role');

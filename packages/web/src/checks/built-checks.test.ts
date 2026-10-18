@@ -1654,6 +1654,34 @@ describe('the model-role rules (AC-24, AC-25, AC-E18 to AC-E20)', () => {
     expect(modelRoleForbiddenRule(casesSite(['<p data-model-role>The model never names the cause.</p>']), context)).toEqual([]);
   });
 
+  // WR-07: the shapes a sentence about the model takes on the pages, each with its negative.
+  const SUBJECT_SHAPES: [string, string, string][] = [
+    ['"it"', 'It approves a lane.', 'It never approves a lane.'],
+    ['a possessive', "Fothering's agent approves a lane.", "Fothering's agent never approves a lane."],
+    ['an adverb', 'The agent then pauses the lane.', 'The agent then never pauses the lane.'],
+  ];
+
+  it.each(SUBJECT_SHAPES)('fails a marked element whose subject is %s, and passes its negative', (_shape, positive, negative) => {
+    const findings = caseFindings(modelRoleForbiddenRule, 'model-role-forbidden', [`<p data-model-role>${positive}</p>`]);
+    expect(findings).toHaveLength(1);
+    expect(modelRoleForbiddenRule(casesSite([`<p data-model-role>${negative}</p>`]), context)).toEqual([]);
+  });
+
+  it('judges each item of the list of what the model does as a sentence about the model', () => {
+    const list = (items: readonly string[], marker: string): string => `<ul data-model-role${marker}>${items.map((item) => `<li>${item}</li>`).join('')}</ul>`;
+    const findings = caseFindings(modelRoleForbiddenRule, 'model-role-forbidden', [list(['Receives one evidence record.', 'Adds a lane to the approved set.'], ' data-model-subject')]);
+    expect(texts(findings)).toEqual(['a data-model-role element claims what only code does (lane-choice): "The model adds a lane to the approved set."']);
+    expect(texts(modelRoleForbiddenRule(casesSite([list(['Picks the lane to pause.'], ' data-model-subject')]), context))).toEqual([
+      'a data-model-role element claims what only code does (lane-choice): "The model picks the lane to pause."',
+    ]);
+    expect(modelRoleForbiddenRule(casesSite([list(['Receives one evidence record.', 'Writes one explanation paragraph.'], ' data-model-subject')]), context)).toEqual([]);
+  });
+
+  it('never judges the list of what the model never does that way, since it names the forbidden actions', () => {
+    const never = '<ul data-model-role><li>Adds a lane to the approved set.</li><li>Changes a lane\'s sending.</li><li>Picks the lane to pause.</li></ul>';
+    expect(modelRoleForbiddenRule(casesSite([never]), context)).toEqual([]);
+  });
+
   it('passes the model id equal to the pin, and fails a different one or none', () => {
     expect(privacyTexts(modelIdRule, privacyBody())).toEqual([]);
     expect(privacyTexts(modelIdRule, privacyBody({ modelId: '<p><code data-model-id>eu.planted.other-model</code></p>' }))).toEqual([
