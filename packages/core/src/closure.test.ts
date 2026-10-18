@@ -11,6 +11,7 @@ import {
 import {
   CLOSURE_LOG_OUTCOMES,
   CLOSURE_LOG_REASONS,
+  actionCloseabilityRefusal,
   claimStateOf,
   closureClaimItem,
   closureItemSchema,
@@ -215,5 +216,26 @@ describe('freshnessRefusal passes a record only while it still describes the acc
   it('passes another lane opened in the same cycle and refuses one opened a millisecond later (AC-E11)', () => {
     expect(freshnessRefusal(fresh({ others: [openElsewhere(RECORD_TO_BUCKET_MS)] }))).toBeUndefined();
     expect(freshnessRefusal(fresh({ others: [openElsewhere(RECORD_TO_BUCKET_MS + 1)] }))).toBe('newer-incident-elsewhere');
+  });
+});
+
+// actionGate already refuses a record whose closeability is not closeable (decision-differs), so the
+// record half is pinned here, where it can be reached.
+describe('actionCloseabilityRefusal checks the record before the configuration read in this act (D-102)', () => {
+  it.each(['refused', 'no-data'] as const)('refuses a record whose closeability is %s as record-not-closeable, whatever the configuration says', (state) => {
+    expect(actionCloseabilityRefusal(state, { configurationRefusals: [] })).toBe('record-not-closeable');
+    expect(actionCloseabilityRefusal(state, { configurationRefusals: ['transactional'] })).toBe('record-not-closeable');
+  });
+
+  it('refuses a closeable record whose target lane holds any configuration code', () => {
+    expect(actionCloseabilityRefusal('closeable', { configurationRefusals: ['default-configuration-set'] })).toBe('configuration-not-closeable');
+  });
+
+  it('refuses a closeable record whose target lane has no entry, failing closed', () => {
+    expect(actionCloseabilityRefusal('closeable', undefined)).toBe('configuration-not-closeable');
+  });
+
+  it('passes a closeable record whose target lane holds no code', () => {
+    expect(actionCloseabilityRefusal('closeable', { configurationRefusals: [] })).toBeUndefined();
   });
 });

@@ -1,8 +1,8 @@
 import * as z from 'zod';
 import { AGENT_DECISIONS, GATE_REFUSALS, type AgentAnswer } from './agent-answer.js';
 import { ACTION_FUNCTION_TIMEOUT_MS, RECORD_MAX_AGE_MS } from './close-values.js';
-import { REFUSAL_REASONS } from './closeability.js';
-import { incidentItemKey } from './evidence-record.js';
+import { REFUSAL_REASONS, type RefusalReason } from './closeability.js';
+import { incidentItemKey, type EvidenceRecord } from './evidence-record.js';
 import type { IncidentMarker, IncidentState } from './incident.js';
 import { CONFIGURATION_SET_PATTERN } from './lanes.js';
 import { SES_ID_PATTERN, expiresAtFor, type RecordKey } from './records.js';
@@ -222,6 +222,15 @@ export function freshnessRefusal(input: FreshnessInput): FreshnessRefusal | unde
   if (marker?.status !== 'open' || marker.incidentId !== input.incidentId || state?.status !== 'open') return 'incident-not-open';
   if (input.others.some((other) => isNewerElsewhere(other, input.recordToBucketMs))) return 'newer-incident-elsewhere';
   if (input.nowMs - input.recordToBucketMs > RECORD_MAX_AGE_MS) return 'record-too-old';
+  return undefined;
+}
+
+export type CloseabilityRefusal = Extract<ActionRefusal, 'record-not-closeable' | 'configuration-not-closeable'>;
+
+export function actionCloseabilityRefusal(
+  _recordCloseability: EvidenceRecord['decision']['closeability']['state'],
+  _target: { configurationRefusals: readonly RefusalReason[] } | undefined,
+): CloseabilityRefusal | undefined {
   return undefined;
 }
 

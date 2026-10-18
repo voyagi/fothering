@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { BUCKET_MS, bucketStartMs } from '@fothering/core/buckets';
 import { ACTION_FUNCTION_TIMEOUT_MS, HOLD_MS } from '@fothering/core/close-values';
-import { closureClaimItem } from '@fothering/core/closure';
-import { incidentLaneKey } from '@fothering/core/evidence-record';
+import { closureClaimItem, type Closure } from '@fothering/core/closure';
+import { buildEvidenceRecord, incidentLaneKey, type EvidenceRecord, type EvidenceRecordInput } from '@fothering/core/evidence-record';
 import { spikeWindowFor, type BucketWindow } from '@fothering/core/window-fold';
 import { createFixtureTableState } from '@fothering/providers/fixtures/ingest-ports';
 import type { DecisionStoreItem, DecisionStorePort, FixtureSesState, FixtureTableState, Recording } from '@fothering/providers/port-types';
@@ -486,6 +486,133 @@ describe('a record that no longer describes the account pauses nothing (R3, AC-8
   });
 });
 
+const ALERTS = 'fothering-alerts';
+
+// The lane block the committed lanes.json gives over the complete SES facts, in lane-map order.
+const LANE_BLOCK = [
+  { configurationSet: TRANSACTIONAL, state: 'no-open-incident', configurationRefusals: ['transactional'] },
+  { configurationSet: BULK, state: 'incident-open', configurationRefusals: [] },
+  { configurationSet: ALERTS, state: 'no-open-incident', configurationRefusals: ['operator-alert', 'transactional'] },
+];
+
+function withRecording(operation: string, request: unknown, response: unknown): Recording[] {
+  return COMPLETE_SES_RECORDINGS.map((recording) =>
+    recording.operation === operation && recording.request === request ? { ...recording, response } : recording,
+  );
+}
+
+function bulkDestinationWithout(eventType: string): Recording[] {
+  const destination = { name: 'to-eventbridge', enabled: true, eventBridge: true, matchingEventTypes: ['SEND', 'REJECT', 'BOUNCE', 'COMPLAINT', 'DELIVERY', 'DELIVERY_DELAY'] };
+  return withRecording('ses.getConfigurationSetEventDestinations', BULK, [
+    { ...destination, matchingEventTypes: destination.matchingEventTypes.filter((type) => type !== eventType) },
+  ]);
+}
+
+function laneOf(closure: Closure | undefined, configurationSet: string): Closure['lanes'][number] | undefined {
+  return closure?.lanes.find((lane) => lane.configurationSet === configurationSet);
+}
+
+function withLiveSesKinds(deps: ActionDeps): ActionDeps {
+  const ses = Object.fromEntries(Object.keys(deps.kinds.ses ?? {}).map((operation) => [operation, 'live'] as const));
+  return { ...deps, kinds: { ...deps.kinds, ses } };
+}
+
+// An honest record for another lane, built from the seeded bulk record with only its lane, incident id
+// and window changed, so actionGate passes it and a refusal can only come from the step under test.
+async function plantApprovingIncident(deps: ActionDeps, configurationSet: string): Promise<string> {
+  const seededRecord = await storedRecord(deps, INCIDENT_ID, NOW_MS);
+  const incidentId = incidentIdOf(configurationSet, LATER_MS);
+  const window = spikeWindowFor(LATER_MS);
+  const record = buildEvidenceRecord({ ...recordInputOf(seededRecord), incidentId, lane: { configurationSet, lane: configurationSet }, window });
+  const optionId = record.approvedOptions[0]?.optionId;
+  await plantIncident(deps, { configurationSet, incidentId, openingWindow: window, record, decision: { outcome: 'close', optionId, explanation: 'planted' }, nowMs: NOW_MS });
+  return incidentId;
+}
+
+function recordInputOf(record: EvidenceRecord): EvidenceRecordInput {
+  const input: Partial<EvidenceRecord> = { ...record };
+  delete input.schemaVersion;
+  delete input.approvedOptions;
+  delete input.hash;
+  return input as EvidenceRecordInput;
+}
+
+describe('a set the lane map or the SES configuration refuses at action time is never paused (R6, AC-11)', () => {
+  it.each([
+    ['an identity defaulting to fothering-bulk', 'default-configuration-set', () => withRecording('ses.getEmailIdentity', 'example.org', { defaultConfigurationSet: BULK, dkimStatus: 'SUCCESS', dkimSigningEnabled: true, identityType: 'DOMAIN' })],
+    ['a fothering-bulk destination missing DELIVERY_DELAY', 'destination-missing-event-types', () => bulkDestinationWithout('DELIVERY_DELAY')],
+    ['a configuration set outside the lane map', 'unlisted-configuration-set', () => withRecording('ses.listConfigurationSets', null, [TRANSACTIONAL, BULK, ALERTS, 'fothering-legacy'])],
+  ] as const)('refuses %s as configuration-not-closeable naming %s', async (_case, code, recordings) => {
+    const { root } = await seeded();
+    const { deps, sesState } = root({ recordings: recordings() });
+
+    await runActionCycle(deps);
+
+    const closure = await storedClosure(deps, INCIDENT_ID, ACT_MS);
+    expect(closure).toMatchObject({ outcome: 'refused', reason: 'configuration-not-closeable', sesFacts: 'read' });
+    expect(laneOf(closure, BULK)?.configurationRefusals).toEqual([code]);
+    expect(mutationsOf(sesState)).toEqual([]);
+  });
+
+  it.each([
+    [ALERTS, ['operator-alert', 'transactional'], 'test kinds'],
+    [TRANSACTIONAL, ['transactional'], 'test kinds'],
+    [ALERTS, ['operator-alert', 'transactional'], 'live SES kinds'],
+    [TRANSACTIONAL, ['transactional'], 'live SES kinds'],
+  ] as const)('refuses an honest record approving %s with the lane-map codes %j, under %s (AC-P12)', async (configurationSet, codes, kinds) => {
+    const { root } = await seeded();
+    const { deps, sesState } = root();
+    const incidentId = await plantApprovingIncident(deps, configurationSet);
+
+    await runActionCycle(kinds === 'live SES kinds' ? withLiveSesKinds(deps) : deps);
+
+    const closure = await storedClosure(deps, incidentId, ACT_MS);
+    expect(closure).toMatchObject({ outcome: 'refused', reason: 'configuration-not-closeable', configurationSet });
+    expect(laneOf(closure, configurationSet)).toEqual({ configurationSet, state: 'incident-open', configurationRefusals: [...codes] });
+    expect(mutationsOf(sesState)).toEqual([]);
+  });
+
+  it('leaves an honest record whose own closeability is refused to the gate, which refuses it first', async () => {
+    const { root } = await seeded();
+    const { deps, sesState } = root();
+    const seededRecord = await storedRecord(deps, INCIDENT_ID, NOW_MS);
+    const incidentId = incidentIdOf(ALERTS, LATER_MS);
+    const decision = { ...seededRecord.decision, closeability: { state: 'refused' as const, reasons: ['caller-on-another-set' as const] } };
+    const record = buildEvidenceRecord({ ...recordInputOf(seededRecord), incidentId, lane: { configurationSet: ALERTS, lane: ALERTS }, window: spikeWindowFor(LATER_MS), decision });
+    const optionId = record.approvedOptions[0]?.optionId;
+    await plantIncident(deps, { configurationSet: ALERTS, incidentId, openingWindow: record.window, record, decision: { outcome: 'close', optionId, explanation: 'planted' }, nowMs: NOW_MS });
+
+    await runActionCycle(deps);
+
+    expect(await storedClosure(deps, incidentId, ACT_MS)).toMatchObject({ outcome: 'refused', reason: 'decision-differs' });
+    expect(mutationsOf(sesState)).toEqual([]);
+  });
+});
+
+describe('every closure stores each lane state and its configuration-only refusals (D-102, CH-06)', () => {
+  it('stores the three lanes in lane-map order on the paused closure', async () => {
+    const { root } = await seeded();
+    const { deps } = root();
+
+    await runActionCycle(deps);
+
+    const closure = await storedClosure(deps, INCIDENT_ID, ACT_MS);
+    expect(closure?.outcome).toBe('paused');
+    expect(closure?.lanes).toEqual(LANE_BLOCK);
+  });
+
+  it('stores the lane-map refusals alone when the SES facts could not be read', async () => {
+    const { root } = await seeded();
+    const { deps } = root({ recordings: withoutListIdentities() });
+
+    await runActionCycle(deps);
+
+    const closure = await storedClosure(deps, INCIDENT_ID, ACT_MS);
+    expect(closure).toMatchObject({ outcome: 'refused', reason: 'ses-facts-unavailable', sesFacts: 'failed' });
+    expect(closure?.lanes).toEqual(LANE_BLOCK);
+  });
+});
+
 describe('the gate runs through the real act', () => {
   it('refuses a tampered evidence hash as hash-mismatch with no put (T-03-02)', async () => {
     const { store, root } = await seeded();
@@ -496,6 +623,16 @@ describe('the gate runs through the real act', () => {
 
     expect(await storedClosure(deps, INCIDENT_ID, ACT_MS)).toMatchObject({ outcome: 'refused', reason: 'hash-mismatch' });
     expect(putsOf(sesState)).toEqual([]);
+  });
+
+  it('still stores the lane block on a gate refusal, since the markers and facts are read before the gate (D-89)', async () => {
+    const { store, root } = await seeded();
+    const { deps } = root();
+    tamperEvidenceHash(store, INCIDENT_ID);
+
+    await runActionCycle(deps);
+
+    expect((await storedClosure(deps, INCIDENT_ID, ACT_MS))?.lanes).toEqual(LANE_BLOCK);
   });
 });
 

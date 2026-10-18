@@ -24,6 +24,18 @@ export const REFUSAL_REASONS = [
 ] as const;
 export type RefusalReason = (typeof REFUSAL_REASONS)[number];
 
+export const LANE_MAP_REFUSALS: readonly RefusalReason[] = [];
+export const SES_CONFIGURATION_REFUSALS: readonly RefusalReason[] = [];
+export type ConfigurationRefusal = RefusalReason;
+
+export function isStaticallyCloseable(_lane: LaneEntry): boolean {
+  return false;
+}
+
+export function configurationRefusals(_configurationSet: string, _options: { laneMap: LaneMap; ses: SesConfigurationFacts | undefined }): ConfigurationRefusal[] {
+  return [];
+}
+
 // Not exported: a value typed with this key can only come from a cast written in this module, so
 // checkCloseability is the one place a lane becomes closeable.
 declare const closeableBrand: unique symbol;
