@@ -30,7 +30,7 @@ import { reserveLaneAttempt } from '@fothering/core/counters';
 import { FROM_DISPLAY_NAME } from '@fothering/core/disclosure';
 import { evidenceRecordSchema, incidentItemKey, incidentLaneKey, incidentPauseKey, recordHash, type EvidenceRecord } from '@fothering/core/evidence-record';
 import { markerOf, stateOf, type IncidentMarker, type IncidentState } from '@fothering/core/incident';
-import { emailAttemptDue, emailKindOf, renderOperatorEmail, type RenderedEmail } from '@fothering/core/operator-email';
+import { emailAttemptDue, emailAttemptsSpent, emailKindOf, renderOperatorEmail, type RenderedEmail } from '@fothering/core/operator-email';
 import { SES_ID_PATTERN, expiresAtFor } from '@fothering/core/records';
 import { LiveConfigMissingError, requireLiveConfig, type SendEmailRequest } from '@fothering/providers/port-types';
 import { SES_READ_SPACING_MS, readSesFacts } from '@fothering/providers/ses-facts';
@@ -553,6 +553,16 @@ async function sendOperatorEmail(run: Run, closure: Closure): Promise<void> {
   await sendClaimed(run, act, claimed, request);
 }
 
+// The run holding the last attempt stopped before its send settled (a timeout, a recycled container, a
+// store fault after the send): the email is failed with the one error line the alarm catches.
+async function failStrandedEmail(run: Run, closure: Closure): Promise<void> {
+  if (closure.email === null) return;
+  const act = { incidentId: closure.incidentId, version: closure.version };
+  if (await updateClosure(run, act, { email: { ...closure.email, failed: true } })) {
+    run.deps.log.error({ event: 'email-failed', incidentId: closure.incidentId, errorName: 'ClaimTimedOut' });
+  }
+}
+
 // D-88 source (c): every closure sources (a) and (b) reached that ended in a state that sends (D-109),
 // read again after the hold checks so a closed outcome written in this run is mailed in this run.
 async function operatorEmails(run: Run, incidentIds: ReadonlySet<string>): Promise<void> {
@@ -560,7 +570,9 @@ async function operatorEmails(run: Run, incidentIds: ReadonlySet<string>): Promi
   for (const incidentId of incidentIds) {
     try {
       const closure = parseClosure(await deps.ports.decisionStore.getItem(closureKey(incidentId), deps.now()));
-      if (closure !== undefined && emailKindOf(closure.outcome) !== undefined && emailAttemptDue(closure, deps.now())) await sendOperatorEmail(run, closure);
+      if (closure === undefined || emailKindOf(closure.outcome) === undefined) continue;
+      if (emailAttemptsSpent(closure, deps.now())) await failStrandedEmail(run, closure);
+      else if (emailAttemptDue(closure, deps.now())) await sendOperatorEmail(run, closure);
     } catch (error) {
       logUnitFailure(deps, 'email-step-failed', { incidentId }, error);
     }

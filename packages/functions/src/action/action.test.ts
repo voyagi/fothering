@@ -1623,6 +1623,27 @@ describe('each email attempt is claimed before the send and retried at most 3 ti
     expect(sendsIssued(sesState)).toBe(1);
   });
 
+  it('marks the email failed with one email-failed line once a claim on the last attempt outlives the timeout with no send (WR-03)', async () => {
+    const { store, sesState } = await closedLaneScripted([]);
+    const { deps } = buildTestActionRoot({ store, sesState, now: () => HOLD_CHECKED_AT_MS });
+    await runActionCycle(deps);
+    const closure = await storedClosure(deps, INCIDENT_ID, HOLD_CHECKED_AT_MS);
+    const stranded = { kind: 'closed', attempts: 3, claimedAtMs: HOLD_CHECKED_AT_MS, sentAtMs: null, messageId: null, failed: false };
+    await deps.ports.decisionStore.updateIfVersion(closureKey(INCIDENT_ID), closure?.version ?? -1, { email: stranded }, HOLD_CHECKED_AT_MS);
+    const logLines: string[] = [];
+    const runAt = (nowMs: number): Promise<unknown> =>
+      runActionCycle(buildTestActionRoot({ store, sesState, now: () => nowMs, operator: OPERATOR, logSink: (line) => logLines.push(line) }).deps);
+
+    await runAt(HOLD_CHECKED_AT_MS + ACTION_FUNCTION_TIMEOUT_MS - 1);
+    expect((await storedClosure(deps, INCIDENT_ID, HOLD_CHECKED_AT_MS))?.email).toMatchObject({ attempts: 3, failed: false });
+    await runAt(HOLD_CHECKED_AT_MS + ACTION_FUNCTION_TIMEOUT_MS);
+    await runAt(HOLD_CHECKED_AT_MS + ACTION_FUNCTION_TIMEOUT_MS + 60_000);
+
+    expect((await storedClosure(deps, INCIDENT_ID, HOLD_CHECKED_AT_MS))?.email).toMatchObject({ attempts: 3, failed: true, sentAtMs: null });
+    expect(loggedEvents(logLines, 'email-failed')).toEqual([{ event: 'email-failed', level: 'error', incidentId: INCIDENT_ID, errorName: 'ClaimTimedOut' }]);
+    expect(sendsIssued(sesState)).toBe(0);
+  });
+
   it('never sends one attempt twice from two runs reaching the closure together', async () => {
     const { store, sesState } = await closedLaneScripted([]);
     await runActionCycle(buildTestActionRoot({ store, sesState, now: () => HOLD_CHECKED_AT_MS }).deps);

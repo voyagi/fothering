@@ -138,6 +138,16 @@ export function emailAttemptDue(closure: Closure, nowMs: number): boolean {
   return email.claimedAtMs === null || nowMs >= email.claimedAtMs + ACTION_FUNCTION_TIMEOUT_MS;
 }
 
+/**
+ * D-96: the claim on the last attempt outlived the action's timeout with no send, so no run will try
+ * again; the email is failed, as a third send that throws makes it, or it would vanish with no error line.
+ */
+export function emailAttemptsSpent(closure: Closure, nowMs: number): boolean {
+  const { email } = closure;
+  if (email === null || email.sentAtMs !== null || email.failed || email.attempts < EMAIL_SEND_ATTEMPTS) return false;
+  return email.claimedAtMs !== null && nowMs >= email.claimedAtMs + ACTION_FUNCTION_TIMEOUT_MS;
+}
+
 function subjectFor(template: keyof typeof SUBJECTS, configurationSet: string): string {
   return SUBJECTS[template].replace(SET_SLOT, configurationSet);
 }
