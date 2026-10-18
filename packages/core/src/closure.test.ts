@@ -14,11 +14,17 @@ import {
   claimStateOf,
   closureClaimItem,
   closureItemSchema,
+  freshnessRefusal,
   parseClosure,
   pauseOutcomeOf,
   type Closure,
+  type FreshnessInput,
+  type OtherLaneReading,
 } from './closure.js';
+import { BUCKET_MS } from './buckets.js';
+import { openIncident, type IncidentMarker, type IncidentState } from './incident.js';
 import { createLogger } from './log.js';
+import { spikeWindowFor } from './window-fold.js';
 
 const INCIDENT_ID = '0123456789abcdef0123456789abcdef';
 const CLAIMED_AT_MS = Date.UTC(2026, 9, 11, 12, 3, 0);
@@ -137,5 +143,77 @@ describe('the logger knows every closure reason and outcome (Pitfall 13)', () =>
 
   it('logs an outcome outside the vocabulary as unclassified', () => {
     expect(logged({ outcome: 'reopened-by-hand' }).outcome).toBe('unclassified');
+  });
+});
+
+const RECORD_TO_BUCKET_MS = Date.UTC(2026, 9, 11, 12, 0, 0);
+const OPEN_MARKER: IncidentMarker = { incidentId: INCIDENT_ID, status: 'open', version: 1 };
+const OPEN_STATE: IncidentState = { ...openIncident('fothering-bulk', RECORD_TO_BUCKET_MS, spikeWindowFor(RECORD_TO_BUCKET_MS)), incidentId: INCIDENT_ID };
+
+function fresh(overrides: Partial<FreshnessInput> = {}): FreshnessInput {
+  return { incidentId: INCIDENT_ID, marker: OPEN_MARKER, state: OPEN_STATE, others: [], recordToBucketMs: RECORD_TO_BUCKET_MS, nowMs: RECORD_TO_BUCKET_MS, ...overrides };
+}
+
+function openElsewhere(openingToBucketMs: unknown): OtherLaneReading {
+  return { kind: 'open', openingToBucketMs };
+}
+
+describe('freshnessRefusal passes a record only while it still describes the account (R3, AC-7)', () => {
+  it('passes an open marker naming the incident, an open STATE, no newer incident elsewhere and age 0', () => {
+    expect(freshnessRefusal(fresh())).toBeUndefined();
+    expect(freshnessRefusal(fresh({ others: [{ kind: 'no-open-incident' }, openElsewhere(RECORD_TO_BUCKET_MS - BUCKET_MS)] }))).toBeUndefined();
+  });
+
+  it.each([
+    ['a closed marker', { marker: { ...OPEN_MARKER, status: 'closed' } }, 'incident-not-open'],
+    ['a marker naming another incident', { marker: { ...OPEN_MARKER, incidentId: 'f'.repeat(32) } }, 'incident-not-open'],
+    ['a closed STATE', { state: { ...OPEN_STATE, status: 'closed' } }, 'incident-not-open'],
+    ['an incident on another lane opened after the record window', { others: [openElsewhere(RECORD_TO_BUCKET_MS + BUCKET_MS)] }, 'newer-incident-elsewhere'],
+    ['an age past one spike window', { nowMs: RECORD_TO_BUCKET_MS + RECORD_MAX_AGE_MS + 1 }, 'record-too-old'],
+  ] as const)('refuses %s as %s', (_case, override, refusal) => {
+    expect(freshnessRefusal(fresh(override))).toBe(refusal);
+  });
+
+  it('checks in the rule order: the incident first, then other lanes, then the age', () => {
+    const newer = [openElsewhere(RECORD_TO_BUCKET_MS + BUCKET_MS)];
+    const old = RECORD_TO_BUCKET_MS + RECORD_MAX_AGE_MS + 1;
+    expect(freshnessRefusal(fresh({ marker: undefined, others: newer, nowMs: old }))).toBe('incident-not-open');
+    expect(freshnessRefusal(fresh({ others: newer, nowMs: old }))).toBe('newer-incident-elsewhere');
+  });
+
+  it('passes an age of exactly one spike window and refuses one millisecond more (AC-E7)', () => {
+    expect(freshnessRefusal(fresh({ nowMs: RECORD_TO_BUCKET_MS + 3_600_000 }))).toBeUndefined();
+    expect(freshnessRefusal(fresh({ nowMs: RECORD_TO_BUCKET_MS + 3_600_001 }))).toBe('record-too-old');
+  });
+
+  it('refuses a missing marker or a missing STATE and passes a lane map with no other lane (AC-E8)', () => {
+    expect(freshnessRefusal(fresh({ marker: undefined }))).toBe('incident-not-open');
+    expect(freshnessRefusal(fresh({ state: undefined }))).toBe('incident-not-open');
+    expect(freshnessRefusal(fresh({ others: [] }))).toBeUndefined();
+  });
+
+  it.each([
+    ['upper-cased', INCIDENT_ID.toUpperCase()],
+    ['with a trailing space', `${INCIDENT_ID} `],
+  ])('compares the marker incident id byte for byte, refusing one %s (AC-E9)', (_case, incidentId) => {
+    expect(freshnessRefusal(fresh({ marker: { ...OPEN_MARKER, incidentId } }))).toBe('incident-not-open');
+  });
+
+  it.each([
+    ['missing', undefined],
+    ['a fraction', 1.5],
+    ['a string', '1700000000000'],
+    ['NaN', Number.NaN],
+  ])('refuses another open lane whose opening window end is %s (AC-E10)', (_case, openingToBucketMs) => {
+    expect(freshnessRefusal(fresh({ others: [openElsewhere(openingToBucketMs)] }))).toBe('newer-incident-elsewhere');
+  });
+
+  it('refuses when another lane could not be read (AC-E10)', () => {
+    expect(freshnessRefusal(fresh({ others: [{ kind: 'unreadable' }] }))).toBe('newer-incident-elsewhere');
+  });
+
+  it('passes another lane opened in the same cycle and refuses one opened a millisecond later (AC-E11)', () => {
+    expect(freshnessRefusal(fresh({ others: [openElsewhere(RECORD_TO_BUCKET_MS)] }))).toBeUndefined();
+    expect(freshnessRefusal(fresh({ others: [openElsewhere(RECORD_TO_BUCKET_MS + 1)] }))).toBe('newer-incident-elsewhere');
   });
 });

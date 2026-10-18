@@ -1,15 +1,17 @@
 import type { RuntimeResult } from '@fothering/core/agent-answer';
 import { bucketStartMs } from '@fothering/core/buckets';
 import { closureKey, parseClosure, type Closure } from '@fothering/core/closure';
-import { incidentIdFor, incidentItemKey, type EvidenceRecord } from '@fothering/core/evidence-record';
+import { evidenceRecordSchema, incidentIdFor, incidentItemKey, incidentLaneKey, type EvidenceRecord } from '@fothering/core/evidence-record';
+import { markerOf, openIncident, stateOf, storedStateOf, type IncidentStatus } from '@fothering/core/incident';
 import { parseLaneMap, type LaneMap } from '@fothering/core/lanes';
 import type { LogSink } from '@fothering/core/log';
 import { PINNED_MODEL_VALUES } from '@fothering/core/model-values';
 import { expiresAtFor } from '@fothering/core/records';
 import { scenarioRecords, type LaneScenario } from '@fothering/core/test/event-arbitraries';
+import type { BucketWindow } from '@fothering/core/window-fold';
 import { TEST_ADDRESS_KEY_SET } from '@fothering/providers/fixtures/ingest-ports';
 import { createFixtureSesState } from '@fothering/providers/fixtures/later-ports';
-import type { DryRunSink, FixtureSesState, FixtureTableState, Recording } from '@fothering/providers/port-types';
+import type { DecisionStoreItem, DryRunSink, FixtureSesState, FixtureTableState, Recording } from '@fothering/providers/port-types';
 import { buildActionRoot, type ActionDeps } from '../action/root.js';
 import { runDetectionCycle, type DetectionCycleSummary } from '../detect/detect.js';
 import { buildDetectRoot, type DetectDeps } from '../detect/root.js';
@@ -165,4 +167,61 @@ export async function plantClosure(deps: ActionDeps, item: Closure, nowMs: numbe
 export async function plantDecision(deps: ActionDeps, incidentId: string, attributes: Readonly<Record<string, unknown>>, nowMs: number): Promise<void> {
   const item = { ...incidentItemKey(incidentId, 'DECISION'), attempt: 1, decidedAtMs: nowMs, expiresAt: expiresAtFor(nowMs), ...attributes };
   if ((await deps.ports.decisionStore.putIfAbsent(item, nowMs)) !== 'written') throw new Error('a DECISION is already stored for that incident');
+}
+
+async function plantItem(deps: ActionDeps, item: DecisionStoreItem, nowMs: number): Promise<void> {
+  if ((await deps.ports.decisionStore.putIfAbsent(item, nowMs)) !== 'written') throw new Error(`an item is already stored at ${item.pk} / ${item.sk}`);
+}
+
+export interface PlantIncidentInput {
+  configurationSet: string;
+  incidentId: string;
+  /** Typed loosely on purpose, so a test can plant the malformed windows AC-E10 names. */
+  openingWindow: BucketWindow;
+  markerStatus?: IncidentStatus;
+  stateStatus?: IncidentStatus;
+  record?: EvidenceRecord;
+  decision?: Readonly<Record<string, unknown>>;
+  nowMs: number;
+  omit?: readonly ('marker' | 'STATE')[];
+}
+
+/** An incident on a lane in the shapes detection writes: marker, STATE and, when given, EVIDENCE and DECISION. */
+export async function plantIncident(deps: ActionDeps, input: PlantIncidentInput): Promise<void> {
+  const { configurationSet, incidentId, nowMs } = input;
+  const expiresAt = expiresAtFor(nowMs);
+  const omitted = new Set(input.omit ?? []);
+  if (!omitted.has('marker')) {
+    await plantItem(deps, { ...incidentLaneKey(configurationSet), incidentId, status: input.markerStatus ?? 'open', version: 1, expiresAt }, nowMs);
+  }
+  if (!omitted.has('STATE')) {
+    const opened = { ...openIncident(configurationSet, nowMs, input.openingWindow), incidentId, status: input.stateStatus ?? 'open' };
+    await plantItem(deps, { ...incidentItemKey(incidentId, 'STATE'), version: opened.version, expiresAt, state: storedStateOf(opened) }, nowMs);
+  }
+  if (input.record !== undefined) await plantItem(deps, { ...incidentItemKey(incidentId, 'EVIDENCE'), expiresAt, record: input.record }, nowMs);
+  if (input.decision !== undefined) await plantDecision(deps, incidentId, input.decision, nowMs);
+}
+
+/** Detection opening a newer incident on the lane: the marker names it from now on. */
+export async function moveMarker(deps: ActionDeps, configurationSet: string, toIncidentId: string, nowMs: number): Promise<void> {
+  const store = deps.ports.decisionStore;
+  const marker = markerOf(await store.getItem(incidentLaneKey(configurationSet), nowMs));
+  if (marker === undefined) throw new Error(`no marker is stored for ${configurationSet}`);
+  const result = await store.updateIfVersion(incidentLaneKey(configurationSet), marker.version, { incidentId: toIncidentId, status: 'open' }, nowMs);
+  if (result !== 'updated') throw new Error(`the marker of ${configurationSet} moved while the test moved it`);
+}
+
+/** Detection ending the incident's lifecycle. */
+export async function closeState(deps: ActionDeps, incidentId: string, nowMs: number): Promise<void> {
+  const store = deps.ports.decisionStore;
+  const key = incidentItemKey(incidentId, 'STATE');
+  const state = stateOf(await store.getItem(key, nowMs));
+  if (state === undefined) throw new Error(`no STATE is stored for incident ${incidentId}`);
+  const result = await store.updateIfVersion(key, state.version, { state: storedStateOf({ ...state, status: 'closed' }) }, nowMs);
+  if (result !== 'updated') throw new Error(`the STATE of ${incidentId} moved while the test closed it`);
+}
+
+export async function storedRecord(deps: ActionDeps, incidentId: string, nowMs: number): Promise<EvidenceRecord> {
+  const item = await deps.ports.decisionStore.getItem(incidentItemKey(incidentId, 'EVIDENCE'), nowMs);
+  return evidenceRecordSchema.parse(item?.record);
 }

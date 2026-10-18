@@ -3,6 +3,7 @@ import { AGENT_DECISIONS, GATE_REFUSALS, type AgentAnswer } from './agent-answer
 import { ACTION_FUNCTION_TIMEOUT_MS } from './close-values.js';
 import { REFUSAL_REASONS } from './closeability.js';
 import { incidentItemKey } from './evidence-record.js';
+import type { IncidentMarker, IncidentState } from './incident.js';
 import { CONFIGURATION_SET_PATTERN } from './lanes.js';
 import { SES_ID_PATTERN, expiresAtFor, type RecordKey } from './records.js';
 
@@ -24,6 +25,7 @@ export const LANE_STATES = ['incident-open', 'no-open-incident', 'paused-by-foth
 export const EMAIL_KINDS = ['closed', 'not-confirmed', 'unknown'] as const;
 
 export const FRESHNESS_REFUSALS = ['incident-not-open', 'newer-incident-elsewhere', 'record-too-old'] as const;
+export type FreshnessRefusal = (typeof FRESHNESS_REFUSALS)[number];
 
 export const ACTION_REFUSALS = [
   ...GATE_REFUSALS,
@@ -186,6 +188,22 @@ export function claimStateOf(closure: Closure, nowMs: number): ClaimState {
   if (closure.outcome !== null) return 'finished';
   if (nowMs < closure.claimedAtMs + ACTION_FUNCTION_TIMEOUT_MS) return 'in-flight';
   return closure.pauseRequestedAtMs === null ? 'reclaimable' : 'put-may-have-taken';
+}
+
+/** Another lane-map lane as the act read it: its marker not open, open with its STATE's opening window end, or unreadable. */
+export type OtherLaneReading = { kind: 'no-open-incident' } | { kind: 'open'; openingToBucketMs: unknown } | { kind: 'unreadable' };
+
+export interface FreshnessInput {
+  incidentId: string;
+  marker: IncidentMarker | undefined;
+  state: IncidentState | undefined;
+  others: readonly OtherLaneReading[];
+  recordToBucketMs: number;
+  nowMs: number;
+}
+
+export function freshnessRefusal(_input: FreshnessInput): FreshnessRefusal | undefined {
+  return undefined;
 }
 
 /** The fields the action reads from a DECISION item; phase 2 stores an agent unknown and cap-reached alike as unknown (D-92). */

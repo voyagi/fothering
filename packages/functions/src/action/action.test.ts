@@ -1,6 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { BUCKET_MS, bucketStartMs } from '@fothering/core/buckets';
 import { ACTION_FUNCTION_TIMEOUT_MS, HOLD_MS } from '@fothering/core/close-values';
 import { closureClaimItem } from '@fothering/core/closure';
+import { incidentLaneKey } from '@fothering/core/evidence-record';
+import { spikeWindowFor, type BucketWindow } from '@fothering/core/window-fold';
 import { createFixtureTableState } from '@fothering/providers/fixtures/ingest-ports';
 import type { DecisionStoreItem, DecisionStorePort, FixtureSesState, FixtureTableState, Recording } from '@fothering/providers/port-types';
 import { MAX_IDENTITY_READS, SES_READ_SPACING_MS } from '@fothering/providers/ses-facts';
@@ -15,12 +18,16 @@ import {
   TRANSACTIONAL,
   buildTestActionRoot,
   closeRuntime,
+  closeState,
   decidingRuntime,
   incidentIdOf,
+  moveMarker,
   plantClosure,
   plantDecision,
+  plantIncident,
   seedIncidents,
   storedClosure,
+  storedRecord,
   type TestActionRootInput,
 } from '../test/close-scenario.js';
 import { runActionCycle } from './action.js';
@@ -343,6 +350,141 @@ function tamperEvidenceHash(store: FixtureTableState, incidentId: string): void 
   if (evidence === undefined) throw new Error('no EVIDENCE item was seeded');
   (evidence.record as { hash: string }).hash = 'f'.repeat(64);
 }
+
+function withStore(deps: ActionDeps, overrides: Partial<DecisionStorePort>): ActionDeps {
+  const store = deps.ports.decisionStore;
+  const decisionStore: DecisionStorePort = {
+    putIfAbsent: (item, nowMs) => store.putIfAbsent(item, nowMs),
+    getItem: (key, nowMs) => store.getItem(key, nowMs),
+    updateIfVersion: (key, expectedVersion, attributes, nowMs, expected) => store.updateIfVersion(key, expectedVersion, attributes, nowMs, expected),
+    reserveInvocation: (request) => store.reserveInvocation(request),
+    recordUsage: (usage) => store.recordUsage(usage),
+    ...overrides,
+  };
+  return { ...deps, ports: { ...deps.ports, decisionStore } };
+}
+
+// The worklist reads the markers before the claim and the act reads them again after it, so a change
+// detection makes in between is planted right after the claim is written.
+function afterClaim(deps: ActionDeps, change: () => Promise<void>): ActionDeps {
+  const store = deps.ports.decisionStore;
+  return withStore(deps, {
+    putIfAbsent: async (item, nowMs) => {
+      const result = await store.putIfAbsent(item, nowMs);
+      if (result === 'written' && item.sk === 'CLOSURE') await change();
+      return result;
+    },
+  });
+}
+
+function markerReadThrowsAfterClaim(deps: ActionDeps, configurationSet: string): ActionDeps {
+  const store = deps.ports.decisionStore;
+  const { pk, sk } = incidentLaneKey(configurationSet);
+  let claimed = false;
+  return withStore(deps, {
+    putIfAbsent: async (item, nowMs) => {
+      const result = await store.putIfAbsent(item, nowMs);
+      if (item.sk === 'CLOSURE') claimed = true;
+      return result;
+    },
+    getItem: async (key, nowMs) => {
+      if (claimed && key.pk === pk && key.sk === sk) throw new Error('the fixture table was scripted to fail this marker read');
+      return store.getItem(key, nowMs);
+    },
+  });
+}
+
+function mutationsOf(state: FixtureSesState): string[] {
+  return state.calls.filter((call) => call.startsWith('put-') || call.startsWith('send-'));
+}
+
+const LATER_MS = NOW_MS + BUCKET_MS;
+const LATER_RECEIPT_INCIDENT_ID = incidentIdOf(TRANSACTIONAL, LATER_MS);
+
+async function plantReceiptIncident(deps: ActionDeps, openingWindow: BucketWindow, incidentId = LATER_RECEIPT_INCIDENT_ID): Promise<void> {
+  await plantIncident(deps, { configurationSet: TRANSACTIONAL, incidentId, openingWindow, nowMs: NOW_MS });
+}
+
+describe('a record that no longer describes the account pauses nothing (R3, AC-8)', () => {
+  it('refuses a close made stale by a later incident on another lane, with no SES mutation (tracer)', async () => {
+    const { root } = await seeded();
+    const { deps, sesState } = root();
+    await plantReceiptIncident(deps, spikeWindowFor(LATER_MS));
+    expect(spikeWindowFor(LATER_MS).toBucketMs).toBe(bucketStartMs(NOW_MS) + BUCKET_MS);
+
+    await runActionCycle(deps);
+
+    const closure = await storedClosure(deps, INCIDENT_ID, ACT_MS);
+    expect(closure?.reason).toBe('newer-incident-elsewhere');
+    expect(closure?.outcome).toBe('refused');
+    expect(mutationsOf(sesState)).toEqual([]);
+  });
+
+  it('refuses incident-not-open when the bulk marker moved to another incident after the claim', async () => {
+    const { root } = await seeded();
+    const { deps, sesState } = root();
+
+    await runActionCycle(afterClaim(deps, () => moveMarker(deps, BULK, incidentIdOf(BULK, LATER_MS), ACT_MS)));
+
+    expect(await storedClosure(deps, INCIDENT_ID, ACT_MS)).toMatchObject({ outcome: 'refused', reason: 'incident-not-open' });
+    expect(mutationsOf(sesState)).toEqual([]);
+  });
+
+  it('refuses incident-not-open when the bulk STATE reads closed', async () => {
+    const { root } = await seeded();
+    const { deps, sesState } = root();
+    await closeState(deps, INCIDENT_ID, NOW_MS);
+
+    await runActionCycle(deps);
+
+    expect(await storedClosure(deps, INCIDENT_ID, ACT_MS)).toMatchObject({ outcome: 'refused', reason: 'incident-not-open' });
+    expect(mutationsOf(sesState)).toEqual([]);
+  });
+
+  it('refuses record-too-old one millisecond past one spike window after the record window', async () => {
+    const { root } = await seeded();
+    const { deps, sesState } = root();
+    const oldMs = (await storedRecord(deps, INCIDENT_ID, NOW_MS)).window.toBucketMs + 3_600_001;
+
+    await runActionCycle(at(deps, oldMs));
+
+    expect(await storedClosure(deps, INCIDENT_ID, oldMs)).toMatchObject({ outcome: 'refused', reason: 'record-too-old' });
+    expect(mutationsOf(sesState)).toEqual([]);
+  });
+
+  it('refuses newer-incident-elsewhere for another lane whose STATE opening window is not an integer (AC-E10)', async () => {
+    const { root } = await seeded();
+    const { deps, sesState } = root();
+    await plantReceiptIncident(deps, { fromBucketMs: 1.5, toBucketMs: 1.5 });
+
+    await runActionCycle(deps);
+
+    expect(await storedClosure(deps, INCIDENT_ID, ACT_MS)).toMatchObject({ outcome: 'refused', reason: 'newer-incident-elsewhere' });
+    expect(mutationsOf(sesState)).toEqual([]);
+  });
+
+  it('refuses newer-incident-elsewhere when another lane marker read throws (AC-E10)', async () => {
+    const { root } = await seeded();
+    const { deps, sesState } = root();
+
+    await runActionCycle(markerReadThrowsAfterClaim(deps, TRANSACTIONAL));
+
+    expect(await storedClosure(deps, INCIDENT_ID, ACT_MS)).toMatchObject({ outcome: 'refused', reason: 'newer-incident-elsewhere' });
+    expect(mutationsOf(sesState)).toEqual([]);
+  });
+
+  it('pauses when another lane incident opened in the same cycle as the record (AC-E11)', async () => {
+    const { root } = await seeded();
+    const { deps, sesState } = root();
+    const record = await storedRecord(deps, INCIDENT_ID, NOW_MS);
+    await plantReceiptIncident(deps, record.window, RECEIPT_INCIDENT_ID);
+
+    await runActionCycle(deps);
+
+    expect((await storedClosure(deps, INCIDENT_ID, ACT_MS))?.outcome).toBe('paused');
+    expect(putsOf(sesState)).toEqual(['put-issued:fothering-bulk:false']);
+  });
+});
 
 describe('the gate runs through the real act', () => {
   it('refuses a tampered evidence hash as hash-mismatch with no put (T-03-02)', async () => {
