@@ -148,12 +148,24 @@ describe('the permissions snapshot', () => {
     );
   });
 
-  it('allows SES actions on the detection and action roles only: the four reads, and on the action role the pause and its read-back', () => {
+  it('holds exactly the actions of the reopen role: named items read and updated, the reopen and its read-back (D-104)', () => {
+    expect(actionsOf(rolesOf(synthesized, 'FotheringAction', 'ReopenRole')).join(',')).toBe(
+      'dynamodb:GetItem,dynamodb:UpdateItem,logs:CreateLogStream,logs:PutLogEvents,ses:GetConfigurationSet,ses:PutConfigurationSetSendingOptions',
+    );
+  });
+
+  it('allows SES actions on the detection, action and reopen roles only: the four reads, the pause and its read-back on the action role, and the reopen role the pause pair alone', () => {
     const sesEntries = synthesized.filter((entry) => entry.effect === 'Allow' && entry.action.toLowerCase().startsWith('ses:'));
     expect(sesEntries.length).toBeGreaterThan(0);
+    const allowed: Record<string, readonly string[]> = {
+      'FotheringDetection/DetectRole': SES_READS,
+      'FotheringAction/ActionRole': [...SES_READS, ...PAUSE_ACTIONS],
+      'FotheringAction/ReopenRole': PAUSE_ACTIONS,
+    };
     for (const entry of sesEntries) {
-      expect(`${entry.stack}/${entry.role.replace(/[0-9A-F]{8}$/, '')}`).toMatch(/^(FotheringDetection\/DetectRole|FotheringAction\/ActionRole)$/);
-      expect(entry.stack === 'FotheringAction' ? [...SES_READS, ...PAUSE_ACTIONS] : SES_READS).toContain(entry.action);
+      const role = `${entry.stack}/${entry.role.replace(/[0-9A-F]{8}$/, '')}`;
+      expect(Object.keys(allowed)).toContain(role);
+      expect(allowed[role]).toContain(entry.action);
     }
   });
 
@@ -169,12 +181,12 @@ describe('the permissions snapshot', () => {
         expect(policies.filter((policy) => policy.PolicyName === 'AccountSendingDeny')).toHaveLength(1);
       }
     }
-    expect(roles).toBe(5);
+    expect(roles).toBe(6);
   });
 
   it('holds Deny entries only for the account-level actions on *, three per role, and every other permission entry is Allow', () => {
     const denies = synthesized.filter((entry) => entry.kind === 'permission' && entry.effect === 'Deny');
-    expect(denies).toHaveLength(15);
+    expect(denies).toHaveLength(18);
     for (const entry of denies) {
       expect(ACCOUNT_LEVEL_ACTIONS).toContain(entry.action);
       expect(entry.resource).toBe('"*"');
@@ -207,6 +219,7 @@ describe('the permissions snapshot', () => {
     const trust = synthesized.filter((entry) => entry.kind === 'trust');
     expect(trust.map((entry) => [entry.role.replace(/[0-9A-F]{8}$/, ''), entry.principal, entry.action])).toEqual([
       ['ActionRole', '{"Service":"lambda.amazonaws.com"}', 'sts:AssumeRole'],
+      ['ReopenRole', '{"Service":"lambda.amazonaws.com"}', 'sts:AssumeRole'],
       ['DetectRole', '{"Service":"lambda.amazonaws.com"}', 'sts:AssumeRole'],
       ['ForgetRole', '{"Service":"lambda.amazonaws.com"}', 'sts:AssumeRole'],
       ['IngestRole', '{"Service":"lambda.amazonaws.com"}', 'sts:AssumeRole'],

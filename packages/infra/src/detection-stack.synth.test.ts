@@ -369,7 +369,7 @@ describe('the permission boundaries, with every wildcard expanded', () => {
       const app = new App({ context: { ...cdkJsonContext }, outdir: assets.outdir });
       const runtime = new RuntimeStack(app, RUNTIME_STACK_ID, { env, agentAssetDir: assets.agentAssetDir });
       const ingest = new IngestStack(app, INGEST_STACK_ID, { env, laneMap, ingestAssetDir: assets.ingestAssetDir, forgetAssetDir: assets.forgetAssetDir });
-      new ActionStack(app, ACTION_STACK_ID, { env, laneMap, actionAssetDir: assets.ingestAssetDir, ingest });
+      new ActionStack(app, ACTION_STACK_ID, { env, laneMap, actionAssetDir: assets.ingestAssetDir, reopenAssetDir: assets.forgetAssetDir, ingest });
       new DetectionStack(app, DETECTION_STACK_ID, { env, laneMap, detectAssetDir: assets.ingestAssetDir, table: ingest.table, runtime: runtime.runtime });
       applyAccountSendingDeny(app);
       const assembly = app.synth();
