@@ -110,6 +110,18 @@ describe('replayArtifactSchema cross-field rules', () => {
     expect(issuePaths({ ...artifact, email: { ...artifact.email, sentAtUtc: '2026-10-14T25:61:00Z' } })).toEqual(['email.sentAtUtc']);
   });
 
+  // Date.parse rolls an impossible day over (2026-02-30 reads as 2026-03-02), so a NaN test alone
+  // would let these through.
+  it('refuses a day the month does not have, and keeps real days with or without milliseconds', () => {
+    const artifact = shipped();
+    for (const sentAtUtc of ['2026-02-30T10:00:00Z', '2026-04-31T10:00:00Z', '2026-02-29T10:00:00.5Z']) {
+      expect(issuePaths({ ...artifact, email: { ...artifact.email, sentAtUtc } }), sentAtUtc).toEqual(['email.sentAtUtc']);
+    }
+    for (const sentAtUtc of ['2028-02-29T10:00:00Z', '2026-04-30T23:59:59Z', '2026-10-14T14:04:00.5Z', '2026-10-14T14:04:00.123Z']) {
+      expect(issuePaths({ ...artifact, email: { ...artifact.email, sentAtUtc } }), sentAtUtc).toEqual([]);
+    }
+  });
+
   it('refuses a key the schema does not know and a non-integer count', () => {
     const artifact = shipped();
     expect(issuePaths({ ...artifact, rate: '7.5' })).toEqual(['']);
