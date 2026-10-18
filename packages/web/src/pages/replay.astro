@@ -92,6 +92,13 @@ const logRows = view.eventLog.rows.map((row) => ({
               readBack={readBack}
             />
             <div class="tag-slot" data-wordcount="tag">
+              <svg class="tag-phantom" data-tag-phantom aria-hidden="true" focusable="false">
+                <line class="tag-phantom-stem" x1="50%" y1="-18" x2="50%" y2="12" />
+                <g class="tag-phantom-card">
+                  <rect x="0" y="0" width="100%" height="100%" rx="8" />
+                  <circle cx="50%" cy="20" r="8" />
+                </g>
+              </svg>
               <LockoutTag tag={view.tag} provenance={provenance} row={2} readBack="field" />
             </div>
           </div>

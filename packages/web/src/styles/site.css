@@ -381,6 +381,11 @@ ol.steps { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); marg
 /* Beside the story the tag simply comes off; where the board stacks above the story (960px and
    below) it keeps its slot, so the story never jumps between steps. */
 :root.js:not([data-step="3"]) .tag-slot { display: none; }
+/* Where the slot is reserved, its empty place is drawn as a phantom: the tag's outline and its stem
+   from the valve, dash-dot in Cell Rule, the drafting line for a part shown where it will go. */
+.tag-slot { position: relative; }
+.tag-phantom { display: none; position: absolute; top: 0; left: 50%; width: min(320px, 100%); height: 100%; translate: -50% 0; overflow: visible; fill: none; stroke: var(--rule); stroke-width: var(--w-rule); stroke-dasharray: 12 4 2 4; }
+.tag-phantom-card { transform: rotate(-2deg); transform-box: view-box; transform-origin: 50% 20px; }
 .board .caption-row { flex-direction: column; justify-content: center; margin-top: var(--space-lg); padding-right: 0; text-align: center; }
 .board .caption { max-inline-size: 44ch; }
 
@@ -408,6 +413,7 @@ ol.steps { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); marg
   .stage { grid-template-columns: minmax(0, 1fr); }
   .board { position: static; border-right: 0; border-bottom: var(--w-rule) solid var(--rule); }
   :root.js:not([data-step="3"]) .tag-slot { display: block; visibility: hidden; }
+  :root.js:not([data-step="3"]) .tag-phantom { display: block; visibility: visible; }
 }
 @media (max-width: 620px) {
   /* The sticky controls cover the top of the viewport, so focus scrolled into view lands below them. */
