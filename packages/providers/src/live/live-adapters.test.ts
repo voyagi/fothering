@@ -22,6 +22,7 @@ import { NotFoundException, SESv2Client, TooManyRequestsException } from '@aws-s
 import {
   RETENTION_SECONDS,
   SES_EVENT_TYPES,
+  SES_ID_PATTERN,
   bucketSortKeyPrefix,
   isStorableBucketStart,
   recordKey,
@@ -1390,11 +1391,12 @@ describe('createSesWrites', () => {
   it.each([
     ['no MessageId', {}],
     ['an empty MessageId', { MessageId: '' }],
-  ])('throws MissingMessageIdError when SES answers %s', async (_case, response) => {
+  ])('counts the email as sent with an empty message id, which the caller stores as none, when SES answers %s', async (_case, response) => {
     const client = sesClient();
     stubSend(client, () => response);
     const sent = createSesWrites({ client: () => client }).sendEmail(REQUEST);
-    await expect(sent).rejects.toMatchObject({ name: 'MissingMessageIdError' });
+    await expect(sent).resolves.toEqual({ messageId: '' });
+    expect(SES_ID_PATTERN.test('')).toBe(false);
   });
 });
 

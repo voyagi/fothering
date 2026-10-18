@@ -6,14 +6,6 @@ import {
 } from '@aws-sdk/client-sesv2';
 import type { ConfigurationSetSending, SesPort } from '../port-types.js';
 
-/** SES accepted the send and named no message: nothing can be stored or traced, so it counts as not sent. */
-export class MissingMessageIdError extends Error {
-  constructor() {
-    super('SES answered the send with no message id');
-    this.name = 'MissingMessageIdError';
-  }
-}
-
 export interface CreateSesWritesOptions {
   client: () => SESv2Client;
 }
@@ -55,8 +47,9 @@ export function createSesWrites(options: CreateSesWritesOptions): SesWritePort {
           ...(request.configurationSetName === undefined ? {} : { ConfigurationSetName: request.configurationSetName }),
         }),
       );
-      if (response.MessageId === undefined || response.MessageId === '') throw new MissingMessageIdError();
-      return { messageId: response.MessageId };
+      // A success answer with no message id is still a message SES accepted: retrying it would mail the
+      // operator again. The empty id fails SES_ID_PATTERN, so the caller records the send with no id.
+      return { messageId: response.MessageId ?? '' };
     },
   };
 }
