@@ -169,6 +169,8 @@ code { font-size: var(--text-mono-value); font-weight: 500; }
 .state-mark rect { fill: none; stroke: var(--ink); stroke-width: var(--w-outline); }
 .state-mark-later rect { stroke-dasharray: 2.5 2; stroke-dashoffset: 1.25; }
 .state-mark-open rect { fill: var(--ink); }
+/* A failed hand check: the shut mark's barred square, in ink rather than lockout red. */
+.state-mark-failed rect.bar { fill: var(--ink); stroke: none; }
 
 /* Row 1: the claim beside the flow drawing, the tag hung from the closed valve's stem. */
 .moment { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); }

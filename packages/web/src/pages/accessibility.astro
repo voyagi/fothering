@@ -1,7 +1,7 @@
 ---
 import Schedule from '../components/Schedule.astro';
 import Sheet from '../layouts/Sheet.astro';
-import { ACCESSIBILITY_RECORD, HAND_CHECK_CRITERIA, HAND_CHECK_RESULT_LABELS, type HandCheckResult } from '../site/content.ts';
+import { ACCESSIBILITY_RECORD, handCheckRows } from '../site/content.ts';
 import { routeFor } from '../site/route-list.ts';
 
 // Every fact here comes from the committed record, which a test holds equal to the audit's own
@@ -19,13 +19,7 @@ const recordRows = [
   { header: 'Also checked', cells: [{ text: 'Keyboard order, a visible focus indicator on every control, no sideways scrolling, flow animation stoppable and still under reduced motion.' }] },
 ];
 
-// Each row carries its own state, so a schedule part way through the hand check reads true.
-const MARKS: Readonly<Record<HandCheckResult, 'later' | 'open' | 'none'>> = { 'not-yet-checked': 'later', 'passed': 'open', 'not-applicable': 'none', 'failed': 'none' };
-const criterionRows = HAND_CHECK_CRITERIA.map((criterion) => ({
-  header: `${criterion.number} ${criterion.name}`,
-  attrs: { 'data-criterion': criterion.number },
-  cells: [{ text: HAND_CHECK_RESULT_LABELS[criterion.result], mark: MARKS[criterion.result] }, { text: criterion.how }],
-}));
+const criterionRows = handCheckRows();
 ---
 <Sheet route={routeFor('/accessibility/')}>
   <div class="row">

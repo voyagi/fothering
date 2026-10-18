@@ -375,6 +375,27 @@ export const HAND_CHECK_CRITERIA: readonly HandCheckCriterion[] = Object.freeze(
   { number: '4.1.3', name: 'Status Messages', result: 'not-yet-checked', how: "Check that a screen reader announces the replay's step clock while focus stays on the step control." },
 ]);
 
+// The state mark each result carries in the hand-check schedule: dashed for not yet checked, filled
+// ink for passed, a barred square for failed, and no mark for a criterion that does not apply. Each
+// result has its own, so a failed row never reads like one that does not apply (IN-12).
+export type HandCheckMark = 'later' | 'open' | 'failed' | 'none';
+
+export const HAND_CHECK_MARKS: Readonly<Record<HandCheckResult, HandCheckMark>> = Object.freeze({
+  'not-yet-checked': 'later',
+  'passed': 'open',
+  'failed': 'failed',
+  'not-applicable': 'none',
+});
+
+// One schedule row per criterion, carrying its own state, so a schedule part way through the hand
+// check reads true.
+export const handCheckRows = (criteria: readonly HandCheckCriterion[] = HAND_CHECK_CRITERIA) =>
+  criteria.map((criterion) => ({
+    header: `${criterion.number} ${criterion.name}`,
+    attrs: { 'data-criterion': criterion.number },
+    cells: [{ text: HAND_CHECK_RESULT_LABELS[criterion.result], mark: HAND_CHECK_MARKS[criterion.result] }, { text: criterion.how }],
+  }));
+
 export interface AccessibilityRecord {
   readonly target: string;
   readonly lastAutomatedAudit: string;

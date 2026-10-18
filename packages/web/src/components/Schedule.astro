@@ -7,7 +7,8 @@ import { textSegments, type IdentifierTerms, type Segment } from '../site/identi
 import Identifier from './Identifier.astro';
 
 // 'none' prints a state with no mark, keeping the mark's place so the state names stay aligned.
-type Mark = 'open' | 'later' | 'none';
+// 'failed' is the replay's barred square drawn in ink.
+type Mark = 'open' | 'later' | 'failed' | 'none';
 
 interface Cell {
   text: string;
@@ -92,7 +93,7 @@ const isEmpty = (cell: Cell): boolean => cell.text === '' && (cell.commands ?? [
               ))}</span>
             ) : (
               <span class="state">
-                <svg class={`state-mark state-mark-${cell.mark}`} viewBox="0 0 12 12" aria-hidden="true"><rect x="1" y="1" width="10" height="10" /></svg>
+                <svg class={`state-mark state-mark-${cell.mark}`} viewBox="0 0 12 12" aria-hidden="true"><rect x="1" y="1" width="10" height="10" />{cell.mark === 'failed' && <rect class="bar" x="3" y="5" width="6" height="2" />}</svg>
                 {cell.text}
               </span>
             )}
