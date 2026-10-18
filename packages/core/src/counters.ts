@@ -1,4 +1,5 @@
-import { counterDayKey, incidentItemKey } from './evidence-record.js';
+import { LANE_HOUR_ATTEMPT_CAP } from './close-values.js';
+import { counterDayKey, counterLaneHourKey, incidentItemKey } from './evidence-record.js';
 import { MODEL_VALUES, TOKEN_RESERVATION_PER_INVOCATION } from './model-values.js';
 import { RETENTION_SECONDS, type RecordKey } from './records.js';
 
@@ -92,8 +93,23 @@ export interface LaneAttemptAnswer<Result> {
   hourEndsAtMs: number;
 }
 
-export async function reserveLaneAttempt<Result>(_store: LaneAttemptStore<Result>, _input: LaneAttemptInput): Promise<LaneAttemptAnswer<Result>> {
-  return { outcome: undefined as Result, hourEndsAtMs: 0 };
+const HOUR_MS = 3_600_000;
+
+// The hour is the UTC hour of the injected clock, never a local getter: a host off UTC must count the
+// same hour (T-03-13).
+function utcHourOf(nowMs: number): string {
+  return new Date(nowMs).toISOString().slice(0, 13);
+}
+
+/** D-99: the cap, the key and the expiry are computed here, so a caller can only ask for one attempt more. */
+export async function reserveLaneAttempt<Result>(store: LaneAttemptStore<Result>, input: LaneAttemptInput): Promise<LaneAttemptAnswer<Result>> {
+  const utcHour = utcHourOf(input.nowMs);
+  const outcome = await store.reserveLaneAttempt({
+    key: counterLaneHourKey(input.configurationSet, utcHour),
+    cap: LANE_HOUR_ATTEMPT_CAP,
+    expiresAt: Math.floor(input.nowMs / 1000) + RETENTION_SECONDS,
+  });
+  return { outcome, hourEndsAtMs: Date.parse(`${utcHour}:00:00.000Z`) + HOUR_MS };
 }
 
 /** Every number the reservation carries is computed here, so no caller can pass a cap of its own. */

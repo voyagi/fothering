@@ -40,7 +40,12 @@ const INCIDENT_LANE_PARTITION_KEY = new RegExp(`^INCIDENT_LANE#${CONFIGURATION_S
 const INCIDENT_PARTITION_KEY = /^INCIDENT#[0-9a-f]{32}$/;
 const COUNTER_DAY_PARTITION_KEY = /^COUNTER_DAY#\d{4}-\d{2}-\d{2}$/;
 const DECISION_PARTITION_KEYS = [INCIDENT_LANE_PARTITION_KEY, INCIDENT_PARTITION_KEY, COUNTER_DAY_PARTITION_KEY];
-const DECISION_SORT_KEY = new RegExp(`^(?:MARKER|${INCIDENT_PARTS.join('|')})$`);
+// MARKER and PAUSE sit under INCIDENT_LANE#, the incident parts under INCIDENT#.
+const DECISION_SORT_KEY = new RegExp(`^(?:MARKER|PAUSE|${INCIDENT_PARTS.join('|')})$`);
+// Pitfall 8: the set rule goes in the middle of this key, so both its anchors come off; a $ left in
+// place would match nothing and refuse every lane-hour line.
+const CONFIGURATION_SET_BODY = CONFIGURATION_SET_PATTERN.source.replace(/^\^/, '').replace(/\$$/, '');
+const COUNTER_LANE_HOUR_PARTITION_KEY = new RegExp(`^COUNTER_LANE_HOUR#${CONFIGURATION_SET_BODY}#\\d{4}-\\d{2}-\\d{2}T\\d{2}$`);
 const MODEL_ID = /^[A-Za-z0-9._:-]{1,256}$/;
 const RUNTIME_ARN = /^arn:[A-Za-z0-9:/_.-]{1,512}$/;
 const DEAD_LETTER_TARGET = new RegExp(`^${DEAD_LETTER_QUEUE_TARGET}$`);
@@ -80,6 +85,11 @@ const usageSchema = z.object({
   inputTokens: z.int().nonnegative(),
   outputTokens: z.int().nonnegative(),
   modelCalls: z.int().nonnegative(),
+});
+const laneAttemptSchema = z.object({
+  key: z.object({ pk: z.string().regex(COUNTER_LANE_HOUR_PARTITION_KEY), sk: z.literal('COUNTER') }),
+  cap: z.int().positive(),
+  expiresAt: z.int().nonnegative(),
 });
 
 type Summary = Record<string, unknown>;
@@ -133,6 +143,11 @@ function summarizeUsage(request: unknown): Summary {
   return { inputTokens, outputTokens, modelCalls };
 }
 
+function summarizeLaneAttempt(request: unknown): Summary {
+  const { cap, expiresAt } = laneAttemptSchema.parse(request);
+  return { cap, expiresAt };
+}
+
 const SHAPES = new Map<string, DryRunShape>([
   ['eventStore.putIfAbsent', RECORD_KEY_SHAPE],
   ['eventStore.deleteRecord', RECORD_KEY_SHAPE],
@@ -146,6 +161,7 @@ const SHAPES = new Map<string, DryRunShape>([
   ],
   ['decisionStore.reserveInvocation', { targets: [INCIDENT_PARTITION_KEY], summarize: summarizeReservation }],
   ['decisionStore.recordUsage', { targets: [INCIDENT_PARTITION_KEY], summarize: summarizeUsage }],
+  ['decisionStore.reserveLaneAttempt', { targets: [COUNTER_LANE_HOUR_PARTITION_KEY], summarize: summarizeLaneAttempt }],
   ['deadLetter.send', { targets: [DEAD_LETTER_TARGET], summarize: summarizeDeadLetter }],
   ['ses.pauseConfigurationSet', CONFIGURATION_SET_SHAPE],
   ['ses.reopenConfigurationSet', CONFIGURATION_SET_SHAPE],

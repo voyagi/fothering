@@ -1,13 +1,13 @@
 import * as z from 'zod';
 import { AGENT_DECISIONS, GATE_REFUSALS, type AgentAnswer } from './agent-answer.js';
-import { bucketStartMs } from './buckets.js';
-import { ACTION_FUNCTION_TIMEOUT_MS, RECORD_MAX_AGE_MS } from './close-values.js';
+import { BUCKET_MS, bucketStartMs } from './buckets.js';
+import { ACTION_FUNCTION_TIMEOUT_MS, HOLD_CHECK_DELAY_MS, RECORD_MAX_AGE_MS } from './close-values.js';
 import { REFUSAL_REASONS, type RefusalReason } from './closeability.js';
 import { incidentItemKey, type EvidenceRecord } from './evidence-record.js';
 import type { IncidentMarker, IncidentState } from './incident.js';
 import { CONFIGURATION_SET_PATTERN } from './lanes.js';
-import { SES_ID_PATTERN, expiresAtFor, type RecordKey } from './records.js';
-import type { BucketWindow, LaneFold } from './window-fold.js';
+import { SES_ID_PATTERN, expiresAtFor, type EventRecord, type RecordKey } from './records.js';
+import { MAX_WINDOW_BUCKETS, type BucketWindow, type LaneFold } from './window-fold.js';
 
 // The closed vocabularies of phase 3, written complete here so later plans fill them in and the
 // logger's sets change once. This module imports nothing from log.ts: the logger reads these.
@@ -192,26 +192,77 @@ export function claimStateOf(closure: Closure, nowMs: number): ClaimState {
   return closure.pauseRequestedAtMs === null ? 'reclaimable' : 'put-may-have-taken';
 }
 
+/** D-93 and D-95: outcomes after which the set may still be paused by Fothering, until a reopen reads reopened. */
 export const PAUSE_MAY_HOLD_OUTCOMES = ['paused', 'closed', 'not-holding', 'pause-unknown'] as const satisfies readonly ClosureOutcome[];
 
-export function pauseMayHold(_closure: Closure | undefined, _nowMs: number): boolean {
-  return false;
+const PAUSE_MAY_HOLD: ReadonlySet<ClosureOutcome> = new Set(PAUSE_MAY_HOLD_OUTCOMES);
+
+function reopened(closure: Closure): boolean {
+  return closure.reopen?.outcome === 'reopened';
 }
 
-export function holdCheckDue(_closure: Closure, _nowMs: number): boolean {
-  return false;
+/**
+ * D-95: whether the closure a lane's pause pointer names may still hold that lane. A closure that cannot
+ * be read fails closed, and so does a claim still acting or one whose put may have taken.
+ */
+export function pauseMayHold(closure: Closure | undefined, nowMs: number): boolean {
+  if (closure === undefined) return true;
+  if (closure.outcome === null) {
+    const state = claimStateOf(closure, nowMs);
+    return state === 'in-flight' || state === 'put-may-have-taken';
+  }
+  return PAUSE_MAY_HOLD.has(closure.outcome) && !reopened(closure);
+}
+
+/** D-100: the first run at or after the hold end plus HOLD_CHECK_DELAY_MS, on a pause the operator has not reopened (D-94). */
+export function holdCheckDue(closure: Closure, nowMs: number): closure is Closure & { holdEndMs: number } {
+  return closure.outcome === 'paused' && !reopened(closure) && closure.holdEndMs !== null && nowMs >= closure.holdEndMs + HOLD_CHECK_DELAY_MS;
+}
+
+/** D-94: a reopened pause whose hold check would otherwise be due; it is skipped and keeps outcome paused. */
+export function holdCheckSkipped(closure: Closure, nowMs: number): boolean {
+  return closure.outcome === 'paused' && reopened(closure) && closure.holdEndMs !== null && nowMs >= closure.holdEndMs + HOLD_CHECK_DELAY_MS;
 }
 
 export interface HoldCheckWindow extends BucketWindow {
+  /** The last millisecond the fold covered, which the email states when an outage clamped it. */
   checkedThroughMs: number;
 }
 
+/**
+ * D-100: Send records sit in the bucket of their mail timestamp (D-08), so no bucket before the one
+ * holding the hold end can hold a later Send. An action outage longer than a fold's reach reads the
+ * first MAX_WINDOW_BUCKETS buckets and says how far it got.
+ */
 export function holdCheckWindow(holdEndMs: number, nowMs: number): HoldCheckWindow {
-  return { fromBucketMs: bucketStartMs(holdEndMs), toBucketMs: bucketStartMs(nowMs), checkedThroughMs: nowMs };
+  const fromBucketMs = bucketStartMs(holdEndMs);
+  const lastReadableMs = fromBucketMs + (MAX_WINDOW_BUCKETS - 1) * BUCKET_MS;
+  const nowBucketMs = bucketStartMs(nowMs);
+  if (nowBucketMs <= lastReadableMs) return { fromBucketMs, toBucketMs: nowBucketMs, checkedThroughMs: nowMs };
+  return { fromBucketMs, toBucketMs: lastReadableMs, checkedThroughMs: lastReadableMs + BUCKET_MS - 1 };
 }
 
-export function holdFold(_holdEndMs: number): LaneFold<number> {
-  return { initial: 0, step: (count) => count };
+/**
+ * R2 and Pitfall 5: counts Send records accepted at or after the hold end, compared as integer epoch
+ * milliseconds. A Delivery record says nothing about acceptance, and the fold keeps a count, never a record.
+ */
+export function holdFold(holdEndMs: number): LaneFold<number> {
+  const acceptedAfterHold = (record: EventRecord): boolean =>
+    record.kind === 'send' && record.eventType === 'Send' && Number.isInteger(record.mailTimestampMs) && record.mailTimestampMs >= holdEndMs;
+  return { initial: 0, step: (count, page) => count + page.filter(acceptedAfterHold).length };
+}
+
+/** D-95: the lane's pause pointer as stored; a pointer that does not parse is treated as one holding the lane. */
+export interface PausePointer {
+  incidentId: string;
+  version: number;
+}
+
+const pausePointerSchema = z.object({ incidentId: z.string().regex(INCIDENT_ID_PATTERN), version: count });
+
+export function pausePointerOf(item: unknown): PausePointer | undefined {
+  const parsed = pausePointerSchema.safeParse(item);
+  return parsed.success ? parsed.data : undefined;
 }
 
 /** Another lane-map lane as the act read it: its marker not open, open with its STATE's opening window end, or unreadable. */

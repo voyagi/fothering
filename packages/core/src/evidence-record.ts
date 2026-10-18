@@ -263,6 +263,7 @@ export const INCIDENT_PARTS = ['STATE', 'EVIDENCE', 'DECISION', 'COUNTER', 'CLOS
 export type IncidentPart = (typeof INCIDENT_PARTS)[number];
 
 const UTC_DATE = /^\d{4}-\d{2}-\d{2}$/;
+const UTC_HOUR = /^\d{4}-\d{2}-\d{2}T\d{2}$/;
 
 export function incidentLaneKey(configurationSet: string): RecordKey {
   return { pk: `INCIDENT_LANE#${configurationSet}`, sk: 'MARKER' };
@@ -277,10 +278,13 @@ export function counterDayKey(utcDate: string): RecordKey {
   return { pk: `COUNTER_DAY#${utcDate}`, sk: 'COUNTER' };
 }
 
+/** D-95: the lane's pause pointer, beside its marker, naming the one closure whose pause may hold the lane. */
 export function incidentPauseKey(configurationSet: string): RecordKey {
-  return { pk: `INCIDENT_LANE#${configurationSet}`, sk: 'MARKER' };
+  return { pk: `INCIDENT_LANE#${configurationSet}`, sk: 'PAUSE' };
 }
 
+/** D-99: pause and reopen attempts on one lane in one UTC clock hour. */
 export function counterLaneHourKey(configurationSet: string, utcHour: string): RecordKey {
+  if (!UTC_HOUR.test(utcHour)) throw new RangeError('a lane-hour counter names a UTC hour written YYYY-MM-DDTHH');
   return { pk: `COUNTER_LANE_HOUR#${configurationSet}#${utcHour}`, sk: 'COUNTER' };
 }
