@@ -4,7 +4,7 @@ import { expect } from 'vitest';
 import { parseLaneMap, type LaneMap } from '@fothering/core/lanes';
 import lanesJson from '../../../../lanes.json' with { type: 'json' };
 import { cdkJsonContext } from '../cdk-context.js';
-import { addFotheringStacks, DETECTION_STACK_ID, RUNTIME_STACK_ID } from '../create-app.js';
+import { ACTION_STACK_ID, addFotheringStacks, DETECTION_STACK_ID, RUNTIME_STACK_ID } from '../create-app.js';
 import type { PermissionEntry } from '../permissions.js';
 import { createStubAssets } from '../stub-assets.js';
 
@@ -13,6 +13,7 @@ export interface SynthesizedStacks {
   readonly ingest: Template;
   readonly runtime: Template;
   readonly detection: Template;
+  readonly action: Template;
   /** The folder the synth wrote its assembly to. */
   readonly outdir: string;
   dispose(): void;
@@ -21,8 +22,8 @@ export interface SynthesizedStacks {
 type Resources = Record<string, { Type: string; Properties?: Record<string, unknown>; [key: string]: unknown }>;
 
 // The deployed context plus whatever a test adds, over stub bundles, so a synth loads aws-cdk-lib
-// and hashes a few small folders and nothing more. The detection function reuses the ingest stub
-// folder: a stub bundle only has to exist to be hashed. The assembly goes inside the stub folder: an
+// and hashes a few small folders and nothing more. The detection and action functions reuse the ingest
+// stub folder: a stub bundle only has to exist to be hashed. The assembly goes inside the stub folder: an
 // App with no outdir writes to a new temp folder of its own, which nothing ever removes. A synth that
 // throws returns no dispose to its caller, so the folder is removed here before the error goes on.
 export function synthStacks(extraContext: Record<string, unknown> = {}): SynthesizedStacks {
@@ -30,12 +31,18 @@ export function synthStacks(extraContext: Record<string, unknown> = {}): Synthes
   try {
     const laneMap = parseLaneMap(lanesJson);
     const app = new App({ context: { ...cdkJsonContext, ...extraContext }, outdir: assets.outdir });
-    const { ingest, runtime, detection } = addFotheringStacks(app, { laneMap, ...assets, detectAssetDir: assets.ingestAssetDir });
+    const { ingest, runtime, detection, action } = addFotheringStacks(app, {
+      laneMap,
+      ...assets,
+      detectAssetDir: assets.ingestAssetDir,
+      actionAssetDir: assets.ingestAssetDir,
+    });
     return {
       laneMap,
       ingest: Template.fromStack(ingest),
       runtime: Template.fromStack(runtime),
       detection: Template.fromStack(detection),
+      action: Template.fromStack(action),
       outdir: app.outdir,
       dispose: assets.remove,
     };
@@ -115,8 +122,9 @@ const NO_ROLE_MAY_HOLD = [
   'bedrock-agentcore:InvokeAgentRuntimeCommandShell',
   'bedrock-agentcore:CreateEvent',
 ];
+const PAUSE_ACTION = 'ses:PutConfigurationSetSendingOptions';
+const PAUSING_ROLE_PREFIXES = ['ActionRole', 'ReopenRole'];
 const SES_WRITES = [
-  'ses:PutConfigurationSetSendingOptions',
   'ses:PutAccountSendingAttributes',
   'ses:UpdateAccountSendingEnabled',
   'ses:UpdateConfigurationSetSendingEnabled',
@@ -127,13 +135,16 @@ const SES_WRITES = [
 
 // Every Allow grant that breaks the boundaries the stacks promise: the runtime reaches no SES,
 // DynamoDB or S3 action, only the detection role may invoke the runtime, no role may invoke it for a
-// user or run commands in it or write AgentCore Memory, and no role may change or use SES sending.
+// user or run commands in it or write AgentCore Memory, no role may change account-level sending or
+// send, and only the action stack's pausing roles may pause a configuration set.
 export function permissionViolations(entries: readonly PermissionEntry[]): string[] {
   const violations: string[] = [];
   for (const entry of entries) {
     if (entry.kind !== 'permission' || entry.effect !== 'Allow') continue;
     const where = `${entry.stack}/${entry.role} ${entry.action}`;
     const isDetectRole = entry.stack === DETECTION_STACK_ID && entry.role.startsWith('DetectRole');
+    const isPausingRole = entry.stack === ACTION_STACK_ID && PAUSING_ROLE_PREFIXES.some((prefix) => entry.role.startsWith(prefix));
+    if (!isPausingRole && grantsAction(entry.action, PAUSE_ACTION)) violations.push(`${where}: only a pausing role may hold ${PAUSE_ACTION}`);
     for (const service of RUNTIME_FORBIDDEN_SERVICES) {
       if (entry.stack === RUNTIME_STACK_ID && reachesService(entry.action, service)) violations.push(`${where}: the runtime role reaches ${service}`);
     }

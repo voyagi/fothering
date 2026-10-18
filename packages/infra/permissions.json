@@ -1,5 +1,155 @@
 [
   {
+    "stack": "FotheringAction",
+    "role": "ActionRole60B0EDF7",
+    "kind": "permission",
+    "effect": "Allow",
+    "action": "dynamodb:GetItem",
+    "resource": "{\"Fn::ImportValue\":\"FotheringIngest:ExportsOutputFnGetAttEventStore165FCE28Arn077E4AA7\"}",
+    "principal": null,
+    "condition": null
+  },
+  {
+    "stack": "FotheringAction",
+    "role": "ActionRole60B0EDF7",
+    "kind": "permission",
+    "effect": "Allow",
+    "action": "dynamodb:PutItem",
+    "resource": "{\"Fn::ImportValue\":\"FotheringIngest:ExportsOutputFnGetAttEventStore165FCE28Arn077E4AA7\"}",
+    "principal": null,
+    "condition": null
+  },
+  {
+    "stack": "FotheringAction",
+    "role": "ActionRole60B0EDF7",
+    "kind": "permission",
+    "effect": "Allow",
+    "action": "dynamodb:Query",
+    "resource": "{\"Fn::ImportValue\":\"FotheringIngest:ExportsOutputFnGetAttEventStore165FCE28Arn077E4AA7\"}",
+    "principal": null,
+    "condition": null
+  },
+  {
+    "stack": "FotheringAction",
+    "role": "ActionRole60B0EDF7",
+    "kind": "permission",
+    "effect": "Allow",
+    "action": "dynamodb:UpdateItem",
+    "resource": "{\"Fn::ImportValue\":\"FotheringIngest:ExportsOutputFnGetAttEventStore165FCE28Arn077E4AA7\"}",
+    "principal": null,
+    "condition": null
+  },
+  {
+    "stack": "FotheringAction",
+    "role": "ActionRole60B0EDF7",
+    "kind": "permission",
+    "effect": "Allow",
+    "action": "logs:CreateLogStream",
+    "resource": "{\"Fn::Join\":[\"\",[\"arn:aws:logs:eu-central-1:\",{\"Ref\":\"AWS::AccountId\"},\":log-group:\",{\"Ref\":\"ActionLogs3E70FEE0\"},\":log-stream:*\"]]}",
+    "principal": null,
+    "condition": null
+  },
+  {
+    "stack": "FotheringAction",
+    "role": "ActionRole60B0EDF7",
+    "kind": "permission",
+    "effect": "Allow",
+    "action": "logs:PutLogEvents",
+    "resource": "{\"Fn::Join\":[\"\",[\"arn:aws:logs:eu-central-1:\",{\"Ref\":\"AWS::AccountId\"},\":log-group:\",{\"Ref\":\"ActionLogs3E70FEE0\"},\":log-stream:*\"]]}",
+    "principal": null,
+    "condition": null
+  },
+  {
+    "stack": "FotheringAction",
+    "role": "ActionRole60B0EDF7",
+    "kind": "permission",
+    "effect": "Allow",
+    "action": "ses:GetConfigurationSet",
+    "resource": "{\"Fn::Join\":[\"\",[\"arn:aws:ses:eu-central-1:\",{\"Ref\":\"AWS::AccountId\"},\":configuration-set/fothering-bulk\"]]}",
+    "principal": null,
+    "condition": null
+  },
+  {
+    "stack": "FotheringAction",
+    "role": "ActionRole60B0EDF7",
+    "kind": "permission",
+    "effect": "Allow",
+    "action": "ses:GetConfigurationSetEventDestinations",
+    "resource": "{\"Fn::Join\":[\"\",[\"arn:aws:ses:eu-central-1:\",{\"Ref\":\"AWS::AccountId\"},\":configuration-set/fothering-alerts\"]]}",
+    "principal": null,
+    "condition": null
+  },
+  {
+    "stack": "FotheringAction",
+    "role": "ActionRole60B0EDF7",
+    "kind": "permission",
+    "effect": "Allow",
+    "action": "ses:GetConfigurationSetEventDestinations",
+    "resource": "{\"Fn::Join\":[\"\",[\"arn:aws:ses:eu-central-1:\",{\"Ref\":\"AWS::AccountId\"},\":configuration-set/fothering-bulk\"]]}",
+    "principal": null,
+    "condition": null
+  },
+  {
+    "stack": "FotheringAction",
+    "role": "ActionRole60B0EDF7",
+    "kind": "permission",
+    "effect": "Allow",
+    "action": "ses:GetConfigurationSetEventDestinations",
+    "resource": "{\"Fn::Join\":[\"\",[\"arn:aws:ses:eu-central-1:\",{\"Ref\":\"AWS::AccountId\"},\":configuration-set/fothering-transactional\"]]}",
+    "principal": null,
+    "condition": null
+  },
+  {
+    "stack": "FotheringAction",
+    "role": "ActionRole60B0EDF7",
+    "kind": "permission",
+    "effect": "Allow",
+    "action": "ses:GetEmailIdentity",
+    "resource": "{\"Fn::Join\":[\"\",[\"arn:aws:ses:eu-central-1:\",{\"Ref\":\"AWS::AccountId\"},\":identity/*\"]]}",
+    "principal": null,
+    "condition": null
+  },
+  {
+    "stack": "FotheringAction",
+    "role": "ActionRole60B0EDF7",
+    "kind": "permission",
+    "effect": "Allow",
+    "action": "ses:ListConfigurationSets",
+    "resource": "\"*\"",
+    "principal": null,
+    "condition": null
+  },
+  {
+    "stack": "FotheringAction",
+    "role": "ActionRole60B0EDF7",
+    "kind": "permission",
+    "effect": "Allow",
+    "action": "ses:ListEmailIdentities",
+    "resource": "\"*\"",
+    "principal": null,
+    "condition": null
+  },
+  {
+    "stack": "FotheringAction",
+    "role": "ActionRole60B0EDF7",
+    "kind": "permission",
+    "effect": "Allow",
+    "action": "ses:PutConfigurationSetSendingOptions",
+    "resource": "{\"Fn::Join\":[\"\",[\"arn:aws:ses:eu-central-1:\",{\"Ref\":\"AWS::AccountId\"},\":configuration-set/fothering-bulk\"]]}",
+    "principal": null,
+    "condition": null
+  },
+  {
+    "stack": "FotheringAction",
+    "role": "ActionRole60B0EDF7",
+    "kind": "trust",
+    "effect": "Allow",
+    "action": "sts:AssumeRole",
+    "resource": null,
+    "principal": "{\"Service\":\"lambda.amazonaws.com\"}",
+    "condition": null
+  },
+  {
     "stack": "FotheringDetection",
     "role": "DetectRoleDEDAD076",
     "kind": "permission",
