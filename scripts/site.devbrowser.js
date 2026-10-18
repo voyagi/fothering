@@ -507,6 +507,11 @@ const layoutStep = (step) => page.evaluate((args) => {
       return round(baseline);
     };
     const rows = Array.from(document.querySelectorAll('tr[data-log-step]')).filter(visible);
+    const logTable = rows.length === 0 ? null : rows[0].closest('table');
+    reading.logHeaders = logTable === null ? [] : Array.from(logTable.querySelectorAll('thead th')).filter(visible).map((header) => {
+      const style = getComputedStyle(header);
+      return { text: header.textContent.trim(), type: [style.fontWeight, style.fontSize, style.letterSpacing, style.textTransform].join(' ') };
+    });
     reading.logRows = rows.map((row) => ({
       header: (row.firstElementChild === null ? '' : row.firstElementChild.textContent.trim()),
       baselines: Array.from(row.children).filter(visible).map(baselineOf).filter((value) => value !== null),
@@ -520,6 +525,7 @@ const layoutRun = async (width) => {
   let phantomExposed = 0;
   let evidence = null;
   let logRows = [];
+  let logHeaders = [];
   const identifiers = [];
   for (const step of [1, 2, 3, 4]) {
     await loadReplay(width, '#step-' + step);
@@ -527,12 +533,15 @@ const layoutRun = async (width) => {
     steps.push({ step, boardHeight: reading.boardHeight, phantom: reading.phantom });
     phantomExposed = Math.max(phantomExposed, reading.phantomExposed);
     if (step === 2) evidence = reading.evidence;
-    if (step === 4) logRows = reading.logRows;
+    if (step === 4) {
+      logRows = reading.logRows;
+      logHeaders = reading.logHeaders;
+    }
     for (const item of reading.identifiers) {
       if (!identifiers.some((seen) => seen.text === item.text && seen.weight === item.weight && seen.lines.join('|') === item.lines.join('|'))) identifiers.push(item);
     }
   }
-  return { route: JOB.replayRoute, width, steps, phantomExposed, evidence, logRows, identifiers };
+  return { route: JOB.replayRoute, width, steps, phantomExposed, evidence, logRows, identifiers, logHeaders };
 };
 
 if (JOB.routes.includes(JOB.replayRoute)) {

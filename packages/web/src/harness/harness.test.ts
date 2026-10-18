@@ -33,6 +33,7 @@ import {
   flowVerdict,
   HANG_WIDTHS,
   hangVerdict,
+  LOG_HEADER_TYPE,
   identifierBreakVerdict,
   lineVerdict,
   overlapVerdict,
@@ -1266,7 +1267,7 @@ describe('noScriptVerdict (AC-10, AC-E7)', () => {
 
 // Stacked (960 and below) the board keeps one height and draws the tag's place off the paused step;
 // beside the story the tag simply comes off, so the board's height follows the step.
-const HEADER_TYPE = '600 12px 0.6px uppercase';
+const HEADER_TYPE = LOG_HEADER_TYPE;
 const healthyLayout = (width: number): ReplayLayoutReading => ({
   route: '/replay/',
   width,
@@ -1352,6 +1353,12 @@ describe('replayLayoutVerdict (AC-6, UI-SPEC 6 and 10.3)', () => {
   it('fails a log header set unlike the other log headers', () => {
     const logHeaders = [{ text: 'Time UTC', type: '500 13px normal none' }, ...['Kind', 'Lane', 'Detail'].map((text) => ({ text, type: HEADER_TYPE }))];
     expect(layoutReason({ ...healthyLayout(1280), logHeaders })).toBe(E2E_MESSAGES.layoutHeaderType(1280, 'Time UTC', '500 13px normal none', HEADER_TYPE));
+  });
+
+  it('names both odd headers when two of four are off the label style', () => {
+    const odd = '500 13px 0.65px uppercase';
+    const logHeaders = ['Time UTC', 'Kind', 'Lane', 'Detail'].map((text, index) => ({ text, type: index % 2 === 0 ? odd : HEADER_TYPE }));
+    expect(layoutReason({ ...healthyLayout(1440), logHeaders })).toBe([E2E_MESSAGES.layoutHeaderType(1440, 'Time UTC', odd, HEADER_TYPE), E2E_MESSAGES.layoutHeaderType(1440, 'Lane', odd, HEADER_TYPE)].join('; '));
   });
 
   it('fails an identifier that breaks anywhere but right after a dot', () => {
