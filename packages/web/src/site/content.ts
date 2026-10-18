@@ -396,8 +396,7 @@ export const ACCESSIBILITY_RECORD: AccessibilityRecord = Object.freeze({
   widths: Object.freeze([320, 1440]),
   themes: Object.freeze(['light', 'dark', 'device']),
   limitations: Object.freeze([
-    { id: 'drawings', text: 'The flow drawings are images. Each carries a text description, which a screen reader announces in place of the lines.' },
-    { id: 'drawing-contrast', text: 'axe-core cannot measure the contrast of the text inside the drawings, which uses the same ink and label colours as the page text.' },
+    { id: 'drawings', text: 'The flow drawings are images with text descriptions; every lane name and state they show is also in the page text.' },
     { id: 'hand-check', text: 'An automated audit cannot decide every criterion. Those listed under Checked by hand need a person in a real browser.' },
   ]),
   contact: `To report an accessibility problem, ${CONTROLLER.contact}.`,
