@@ -445,11 +445,79 @@ const noScriptRun = async (width) => {
   }, { route: JOB.replayRoute, width, selectors: REPLAY_CONTROLS });
 };
 
+// The replay's layout, each step loaded by its deep link: the board's height and whether the tag's
+// drawn place shows; on step 2 the evidence schedule's right edge against its panel's; on step 4,
+// with every log row shown, each row's cell baselines and every identifier's computed weight. A
+// zero-size inline block set just before a cell's first text sits on that line's baseline, so its
+// bottom edge is the baseline; it is removed straight after.
+const layoutStep = (step) => page.evaluate((args) => {
+  const round = (value) => Math.round(value * 100) / 100;
+  const visible = (element) => element.getClientRects().length > 0 && getComputedStyle(element).visibility !== 'hidden';
+  const board = document.querySelector('[data-replay] .board');
+  const phantoms = Array.from(document.querySelectorAll('[data-tag-phantom]'));
+  const reading = {
+    step: args.step,
+    boardHeight: board === null ? 0 : round(board.getBoundingClientRect().height),
+    phantom: phantoms.some(visible),
+    phantomExposed: phantoms.filter((element) => element.closest('[aria-hidden="true"]') === null).length,
+  };
+  const weights = (elements) => elements.filter(visible).map((element) => ({ text: element.textContent.trim(), weight: getComputedStyle(element).fontWeight }));
+  if (args.step === 2) {
+    const panel = document.querySelector('[data-wordcount="step"][data-steps="2"]');
+    const table = panel === null ? null : panel.querySelector('table');
+    reading.evidence = table === null ? null : { tableRight: round(table.getBoundingClientRect().right), panelRight: round(panel.getBoundingClientRect().right) };
+    reading.identifiers = panel === null ? [] : weights(Array.from(panel.querySelectorAll('table [data-identifier]')));
+  }
+  if (args.step === 4) {
+    const firstText = (cell) => {
+      const { NodeFilter: filter } = window;
+      const walker = document.createTreeWalker(cell, filter.SHOW_TEXT, { acceptNode: (node) => (node.textContent.trim() === '' ? filter.FILTER_SKIP : filter.FILTER_ACCEPT) });
+      return walker.nextNode();
+    };
+    const baselineOf = (cell) => {
+      const text = firstText(cell);
+      if (text === null) return null;
+      const probe = document.createElement('span');
+      probe.style.cssText = 'display:inline-block;width:0;height:0;margin:0;padding:0;border:0';
+      text.parentNode.insertBefore(probe, text);
+      const baseline = probe.getBoundingClientRect().bottom;
+      probe.remove();
+      return round(baseline);
+    };
+    const rows = Array.from(document.querySelectorAll('tr[data-log-step]')).filter(visible);
+    reading.logRows = rows.map((row) => ({
+      header: (row.firstElementChild === null ? '' : row.firstElementChild.textContent.trim()),
+      baselines: Array.from(row.children).filter(visible).map(baselineOf).filter((value) => value !== null),
+    }));
+    reading.identifiers = weights(rows.flatMap((row) => Array.from(row.querySelectorAll('.mono, [data-identifier]'))));
+  }
+  return reading;
+}, { step });
+
+const layoutRun = async (width) => {
+  const steps = [];
+  let phantomExposed = 0;
+  let evidence = null;
+  let logRows = [];
+  const identifiers = [];
+  for (const step of [1, 2, 3, 4]) {
+    await loadReplay(width, '#step-' + step);
+    const reading = await layoutStep(step);
+    steps.push({ step, boardHeight: reading.boardHeight, phantom: reading.phantom });
+    phantomExposed = Math.max(phantomExposed, reading.phantomExposed);
+    if (step === 2) evidence = reading.evidence;
+    if (step === 4) logRows = reading.logRows;
+    if (reading.identifiers !== undefined) identifiers.push(...reading.identifiers);
+  }
+  return { route: JOB.replayRoute, width, steps, phantomExposed, evidence, logRows, identifiers };
+};
+
 if (JOB.routes.includes(JOB.replayRoute)) {
   for (const width of JOB.widths) {
     console.log('REPLAY ' + JSON.stringify(await replayRun(width)));
     console.log('NOSCRIPT ' + JSON.stringify(await noScriptRun(width)));
   }
+  for (const width of JOB.layoutWidths) console.log('LAYOUT ' + JSON.stringify(await layoutRun(width)));
 }
 
 const storage = await page.evaluate(() => {

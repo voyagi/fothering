@@ -635,9 +635,54 @@ export interface ReplayLayoutReading {
   readonly identifiers: readonly { readonly text: string; readonly weight: string }[];
 }
 
-// Stub until the layout check is written.
+const STACKED_BOARD_WIDTH = 960;
+const STACKED_LOG_WIDTH = 620;
+const IDENTIFIER_WEIGHT = '500';
+const spread = (values: readonly number[]): number => Math.max(...values) - Math.min(...values);
+
+// UI-SPEC 10.3 and AC-6: stacked, the board keeps one height and the reserved slot draws where the
+// tag will hang on every step but the paused one; beside the story the tag comes off and nothing
+// marks its place.
+function boardReasons(reading: ReplayLayoutReading): string[] {
+  const { width, steps } = reading;
+  if (steps.map((item) => item.step).join(',') !== '1,2,3,4') return [E2E_MESSAGES.layoutStepsMissing(width)];
+  const stacked = width <= STACKED_BOARD_WIDTH;
+  const heights = steps.map((item) => item.boardHeight);
+  const reasons = stacked && spread(heights) > BOX_TOLERANCE ? [E2E_MESSAGES.layoutBoardHeight(width, heights)] : [];
+  for (const { step, phantom } of steps) {
+    const expected = stacked && String(step) !== PAUSED_STEP;
+    if (expected && !phantom) reasons.push(E2E_MESSAGES.layoutPhantomMissing(width, step));
+    if (!expected && phantom) reasons.push(E2E_MESSAGES.layoutPhantomShown(width, step));
+  }
+  if (reading.phantomExposed > 0) reasons.push(E2E_MESSAGES.layoutPhantomExposed(width, reading.phantomExposed));
+  return reasons;
+}
+
+// UI-SPEC 6: the log's cells share their first baseline wherever the log is a table, and every
+// identifier is set at weight 500, the tinted rows included.
+function typeReasons(reading: ReplayLayoutReading): string[] {
+  const { width, logRows, identifiers } = reading;
+  const reasons: string[] = [];
+  if (width > STACKED_LOG_WIDTH) {
+    if (logRows.length === 0) reasons.push(E2E_MESSAGES.layoutLogMissing(width));
+    for (const row of logRows) {
+      if (row.baselines.length > 0 && spread(row.baselines) > BOX_TOLERANCE) reasons.push(E2E_MESSAGES.layoutBaseline(width, row.header, row.baselines));
+    }
+  }
+  if (identifiers.length === 0) reasons.push(E2E_MESSAGES.layoutIdentifiersMissing(width));
+  for (const { text, weight } of identifiers) {
+    if (weight !== IDENTIFIER_WEIGHT) reasons.push(E2E_MESSAGES.layoutIdentifierWeight(width, text, weight));
+  }
+  return reasons;
+}
+
 export function replayLayoutVerdict(reading: ReplayLayoutReading): Verdict {
-  return reading.route === '' ? { ok: false, reason: '' } : { ok: true };
+  const { width, evidence } = reading;
+  const reasons = boardReasons(reading);
+  if (evidence === null) reasons.push(E2E_MESSAGES.layoutEvidenceMissing(width));
+  else if (evidence.tableRight > evidence.panelRight + EDGE_TOLERANCE) reasons.push(E2E_MESSAGES.layoutEvidenceSpill(width, evidence.tableRight, evidence.panelRight));
+  reasons.push(...typeReasons(reading));
+  return verdictOf(reasons);
 }
 
 const LANDING = '/';
@@ -1479,7 +1524,8 @@ const ROUTE_CHECKS = ['SWITCH', 'FONTS', 'REQUESTS'] as const;
 // Measured over every route: the flow and Tab walk at both widths, prose lines at 1440, the tag and
 // drawing labels at 320.
 const MEASURE_CHECKS = ['FLOW', 'TABFLOW', 'LINES', 'NARROW', 'HANG'] as const;
-const REPLAY_CHECKS = ['REPLAY', 'NOSCRIPT'] as const;
+const REPLAY_CHECKS = ['REPLAY', 'NOSCRIPT', 'LAYOUT'] as const;
+type ReplayCheck = (typeof REPLAY_CHECKS)[number];
 // dev-browser 0.2.9's newPage takes no context options, so JavaScript cannot be turned off for one
 // page; the CSS reads only the root's js class, so removing it is the same reading (05-11 context).
 const NO_SCRIPT_METHOD = 'js class removed, the page API has no JavaScript switch';
@@ -1605,7 +1651,7 @@ function judgeNarrow(lines: readonly string[], routes: readonly string[]): Check
 }
 
 function judgeByWidth<T extends { readonly route: string; readonly width: number }>(
-  check: 'FLOW' | 'TABFLOW' | 'HANG' | 'REPLAY' | 'NOSCRIPT', lines: readonly string[], routes: readonly string[], accept: (value: unknown) => value is T, verdictFor: (value: T) => Verdict,
+  check: 'FLOW' | 'TABFLOW' | 'HANG' | ReplayCheck, lines: readonly string[], routes: readonly string[], accept: (value: unknown) => value is T, verdictFor: (value: T) => Verdict,
   widths: readonly number[] = AXE_CONFIG.widths,
 ): { verdict: Verdict; readings: T[] } {
   const { byKey, reasons } = readKeyed(check, lines, accept, (value) => widthKey(value.route, value.width));
@@ -1654,15 +1700,22 @@ const isReplayReading = (value: unknown): value is ReplayReading => isObject(val
 const isNoScriptReading = (value: unknown): value is NoScriptReading => isObject(value) && typeof value.route === 'string' && isNumber(value.width)
   && isStringList(value.panels) && isNumber(value.controls) && typeof value.tagShown === 'boolean'
   && Array.isArray(value.boardParts) && value.boardParts.every((part) => isObject(part) && typeof part.steps === 'string' && typeof part.displayed === 'boolean');
+const isReplayLayoutReading = (value: unknown): value is ReplayLayoutReading => isObject(value) && typeof value.route === 'string' && isNumber(value.width)
+  && Array.isArray(value.steps) && value.steps.every((item) => isObject(item) && isNumber(item.step) && isNumber(item.boardHeight) && typeof item.phantom === 'boolean')
+  && isNumber(value.phantomExposed)
+  && (value.evidence === null || (isObject(value.evidence) && isNumber(value.evidence.tableRight) && isNumber(value.evidence.panelRight)))
+  && Array.isArray(value.logRows) && value.logRows.every((row) => isObject(row) && typeof row.header === 'string' && Array.isArray(row.baselines) && row.baselines.every(isNumber))
+  && Array.isArray(value.identifiers) && value.identifiers.every((item) => isObject(item) && typeof item.text === 'string' && typeof item.weight === 'string');
 
 // The replay checks run only where the build holds the replay; a replay route that printed no line
 // fails as missing, like every other check.
 function judgeReplayCheck<T extends { readonly route: string; readonly width: number }>(
-  check: 'REPLAY' | 'NOSCRIPT', lines: readonly string[], routes: readonly string[], accept: (value: unknown) => value is T, verdictFor: (value: T) => Verdict, detail: string,
+  check: ReplayCheck, lines: readonly string[], routes: readonly string[], accept: (value: unknown) => value is T, verdictFor: (value: T) => Verdict, detail: string,
+  widths: readonly number[] = AXE_CONFIG.widths,
 ): CheckResult {
   const replayRoutes = routes.filter((route) => route === REPLAY);
   if (replayRoutes.length === 0) return { verdict: { ok: true }, detail: 'the build holds no replay page' };
-  const { verdict } = judgeByWidth(check, lines, replayRoutes, accept, verdictFor);
+  const { verdict } = judgeByWidth(check, lines, replayRoutes, accept, verdictFor, widths);
   return { verdict, detail };
 }
 
@@ -1706,6 +1759,9 @@ function judgeRendered(run: DriverRun, routes: readonly string[], print: (line: 
       `Next, Previous, the step buttons, deep links, invalid hashes, keys and history held on ${REPLAY} at 320 and 1440 px`)],
     ['NOSCRIPT', judgeReplayCheck('NOSCRIPT', routeLines.get('NOSCRIPT') ?? [], routes, isNoScriptReading, noScriptVerdict,
       `with the js class removed every panel showed in order, no control showed and the board held the paused step at 320 and 1440 px (${NO_SCRIPT_METHOD})`)],
+    ['LAYOUT', judgeReplayCheck('LAYOUT', routeLines.get('LAYOUT') ?? [], routes, isReplayLayoutReading, replayLayoutVerdict,
+      `the stacked board held one height with the tag's place drawn, the step 2 schedule stayed inside its panel, log cells shared a baseline and identifiers computed 500 on ${REPLAY} at ${REPLAY_LAYOUT_WIDTHS.join(', ')} px`,
+      REPLAY_LAYOUT_WIDTHS)],
     ['STORAGE', judgeStorage(records.get('STORAGE'))],
     ['CONSOLE', { verdict: consoleVerdict(consoleErrors), detail: 'no console error, no Content Security Policy violation' }],
   ];
@@ -1731,7 +1787,7 @@ async function renderedStep(options: SiteE2eOptions, dist: string, print: (line:
   if (typeof driver === 'string') return driver;
   const routes = [...routesFromDist(dist), UNKNOWN_PATH];
   const served = await withPreview(options.repoRoot, 'fothering-e2e-', async (server, workDir) => {
-    const written = writeDriver(driver.templatePath, { base: server.url, route: '/', routes, widths: AXE_CONFIG.widths, hangWidths: HANG_WIDTHS, families: SITE_FAMILIES, replayRoute: REPLAY, invalidHashes: REPLAY_INVALID_HASHES }, join(workDir, 'site.js'));
+    const written = writeDriver(driver.templatePath, { base: server.url, route: '/', routes, widths: AXE_CONFIG.widths, hangWidths: HANG_WIDTHS, families: SITE_FAMILIES, replayRoute: REPLAY, invalidHashes: REPLAY_INVALID_HASHES, layoutWidths: REPLAY_LAYOUT_WIDTHS }, join(workDir, 'site.js'));
     if (!written.ok) return A11Y_MESSAGES.templateTokens(driver.templatePath, written.tokens);
     const run = await runDriver({ launcher: driver.launcher, driverPath: written.path, timeoutSeconds: DRIVER_TIMEOUT_SECONDS });
     return judgeRendered(run, routes, print);

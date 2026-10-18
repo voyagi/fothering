@@ -1916,6 +1916,9 @@ describe('the built checks through the CLI and the e2e step (D-150, D-151)', () 
       replayBoxMoved: [320, 'Next', 2, 3], replayDeepLink: [320, '#step-2', 1], replayDeepLinkMissing: [320, '#step-2'], replayInvalidHash: [320, '#step-0', 2],
       replaySameStep: [320, 1], replayHistory: [320, 2, 3], replayArrow: [320, 1, 1], replayArrowRadio: [320, 2, 3], replayArrowModifier: [320, 'Alt', 2, 3],
       noScriptPanels: [320, ['1']], noScriptControls: [320, 1], noScriptBoard: [320, '3', false], noScriptNoBoard: [320], noScriptTag: [320],
+      layoutStepsMissing: [320], layoutBoardHeight: [960, [638, 900]], layoutPhantomMissing: [960, 1], layoutPhantomShown: [1280, 2], layoutPhantomExposed: [960, 1],
+      layoutEvidenceMissing: [961], layoutEvidenceSpill: [1280, 1220, 1201], layoutLogMissing: [1024], layoutBaseline: [1280, '14:01:07', [1498, 1500]],
+      layoutIdentifiersMissing: [320], layoutIdentifierWeight: [1440, 'fothering-bulk', '600'],
       copyStampMissing: ['/'], copyStamp: ['/', 'FIXTURE RUN', 'SIMULATOR RUN'], copyCauseMissing: ['/', 'batch=x'], copyOldCause: ['/', 'x'],
       copyVariantFailed: ['cause', 1, 'x'], copyVariantUnjudged: ['cause'],
     };
