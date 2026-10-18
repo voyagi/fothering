@@ -10,7 +10,19 @@ import {
   permissionSchedules,
   runtimeRoleHoldsNoDataAction,
 } from './permissions-view.js';
-import { isOfferedCommand, loadRepoFacts, readDeployCommands, readRepoText, repoRoot, resolveModelId } from './repo-facts.js';
+import { DEPLOY_STEPS, REMOVAL_STEP_TEXTS } from './content.js';
+import {
+  deploySteps,
+  isOfferedCommand,
+  loadRepoFacts,
+  readDeployCommands,
+  readDeployRegion,
+  readRepoText,
+  removalSteps,
+  removedByText,
+  repoRoot,
+  resolveModelId,
+} from './repo-facts.js';
 import { NOT_LISTED, RESOURCE_NOUNS, resourceRows } from './resources-view.js';
 
 const ROOT = repoRoot(process.cwd());
@@ -344,6 +356,90 @@ describe('resolveModelId', () => {
   it('throws on an ADR with no Model row, and on a Model row naming two ids', () => {
     expect(() => resolveModelId({ adrText: '| Language | TypeScript | 6.0.3 |\n' })).toThrow(ZERO_IDS);
     expect(() => resolveModelId({ adrText: `${ADR_ROW.replace('` |', '` or `eu.other` |')}\n` })).toThrow(/found 2 ids/);
+  });
+});
+
+describe('the removal steps (pre-R6)', () => {
+  const facts = loadRepoFacts(ROOT);
+  // The README's own destroy lines, read here from the README rather than typed.
+  const destroyLines = facts.deployCommands.filter(({ command }) => command.split(' ').includes('destroy'));
+
+  it('gives the README destroy command as the first step and the event destinations after it', () => {
+    expect(destroyLines.length).toBeGreaterThan(0);
+    expect(removalSteps(facts)).toEqual([
+      { text: REMOVAL_STEP_TEXTS.destroy, commands: destroyLines },
+      { text: REMOVAL_STEP_TEXTS.destinations, commands: [] },
+    ]);
+  });
+
+  it('shows only commands the README or package.json offers', () => {
+    for (const step of removalSteps(facts)) {
+      for (const { command } of step.commands) expect(isOfferedCommand(command, facts.deployCommands, facts.scripts), command).toBe(true);
+    }
+  });
+
+  it('throws when the README holds no destroy line', () => {
+    expect(() => removalSteps({ deployCommands: facts.deployCommands.filter((command) => !destroyLines.includes(command)) })).toThrow(
+      /^README\.md: Deploy and remove: no destroy command/,
+    );
+  });
+
+  it('words a deleted resource with the README destroy line', () => {
+    expect(removedByText(facts.deployCommands)).toBe(destroyLines.map(({ command }) => command).join(' and '));
+  });
+});
+
+describe('the deploy steps', () => {
+  const facts = loadRepoFacts(ROOT);
+  const steps = deploySteps({ deployCommands: facts.deployCommands, region: 'xx-planted-9' });
+  const lineOf = (index: number): string | undefined => facts.deployCommands[index]?.command;
+
+  it('gives the five step titles and texts of the content module, with the Region filled in', () => {
+    expect(steps.map((step) => step.title)).toEqual(DEPLOY_STEPS.map((step) => step.title));
+    expect(steps[0]?.text).toContain('`xx-planted-9`');
+    expect(steps.some((step) => step.text.includes('{region}'))).toBe(false);
+  });
+
+  it('puts no command on the first two steps', () => {
+    expect(steps.slice(0, 2).map((step) => step.commands)).toEqual([[], []]);
+  });
+
+  it('takes the build, bootstrap, deploy and go-live lines from the README, notes kept', () => {
+    // README order: build, bootstrap, deploy, destroy, then the go-live deploy.
+    expect(steps[2]?.commands.map(({ command }) => command)).toEqual([lineOf(0)]);
+    expect(steps[3]?.commands).toEqual([facts.deployCommands[1], facts.deployCommands[2]]);
+    expect(steps[3]?.commands[0]?.note).not.toBeNull();
+    expect(steps[4]?.commands.map(({ command }) => command)).toEqual([lineOf(4)]);
+  });
+
+  it('shows only commands the README or package.json offers', () => {
+    for (const step of steps) {
+      for (const { command } of step.commands) expect(isOfferedCommand(command, facts.deployCommands, facts.scripts), command).toBe(true);
+    }
+  });
+
+  it('throws when the README holds no deploy line for a step that needs one', () => {
+    const withoutBootstrap = facts.deployCommands.filter((command) => command !== facts.deployCommands[1]);
+    expect(() => deploySteps({ deployCommands: withoutBootstrap, region: 'xx-planted-9' })).toThrow(/^README\.md: Deploy and remove: no bootstrap command/);
+  });
+});
+
+describe('the deploy Region', () => {
+  const CREATE_APP = 'packages/infra/src/create-app.ts';
+
+  it('reads the one Region the stacks pin', () => {
+    const region = readDeployRegion(ROOT);
+    expect(region).toMatch(/^[a-z]{2}-[a-z]+-\d$/);
+    expect(readRepoText(CREATE_APP, ROOT)).toContain(`region: '${region}'`);
+  });
+
+  it('reads a planted pin, and throws on none and on two', () => {
+    plantFile(`region-one/${CREATE_APP}`, "const ENV = { region: 'xx-planted-9' };\n");
+    plantFile(`region-none/${CREATE_APP}`, 'const ENV = {};\n');
+    plantFile(`region-two/${CREATE_APP}`, "const A = { region: 'xx-one-1' };\nconst B = { region: 'xx-two-2' };\n");
+    expect(readDeployRegion(join(PLANT, 'region-one'))).toBe('xx-planted-9');
+    expect(() => readDeployRegion(join(PLANT, 'region-none'))).toThrow(`${CREATE_APP}: found 0 Regions, expected exactly one. Pin the stacks' Region in one env.`);
+    expect(() => readDeployRegion(join(PLANT, 'region-two'))).toThrow(/found 2 Regions/);
   });
 });
 

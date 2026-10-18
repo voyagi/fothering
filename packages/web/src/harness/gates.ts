@@ -13,12 +13,15 @@ import {
 } from './dev-browser.js';
 import { startPreviewServer, type PreviewServer } from './preview-server.js';
 import { filesIn, loadBuiltSite, NoBuiltPagesError, routeOf, textOf, walk, type BuiltElement, type BuiltSite } from '../checks/built-site.js';
-import { checkFileBudget, isRegisteredRule, runBuiltChecks, type BudgetViolation, type CheckContext, type Finding } from '../checks/rules.js';
+import { checkFileBudget, isRegisteredRule, runBuiltChecks, type BudgetViolation, type CheckContext, type DeployFacts, type Finding } from '../checks/rules.js';
 import { BANNED_NAMES, CONSOLE_DELETE_PHRASES, REPLY_PROMISE_PHRASES, REPUTATION_PAGE_URL } from '../site/content.js';
 import type { Provenance } from '@fothering/core/records';
 import { LOG_API_NAMES } from '../site/identifier-text.js';
 import { PROVENANCE_LABELS } from '../site/labels.js';
+import { loadPermissionSnapshot, PERMISSION_REASONS } from '../site/permissions-view.js';
 import { buildReplayView, loadReplayArtifact } from '../site/replay-view.js';
+import { loadRepoFacts } from '../site/repo-facts.js';
+import { loadResourceSnapshot } from '../site/resources-view.js';
 import { ROUTES, SITE_ORIGIN, sitemapUrls } from '../site/route-list.js';
 import { HEAD_SCRIPT, themedValue, TOKENS } from '../theme/head-script.js';
 
@@ -1318,6 +1321,18 @@ export function loadCheckContext(repoRoot: string): CheckContext {
     headScript: HEAD_SCRIPT,
     provenance: artifact.provenance,
     replay: buildReplayView(artifact),
+    deploy: loadDeployFacts(repoRoot),
+  });
+}
+
+function loadDeployFacts(repoRoot: string): DeployFacts {
+  const facts = loadRepoFacts(repoRoot);
+  return Object.freeze({
+    permissions: loadPermissionSnapshot(repoRoot),
+    resources: loadResourceSnapshot(repoRoot),
+    reasons: PERMISSION_REASONS,
+    commands: facts.deployCommands,
+    scripts: facts.scripts,
   });
 }
 

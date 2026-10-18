@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
+import type { DeployCommandUse } from './content.js';
 
 const REPO_PACKAGE_NAME = 'fothering';
 
@@ -52,7 +53,7 @@ export function readRepoText(relativePath: string, root: string): string {
   return text;
 }
 
-interface DeployCommand {
+export interface DeployCommand {
   command: string;
   /** The line's trailing `# ...` comment, or null. */
   note: string | null;
@@ -142,6 +143,37 @@ function scriptNames(packageText: string): string[] {
     throw new Error('package.json: scripts: missing or not an object. Restore the scripts field.');
   }
   return Object.keys(scripts);
+}
+
+export interface DeployStep {
+  title: string;
+  text: string;
+  commands: DeployCommand[];
+}
+
+export interface RemovalStep {
+  text: string;
+  commands: DeployCommand[];
+}
+
+export function commandsFor(_commands: readonly DeployCommand[], _use: DeployCommandUse): DeployCommand[] {
+  return [];
+}
+
+export function deploySteps(_facts: { deployCommands: readonly DeployCommand[]; region: string }): DeployStep[] {
+  return [];
+}
+
+export function removalSteps(_facts: { deployCommands: readonly DeployCommand[] }): RemovalStep[] {
+  return [];
+}
+
+export function removedByText(_commands: readonly DeployCommand[]): string {
+  return '';
+}
+
+export function readDeployRegion(_root: string): string {
+  return '';
 }
 
 export function loadRepoFacts(root: string): { deployCommands: DeployCommand[]; scripts: string[]; modelId: string } {

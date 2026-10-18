@@ -2,9 +2,24 @@ import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSy
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { NOT_FOUND_ROUTE, routeOf } from '../checks/built-site.js';
-import { LANDING_SECTIONS, LIMITS_FIXED_ROWS, LIMITS_REPLAY_ROW, NO_MEASURED_NUMBER_SENTENCE, type LandingSectionId } from '../site/content.js';
+import type { DeployFacts } from '../checks/rules.js';
+import {
+  LANDING_SECTIONS,
+  LIMITS_FIXED_ROWS,
+  LIMITS_REPLAY_ROW,
+  NO_MEASURED_NUMBER_SENTENCE,
+  NOT_YET_NOTICE,
+  ONE_CALLER_SENTENCE,
+  PERMISSION_COLUMNS,
+  RESOURCE_COLUMNS,
+  RESOURCE_REMOVAL,
+  type LandingSectionId,
+} from '../site/content.js';
 import { PROVENANCE_LABELS } from '../site/labels.js';
+import { denyRows, hasPauseGrant, loadPermissionSnapshot, PERMISSION_REASONS, permissionKey, permissionSchedules } from '../site/permissions-view.js';
 import { buildReplayView, loadReplayArtifact, type ReplayView } from '../site/replay-view.js';
+import { loadRepoFacts, removedByText } from '../site/repo-facts.js';
+import { loadResourceSnapshot, resourceRows } from '../site/resources-view.js';
 import { renderRobots, renderSitemap } from '../site/route-list.js';
 import { HEAD_SCRIPT, renderTokensCss } from '../theme/head-script.js';
 
@@ -26,13 +41,18 @@ export interface PlantedDist {
 // root carries the committed artifact.
 const ARTIFACT_FILE = join('packages', 'web', 'src', 'fixtures', 'replay-incident.json');
 
+// The deploy rules read the snapshots, the README and the package scripts from the root they judge.
+const DEPLOY_SOURCES = ['README.md', 'package.json', join('docs', 'adr', '0001-stack.md'), join('packages', 'infra', 'permissions.json'), join('packages', 'infra', 'resources.json')];
+
 export function plantDist(files: Readonly<Record<string, string | Buffer>>): PlantedDist {
   mkdirSync(CACHE, { recursive: true });
   const root = mkdtempSync(join(CACHE, 'fothering-built-'));
   const dist = join(root, 'packages', 'web', 'dist');
   mkdirSync(dist, { recursive: true });
-  mkdirSync(dirname(join(root, ARTIFACT_FILE)), { recursive: true });
-  copyFileSync(join(REPO_ROOT, ARTIFACT_FILE), join(root, ARTIFACT_FILE));
+  for (const source of [ARTIFACT_FILE, ...DEPLOY_SOURCES]) {
+    mkdirSync(dirname(join(root, source)), { recursive: true });
+    copyFileSync(join(REPO_ROOT, source), join(root, source));
+  }
   for (const [path, body] of Object.entries(files)) {
     const file = join(dist, path);
     mkdirSync(dirname(file), { recursive: true });
@@ -185,17 +205,99 @@ export function replayBody(parts: ReplayParts = {}, view: ReplayView = REPLAY_VI
 export const TYPE_TOKEN_CSS = ['--text-lede', '--text-intro', '--text-narrative-headline', '--text-small', '--text-mono-value', '--text-schedule-compact']
   .map((name, index) => `.t${String(index)} { font-size: var(${name}); }`).join('\n');
 
-const REPLAY_FILE = 'replay/index.html';
+// The deploy sources as the check context reads them from the repo root.
+const REPO_FACTS = loadRepoFacts(REPO_ROOT);
+export const DEPLOY_FACTS: DeployFacts = Object.freeze({
+  permissions: loadPermissionSnapshot(REPO_ROOT),
+  resources: loadResourceSnapshot(REPO_ROOT),
+  reasons: PERMISSION_REASONS,
+  commands: REPO_FACTS.deployCommands,
+  scripts: REPO_FACTS.scripts,
+});
 
-// A planted build every head, file, landing and replay rule passes, so a case can plant one fault
-// and see only the rule it aims at fire. It always holds the replay page, as the real build does.
+const escapeHtml = (text: string): string => text.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
+const cell = (tag: 'th' | 'td', column: string, text: string): string => `<${tag} data-col="${column}">${escapeHtml(text)}</${tag}>`;
+
+type PermissionRow = ReturnType<typeof permissionSchedules>[number]['rows'][number];
+
+export function permissionRow(row: PermissionRow): string {
+  const [kind = '', action = '', effect = '', resource = '', condition = '', why = ''] = PERMISSION_COLUMNS;
+  return `<tr data-permission="${escapeHtml(permissionKey(row))}">${cell('th', kind, row.kind)}${cell('td', action, row.action)}${cell('td', effect, row.effect)}`
+    + `${cell('td', resource, row.resourceOrPrincipal)}${cell('td', condition, row.condition)}${cell('td', why, row.reason)}</tr>`;
+}
+
+const roleNameOf = (row: PermissionRow): string => permissionKey(row).split('/')[1] ?? '';
+
+// One section per role holding its Allow rows; Deny rows sit in the Deny box only, so each entry
+// renders once (AC-33).
+export function roleSections(facts: DeployFacts = DEPLOY_FACTS): string {
+  return permissionSchedules(facts.permissions, facts.reasons).map((schedule) => {
+    const allowed = schedule.rows.filter((row) => row.effect === 'Allow');
+    const [first] = allowed;
+    if (first === undefined) return '';
+    const name = roleNameOf(first);
+    return `<section data-permission-role="${schedule.stack}/${name}"><h3>${name}</h3><p>${schedule.stack}</p><table>${allowed.map(permissionRow).join('')}</table></section>`;
+  }).join('');
+}
+
+export function denyBox(facts: DeployFacts = DEPLOY_FACTS): string {
+  const rows = denyRows(facts.permissions, facts.reasons);
+  return rows.length === 0 ? '' : `<div data-deny><h3>Denied</h3><table>${rows.map(permissionRow).join('')}</table></div>`;
+}
+
+export function resourceRow(row: ReturnType<typeof resourceRows>[number], removal: string): string {
+  const [resource = '', what = '', stack = '', onRemoval = ''] = RESOURCE_COLUMNS;
+  return `<tr data-resource="${row.stack}/${row.logicalId}">${cell('th', resource, row.logicalId)}${cell('td', what, row.noun)}${cell('td', stack, row.stack)}`
+    + `${cell('td', onRemoval, row.deletedOnRemoval ? `${RESOURCE_REMOVAL.deleted} ${removal}` : RESOURCE_REMOVAL.kept)}</tr>`;
+}
+
+export function resourceTable(facts: DeployFacts = DEPLOY_FACTS): string {
+  const removal = removedByText(facts.commands);
+  return `<table>${resourceRows(facts.resources).map((row) => resourceRow(row, removal)).join('')}</table>`;
+}
+
+export const commandBlock = (lines: readonly string[]): string => `<pre><code>${lines.map(escapeHtml).join('\n')}</code></pre>`;
+
+export interface DeployParts {
+  readonly notice?: string;
+  readonly commands?: string;
+  readonly roles?: string;
+  readonly deny?: string;
+  readonly resources?: string;
+  readonly oneCaller?: string;
+  readonly extra?: string;
+}
+
+// The deploy page every deploy rule passes for the given sources, with any one part replaced.
+export function deployBody(parts: DeployParts = {}, facts: DeployFacts = DEPLOY_FACTS): string {
+  const notice = parts.notice ?? (hasPauseGrant(facts.permissions) ? '' : `<p data-notice><b>${NOT_YET_NOTICE.label}</b> ${NOT_YET_NOTICE.text}</p>`);
+  const commands = parts.commands ?? commandBlock(facts.commands.map(({ command }) => command));
+  return `<main><h1>Deploy</h1>${notice}${commands}${parts.resources ?? resourceTable(facts)}${parts.roles ?? roleSections(facts)}`
+    + `<p>${parts.oneCaller ?? ONE_CALLER_SENTENCE}</p>${parts.deny ?? denyBox(facts)}${parts.extra ?? ''}</main>`;
+}
+
+const REPLAY_FILE = 'replay/index.html';
+const DEPLOY_FILE = 'deploy/index.html';
+
+function leadOf(file: string): string {
+  if (routeOf(file) === '/') return landingBody();
+  if (file === REPLAY_FILE) return replayBody();
+  return file === DEPLOY_FILE ? deployBody() : '';
+}
+
+// A planted build every head, file, landing, replay and deploy rule passes, so a case can plant one
+// fault and see only the rule it aims at fire. It always holds the replay and deploy pages, as the
+// real build does.
 export function completeSite(bodies: Readonly<Record<string, string>>, heads: Readonly<Record<string, SheetHead>> = {}): Record<string, string> {
   const files: Record<string, string> = {};
   const paths: string[] = [];
-  const withReplay = REPLAY_FILE in bodies ? bodies : { ...bodies, [REPLAY_FILE]: '' };
-  for (const [file, body] of Object.entries(withReplay)) {
+  const withSheets: Record<string, string> = { ...bodies };
+  for (const sheet of [REPLAY_FILE, DEPLOY_FILE]) {
+    if (!(sheet in withSheets)) withSheets[sheet] = '';
+  }
+  for (const [file, body] of Object.entries(withSheets)) {
     const route = routeOf(file);
-    const lead = route === '/' ? landingBody() : file === REPLAY_FILE ? replayBody() : '';
+    const lead = leadOf(file);
     files[file] = page(`${THEME_SWITCH}${lead}${body}`, sheetHead(route, heads[file]));
     if (route !== NOT_FOUND_ROUTE) paths.push(route);
   }

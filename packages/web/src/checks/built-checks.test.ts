@@ -2,13 +2,17 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 import {
+  commandBlock,
   completeSite,
+  DEPLOY_FACTS,
+  deployBody,
   HEADERS_TEXT,
   landingBody,
   LIMITS_ROWS,
   limitsRow,
   limitsSection,
   page,
+  permissionRow,
   plantDist,
   REPLAY_LIMITS_STATE,
   REPLAY_VIEW,
@@ -16,6 +20,9 @@ import {
   replayPanels,
   replaySummary,
   REPO_ROOT,
+  resourceRow,
+  resourceTable,
+  roleSections,
   SHEET_HEAD_ITEMS,
   THEME_HEAD,
   THEME_SWITCH,
@@ -27,6 +34,9 @@ import { loadCheckContext } from '../harness/gates.js';
 import { HEAD_SCRIPT, headScriptHash, renderTokensCss } from '../theme/head-script.js';
 import { BANNED_NAMES, CONSOLE_DELETE_PHRASES, LANDING_SECTIONS, LEDE_TERMS, LIMITS_FIXED_ROWS, REPLY_PROMISE_PHRASES } from '../site/content.js';
 import { PROVENANCE_LABELS } from '../site/labels.js';
+import { PERMISSION_REASONS, permissionKey, permissionSchedules } from '../site/permissions-view.js';
+import { removedByText } from '../site/repo-facts.js';
+import { resourceRows } from '../site/resources-view.js';
 import { renderRobots, renderSitemap, SITE_ORIGIN } from '../site/route-list.js';
 import { filesIn, loadBuiltSite, NOT_FOUND_ROUTE, NoBuiltPagesError, type BuiltSite } from './built-site.js';
 import {
@@ -36,6 +46,13 @@ import {
   countReplayWords,
   countWords,
   dashRule,
+  DEPLOY_ROUTE,
+  deployCommandsRule,
+  deployDenyRule,
+  deployNoticeRule,
+  deployPageRule,
+  deployPermissionsRule,
+  deployResourcesRule,
   exactThirtyDaysRule,
   formsCookiesAnalyticsRule,
   headScriptOrderRule,
@@ -45,6 +62,7 @@ import {
   limitsRule,
   noEllipsisRule,
   noInlineStyleRule,
+  oneCallerRule,
   pageMetadataRule,
   preR6WordsRule,
   provenanceWordingRule,
@@ -70,6 +88,7 @@ import {
   typeTokenDeclaredRule,
   typeTokenUseRule,
   unitFigureRule,
+  type DeployFacts,
   type Finding,
 } from './rules.js';
 
@@ -191,10 +210,11 @@ describe('runBuiltChecks', () => {
     expect([...rules].filter((rule) => ['page-metadata', 'sitemap', 'robots'].includes(rule)).sort()).toEqual(['page-metadata', 'robots', 'sitemap']);
   });
 
-  it('holds exactly the thirty-four rule ids the plans name', () => {
+  it('holds exactly the forty-one rule ids the plans name', () => {
     expect([...RULE_IDS].sort()).toEqual([
-      'banned-name', 'console-delete', 'dash', 'exact-30-days', 'forms-cookies-analytics', 'head-script-order', 'identifier-break', 'landing-sections', 'lede', 'limits',
-      'no-ellipsis', 'no-inline-style', 'page-metadata', 'pre-r6-words', 'provenance-wording', 'provider-label', 'region-claim', 'replay-lanes',
+      'banned-name', 'console-delete', 'dash', 'deploy-commands', 'deploy-deny', 'deploy-notice', 'deploy-page', 'deploy-permissions', 'deploy-resources',
+      'exact-30-days', 'forms-cookies-analytics', 'head-script-order', 'identifier-break', 'landing-sections', 'lede', 'limits',
+      'no-ellipsis', 'no-inline-style', 'one-caller', 'page-metadata', 'pre-r6-words', 'provenance-wording', 'provider-label', 'region-claim', 'replay-lanes',
       'replay-page', 'replay-panels', 'replay-summary', 'replay-word-count', 'reply-promise', 'robots', 'script-hash',
       'ses-percentage-link', 'ses-rate-wording', 'sitemap', 'switch-markup', 'theme-token-blocks', 'third-party-reference', 'type-token-declared',
       'type-token-use', 'unit-figure',
@@ -511,23 +531,24 @@ describe('the sitemap rule (AC-50, AC-E38, AC-E39)', () => {
   });
 
   it('fails a sitemap listing a route the build lacks', () => {
-    expect(sitemapFindings(sitemapOf(['/', '/replay/', '/ghost/'])).map((finding) => finding.text)).toEqual(['the sitemap lists /ghost/, which the build lacks']);
+    expect(sitemapFindings(sitemapOf(['/', '/replay/', '/deploy/', '/ghost/'])).map((finding) => finding.text)).toEqual(['the sitemap lists /ghost/, which the build lacks']);
   });
 
   it('fails a sitemap listing a built route twice', () => {
-    expect(sitemapFindings(sitemapOf(['/', '/replay/', '/'])).map((finding) => finding.text)).toEqual(['the sitemap lists / 2 times']);
+    expect(sitemapFindings(sitemapOf(['/', '/replay/', '/deploy/', '/'])).map((finding) => finding.text)).toEqual(['the sitemap lists / 2 times']);
   });
 
   it('fails a sitemap listing the 404 page', () => {
-    expect(sitemapFindings(sitemapOf(['/', '/replay/', '/404.html'])).map((finding) => finding.text)).toEqual(['the sitemap lists the 404 page at /404.html']);
+    expect(sitemapFindings(sitemapOf(['/', '/replay/', '/deploy/', '/404.html'])).map((finding) => finding.text)).toEqual(['the sitemap lists the 404 page at /404.html']);
   });
 
   it('fails a built route missing from the sitemap, at that route', () => {
-    expect(sitemapFindings(sitemapOf(['/']))).toEqual([{ rule: 'sitemap', route: '/replay/', text: '/replay/ is a built route missing from the sitemap' }]);
+    expect(sitemapFindings(sitemapOf(['/', '/deploy/']))).toEqual([{ rule: 'sitemap', route: '/replay/', text: '/replay/ is a built route missing from the sitemap' }]);
   });
 
   it('fails a relative URL and a URL on another origin', () => {
-    const xml = `<urlset><url><loc>/</loc></url><url><loc>https://elsewhere.example/replay/</loc></url><url><loc>${SITE_ORIGIN}/</loc></url><url><loc>${SITE_ORIGIN}/replay/</loc></url></urlset>`;
+    const xml = `<urlset><url><loc>/</loc></url><url><loc>https://elsewhere.example/replay/</loc></url><url><loc>${SITE_ORIGIN}/</loc></url><url><loc>${SITE_ORIGIN}/replay/</loc></url>`
+      + `<url><loc>${SITE_ORIGIN}/deploy/</loc></url></urlset>`;
     expect(sitemapFindings(xml).map((finding) => finding.text)).toEqual([
       `/ is not an absolute URL on ${SITE_ORIGIN}`,
       `https://elsewhere.example/replay/ is not an absolute URL on ${SITE_ORIGIN}`,
@@ -535,7 +556,7 @@ describe('the sitemap rule (AC-50, AC-E38, AC-E39)', () => {
   });
 
   it('leaves out a built route the route list marks not indexable', () => {
-    const site = siteOf({ ...completeSite(TWO_SHEETS), 'sitemap.xml': sitemapOf(['/']) });
+    const site = siteOf({ ...completeSite(TWO_SHEETS), 'sitemap.xml': sitemapOf(['/', '/deploy/']) });
     const draft = { path: '/replay/', sheet: 'FTH-002', label: 'Replay', title: 't', description: 'd', indexable: false };
     expect(sitemapRule(site, { ...context, routes: [draft] })).toEqual([]);
   });
@@ -681,7 +702,7 @@ describe('the script hash rule (D-149, C6, T-05-21, T-05-24)', () => {
   it('fails a build with no _headers and one whose _headers has no script-src', () => {
     expect(texts(scriptHashRule(siteOf(withFile('_headers', null)), context))).toEqual(['dist/_headers is missing']);
     const findings = scriptHashRule(siteOf(withFile('_headers', '/*\n  X-Frame-Options: DENY\n')), context);
-    expect(findings.map((finding) => finding.route)).toEqual(['/', REPLAY_ROUTE]);
+    expect(findings.map((finding) => finding.route)).toEqual(['/', DEPLOY_ROUTE, REPLAY_ROUTE]);
   });
 });
 
@@ -1188,6 +1209,215 @@ describe('the type token use rule (AC-63 use half)', () => {
     const css = TYPE_TOKEN_CSS.replace(`var(${name})`, '1rem');
     expect(css).not.toBe(TYPE_TOKEN_CSS);
     expect(texts(typeTokenUseRule(siteOf({ ...completeSite(ONE_SHEET), '_astro/site.css': css }), context))).toEqual([`the built CSS never uses ${name} through var()`]);
+  });
+});
+
+const DEPLOY_PAGE_RULES = ['deploy-page', 'deploy-commands', 'deploy-permissions', 'deploy-resources', 'deploy-deny', 'deploy-notice', 'one-caller'];
+const deploySite = (body: string): BuiltSite => siteOf({ 'deploy/index.html': page(body) });
+const deployTexts = (rule: RuleFunction, body: string, ruleContext = context): string[] => {
+  const findings = rule(deploySite(body), ruleContext);
+  expect(findings.every((finding) => finding.route === DEPLOY_ROUTE)).toBe(true);
+  return texts(findings);
+};
+const withDeploy = (facts: Partial<DeployFacts>): typeof context => ({ ...context, deploy: { ...DEPLOY_FACTS, ...facts } });
+interface SnapshotEntry {
+  stack: string;
+  role: string;
+  kind: string;
+  effect: string;
+  action: string;
+  resource: string | null;
+  principal: string | null;
+  condition: string | null;
+}
+const [SHIPPED_ENTRY] = DEPLOY_FACTS.permissions as SnapshotEntry[];
+const plantedEntry = (overrides: Partial<SnapshotEntry>): SnapshotEntry => ({ ...SHIPPED_ENTRY, ...overrides }) as SnapshotEntry;
+const SHIPPED_ROWS = permissionSchedules(DEPLOY_FACTS.permissions).flatMap((schedule) => schedule.rows);
+const [FIRST_ROW, SECOND_ROW] = SHIPPED_ROWS;
+const FIRST_ROW_HTML = FIRST_ROW === undefined ? '' : permissionRow(FIRST_ROW);
+const SECOND_ROW_HTML = SECOND_ROW === undefined ? '' : permissionRow(SECOND_ROW);
+const NOT_IN_README = /^the deploy page shows the command "(.+)", which README's Deploy and remove section does not hold and which runs no package\.json script$/;
+
+describe('the deploy page rule (D-150 tracer)', () => {
+  it('reports a build without /deploy/ once, under deploy-page, and no other deploy rule', () => {
+    const findings = runBuiltChecks(siteOf({ 'index.html': page('<p>landing</p>') }), context).filter((finding) => DEPLOY_PAGE_RULES.includes(finding.rule));
+    expect(findings).toEqual([{ rule: 'deploy-page', route: DEPLOY_ROUTE, text: 'the build has no deploy page at /deploy/' }]);
+  });
+
+  it('passes a build that holds the deploy page', () => {
+    expect(deployPageRule(deploySite(deployBody()), context)).toEqual([]);
+  });
+});
+
+describe('the deploy commands rule (AC-32)', () => {
+  it('passes the planted page, whose block holds every README command line', () => {
+    expect(deployTexts(deployCommandsRule, deployBody())).toEqual([]);
+  });
+
+  it('passes a block holding only npm run build', () => {
+    expect(deployTexts(deployCommandsRule, deployBody({ commands: commandBlock(['npm run build']) }))).toEqual([]);
+  });
+
+  it('fails a pre block holding npm run synth, which no script defines', () => {
+    const found = deployTexts(deployCommandsRule, deployBody({ commands: commandBlock(['npm run synth']) }));
+    expect(found.map((text) => NOT_IN_README.exec(text)?.[1])).toEqual(['npm run synth']);
+  });
+
+  it('fails an inline code block holding npx cdk deploy FotheringIngest, a line the README does not hold', () => {
+    const found = deployTexts(deployCommandsRule, deployBody({ extra: '<p>Then run <code>npx cdk deploy FotheringIngest</code>.</p>' }));
+    expect(found.map((text) => NOT_IN_README.exec(text)?.[1])).toEqual(['npx cdk deploy FotheringIngest']);
+  });
+
+  it('fails only the line the README lacks in a block of several', () => {
+    const found = deployTexts(deployCommandsRule, deployBody({ commands: commandBlock(['npm run build', 'npx cdk synth', 'npx cdk deploy --all']) }));
+    expect(found.map((text) => NOT_IN_README.exec(text)?.[1])).toEqual(['npx cdk synth']);
+  });
+
+  it('leaves inline code that runs nothing, such as a file name, to the other rules', () => {
+    expect(deployTexts(deployCommandsRule, deployBody({ extra: '<p>Edit <code>lanes.json</code> first.</p>' }))).toEqual([]);
+  });
+});
+
+describe('the deploy permissions rule (AC-33, AC-34, AC-E24, AC-E26)', () => {
+  it('passes the shipped snapshot rendered in a planted page', () => {
+    expect(SHIPPED_ROWS.length).toBeGreaterThan(1);
+    expect(deployTexts(deployPermissionsRule, deployBody())).toEqual([]);
+  });
+
+  it('fails a page missing one snapshot entry', () => {
+    const found = deployTexts(deployPermissionsRule, deployBody({ roles: roleSections().replace(FIRST_ROW_HTML, '') }));
+    expect(found).toEqual([`the deploy page has no row for ${FIRST_ROW === undefined ? '' : permissionKey(FIRST_ROW)} on ${FIRST_ROW?.resourceOrPrincipal ?? ''}`]);
+  });
+
+  it('fails a page holding one entry twice', () => {
+    const found = deployTexts(deployPermissionsRule, deployBody({ roles: roleSections().replace(FIRST_ROW_HTML, FIRST_ROW_HTML + FIRST_ROW_HTML) }));
+    expect(found).toEqual([expect.stringMatching(/ 2 times, once expected$/)]);
+  });
+
+  it('fails a row for no entry in the snapshot', () => {
+    const planted = FIRST_ROW === undefined ? '' : permissionRow({ ...FIRST_ROW, action: 'dynamodb:Scan' });
+    const found = deployTexts(deployPermissionsRule, deployBody({ roles: roleSections().replace(FIRST_ROW_HTML, FIRST_ROW_HTML + planted) }));
+    expect(found).toEqual([expect.stringMatching(/dynamodb:Scan .*matches no entry in packages\/infra\/permissions\.json$/)]);
+  });
+
+  it('fails a row whose reason differs from the reasons map', () => {
+    const planted = FIRST_ROW === undefined ? '' : permissionRow({ ...FIRST_ROW, reason: 'Because it can.' });
+    const found = deployTexts(deployPermissionsRule, deployBody({ roles: roleSections().replace(FIRST_ROW_HTML, planted) }));
+    expect(found).toEqual([expect.stringMatching(/reads "Because it can\."; the reasons map gives "/)]);
+  });
+
+  it('renders two entries differing only in resource as two rows, and fails a page showing one', () => {
+    const twin = plantedEntry({ resource: '{"Ref":"PlantedTable"}' });
+    const twinned = { permissions: [...DEPLOY_FACTS.permissions, twin] };
+    expect(deployTexts(deployPermissionsRule, deployBody({}, { ...DEPLOY_FACTS, ...twinned }), withDeploy(twinned))).toEqual([]);
+    expect(deployTexts(deployPermissionsRule, deployBody(), withDeploy(twinned))).toEqual([expect.stringMatching(/^the deploy page has no row for .* on \{"Ref":"PlantedTable"\}$/)]);
+  });
+
+  it('reads a shuffled snapshot as the same table, and fails rows out of the snapshot order', () => {
+    const shuffledFacts = { permissions: [...DEPLOY_FACTS.permissions].reverse() };
+    expect(deployTexts(deployPermissionsRule, deployBody(), withDeploy(shuffledFacts))).toEqual([]);
+    const swapped = roleSections().replace(FIRST_ROW_HTML + SECOND_ROW_HTML, SECOND_ROW_HTML + FIRST_ROW_HTML);
+    expect(swapped).not.toBe(roleSections());
+    expect(deployTexts(deployPermissionsRule, deployBody({ roles: swapped }))).toEqual(["the permission rows do not follow the snapshot's order"]);
+  });
+
+  it('fails a role section whose heading names another role', () => {
+    const sections = roleSections();
+    const [, name = ''] = /<h3>([^<]+)<\/h3>/.exec(sections) ?? [];
+    const found = deployTexts(deployPermissionsRule, deployBody({ roles: sections.replace(`<h3>${name}</h3>`, '<h3>OtherRole</h3>') }));
+    expect(found).toEqual([expect.stringMatching(new RegExp(`^the role section .*/${name} is headed "OtherRole"`))]);
+  });
+});
+
+describe('the deploy resources rule (AC-35)', () => {
+  const resources = DEPLOY_FACTS.resources as Record<string, string>[];
+  const firstListed = resourceRows(resources)[0];
+  const firstHtml = firstListed === undefined ? '' : resourceRow(firstListed, removedByText(DEPLOY_FACTS.commands));
+  const retained = { resources: resources.map((entry) => (entry.logicalId === firstListed?.logicalId ? { ...entry, deletionPolicy: 'Retain' } : entry)) };
+
+  it('passes every resources.json entry rendered once with its removal', () => {
+    expect(deployTexts(deployResourcesRule, deployBody())).toEqual([]);
+  });
+
+  it('fails a page missing one resources.json entry', () => {
+    expect(deployTexts(deployResourcesRule, deployBody({ resources: resourceTable().replace(firstHtml, '') }))).toEqual([
+      `the deploy page lists no row for ${firstListed?.stack ?? ''}/${firstListed?.logicalId ?? ''}`,
+    ]);
+  });
+
+  it('fails a page listing a resource the snapshot does not hold', () => {
+    const extra = firstListed === undefined ? '' : resourceRow({ ...firstListed, logicalId: 'PlantedBucket0A1B2C3D' }, removedByText(DEPLOY_FACTS.commands));
+    expect(deployTexts(deployResourcesRule, deployBody({ resources: resourceTable().replace(firstHtml, firstHtml + extra) }))).toEqual([
+      `the deploy page lists ${firstListed?.stack ?? ''}/PlantedBucket0A1B2C3D, which packages/infra/resources.json does not hold`,
+    ]);
+  });
+
+  it('fails a page saying deleted for a Retain entry, and passes it saying kept', () => {
+    expect(deployTexts(deployResourcesRule, deployBody(), withDeploy(retained))).toEqual([expect.stringMatching(/ reads "Deleted by .*" under On removal; "Kept after removal" expected$/)]);
+    expect(deployTexts(deployResourcesRule, deployBody({}, { ...DEPLOY_FACTS, ...retained }), withDeploy(retained))).toEqual([]);
+  });
+});
+
+describe('the deploy Deny rule (AC-37, AC-E27)', () => {
+  const denied = plantedEntry({ effect: 'Deny', action: 'ses:UpdateAccountSendingEnabled', resource: '*' });
+  const deniedFacts = {
+    permissions: [...DEPLOY_FACTS.permissions, denied],
+    reasons: { ...PERMISSION_REASONS, [permissionKey(denied)]: 'Stops a pause of the whole account.' },
+  };
+
+  it('passes the shipped snapshot, which holds no Deny entry, with no Deny box', () => {
+    expect(deployTexts(deployDenyRule, deployBody())).toEqual([]);
+  });
+
+  it('fails a Deny box while the snapshot holds no Deny entry', () => {
+    expect(deployTexts(deployDenyRule, deployBody({ deny: '<div data-deny><h3>Denied on every role</h3></div>' }))).toEqual([
+      'the snapshot holds no Deny entry, and the deploy page shows a Deny box',
+    ]);
+  });
+
+  it('fails a Deny row while the snapshot holds no Deny entry', () => {
+    const planted = FIRST_ROW === undefined ? '' : permissionRow({ ...FIRST_ROW, effect: 'Deny' });
+    expect(deployTexts(deployDenyRule, deployBody({ extra: `<table>${planted}</table>` }))).toEqual([expect.stringMatching(/^the snapshot holds no Deny entry, and the deploy page shows the Deny row /)]);
+  });
+
+  it('renders a planted Deny entry as a row in the Deny box, and fails a page without it', () => {
+    expect(deployTexts(deployDenyRule, deployBody({}, { ...DEPLOY_FACTS, ...deniedFacts }), withDeploy(deniedFacts))).toEqual([]);
+    expect(deployTexts(deployDenyRule, deployBody(), withDeploy(deniedFacts))).toEqual(['the snapshot holds 1 Deny entry, and the deploy page has no Deny box']);
+  });
+});
+
+describe('the deploy notice rule (UI-SPEC Q16)', () => {
+  const pause = plantedEntry({ action: 'ses:PutConfigurationSetSendingOptions', resource: '*' });
+  const pausing = {
+    permissions: [...DEPLOY_FACTS.permissions, pause],
+    reasons: { ...PERMISSION_REASONS, [permissionKey(pause)]: 'Pauses the one lane code approved.' },
+  };
+
+  it('passes the NOT YET notice while no role may pause a lane', () => {
+    expect(deployTexts(deployNoticeRule, deployBody())).toEqual([]);
+  });
+
+  it('fails a page without the notice while no role may pause a lane', () => {
+    expect(deployTexts(deployNoticeRule, deployBody({ notice: '' }))).toEqual([
+      'the template holds no ses:PutConfigurationSetSendingOptions grant, and the deploy page shows no NOT YET notice',
+    ]);
+  });
+
+  it('fails the notice once a role may pause a lane, and passes the page without it', () => {
+    expect(deployTexts(deployNoticeRule, deployBody(), withDeploy(pausing))).toEqual(['the template holds a pause grant, and the deploy page still shows the NOT YET notice']);
+    expect(deployTexts(deployNoticeRule, deployBody({}, { ...DEPLOY_FACTS, ...pausing }), withDeploy(pausing))).toEqual([]);
+  });
+});
+
+describe('the one-caller rule (AC-36)', () => {
+  it('passes a deploy page stating the one caller per lane and why', () => {
+    expect(deployTexts(oneCallerRule, deployBody())).toEqual([]);
+  });
+
+  it('fails a deploy page without the sentence', () => {
+    expect(deployTexts(oneCallerRule, deployBody({ oneCaller: 'Each lane sends through its own IAM caller identity.' }))).toEqual([
+      'the deploy page does not say that each lane sends through its own IAM caller identity, and why',
+    ]);
   });
 });
 

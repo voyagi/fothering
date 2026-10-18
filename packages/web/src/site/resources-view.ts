@@ -1,4 +1,12 @@
+import { readRepoText } from './repo-facts.js';
+
 const SOURCE = 'packages/infra/resources.json';
+
+export function loadResourceSnapshot(root: string): unknown[] {
+  const parsed: unknown = JSON.parse(readRepoText(SOURCE, root));
+  if (!Array.isArray(parsed)) throw new Error(`${SOURCE}: not a list. Run npm run permissions:snapshot.`);
+  return parsed;
+}
 
 // Every CloudFormation type the synthesized stacks hold is in exactly one of these two maps, so a
 // type a later stack change adds fails the deploy page's tests until someone says how to show it.
