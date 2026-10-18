@@ -1,7 +1,7 @@
 import { execFileSync, spawnSync } from 'node:child_process';
 import { copyFileSync, mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, relative, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { afterAll, describe, expect, it } from 'vitest';
 
@@ -99,10 +99,16 @@ function lineIndexes(lines: readonly string[], text: string): number[] {
 // The commands are assembled from words, so neither this file nor a commit quoting it holds one
 // literally: the machine's command guards match that text wherever it appears.
 const WRANGLER = 'wrangler';
-const DEPLOY_COMMANDS = [['deploy'], ['publish'], ['versions', 'deploy'], ['versions', 'upload'], ['pages', 'deploy']].map((words) => ({
-  phrase: [WRANGLER, ...words].join(' '),
-  pattern: new RegExp(`\\b${WRANGLER}(?:@\\S+)?\\s+${words.join('\\s+')}\\b`),
-}));
+// Cloudflare's cf CLI installs the same commands under two names, cf and cloudflare.
+const CF_NAMES = ['cf', 'cloudflare'];
+// Option tokens may sit between the binary and its subcommand (--config wrangler.jsonc, --env x).
+const OPTION_TOKENS = String.raw`(?:\s+-\S+(?:\s+[^-\s]\S*)?)*`;
+const commandPattern = (binary: string, words: readonly string[]): RegExp =>
+  new RegExp(String.raw`\b${binary}(?:@\S+)?${OPTION_TOKENS}\s+${words.join(String.raw`\s+`)}\b`);
+const DEPLOY_COMMANDS = [
+  ...[['deploy'], ['publish'], ['versions', 'deploy'], ['versions', 'upload'], ['pages', 'deploy']].map((words) => [WRANGLER, words] as const),
+  ...CF_NAMES.map((binary) => [binary, ['deploy']] as const),
+].map(([binary, words]) => ({ phrase: [binary, ...words].join(' '), pattern: commandPattern(binary, words) }));
 const ACCOUNT_ID_KEY_RE = /["']?\baccount_id\b["']?\s*[:=]/;
 
 function deployPhrasesIn(text: string): string[] {
@@ -114,13 +120,17 @@ function scriptLines(manifest: Partial<PackageJson>): string {
   return Object.values(manifest.scripts ?? {}).join('\n');
 }
 
-// Every place a deploy could be wired: each manifest's scripts, each workflow, the Workers config.
+// Every place a deploy could be wired: each manifest's scripts, each workflow, the Workers config
+// and every file under scripts/, which a manifest script may run.
 function deployScanTargets(): SourceFile[] {
   const manifests = ['package.json', ...readdirSync(join(REPO_ROOT, 'packages')).map((ws) => `packages/${ws}/package.json`)];
   const workflows = readdirSync(join(REPO_ROOT, '.github', 'workflows')).map((file) => `.github/workflows/${file}`);
+  const scripts = readdirSync(join(REPO_ROOT, 'scripts'), { recursive: true, withFileTypes: true })
+    .filter((entry) => entry.isFile())
+    .map((entry) => relative(REPO_ROOT, join(entry.parentPath, entry.name)).split(sep).join('/'));
   return [
     ...manifests.map((path) => ({ path, text: scriptLines(readJson<Partial<PackageJson>>(path)) })),
-    ...[...workflows, 'packages/web/wrangler.jsonc'].map((path) => ({ path, text: readText(path) })),
+    ...[...workflows, 'packages/web/wrangler.jsonc', ...scripts].map((path) => ({ path, text: readText(path) })),
   ];
 }
 
@@ -270,9 +280,31 @@ describe('repo hardening: every gate, config and document ships what it claims',
   it('no package.json script, workflow or Workers config names a deploy command or an account id', () => {
     const targets = deployScanTargets();
     expect(targets.map(({ path }) => path)).toEqual(
-      expect.arrayContaining(['package.json', 'packages/web/package.json', '.github/workflows/ci-gates.yml', 'packages/web/wrangler.jsonc']),
+      expect.arrayContaining(['package.json', 'packages/web/package.json', '.github/workflows/ci-gates.yml', 'packages/web/wrangler.jsonc', 'scripts/site-tool.mjs']),
     );
     for (const { path, text } of targets) expect(deployPhrasesIn(text), path).toEqual([]);
+  });
+
+  it('the never-deploy scan catches option tokens before the subcommand and passes them before one that does not deploy', () => {
+    expect(deployPhrasesIn(`npx ${WRANGLER} --config wrangler.jsonc deploy`)).toEqual([`${WRANGLER} deploy`]);
+    expect(deployPhrasesIn(`npx ${WRANGLER}@4.132.0 --env production --dry-run versions upload`)).toEqual([`${WRANGLER} versions upload`]);
+    expect(deployPhrasesIn(`npx ${WRANGLER} --config wrangler.jsonc dev --local`)).toEqual([]);
+  });
+
+  it('the never-deploy scan catches the cf CLI deploy under both its names and passes its other commands', () => {
+    for (const binary of CF_NAMES) {
+      expect(deployPhrasesIn(`npx ${binary} deploy`), binary).toEqual([`${binary} deploy`]);
+      expect(deployPhrasesIn(`${binary} --profile work deploy`), binary).toEqual([`${binary} deploy`]);
+      expect(deployPhrasesIn(`${binary} dev\n${binary} build\n${binary} schema`), binary).toEqual([]);
+    }
+  });
+
+  it('the never-deploy scan reads files under scripts/ and catches a deploy spawned from one', () => {
+    const siteTool = deployScanTargets().find(({ path }) => path === 'scripts/site-tool.mjs');
+    expect(siteTool?.text).toBe(readText('scripts/site-tool.mjs'));
+    expect(deployPhrasesIn(siteTool?.text ?? 'unread')).toEqual([]);
+    const spawning = `${readText('scripts/site-tool.mjs')}\nexecSync('npx ${WRANGLER} deploy', { stdio: 'inherit' });\n`;
+    expect(deployPhrasesIn(spawning)).toEqual([`${WRANGLER} deploy`]);
   });
 
   it.each(DEPLOY_COMMANDS.map(({ phrase }) => phrase))('the never-deploy scan catches %s in a script, a workflow line and the Workers config', (phrase) => {
