@@ -1,7 +1,9 @@
 ---
 // A drawing's table. The first cell of every row is its row header; a cell may carry a state mark,
 // whose name is always printed beside it (UI-SPEC section 7, StateMark). Text marks code spans with
-// backticks, the way the replay view writes them, and each span renders as an identifier.
+// backticks, the way the replay view writes them, and each span renders as an identifier; with
+// terms, the configuration set names and tag values in the text and caption render as identifiers too.
+import { textSegments, type IdentifierTerms, type Segment } from '../site/identifier-text.ts';
 import Identifier from './Identifier.astro';
 
 type Mark = 'open' | 'later';
@@ -39,9 +41,12 @@ interface Props {
   // Column indexes whose API names may break between their capitalised words (the replay log's
   // Detail column only, UI-SPEC line 208).
   wordColumns?: readonly number[];
+  // Configuration set names and tag values to render as identifiers wherever the text names them.
+  terms?: IdentifierTerms;
 }
 
-const { columns, rows, narrowHidden = [], monoColumns = [], caption, captionAttrs = {}, variant = 'schedule', compact = false, stack = false, wordColumns = [] } = Astro.props;
+const { columns, rows, narrowHidden = [], monoColumns = [], caption, captionAttrs = {}, variant = 'schedule', compact = false, stack = false, wordColumns = [], terms = { names: [], values: [] } } = Astro.props;
+const segmentsOf = (text: string): Segment[] => textSegments(text, terms);
 const classes = (column: number): string | undefined =>
   [narrowHidden.includes(column) ? 'hide-narrow' : '', monoColumns.includes(column) ? 'mono' : ''].filter((name) => name !== '').join(' ') || undefined;
 // A column header is a label like its siblings; only the column's values are set in mono.
@@ -51,10 +56,10 @@ const tableClass = [variant, compact ? 'compact' : '', stack ? 'stack' : ''].fil
 // become grids states its roles.
 type TableRole = 'table' | 'rowgroup' | 'row' | 'columnheader' | 'rowheader' | 'cell';
 const role = (name: TableRole): TableRole | undefined => (stack || compact ? name : undefined);
-const spans = (text: string): string[] => text.split('`');
+const faceOf = (segment: Segment): 'mono' | 'inherit' => (segment.kind === 'name' ? 'inherit' : 'mono');
 ---
 <table class={tableClass} role={role('table')}>
-  {caption !== undefined && <caption {...captionAttrs}>{caption}</caption>}
+  {caption !== undefined && <caption {...captionAttrs}>{segmentsOf(caption).map((segment) => (segment.kind === 'text' ? segment.text : <Identifier value={segment.text} face={faceOf(segment)} />))}</caption>}
   <thead role={role('rowgroup')}>
     <tr role={role('row')}>{columns.map((column, index) => <th scope="col" class={headClass(index)} role={role('columnheader')}>{column}</th>)}</tr>
   </thead>
@@ -63,13 +68,13 @@ const spans = (text: string): string[] => text.split('`');
       <tr {...row.attrs} role={role('row')}>
         <th scope="row" class={classes(0)} role={role('rowheader')}>
           {row.headerHref === undefined
-            ? spans(row.header).map((part, index) => (index % 2 === 1 ? <Identifier value={part} /> : part))
-            : <a href={row.headerHref}>{spans(row.header).map((part, index) => (index % 2 === 1 ? <Identifier value={part} /> : part))}</a>}
+            ? segmentsOf(row.header).map((segment) => (segment.kind === 'text' ? segment.text : <Identifier value={segment.text} face={faceOf(segment)} />))
+            : <a href={row.headerHref}>{segmentsOf(row.header).map((segment) => (segment.kind === 'text' ? segment.text : <Identifier value={segment.text} face={faceOf(segment)} />))}</a>}
           {row.headerNote !== undefined && <Fragment> <span class="note">{row.headerNote}</span></Fragment>}
         </th>
         {row.cells.map((cell, index) => (
           <td class={classes(index + 1)} data-col={stack ? columns[index + 1] : undefined} role={role('cell')} {...cell.attrs}>
-            {cell.mark === undefined ? <span class="cell-text">{spans(cell.text).map((part, spanIndex) => (spanIndex % 2 === 1 ? <Identifier value={part} words={wordColumns.includes(index + 1)} /> : part))}</span> : (
+            {cell.mark === undefined ? <span class="cell-text">{segmentsOf(cell.text).map((segment) => (segment.kind === 'text' ? segment.text : <Identifier value={segment.text} face={faceOf(segment)} words={wordColumns.includes(index + 1)} />))}</span> : (
               <span class="state">
                 <svg class={`state-mark state-mark-${cell.mark}`} viewBox="0 0 12 12" aria-hidden="true"><rect x="1" y="1" width="10" height="10" /></svg>
                 {cell.text}

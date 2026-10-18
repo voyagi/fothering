@@ -7,16 +7,22 @@
 // a line between its capitalised words, each word one unbreakable run with no hyphen added. Only the
 // replay log's Detail cells pass it (UI-SPEC line 208, S4 note 2026-10-18); the built rule
 // identifier-break fails that break anywhere else.
+// With face="inherit" the identifier keeps the face of the text around it, as the comp sets a
+// configuration set name in running text, and only never breaks mid-name.
 interface Props {
   value: string;
   words?: boolean;
+  face?: 'mono' | 'inherit';
 }
 
 const NO_BREAK_SPACE = String.fromCharCode(0xa0);
-const { value, words = false } = Astro.props;
+const { value, words = false, face = 'mono' } = Astro.props;
 const wordParts = words && !value.includes('.') ? value.split(/(?=[A-Z])/) : [];
 const byWords = wordParts.length > 1;
 const parts = byWords ? wordParts : value.split('.').map((part) => part.replaceAll(' ', NO_BREAK_SPACE));
-const joiner = byWords ? '' : '.';
+// Each part with its joiner, and whether a break may follow it.
+const runs = parts.map((part, index) => ({ text: index < parts.length - 1 ? `${part}${byWords ? '' : '.'}` : part, breakAfter: index < parts.length - 1 }));
 ---
-<code class="identifier" data-identifier data-identifier-words={byWords ? '' : undefined}>{parts.map((part, index) => (index < parts.length - 1 ? <Fragment><span>{part}{joiner}</span><wbr /></Fragment> : <span>{part}</span>))}</code>
+{face === 'inherit'
+  ? <span class="identifier" data-identifier data-identifier-face="inherit">{runs.map((run) => (run.breakAfter ? <Fragment><span>{run.text}</span><wbr /></Fragment> : <span>{run.text}</span>))}</span>
+  : <code class="identifier" data-identifier data-identifier-words={byWords ? '' : undefined}>{runs.map((run) => (run.breakAfter ? <Fragment><span>{run.text}</span><wbr /></Fragment> : <span>{run.text}</span>))}</code>}

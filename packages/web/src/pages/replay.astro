@@ -7,7 +7,7 @@ import LockoutTag from '../components/LockoutTag.astro';
 import Message from '../components/Message.astro';
 import Schedule from '../components/Schedule.astro';
 import Sheet from '../layouts/Sheet.astro';
-import { LOG_API_NAMES, textSegments } from '../site/identifier-text.ts';
+import { LOG_API_NAMES, textSegments, type Segment } from '../site/identifier-text.ts';
 import { buildReplayView, loadReplayArtifact } from '../site/replay-view.ts';
 import { routeFor } from '../site/route-list.ts';
 
@@ -19,13 +19,12 @@ const { field, value, atUtc } = artifact.pause.readBack;
 const readBack = { field: field.slice(field.lastIndexOf('.') + 1), value, time: atUtc.slice(11, 16) };
 const STEP_COUNT = view.steps.length;
 
-// The view marks code spans with backticks; odd-numbered pieces are the spans.
-const spans = (text: string): string[] => text.split('`');
-// The summary names the cause as plain text, so its one copyable value is found by value.
-const causeSpans = (text: string): string[] => {
-  const at = text.indexOf(view.tag.cause);
-  return at < 0 ? [text] : [text.slice(0, at), view.tag.cause, text.slice(at + view.tag.cause.length)];
-};
+// The view marks code spans with backticks; the artifact's configuration set names and tag values
+// are found by value. Names keep the face of the text around them, as the comp sets a lane name in
+// running text; tag values and code spans are mono. Each renders through the Identifier component,
+// so none breaks mid-name (UI-SPEC lines 207 and 208).
+const segmentsOf = (text: string): Segment[] => textSegments(text, view.identifierTerms);
+const faceOf = (segment: Segment): 'mono' | 'inherit' => (segment.kind === 'name' ? 'inherit' : 'mono');
 const clock = (step: { number: number; time: string }): string => `Step ${String(step.number)} of ${String(STEP_COUNT)}, ${step.time} UTC`;
 
 const evidenceRows = view.schedule.rows.map((row) => ({
@@ -59,11 +58,11 @@ const logRows = view.eventLog.rows.map((row) => ({
   <div class="row">
     <div class="rail" aria-hidden="true">1</div>
     <section class="sheet replay-intro" aria-labelledby="replay-title">
-      <h1 id="replay-title">{view.h1}</h1>
+      <h1 id="replay-title">{segmentsOf(view.h1).map((segment) => (segment.kind === 'text' ? segment.text : <Identifier value={segment.text} face={faceOf(segment)} />))}</h1>
       <p class="intro" data-provenance={provenance}>{view.intro} <span class="needs-js">Use the buttons or the arrow keys.</span></p>
       <ol class="summary" data-wordcount="summary" data-provenance={provenance} aria-label="The incident in one line">
         {view.summary.map((item) => (
-          <li><time>{item.time}</time> {causeSpans(item.text).map((part, index) => (index === 1 ? <Identifier value={part} /> : part))}</li>
+          <li><time>{item.time}</time> {segmentsOf(item.text).map((segment) => (segment.kind === 'text' ? segment.text : <Identifier value={segment.text} face={faceOf(segment)} />))}</li>
         ))}
       </ol>
     </section>
@@ -125,7 +124,7 @@ const logRows = view.eventLog.rows.map((row) => ({
 
           <section class="panel" data-wordcount="step" data-steps="1" aria-labelledby="step-1-title">
             <h2 id="step-1-title">{one?.heading}</h2>
-            {one?.paragraphs.map((text) => <p>{spans(text).map((part, index) => (index % 2 === 1 ? <Identifier value={part} /> : part))}</p>)}
+            {one?.paragraphs.map((text) => <p>{segmentsOf(text).map((segment) => (segment.kind === 'text' ? segment.text : <Identifier value={segment.text} face={faceOf(segment)} />))}</p>)}
           </section>
 
           <section class="panel" data-wordcount="step" data-steps="2" aria-labelledby="step-2-title">
@@ -134,6 +133,7 @@ const logRows = view.eventLog.rows.map((row) => ({
               compact
               columns={['Dimension', 'Count', 'Verdict', 'Threshold']}
               rows={evidenceRows}
+              terms={view.identifierTerms}
               caption={view.schedule.caption}
               captionAttrs={{ 'data-provenance': provenance }}
             />
@@ -142,16 +142,16 @@ const logRows = view.eventLog.rows.map((row) => ({
 
           <section class="panel" data-wordcount="step" data-steps="3" aria-labelledby="step-3-title">
             <h2 id="step-3-title">{three?.heading}</h2>
-            {three?.paragraphs.map((text) => <p>{spans(text).map((part, index) => (index % 2 === 1 ? <Identifier value={part} /> : part))}</p>)}
-            <p class="lanes"><svg class="state-mark state-mark-shut" viewBox="0 0 12 12" aria-hidden="true"><rect x="1" y="1" width="10" height="10" /><rect class="bar" x="3" y="5" width="6" height="2" /></svg>{view.lanesLines.paused}</p>
+            {three?.paragraphs.map((text) => <p>{segmentsOf(text).map((segment) => (segment.kind === 'text' ? segment.text : <Identifier value={segment.text} face={faceOf(segment)} />))}</p>)}
+            <p class="lanes"><svg class="state-mark state-mark-shut" viewBox="0 0 12 12" aria-hidden="true"><rect x="1" y="1" width="10" height="10" /><rect class="bar" x="3" y="5" width="6" height="2" /></svg>{segmentsOf(view.lanesLines.paused).map((segment) => (segment.kind === 'text' ? segment.text : <Identifier value={segment.text} face={faceOf(segment)} />))}</p>
           </section>
 
           <section class="panel" data-wordcount="step" data-steps="4" aria-labelledby="step-4-title">
             <h2 id="step-4-title">{four?.heading}</h2>
-            <Message email={view.email} label="Operator email" />
+            <Message email={view.email} label="Operator email" terms={view.identifierTerms} />
             <CommandBlock command={view.reopenCommand} provenance={provenance} />
-            {four?.paragraphs.map((text) => <p>{spans(text).map((part, index) => (index % 2 === 1 ? <Identifier value={part} /> : part))}</p>)}
-            <p class="lanes"><svg class="state-mark state-mark-open" viewBox="0 0 12 12" aria-hidden="true"><rect x="1" y="1" width="10" height="10" /></svg>{view.lanesLines.reopened}</p>
+            {four?.paragraphs.map((text) => <p>{segmentsOf(text).map((segment) => (segment.kind === 'text' ? segment.text : <Identifier value={segment.text} face={faceOf(segment)} />))}</p>)}
+            <p class="lanes"><svg class="state-mark state-mark-open" viewBox="0 0 12 12" aria-hidden="true"><rect x="1" y="1" width="10" height="10" /></svg>{segmentsOf(view.lanesLines.reopened).map((segment) => (segment.kind === 'text' ? segment.text : <Identifier value={segment.text} face={faceOf(segment)} />))}</p>
           </section>
         </div>
       </section>
@@ -170,6 +170,7 @@ const logRows = view.eventLog.rows.map((row) => ({
         columns={['Time UTC', 'Kind', 'Lane', 'Detail']}
         monoColumns={[0, 2]}
         wordColumns={[DETAIL_COLUMN]}
+        terms={view.identifierTerms}
         rows={logRows}
         caption={`${view.eventLog.caption} ${view.eventLog.note}`}
         captionAttrs={{ 'data-provenance': provenance }}

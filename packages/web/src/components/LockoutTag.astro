@@ -25,7 +25,7 @@ const evidenceParts = tag.evidence.split('`');
   <span class="tag-hole" aria-hidden="true"></span>
   <header>
     <b>{tag.legend}</b>
-    <span class="tag-lane mono">{tag.lane}</span>
+    <span class="tag-lane mono"><Identifier value={tag.lane} face="inherit" /></span>
     <span class="stamp">{tag.stamp}</span>
   </header>
   <dl>
