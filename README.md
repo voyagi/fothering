@@ -96,17 +96,19 @@ happy with:
 npx cdk deploy --all -c fothering:live=live
 ```
 
-To try the model on its own, deploy only the runtime with the switch on and invoke it once with an
-evidence record built from fixtures, saved as `record.json`. The runtime ARN is among the
-`FotheringRuntime` stack outputs in the CloudFormation console. The session id must be at least 33
-characters, and the read timeout is raised because the CLI gives up after 60 seconds by default:
+To try the model on its own, deploy only the runtime with the switch on and invoke it once with the
+committed trial record, `packages/agent/fixtures/trial-record.json` (one bad import batch on
+`fothering-bulk`, built from fixtures; a test keeps it equal to the builder, so it stays current). Run
+the commands from the repository root. The runtime ARN is among the `FotheringRuntime` stack outputs in
+the CloudFormation console. The session id must be at least 33 characters, and the read timeout is
+raised because the CLI gives up after 60 seconds by default:
 
 ```sh
 npx cdk deploy FotheringRuntime -c fothering:live=live
 aws bedrock-agentcore invoke-agent-runtime --region eu-central-1 \
   --agent-runtime-arn <runtime arn> \
   --runtime-session-id fothering-trial-0000000000000000000001 \
-  --payload fileb://record.json \
+  --payload fileb://packages/agent/fixtures/trial-record.json \
   --cli-read-timeout 120 \
   response.json
 ```

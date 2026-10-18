@@ -1,0 +1,104 @@
+{
+  "schemaVersion": 1,
+  "incidentId": "b438b20ed0d68cfbd10c0469111d7d6a",
+  "lane": {
+    "configurationSet": "fothering-bulk",
+    "lane": "fothering-bulk"
+  },
+  "window": {
+    "fromBucketMs": 1791716700000,
+    "toBucketMs": 1791720000000
+  },
+  "laneTotals": {
+    "recipientSends": 200,
+    "permanentBounces": 15,
+    "complaints": 0,
+    "hardBounceRatio": "7.50%",
+    "complaintRatio": "0.00%",
+    "verdict": "spike",
+    "triggers": [
+      "hard-bounce"
+    ],
+    "label": {
+      "hardBounceRatio": "Fothering lane hard-bounce ratio (permanent bounces over recipient-sends)",
+      "complaintRatio": "Fothering lane complaint ratio (complaints over recipient-sends)"
+    }
+  },
+  "share": {
+    "laneCountableEvents": 400,
+    "storedCountableEvents": 400,
+    "percent": "100.00%",
+    "label": "share of the countable events Fothering stores for its lane-map sets"
+  },
+  "rows": [
+    {
+      "dimension": "batch",
+      "kind": "value",
+      "value": "import-0901",
+      "sends": 160,
+      "permanentBounces": 0,
+      "complaints": 0,
+      "hardBounceRatio": "0.00%",
+      "complaintRatio": "0.00%",
+      "sharePercent": "80.00%",
+      "verdict": "ruled-out",
+      "thresholds": [
+        {
+          "ratio": "hard-bounce",
+          "numerator": 5,
+          "denominator": 100,
+          "minEvents": 3,
+          "minSends": 20
+        }
+      ],
+      "fromBucketMs": 1791716700000,
+      "toBucketMs": 1791720000000
+    },
+    {
+      "dimension": "batch",
+      "kind": "value",
+      "value": "import-0915",
+      "sends": 40,
+      "permanentBounces": 15,
+      "complaints": 0,
+      "hardBounceRatio": "37.50%",
+      "complaintRatio": "0.00%",
+      "sharePercent": "20.00%",
+      "verdict": "cause",
+      "thresholds": [
+        {
+          "ratio": "hard-bounce",
+          "numerator": 5,
+          "denominator": 100,
+          "minEvents": 3,
+          "minSends": 20
+        }
+      ],
+      "fromBucketMs": 1791716700000,
+      "toBucketMs": 1791720000000
+    }
+  ],
+  "configurationRows": [],
+  "isolation": "confined",
+  "decision": {
+    "outcome": "approved",
+    "reason": "approved",
+    "closeability": {
+      "state": "closeable",
+      "reasons": []
+    },
+    "noData": false,
+    "bound": null,
+    "otherSpikingLanes": [],
+    "sharedCause": null
+  },
+  "question": null,
+  "fix": null,
+  "approvedOptions": [
+    {
+      "optionId": "opt-72a061ae5504378bcdac5f73"
+    }
+  ],
+  "expiresAt": 1794312120,
+  "hash": "fac57751391000299915362daaa54d8b0b9621146c8116e53a618cd61d9714b6"
+}
