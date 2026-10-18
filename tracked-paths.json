@@ -23,7 +23,9 @@
     "verify-ship.mjs",
     "vitest.config.ts",
     "vitest.stryker.config.ts",
-    "docs/forget-one-recipient.md"
+    "docs/forget-one-recipient.md",
+    "tools/dev-browser/package.json",
+    "tools/dev-browser/package-lock.json"
   ],
   "prefixes": [
     ".github/workflows/",

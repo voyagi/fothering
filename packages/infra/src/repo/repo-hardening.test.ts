@@ -257,18 +257,33 @@ describe('repo hardening: every gate, config and document ships what it claims',
   });
 
   // The ship gate's e2e and a11y steps drive dev-browser, and the npm package's own install script
-  // would fetch its binary unchecked; CI installs without it and checks the release digest itself.
-  it('CI installs the pinned dev-browser and refuses its binary unless the release digest matches, before the ship gate', () => {
+  // would fetch its binary unchecked; CI installs the locked tree without it and checks the release
+  // digest itself.
+  it('CI installs the pinned dev-browser from its lockfile and refuses its binary unless the release digest matches, before the ship gate', () => {
     const { lines, blocks } = workflowSteps(readText('.github/workflows/ci-gates.yml'));
-    const install = 'npm install -g dev-browser@0.2.9 --ignore-scripts';
+    const install = 'npm ci --ignore-scripts --prefix tools/dev-browser';
     const installSteps = blocks.filter((block) => block.includes(install));
     expect(installSteps).toHaveLength(1);
     const step = installSteps[0] ?? '';
+    expect(step).not.toMatch(/npm install -g/);
     expect(step).toContain('releases/download/v0.2.9/dev-browser-linux-x64');
-    expect(step).toContain('179ee6eb6d27245285fddbac063c24723482314d16b3fb0741dfaf0e63e8c0f6');
+    expect(step).toContain('179ee6eb6d27245285fddbac063c24723482314d16b3fb0741dfaf0e63e8c0f6  $pkg/bin/dev-browser-linux-x64');
+    expect(step).toContain('pkg="$GITHUB_WORKSPACE/tools/dev-browser/node_modules/dev-browser"');
     expect(step).toContain('sha256sum -c');
-    expect(step).toContain('dev-browser install');
+    expect(step).toContain('echo "$bin" >> "$GITHUB_PATH"');
+    expect(step).toContain('"$bin/dev-browser" install');
     expect(step).toContain("if: ${{ !cancelled() && steps.rebuild.outcome == 'success' }}");
+
+    // The lock pins dev-browser 0.2.9 exactly, and every package it installs carries an integrity hash.
+    const manifest = readJson<{ private?: boolean; scripts?: unknown; dependencies?: Record<string, string> }>('tools/dev-browser/package.json');
+    expect(manifest.private).toBe(true);
+    expect(manifest.scripts).toBeUndefined();
+    expect(manifest.dependencies).toEqual({ 'dev-browser': '0.2.9' });
+    const locked = readJson<{ packages: Record<string, { version?: string; integrity?: string }> }>('tools/dev-browser/package-lock.json').packages;
+    expect(locked['node_modules/dev-browser']?.version).toBe('0.2.9');
+    const installed = Object.entries(locked).filter(([key]) => key !== '');
+    expect(installed.length).toBeGreaterThan(1);
+    for (const [key, entry] of installed) expect(entry.integrity, key).toMatch(/^sha512-/);
 
     const [installLine] = lineIndexes(lines, install);
     const verifyShipLine = lines.findIndex((l) => l.includes('npm run verify:ship'));
