@@ -1280,7 +1280,11 @@ const healthyLayout = (width: number): ReplayLayoutReading => ({
     { header: '14:01:07', baselines: [1500.25, 1500.25, 1500.75, 1500.25] },
     { header: '14:01:12', baselines: [1560, 1560, 1560, 1560] },
   ],
-  identifiers: [{ text: 'batch=2026-10-14-b', weight: '500' }, { text: '14:01:07', weight: '500' }],
+  identifiers: [
+    { text: 'batch=2026-10-14-b', weight: '500', lines: ['batch=2026-10-14-b'] },
+    { text: '14:01:07', weight: '500', lines: ['14:01:07'] },
+    { text: 'SendingOptions.SendingEnabled', weight: '500', lines: ['SendingOptions.', 'SendingEnabled'] },
+  ],
 });
 const layoutReason = (reading: ReplayLayoutReading): string => {
   const verdict = replayLayoutVerdict(reading);
@@ -1335,9 +1339,14 @@ describe('replayLayoutVerdict (AC-6, UI-SPEC 6 and 10.3)', () => {
   });
 
   it('fails an identifier that computes a weight other than 500, and a run that measured none', () => {
-    const identifiers = [{ text: 'fothering-bulk', weight: '600' }];
+    const identifiers = [{ text: 'fothering-bulk', weight: '600', lines: ['fothering-bulk'] }];
     expect(layoutReason({ ...healthyLayout(1440), identifiers })).toBe(E2E_MESSAGES.layoutIdentifierWeight(1440, 'fothering-bulk', '600'));
     expect(layoutReason({ ...healthyLayout(320), identifiers: [] })).toBe(E2E_MESSAGES.layoutIdentifiersMissing(320));
+  });
+
+  it('fails an identifier that breaks anywhere but right after a dot', () => {
+    const identifiers = [{ text: 'fothering-transactional', weight: '500', lines: ['fothering-', 'transactional'] }];
+    expect(layoutReason({ ...healthyLayout(960), identifiers })).toBe(E2E_MESSAGES.layoutIdentifierBreak(960, 'fothering-transactional', ['fothering-', 'transactional']));
   });
 });
 
@@ -1918,7 +1927,7 @@ describe('the built checks through the CLI and the e2e step (D-150, D-151)', () 
       noScriptPanels: [320, ['1']], noScriptControls: [320, 1], noScriptBoard: [320, '3', false], noScriptNoBoard: [320], noScriptTag: [320],
       layoutStepsMissing: [320], layoutBoardHeight: [960, [638, 900]], layoutPhantomMissing: [960, 1], layoutPhantomShown: [1280, 2], layoutPhantomExposed: [960, 1],
       layoutEvidenceMissing: [961], layoutEvidenceSpill: [1280, 1220, 1201], layoutLogMissing: [1024], layoutBaseline: [1280, '14:01:07', [1498, 1500]],
-      layoutIdentifiersMissing: [320], layoutIdentifierWeight: [1440, 'fothering-bulk', '600'],
+      layoutIdentifiersMissing: [320], layoutIdentifierWeight: [1440, 'fothering-bulk', '600'], layoutIdentifierBreak: [960, 'a-b', ['a-', 'b']],
       copyStampMissing: ['/'], copyStamp: ['/', 'FIXTURE RUN', 'SIMULATOR RUN'], copyCauseMissing: ['/', 'batch=x'], copyOldCause: ['/', 'x'],
       copyVariantFailed: ['cause', 1, 'x'], copyVariantUnjudged: ['cause'],
     };

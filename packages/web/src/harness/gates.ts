@@ -631,8 +631,9 @@ export interface ReplayLayoutReading {
   readonly evidence: { readonly tableRight: number; readonly panelRight: number } | null;
   // On step 4, with every row shown, the first baseline of each cell of each log row.
   readonly logRows: readonly { readonly header: string; readonly baselines: readonly number[] }[];
-  // The computed weight of every identifier in step 2's schedule and in the log's mono cells.
-  readonly identifiers: readonly { readonly text: string; readonly weight: string }[];
+  // Every identifier shown on a step (the log's mono cells included): its computed weight and the
+  // rendered lines it occupies.
+  readonly identifiers: readonly { readonly text: string; readonly weight: string; readonly lines: readonly string[] }[];
 }
 
 const STACKED_BOARD_WIDTH = 960;
@@ -1186,6 +1187,7 @@ export const E2E_MESSAGES = Object.freeze({
   layoutBaseline: (width: number, header: string, baselines: readonly number[]) => `at ${width} px the log row ${header} sets its cells on baselines ${baselines.join(', ')}, one baseline within 1 px expected`,
   layoutIdentifiersMissing: (width: number) => `at ${width} px the run measured no identifier in the evidence schedule or the log`,
   layoutIdentifierWeight: (width: number, text: string, weight: string) => `at ${width} px the identifier ${text} computes weight ${weight}, 500 expected`,
+  layoutIdentifierBreak: (width: number, text: string, lines: readonly string[]) => `at ${width} px ${E2E_MESSAGES.identifierBreak(text, lines)}`,
   copyStampMissing: (route: string) => `${route} carries no provenance stamp in the project copy`,
   copyStamp: (route: string, found: string, expected: string) => `the stamp on ${route} reads ${found}, ${expected} expected for the copy's provenance`,
   copyCauseMissing: (where: string, cause: string) => `${where} does not show the copy's cause ${cause}`,
