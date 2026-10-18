@@ -363,6 +363,9 @@ export function lineVerdict(readings: readonly LinesReading[]): Verdict {
 export interface IdentifierReading {
   readonly text: string;
   readonly lines: readonly string[];
+  // The word parts of an identifier in word mode (an API name in a replay log Detail cell), whose
+  // own boundaries may end a line; absent, only a dot may.
+  readonly parts?: readonly string[];
 }
 
 // AC-E55: every line of an identifier but the last must end right after a dot.
@@ -633,7 +636,16 @@ export interface ReplayLayoutReading {
   readonly logRows: readonly { readonly header: string; readonly baselines: readonly number[] }[];
   // Every identifier shown on a step (the log's mono cells included): its computed weight and the
   // rendered lines it occupies.
-  readonly identifiers: readonly { readonly text: string; readonly weight: string; readonly lines: readonly string[] }[];
+  readonly identifiers: readonly {
+    readonly text: string;
+    readonly weight: string;
+    readonly family: string;
+    readonly lines: readonly string[];
+    readonly parts?: readonly string[];
+  }[];
+  // API operation names (two or more capitalised words run together) written in a log Detail cell
+  // as plain text rather than as an identifier.
+  readonly plainApiNames: readonly string[];
   // The computed type (weight, size, tracking, case) of each column header in the log, where it shows.
   readonly logHeaders: readonly { readonly text: string; readonly type: string }[];
 }
@@ -1198,6 +1210,8 @@ export const E2E_MESSAGES = Object.freeze({
   layoutBaseline: (width: number, header: string, baselines: readonly number[]) => `at ${width} px the log row ${header} sets its cells on baselines ${baselines.join(', ')}, one baseline within 1 px expected`,
   layoutIdentifiersMissing: (width: number) => `at ${width} px the run measured no identifier in the evidence schedule or the log`,
   layoutIdentifierWeight: (width: number, text: string, weight: string) => `at ${width} px the identifier ${text} computes weight ${weight}, 500 expected`,
+  layoutPlainApiName: (width: number, text: string) => `at ${width} px the log names the API operation ${text} as plain text, not as a mono identifier`,
+  layoutIdentifierFamily: (width: number, text: string, family: string) => `at ${width} px the identifier ${text} is set in ${family}, Red Hat Mono expected`,
   layoutHeaderType: (width: number, text: string, type: string, expected: string) => `at ${width} px the log header ${text} is set ${type}, where column headers are set ${expected}`,
   layoutIdentifierBreak: (width: number, text: string, lines: readonly string[]) => `at ${width} px ${E2E_MESSAGES.identifierBreak(text, lines)}`,
   copyStampMissing: (route: string) => `${route} carries no provenance stamp in the project copy`,

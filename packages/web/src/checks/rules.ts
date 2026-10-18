@@ -52,6 +52,7 @@ export const RULE_IDS = Object.freeze([
   'provider-label',
   'replay-panels',
   'type-token-use',
+  'identifier-break',
 ] as const);
 
 export type RuleId = (typeof RULE_IDS)[number];
@@ -980,6 +981,11 @@ export function typeTokenUseRule(site: BuiltSite, _context: CheckContext): Findi
     .map(([name]) => ({ rule: 'type-token-use' as const, route: fileRoute('*.css'), text: `the built CSS never uses ${name} through var()` }));
 }
 
+// Stub until the identifier break rule is written.
+export function identifierBreakRule(site: BuiltSite, _context: CheckContext): Finding[] {
+  return site.pages.length < 0 ? [{ rule: 'identifier-break', route: '', text: '' }] : [];
+}
+
 // Workers limits: 20,000 files per version on the Free plan and 25 MiB per file (AC-62).
 const MAX_FILES = 20_000;
 const MAX_FILE_BYTES = 25 * 1024 * 1024;
@@ -1033,6 +1039,7 @@ const RULES: Readonly<Record<RuleId, Rule>> = {
   'provider-label': providerLabelRule,
   'replay-panels': replayPanelsRule,
   'type-token-use': typeTokenUseRule,
+  'identifier-break': identifierBreakRule,
 };
 
 // Every rule runs over the whole site and every hit is kept, so one report names them all.

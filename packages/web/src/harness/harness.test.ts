@@ -1015,6 +1015,19 @@ describe('identifierBreakVerdict (AC-E55)', () => {
   it('fails an identifier without a dot broken anywhere', () => {
     expect(verdict(['batch=2026-', '10-14-b']).ok).toBe(false);
   });
+
+  it('passes a word-mode API name broken between its word parts, on any of them', () => {
+    const parts = ['Put', 'Configuration', 'Set', 'Sending', 'Options'];
+    const text = 'PutConfigurationSetSendingOptions';
+    expect(identifierBreakVerdict({ text, lines: ['PutConfigurationSet', 'SendingOptions'], parts })).toEqual({ ok: true });
+    expect(identifierBreakVerdict({ text, lines: ['Put', 'Configuration', 'SetSendingOptions'], parts })).toEqual({ ok: true });
+  });
+
+  it('fails a word-mode API name broken inside a word part', () => {
+    const parts = ['Get', 'Configuration', 'Set'];
+    const lines = ['GetConfig', 'urationSet'];
+    expect(identifierBreakVerdict({ text: 'GetConfigurationSet', lines, parts })).toEqual({ ok: false, reason: E2E_MESSAGES.identifierBreak('GetConfigurationSet', lines) });
+  });
 });
 
 const box = (left: number, top: number, right: number, bottom: number): Box => ({ left, top, right, bottom });
@@ -1268,6 +1281,8 @@ describe('noScriptVerdict (AC-10, AC-E7)', () => {
 // Stacked (960 and below) the board keeps one height and draws the tag's place off the paused step;
 // beside the story the tag simply comes off, so the board's height follows the step.
 const HEADER_TYPE = LOG_HEADER_TYPE;
+const MONO = '"Red Hat Mono", monospace';
+const API_PARTS = ['Put', 'Configuration', 'Set', 'Sending', 'Options'];
 const healthyLayout = (width: number): ReplayLayoutReading => ({
   route: '/replay/',
   width,
@@ -1283,10 +1298,12 @@ const healthyLayout = (width: number): ReplayLayoutReading => ({
     { header: '14:01:12', baselines: [1560, 1560, 1560, 1560] },
   ],
   identifiers: [
-    { text: 'batch=2026-10-14-b', weight: '500', lines: ['batch=2026-10-14-b'] },
-    { text: '14:01:07', weight: '500', lines: ['14:01:07'] },
-    { text: 'SendingOptions.SendingEnabled', weight: '500', lines: ['SendingOptions.', 'SendingEnabled'] },
+    { text: 'batch=2026-10-14-b', weight: '500', family: MONO, lines: ['batch=2026-10-14-b'] },
+    { text: '14:01:07', weight: '500', family: MONO, lines: ['14:01:07'] },
+    { text: 'SendingOptions.SendingEnabled', weight: '500', family: MONO, lines: ['SendingOptions.', 'SendingEnabled'] },
+    { text: 'PutConfigurationSetSendingOptions', weight: '500', family: MONO, lines: ['PutConfigurationSet', 'SendingOptions'], parts: API_PARTS },
   ],
+  plainApiNames: [],
   logHeaders: width > 960 ? ['Time UTC', 'Kind', 'Lane', 'Detail'].map((text) => ({ text, type: HEADER_TYPE })) : [],
 });
 const layoutReason = (reading: ReplayLayoutReading): string => {
@@ -1345,7 +1362,7 @@ describe('replayLayoutVerdict (AC-6, UI-SPEC 6 and 10.3)', () => {
   });
 
   it('fails an identifier that computes a weight other than 500, and a run that measured none', () => {
-    const identifiers = [{ text: 'fothering-bulk', weight: '600', lines: ['fothering-bulk'] }];
+    const identifiers = [{ text: 'fothering-bulk', weight: '600', family: MONO, lines: ['fothering-bulk'] }];
     expect(layoutReason({ ...healthyLayout(1440), identifiers })).toBe(E2E_MESSAGES.layoutIdentifierWeight(1440, 'fothering-bulk', '600'));
     expect(layoutReason({ ...healthyLayout(320), identifiers: [] })).toBe(E2E_MESSAGES.layoutIdentifiersMissing(320));
   });
@@ -1361,8 +1378,22 @@ describe('replayLayoutVerdict (AC-6, UI-SPEC 6 and 10.3)', () => {
     expect(layoutReason({ ...healthyLayout(1440), logHeaders })).toBe([E2E_MESSAGES.layoutHeaderType(1440, 'Time UTC', odd, HEADER_TYPE), E2E_MESSAGES.layoutHeaderType(1440, 'Lane', odd, HEADER_TYPE)].join('; '));
   });
 
+  it('fails an API name in the log left as plain text', () => {
+    expect(layoutReason({ ...healthyLayout(320), plainApiNames: ['GetConfigurationSet'] })).toBe(E2E_MESSAGES.layoutPlainApiName(320, 'GetConfigurationSet'));
+  });
+
+  it('fails an identifier not set in Red Hat Mono', () => {
+    const identifiers = [{ text: 'GetConfigurationSet', weight: '500', family: '"Red Hat Text", sans-serif', lines: ['GetConfigurationSet'] }];
+    expect(layoutReason({ ...healthyLayout(1280), identifiers })).toBe(E2E_MESSAGES.layoutIdentifierFamily(1280, 'GetConfigurationSet', '"Red Hat Text", sans-serif'));
+  });
+
+  it('fails a word-mode API name broken inside one of its words', () => {
+    const identifiers = [{ text: 'PutConfigurationSetSendingOptions', weight: '500', family: MONO, lines: ['PutConfigura', 'tionSetSendingOptions'], parts: API_PARTS }];
+    expect(layoutReason({ ...healthyLayout(320), identifiers })).toBe(E2E_MESSAGES.layoutIdentifierBreak(320, 'PutConfigurationSetSendingOptions', ['PutConfigura', 'tionSetSendingOptions']));
+  });
+
   it('fails an identifier that breaks anywhere but right after a dot', () => {
-    const identifiers = [{ text: 'fothering-transactional', weight: '500', lines: ['fothering-', 'transactional'] }];
+    const identifiers = [{ text: 'fothering-transactional', weight: '500', family: MONO, lines: ['fothering-', 'transactional'] }];
     expect(layoutReason({ ...healthyLayout(960), identifiers })).toBe(E2E_MESSAGES.layoutIdentifierBreak(960, 'fothering-transactional', ['fothering-', 'transactional']));
   });
 });
@@ -1945,6 +1976,7 @@ describe('the built checks through the CLI and the e2e step (D-150, D-151)', () 
       layoutStepsMissing: [320], layoutBoardHeight: [960, [638, 900]], layoutPhantomMissing: [960, 1], layoutPhantomShown: [1280, 2], layoutPhantomExposed: [960, 1],
       layoutEvidenceMissing: [961], layoutEvidenceSpill: [1280, 1220, 1201], layoutLogMissing: [1024], layoutBaseline: [1280, '14:01:07', [1498, 1500]],
       layoutIdentifiersMissing: [320], layoutIdentifierWeight: [1440, 'fothering-bulk', '600'], layoutIdentifierBreak: [960, 'a-b', ['a-', 'b']], layoutHeaderType: [1280, 'Time UTC', '500 13px', '600 12px'],
+      layoutPlainApiName: [320, 'GetConfigurationSet'], layoutIdentifierFamily: [1280, 'x', 'serif'],
       copyStampMissing: ['/'], copyStamp: ['/', 'FIXTURE RUN', 'SIMULATOR RUN'], copyCauseMissing: ['/', 'batch=x'], copyOldCause: ['/', 'x'],
       copyVariantFailed: ['cause', 1, 'x'], copyVariantUnjudged: ['cause'],
     };

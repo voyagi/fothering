@@ -39,6 +39,7 @@ import {
   exactThirtyDaysRule,
   formsCookiesAnalyticsRule,
   headScriptOrderRule,
+  identifierBreakRule,
   landingSectionsRule,
   ledeRule,
   limitsRule,
@@ -190,9 +191,9 @@ describe('runBuiltChecks', () => {
     expect([...rules].filter((rule) => ['page-metadata', 'sitemap', 'robots'].includes(rule)).sort()).toEqual(['page-metadata', 'robots', 'sitemap']);
   });
 
-  it('holds exactly the thirty-three rule ids the plans name', () => {
+  it('holds exactly the thirty-four rule ids the plans name', () => {
     expect([...RULE_IDS].sort()).toEqual([
-      'banned-name', 'console-delete', 'dash', 'exact-30-days', 'forms-cookies-analytics', 'head-script-order', 'landing-sections', 'lede', 'limits',
+      'banned-name', 'console-delete', 'dash', 'exact-30-days', 'forms-cookies-analytics', 'head-script-order', 'identifier-break', 'landing-sections', 'lede', 'limits',
       'no-ellipsis', 'no-inline-style', 'page-metadata', 'pre-r6-words', 'provenance-wording', 'provider-label', 'region-claim', 'replay-lanes',
       'replay-page', 'replay-panels', 'replay-summary', 'replay-word-count', 'reply-promise', 'robots', 'script-hash',
       'ses-percentage-link', 'ses-rate-wording', 'sitemap', 'switch-markup', 'theme-token-blocks', 'third-party-reference', 'type-token-declared',
@@ -224,6 +225,32 @@ function caseFindings(rule: RuleFunction, id: string, bodies: readonly string[])
   for (const finding of findings) expect(finding.text.length).toBeGreaterThan(0);
   return findings;
 }
+
+// An API operation name in word mode, and the replay log row and Detail cell that may hold it.
+const WORD_MODE = '<code class="identifier" data-identifier data-identifier-words><span>Put</span><wbr><span>Configuration</span><wbr><span>Set</span></code>';
+const logCell = (inner: string, column = 'Detail', step = ' data-log-step="3"'): string => `<table><tbody><tr${step}><td data-col="${column}">${inner}</td></tr></tbody></table>`;
+
+describe('the identifier break rule (AC-65, AC-E55, UI-SPEC line 208)', () => {
+  it('passes a word-boundary break inside a replay log Detail cell, and a break after a dot anywhere', () => {
+    const dotted = '<p><code class="identifier" data-identifier><span>SendingOptions.</span><wbr><span>SendingEnabled</span></code></p>';
+    expect(identifierBreakRule(casesSite([logCell(WORD_MODE), dotted]), context)).toEqual([]);
+  });
+
+  // Each finding as one line, so a failing case reads as one string.
+  const named = (findings: readonly Finding[]): string => findings.map((finding) => `${finding.route} ${finding.text}`).join(' | ');
+  const OUTSIDE = 'the identifier PutConfigurationSet may break after "Put", and outside a replay log Detail cell only a dot may end an identifier\'s line';
+
+  it('fails the same word-boundary break outside a replay log Detail cell', () => {
+    const findings = identifierBreakRule(casesSite([`<p>${WORD_MODE}</p>`, logCell(WORD_MODE, 'Lane'), logCell(WORD_MODE, 'Detail', '')]), context);
+    expect(named(findings.filter((finding) => finding.text.includes('"Put"')))).toBe(['/case-0/', '/case-1/', '/case-2/'].map((route) => `${route} ${OUTSIDE}`).join(' | '));
+    expect(findings.every((finding) => finding.rule === 'identifier-break')).toBe(true);
+  });
+
+  it('fails a break after a part with no dot in an identifier not in word mode, even in a log Detail cell', () => {
+    const plain = '<code class="identifier" data-identifier><span>Put</span><wbr><span>Configuration</span></code>';
+    expect(named(identifierBreakRule(casesSite([logCell(plain)]), context))).toBe('/case-0/ the identifier PutConfiguration may break after "Put", and only a dot may end an identifier\'s line');
+  });
+});
 
 describe('the SES rate wording rule (AC-54, AC-E41, AC-P5)', () => {
   it('fails all four phrasings in any case, across a non-breaking space, a line break and an inline element', () => {
