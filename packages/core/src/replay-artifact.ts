@@ -233,15 +233,26 @@ function manifestErrors(artifact: ReplayArtifact, manifest: unknown): string[] {
   return errors;
 }
 
+// The page labels come from the artifact's provenance alone, so a non-live label must match every
+// event too: a simulator stamp over generated events would claim a capture nobody ran.
+function eventProvenanceError(artifact: ReplayArtifact): string | undefined {
+  const index = artifact.events.findIndex((event) => event.provenance !== artifact.provenance);
+  const event = artifact.events[index];
+  if (event === undefined) return undefined;
+  return `provenance is ${artifact.provenance} but events[${String(index)}].provenance is ${event.provenance}. Record every event as ${artifact.provenance}, or label the artifact by what its events are.`;
+}
+
 // The only way to the live label: every event live and a manifest whose every item checks out.
 // A refusal is an error list for the build to print, never a quieter label for the page to show.
 export function assertPublishable(artifact: ReplayArtifact, manifest: unknown): PublishResult {
   if (artifact.provenance !== 'live') {
-    if (manifest === undefined) return { ok: true };
-    return {
-      ok: false,
-      errors: [`${MANIFEST} is present but the artifact's provenance is ${artifact.provenance}. Remove the manifest, or label the artifact live from a capture run.`],
-    };
+    const errors: string[] = [];
+    const mismatch = eventProvenanceError(artifact);
+    if (mismatch !== undefined) errors.push(mismatch);
+    if (manifest !== undefined) {
+      errors.push(`${MANIFEST} is present but the artifact's provenance is ${artifact.provenance}. Remove the manifest, or label the artifact live from a capture run.`);
+    }
+    return errors.length === 0 ? { ok: true } : { ok: false, errors };
   }
   const errors: string[] = [];
   artifact.events.forEach((event, index) => {
