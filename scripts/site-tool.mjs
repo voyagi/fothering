@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-// site-tool.mjs - one entry for the site's Node-side tools: `a11y` (npm run a11y:live) and
-// `preview` (npm run preview -w @fothering/web). The harness is TypeScript under
+// site-tool.mjs - one entry for the site's Node-side tools: `a11y` (npm run a11y:live), `e2e`
+// (npm run test:e2e), `built-checks` and `preview` (npm run preview -w @fothering/web). The harness is TypeScript under
 // packages/web/src/harness, bundled into the git-ignored root dist/tools/ the way
 // permissions-snapshot.mjs bundles its CLI, then run with this same Node.
 //
@@ -18,7 +18,7 @@ const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
 const [subcommand, ...rest] = process.argv.slice(2);
 
 if (subcommand === undefined) {
-  console.error('[site-tool] usage: node scripts/site-tool.mjs <a11y|preview> [options]');
+  console.error('[site-tool] usage: node scripts/site-tool.mjs <a11y|e2e|built-checks|preview> [options]');
   process.exit(1);
 }
 
