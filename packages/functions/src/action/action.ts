@@ -5,16 +5,19 @@ import {
   closureClaimItem,
   closureKey,
   decisionOf,
+  freshnessRefusal,
   parseClosure,
   pauseOutcomeOf,
   type ActionRefusal,
   type Closure,
   type ClosureOutcome,
+  type FreshnessRefusal,
+  type OtherLaneReading,
   type ReadBack,
   type StoredDecision,
 } from '@fothering/core/closure';
-import { incidentItemKey, incidentLaneKey, type EvidenceRecord } from '@fothering/core/evidence-record';
-import { markerOf } from '@fothering/core/incident';
+import { evidenceRecordSchema, incidentItemKey, incidentLaneKey, type EvidenceRecord } from '@fothering/core/evidence-record';
+import { markerOf, stateOf, type IncidentMarker, type IncidentState } from '@fothering/core/incident';
 import { SES_READ_SPACING_MS, readSesFacts } from '@fothering/providers/ses-facts';
 import type { ActionDeps } from './root.js';
 
@@ -135,22 +138,93 @@ async function dryRunPause(run: Run, act: Act, configurationSet: string): Promis
   return finish(run, act, 'dry-run', { configurationSet, sesFacts: 'read' });
 }
 
-// D-89, each step only if the one before it passed. Steps 4 to 6 (freshness, closeability at action
-// time and the pause pointer check) go between the fact check and the dry-run branch, steps 7 and 8
-// (the lane-hour reservation and the pointer write) between the dry-run branch and the pause stage, and
-// step 13 (the email) after the outcome.
+type MarkerReading = { kind: 'absent' } | { kind: 'read'; marker: IncidentMarker } | { kind: 'unreadable' };
+
+// A read that throws and an item markerOf cannot parse are both unreadable, so freshness fails closed.
+async function readMarker(deps: ActionDeps, configurationSet: string): Promise<MarkerReading> {
+  try {
+    const item = await deps.ports.decisionStore.getItem(incidentLaneKey(configurationSet), deps.now());
+    if (item === undefined) return { kind: 'absent' };
+    const marker = markerOf(item);
+    return marker === undefined ? { kind: 'unreadable' } : { kind: 'read', marker };
+  } catch {
+    return { kind: 'unreadable' };
+  }
+}
+
+// D-102: every lane-map marker is read once per act, before the gate, so the lane states the closure
+// stores and the freshness rule both come from the same reads.
+async function readMarkers(deps: ActionDeps): Promise<ReadonlyMap<string, MarkerReading>> {
+  const markers = new Map<string, MarkerReading>();
+  for (const lane of deps.laneMap.lanes) markers.set(lane.configurationSet, await readMarker(deps, lane.configurationSet));
+  return markers;
+}
+
+async function readState(deps: ActionDeps, incidentId: string): Promise<IncidentState | undefined> {
+  try {
+    return stateOf(await deps.ports.decisionStore.getItem(incidentItemKey(incidentId, 'STATE'), deps.now()));
+  } catch {
+    return undefined;
+  }
+}
+
+// The window is read as stored, not as typed: a missing or non-integer end must reach the rule as it is.
+function openingEndOf(state: IncidentState): unknown {
+  const window: unknown = state.openingWindow;
+  return typeof window === 'object' && window !== null ? (window as Record<string, unknown>).toBucketMs : undefined;
+}
+
+async function otherLaneReading(deps: ActionDeps, reading: MarkerReading | undefined): Promise<OtherLaneReading> {
+  if (reading === undefined || reading.kind === 'unreadable') return { kind: 'unreadable' };
+  if (reading.kind === 'absent' || reading.marker.status !== 'open') return { kind: 'no-open-incident' };
+  const state = await readState(deps, reading.marker.incidentId);
+  return state === undefined ? { kind: 'unreadable' } : { kind: 'open', openingToBucketMs: openingEndOf(state) };
+}
+
+interface FreshnessContext {
+  incidentId: string;
+  configurationSet: string;
+  record: EvidenceRecord;
+  markers: ReadonlyMap<string, MarkerReading>;
+}
+
+// D-89 step 4, over the decision store alone (R3): no SES read and no event fold.
+async function freshnessOf(deps: ActionDeps, context: FreshnessContext): Promise<FreshnessRefusal | undefined> {
+  const own = context.markers.get(context.configurationSet);
+  const others: OtherLaneReading[] = [];
+  for (const [configurationSet, reading] of context.markers) {
+    if (configurationSet !== context.configurationSet) others.push(await otherLaneReading(deps, reading));
+  }
+  return freshnessRefusal({
+    incidentId: context.incidentId,
+    marker: own?.kind === 'read' ? own.marker : undefined,
+    state: await readState(deps, context.incidentId),
+    others,
+    recordToBucketMs: context.record.window.toBucketMs,
+    nowMs: deps.now(),
+  });
+}
+
+// D-89, each step only if the one before it passed. Step 6 (the pause pointer check) goes between
+// freshness and the dry-run branch, steps 7 and 8 (the lane-hour reservation and the pointer write)
+// between the dry-run branch and the pause stage, and step 13 (the email) after the outcome.
 async function actOn(run: Run, act: Act): Promise<ClosureOutcome | undefined> {
   const { deps } = run;
   const sesFacts = await run.facts();
+  const markers = await readMarkers(deps);
+  let accepted: EvidenceRecord | undefined;
   const gate = await actionGate({
     decision: { decision: act.decision.outcome, optionId: act.decision.optionId },
     incidentId: act.incidentId,
-    loadRecord: (incidentId) => loadRecord(deps, incidentId),
+    loadRecord: async (incidentId) => (accepted = await loadRecord(deps, incidentId)),
     laneMap: deps.laneMap,
   });
   if (!gate.ok) return refuse(run, act, gate.refusal, sesFacts);
   if (sesFacts !== 'read') return refuse(run, act, sesFacts === 'bound' ? 'ses-facts-bound' : 'ses-facts-unavailable', sesFacts);
   const { configurationSet } = gate.intent;
+  const record = evidenceRecordSchema.parse(accepted);
+  const stale = await freshnessOf(deps, { incidentId: act.incidentId, configurationSet, record, markers });
+  if (stale !== undefined) return refuse(run, act, stale, sesFacts);
   if (deps.kinds.ses?.pauseConfigurationSet === 'dry-run') return dryRunPause(run, act, configurationSet);
   return pause(run, act, configurationSet);
 }

@@ -1,6 +1,6 @@
 import * as z from 'zod';
 import { AGENT_DECISIONS, GATE_REFUSALS, type AgentAnswer } from './agent-answer.js';
-import { ACTION_FUNCTION_TIMEOUT_MS } from './close-values.js';
+import { ACTION_FUNCTION_TIMEOUT_MS, RECORD_MAX_AGE_MS } from './close-values.js';
 import { REFUSAL_REASONS } from './closeability.js';
 import { incidentItemKey } from './evidence-record.js';
 import type { IncidentMarker, IncidentState } from './incident.js';
@@ -202,7 +202,26 @@ export interface FreshnessInput {
   nowMs: number;
 }
 
-export function freshnessRefusal(_input: FreshnessInput): FreshnessRefusal | undefined {
+// AC-E10: an opening window end that is not a safe integer, or a lane that could not be read, fails
+// closed, since the lane it hides may hold the newer incident.
+function isNewerElsewhere(other: OtherLaneReading, recordToBucketMs: number): boolean {
+  if (other.kind === 'no-open-incident') return false;
+  if (other.kind === 'unreadable') return true;
+  const { openingToBucketMs } = other;
+  return typeof openingToBucketMs !== 'number' || !Number.isSafeInteger(openingToBucketMs) || openingToBucketMs > recordToBucketMs;
+}
+
+/**
+ * R3 and D-101: the record still describes the account only while its incident is open on its lane,
+ * no other lane opened an incident after the record's window, and the window ended at most one spike
+ * window ago. Ids compare with === (AC-E9). The lifecycle's closed status is read here and never
+ * logged or rendered (D-112).
+ */
+export function freshnessRefusal(input: FreshnessInput): FreshnessRefusal | undefined {
+  const { marker, state } = input;
+  if (marker?.status !== 'open' || marker.incidentId !== input.incidentId || state?.status !== 'open') return 'incident-not-open';
+  if (input.others.some((other) => isNewerElsewhere(other, input.recordToBucketMs))) return 'newer-incident-elsewhere';
+  if (input.nowMs - input.recordToBucketMs > RECORD_MAX_AGE_MS) return 'record-too-old';
   return undefined;
 }
 
