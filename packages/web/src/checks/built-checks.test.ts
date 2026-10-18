@@ -210,9 +210,9 @@ describe('runBuiltChecks', () => {
     expect([...rules].filter((rule) => ['page-metadata', 'sitemap', 'robots'].includes(rule)).sort()).toEqual(['page-metadata', 'robots', 'sitemap']);
   });
 
-  it('holds exactly the forty-one rule ids the plans name', () => {
+  it('holds exactly the forty-two rule ids the plans name', () => {
     expect([...RULE_IDS].sort()).toEqual([
-      'banned-name', 'console-delete', 'dash', 'deploy-commands', 'deploy-deny', 'deploy-notice', 'deploy-page', 'deploy-permissions', 'deploy-resources',
+      'banned-name', 'command-pair', 'console-delete', 'dash', 'deploy-commands', 'deploy-deny', 'deploy-notice', 'deploy-page', 'deploy-permissions', 'deploy-resources',
       'exact-30-days', 'forms-cookies-analytics', 'head-script-order', 'identifier-break', 'landing-sections', 'lede', 'limits',
       'no-ellipsis', 'no-inline-style', 'one-caller', 'page-metadata', 'pre-r6-words', 'provenance-wording', 'provider-label', 'region-claim', 'replay-lanes',
       'replay-page', 'replay-panels', 'replay-summary', 'replay-word-count', 'reply-promise', 'robots', 'script-hash',
@@ -269,6 +269,39 @@ describe('the identifier break rule (AC-65, AC-E55, UI-SPEC line 208)', () => {
   it('fails a break after a part with no dot in an identifier not in word mode, even in a log Detail cell', () => {
     const plain = '<code class="identifier" data-identifier><span>Put</span><wbr><span>Configuration</span></code>';
     expect(named(identifierBreakRule(casesSite([logCell(plain)]), context))).toBe('/case-0/ the identifier PutConfiguration may break after "Put", and only a dot may end an identifier\'s line');
+  });
+});
+
+// A command block as the CommandBlock component renders it: each unit a span directly in the code
+// element, a flag and its value one span holding the two token spans.
+const unitSpan = (unit: string): string => (unit.includes(' ') ? `<span>${unit.split(' ').map((token) => `<span>${token}</span>`).join(' ')}</span>` : `<span>${unit}</span>`);
+const commandMarkup = (lines: readonly (readonly string[])[]): string => `<pre class="command"><code>${lines.map((units) => units.map(unitSpan).join(' ')).join('\n')}</code></pre>`;
+const commandPairFindings = (bodies: readonly string[]): string[] => runBuiltChecks(casesSite(bodies), context)
+  .filter((finding) => String(finding.rule) === 'command-pair').map((finding) => `${finding.route} ${finding.text}`);
+
+describe('the command pair rule (UI-SPEC line 209, the 05-12 finish review)', () => {
+  it('passes a flag and its value in one unit, a flag before a flag, and a flag that ends a line', () => {
+    expect(commandPairFindings([
+      commandMarkup([['npx', 'cdk', 'deploy', '--all', '-c fothering:live=live']]),
+      commandMarkup([['aws', '--configuration-set-name fothering-bulk', '--sending-enabled', '--region eu-central-1']]),
+      commandMarkup([['npm', 'run', 'build', '--'], ['fothering']]),
+    ])).toEqual([]);
+  });
+
+  it('fails a flag and its value in separate units, as the deploy page renders the live switch today', () => {
+    expect(commandPairFindings([commandMarkup([['npx', 'cdk', 'deploy', '--all', '-c', 'fothering:live=live']])]))
+      .toEqual(['/case-0/ the command block keeps the flag -c apart from its value fothering:live=live, so a line can end between them']);
+  });
+
+  it('fails anything but one space or a line break between units or inside a pair, and text outside the code', () => {
+    const doubled = '<pre class="command"><code><span>npx</span>  <span>cdk</span></code></pre>';
+    const inPair = '<pre class="command"><code><span><span>-c</span>,<span>x</span></span></code></pre>';
+    const outside = '<pre class="command"><code><span>npx</span></code>#</pre>';
+    expect(commandPairFindings([doubled, inPair, outside])).toEqual([
+      '/case-0/ the command block holds "  " between its units, where only one space or a line break belongs, so the copied text is not the command',
+      '/case-1/ the command block holds "," between its units, where only one space or a line break belongs, so the copied text is not the command',
+      '/case-2/ the command block holds "#" outside its code element, so the copied text is not the command',
+    ]);
   });
 });
 
