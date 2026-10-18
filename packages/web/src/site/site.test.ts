@@ -128,13 +128,16 @@ const DEPLOY_DESCRIPTION = 'The steps to deploy and remove Fothering, everything
 const PRIVACY_TITLE = 'Privacy and AI: what Fothering keeps and what the model decides';
 const PRIVACY_DESCRIPTION = 'Which SES event fields a Fothering deployment stores, where and for how long, how to delete them, what this site keeps, and what the AI model may and may not do.';
 
+const ACCESSIBILITY_TITLE = 'Accessibility statement: Fothering';
+const ACCESSIBILITY_DESCRIPTION = 'The WCAG 2.2 AA target for this site, the last automated audit, what was checked by hand, known limitations and how to report a problem.';
+
 describe('the route list (D-153)', () => {
   it('holds an RFC 2606 reserved origin with no trailing slash until the deployed host is known', () => {
     expect(SITE_ORIGIN).toMatch(/^https:\/\/[a-z-]+\.example$/);
   });
 
   it('holds / as sheet FTH-001 with the UI-SPEC 11.2 title and description, indexable', () => {
-    expect(ROUTES.map((route) => route.path)).toEqual(['/', '/replay/', '/deploy/', '/privacy-and-ai/']);
+    expect(ROUTES.map((route) => route.path)).toEqual(['/', '/replay/', '/deploy/', '/privacy-and-ai/', '/accessibility/']);
     expect(ROUTES[0]).toEqual({ path: '/', sheet: 'FTH-001', label: 'Landing', title: LANDING_TITLE, description: LANDING_DESCRIPTION, indexable: true });
   });
 
@@ -148,6 +151,10 @@ describe('the route list (D-153)', () => {
 
   it('holds /privacy-and-ai/ as sheet FTH-004 with the UI-SPEC 11.2 title and description, indexable', () => {
     expect(ROUTES[3]).toEqual({ path: '/privacy-and-ai/', sheet: 'FTH-004', label: 'Privacy and AI', title: PRIVACY_TITLE, description: PRIVACY_DESCRIPTION, indexable: true });
+  });
+
+  it('holds /accessibility/ as sheet FTH-005 with the UI-SPEC 11.2 title and description, indexable', () => {
+    expect(ROUTES[4]).toEqual({ path: '/accessibility/', sheet: 'FTH-005', label: 'Accessibility', title: ACCESSIBILITY_TITLE, description: ACCESSIBILITY_DESCRIPTION, indexable: true });
   });
 
   it('holds the 404 title, description and Drawing cell text, with no path and not indexable', () => {

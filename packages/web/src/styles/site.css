@@ -617,6 +617,43 @@ ul.site { display: grid; gap: var(--space-12); margin: 0; padding-left: var(--sp
   .filter-caption .flow-toggle { display: none; }
 }
 
+/* Accessibility statement. The record and the hand-check schedule follow the stored-field table: each
+   keeps its table form while its section is as wide as the table needs, and is one block per row at
+   that width and below and at 620px and below, so each changes form once between 320 and 1440. */
+.state-mark-none rect { stroke: none; }
+.fit-record { container: record / inline-size; }
+.fit-checks { container: checks / inline-size; }
+.fit-record td[data-col="Record"] .cell-text, .fit-checks td[data-col="How checked"] .cell-text { min-inline-size: 16em; }
+.fit-record .fit-form, .fit-checks .fit-form { container-type: inline-size; }
+/* Either condition names the wrapper statement-stacked, so the stacked rules are written once for
+   both schedules; each schedule's own section decides its own form. */
+/* Measured 2026-10-18 on the rendered tables with the 16em minimums: the record needs 409px and the
+   hand-check schedule 612px. */
+@container record (width < 412px) { .fit-record .fit-form { container-name: statement-stacked; } }
+@container checks (width < 616px) { .fit-checks .fit-form { container-name: statement-stacked; } }
+@media (max-width: 620px) {
+  :is(.fit-record, .fit-checks) .fit-form { container-name: statement-stacked; }
+}
+@container statement-stacked (width >= 0px) {
+  :is(.fit-record, .fit-checks) .fit, :is(.fit-record, .fit-checks) .fit :is(thead, tbody, tr, th, td) { display: block; width: auto; }
+  :is(.fit-record, .fit-checks) .fit thead { display: none; }
+  :is(.fit-record, .fit-checks) .fit tbody tr { padding: var(--space-xs) 0 var(--space-sm); }
+  :is(.fit-record, .fit-checks) .fit tbody tr + tr { border-top: var(--w-outline) solid var(--ink); }
+  :is(.fit-record, .fit-checks) .fit :is(th, td) { padding: 6px 14px; border: 0; }
+  :is(.fit-record, .fit-checks) .fit :is(th, td)::before { content: attr(data-col); display: block; font: 600 var(--text-label-small)/1.4 var(--font-mono); letter-spacing: 0.06em; text-transform: uppercase; color: var(--label); }
+  :is(.fit-record, .fit-checks) .fit caption { display: block; padding: 10px 14px; }
+  :is(.fit-record, .fit-checks) .fit :is(th, td) .cell-text { min-inline-size: 0; }
+  /* One state per block, so there is no column of names to keep aligned. */
+  .fit-checks .fit .state-mark-none { display: none; }
+}
+.split .report { margin: 0; padding-top: var(--space-md); border-top: var(--w-outline) solid var(--ink); font-weight: 600; }
+
+/* The 404 page: the intro row of every sheet, its action under the paragraph. */
+.not-found-action { margin: 0; }
+@media (max-width: 620px) {
+  .not-found-action .button { width: 100%; justify-content: center; }
+}
+
 @media (max-width: 620px) {
   /* The sticky controls cover the top of the viewport, so focus scrolled into view lands below them. */
   :root:has(.controls) { scroll-padding-top: 120px; }

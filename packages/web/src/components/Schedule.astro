@@ -6,7 +6,8 @@
 import { textSegments, type IdentifierTerms, type Segment } from '../site/identifier-text.ts';
 import Identifier from './Identifier.astro';
 
-type Mark = 'open' | 'later';
+// 'none' prints a state with no mark, keeping the mark's place so the state names stay aligned.
+type Mark = 'open' | 'later' | 'none';
 
 interface Cell {
   text: string;

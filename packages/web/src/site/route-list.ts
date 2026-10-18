@@ -58,6 +58,14 @@ export const ROUTES: readonly SiteRoute[] = Object.freeze([
     description: 'Which SES event fields a Fothering deployment stores, where and for how long, how to delete them, what this site keeps, and what the AI model may and may not do.',
     indexable: true,
   }),
+  Object.freeze({
+    path: '/accessibility/',
+    sheet: 'FTH-005',
+    label: 'Accessibility',
+    title: 'Accessibility statement: Fothering',
+    description: 'The WCAG 2.2 AA target for this site, the last automated audit, what was checked by hand, known limitations and how to report a problem.',
+    indexable: true,
+  }),
 ]);
 
 export const NOT_FOUND_ROUTE: NotFoundRoute = Object.freeze({
