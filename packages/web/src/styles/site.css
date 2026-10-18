@@ -400,6 +400,19 @@ ol.steps { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); marg
 .state-mark-shut rect { fill: var(--lock); stroke: var(--lock); }
 .state-mark-shut rect.bar { fill: var(--sheet); stroke: none; }
 
+/* Beside the board the story column can be narrower than four columns of evidence and an unbroken
+   tag value. There each row's dimension spans its row as a heading over its three readings, so no
+   identifier breaks and nothing leaves the panel; the rows sit in one anonymous table cell, which
+   keeps the caption below the outline. The Dimension header stays for screen readers only. */
+.panel { container-type: inline-size; }
+@container (width < 460px) {
+  .schedule.compact tr { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .schedule.compact tbody th { grid-column: 1 / -1; }
+  .schedule.compact tr > :nth-child(2) { border-left: 0; }
+  .schedule.compact tbody tr:first-child > th { border-top: 0; }
+  .schedule.compact thead th:first-child { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+}
+
 :root.js:not([data-step]) tr[data-log-step="1"] > *,
 :root.js[data-step="1"] tr[data-log-step="1"] > *,
 :root.js[data-step="2"] tr[data-log-step="2"] > *,
