@@ -7,6 +7,7 @@ import LockoutTag from '../components/LockoutTag.astro';
 import Message from '../components/Message.astro';
 import Schedule from '../components/Schedule.astro';
 import Sheet from '../layouts/Sheet.astro';
+import { LOG_API_NAMES, textSegments } from '../site/identifier-text.ts';
 import { buildReplayView, loadReplayArtifact } from '../site/replay-view.ts';
 import { routeFor } from '../site/route-list.ts';
 
@@ -37,11 +38,12 @@ const evidenceRows = view.schedule.rows.map((row) => ({
 
 // A row shows from the step that reaches it to the last, and carries its own step for the tint.
 const fromStep = (step: number): string => Array.from({ length: STEP_COUNT - step + 1 }, (_, index) => String(step + index)).join(' ');
-// The lane is a configuration set name; in a detail, a key=value is a message tag and capitalised
-// words run together are an API operation or field path. All are identifiers, so they render
-// through the Identifier component; the Detail column lets an API name break between its words.
-const DETAIL_IDENTIFIER = /([A-Za-z_][\w-]*=[\w.-]*\w|[A-Z][a-z]+(?:[A-Z][a-z]+)+(?:\.[A-Z][a-z]+(?:[A-Z][a-z]+)*)*)/g;
-const markIdentifiers = (text: string): string => text.replace(DETAIL_IDENTIFIER, '`$1`');
+// The lane is a configuration set name; in a detail, the artifact's tag values and the listed SES
+// API operations and fields are identifiers, marked as code spans so they render through the
+// Identifier component; the Detail column lets an API name break between its words. The API names
+// come from a closed list, so a product name in a detail stays plain.
+const markIdentifiers = (text: string): string =>
+  textSegments(text, { names: [], values: view.identifierTerms.values }, LOG_API_NAMES).map((segment) => (segment.kind === 'code' ? `\`${segment.text}\`` : segment.text)).join('');
 const DETAIL_COLUMN = 3;
 const logRows = view.eventLog.rows.map((row) => ({
   header: row.time,
