@@ -4,7 +4,7 @@ import { CfnRole, Effect, PolicyDocument, PolicyStatement, Role, ServicePrincipa
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { ACTION_FUNCTION_TIMEOUT_MS, REOPEN_FUNCTION_TIMEOUT_MS } from '@fothering/core/close-values';
 import { isStaticallyCloseable } from '@fothering/core/closeability';
-import { parseLaneMap } from '@fothering/core/lanes';
+import { parseLaneMap, type LaneMap } from '@fothering/core/lanes';
 import { LIVE_SWITCH } from '@fothering/core/mode';
 import { FIND_REOPEN_FUNCTION_COMMAND } from '@fothering/core/reopen';
 import lanesJson from '../../../lanes.json' with { type: 'json' };
@@ -13,8 +13,9 @@ import { ActionStack } from './action-stack.js';
 import { cdkJsonContext } from './cdk-context.js';
 import { ACTION_STACK_ID } from './create-app.js';
 import { IngestStack } from './ingest-stack.js';
+import { collectPermissions, type CfnTemplate, type PermissionEntry } from './permissions.js';
 import { createStubAssets } from './stub-assets.js';
-import { grantsAction, resourcesOfType, statementsByRole, synthStacks, type SynthesizedStacks } from './test/synth.js';
+import { grantsAction, permissionViolations, resourcesOfType, statementsByRole, synthStacks, type SynthesizedStacks } from './test/synth.js';
 
 interface FunctionProperties {
   Runtime: string;
@@ -82,6 +83,50 @@ function pausedSetsOf(grants: Record<string, string[]>): string[] {
 }
 
 const TABLE_IMPORT = /^\{"Fn::ImportValue":"FotheringIngest:[^"]*EventStore[^"]*Arn[^"]*"\}$/;
+const ADDRESS_KEY_IMPORT = /^\{"Fn::ImportValue":"FotheringIngest:[^"]*AddressKey[^"]*"\}$/;
+const SEND_EMAIL = 'ses:SendEmail';
+const FROM_ADDRESS_REF = { Ref: 'FromAddress' };
+
+function identityArn(name: unknown): string {
+  return JSON.stringify({ 'Fn::Join': ['', ['arn:aws:ses:eu-central-1:', { Ref: 'AWS::AccountId' }, ':identity/', name]] });
+}
+
+// The three resources the operator email may be sent from and through: the From address's own
+// identity, its domain's identity, and the operator-alert configuration set.
+const SEND_EMAIL_RESOURCES = [
+  identityArn(FROM_ADDRESS_REF),
+  identityArn({ 'Fn::Select': [1, { 'Fn::Split': ['@', FROM_ADDRESS_REF] }] }),
+  configurationSetArn('fothering-alerts'),
+].sort();
+
+// The raw statements, Condition included, that grant an action to a role.
+function statementsGranting(template: Template, rolePrefix: string, action: string): Array<Record<string, unknown>> {
+  const roleId = logicalIdWithPrefix(template, 'AWS::IAM::Role', rolePrefix);
+  return Object.values(resourcesOfType(template, 'AWS::IAM::Policy')).flatMap((policy) => {
+    const properties = policy.Properties as { Roles: Array<{ Ref: string }>; PolicyDocument: { Statement: Array<Record<string, unknown>> } };
+    if (!properties.Roles.some((role) => role.Ref === roleId)) return [];
+    return properties.PolicyDocument.Statement.filter((statement) => [statement.Action].flat().includes(action));
+  });
+}
+
+// An action stack synthesized on its own over a planted lane map, beside the ingest stack it reads.
+function synthActionAlone(laneMap: LaneMap): Template {
+  const assets = createStubAssets();
+  try {
+    const env = { region: 'eu-central-1' };
+    const app = new App({ context: { ...cdkJsonContext }, outdir: assets.outdir });
+    const ingest = new IngestStack(app, 'PlantedIngest', { env, laneMap, ingestAssetDir: assets.ingestAssetDir, forgetAssetDir: assets.forgetAssetDir });
+    return Template.fromStack(
+      new ActionStack(app, 'PlantedAction', { env, laneMap, actionAssetDir: assets.ingestAssetDir, reopenAssetDir: assets.forgetAssetDir, ingest }),
+    );
+  } finally {
+    assets.remove();
+  }
+}
+
+function laneMapWithOperatorAlerts(sets: readonly string[]): LaneMap {
+  return parseLaneMap({ ...lanesJson, lanes: lanesJson.lanes.map((lane) => ({ ...lane, operatorAlert: sets.includes(lane.configurationSet) })) });
+}
 
 // A synth loads aws-cdk-lib whole and hashes the stub assets, which under a full parallel suite runs
 // past vitest's default hook limit, so every limit here is explicit.
@@ -135,10 +180,10 @@ describe('ActionStack synth', () => {
     expect(ACTION_STACK_ID).toBe('FotheringAction');
   });
 
-  it('may pause and read back fothering-bulk alone, beside its table, SES read and log actions', () => {
+  it('may pause and read back fothering-bulk alone, beside its table, SES read, send, address key and log actions', () => {
     const grants = grantsOfRole(stacks.action, 'ActionRole');
     expect(Object.keys(grants).sort().join(',')).toBe(
-      'dynamodb:GetItem,dynamodb:PutItem,dynamodb:Query,dynamodb:UpdateItem,logs:CreateLogStream,logs:PutLogEvents,ses:GetConfigurationSet,ses:GetConfigurationSetEventDestinations,ses:GetEmailIdentity,ses:ListConfigurationSets,ses:ListEmailIdentities,ses:PutConfigurationSetSendingOptions',
+      'dynamodb:GetItem,dynamodb:PutItem,dynamodb:Query,dynamodb:UpdateItem,logs:CreateLogStream,logs:PutLogEvents,secretsmanager:GetSecretValue,ses:GetConfigurationSet,ses:GetConfigurationSetEventDestinations,ses:GetEmailIdentity,ses:ListConfigurationSets,ses:ListEmailIdentities,ses:PutConfigurationSetSendingOptions,ses:SendEmail',
     );
     for (const action of PAUSE_ACTIONS) expect(grants[action]).toEqual([configurationSetArn('fothering-bulk')]);
     for (const action of ['dynamodb:GetItem', 'dynamodb:PutItem', 'dynamodb:Query', 'dynamodb:UpdateItem']) {
@@ -171,10 +216,112 @@ describe('ActionStack synth', () => {
     expect(new Set(paused).size).toBe(paused.length);
   });
 
-  it.each([ACTION_FUNCTION, REOPEN_FUNCTION])('gives %s the table name from the ingest stack and nothing else in a default synth', (prefix) => {
-    const variables = functionOf(stacks.action, prefix).properties.Environment.Variables;
+  it('gives the action function the table, the address key and the two addresses, from the ingest stack and the parameters', () => {
+    const variables = functionOf(stacks.action, ACTION_FUNCTION).properties.Environment.Variables;
+    expect(Object.keys(variables).sort().join(',')).toBe(
+      'FOTHERING_ADDRESS_KEY_SECRET_ID,FOTHERING_FROM_ADDRESS,FOTHERING_OPERATOR_ADDRESS,FOTHERING_TABLE_NAME',
+    );
+    expect(variables.FOTHERING_OPERATOR_ADDRESS).toEqual({ Ref: 'OperatorAddress' });
+    expect(variables.FOTHERING_FROM_ADDRESS).toEqual(FROM_ADDRESS_REF);
+    expect(JSON.stringify(variables.FOTHERING_ADDRESS_KEY_SECRET_ID)).toMatch(ADDRESS_KEY_IMPORT);
+    expect(JSON.stringify(variables.FOTHERING_TABLE_NAME)).toMatch(/^\{"Fn::ImportValue":"FotheringIngest:/);
+  });
+
+  it('gives the reopen function the table name from the ingest stack and nothing else in a default synth', () => {
+    const variables = functionOf(stacks.action, REOPEN_FUNCTION).properties.Environment.Variables;
     expect(Object.keys(variables).join(',')).toBe('FOTHERING_TABLE_NAME');
     expect(JSON.stringify(variables.FOTHERING_TABLE_NAME)).toMatch(/^\{"Fn::ImportValue":"FotheringIngest:/);
+  });
+
+  it.each(['OperatorAddress', 'FromAddress'])('takes %s as a String parameter with no default and a one-address pattern', (name) => {
+    const parameters = stacks.action.toJSON().Parameters as Record<string, Record<string, unknown>> | undefined;
+    const parameter = parameters?.[name];
+    expect(parameter?.Type).toBe('String');
+    expect(parameter).not.toHaveProperty('Default');
+    const pattern = new RegExp(String(parameter?.AllowedPattern));
+    expect(pattern.test('ops@example.com')).toBe(true);
+    for (const refused of ['Ops <ops@example.com>', 'ops@example', 'ops', 'a@b@example.com', 'ops @example.com']) {
+      expect(pattern.test(refused), refused).toBe(false);
+    }
+  });
+
+  it('may send mail only from the From identity and its domain through fothering-alerts, with no condition (AC-23)', () => {
+    const grants = grantsOfRole(stacks.action, 'ActionRole');
+    expect(grants[SEND_EMAIL]).toEqual(SEND_EMAIL_RESOURCES);
+    const statements = statementsGranting(stacks.action, 'ActionRole', SEND_EMAIL);
+    expect(statements).toHaveLength(1);
+    expect(statements[0]).not.toHaveProperty('Condition');
+    expect(Object.keys(grantsOfRole(stacks.action, 'ReopenRole'))).not.toContain(SEND_EMAIL);
+  });
+
+  it('may read the address key secret alone, for the pseudonyms on the dry-run send line', () => {
+    const keyGrants = grantsOfRole(stacks.action, 'ActionRole')['secretsmanager:GetSecretValue'];
+    expect(keyGrants).toHaveLength(1);
+    expect(keyGrants?.[0]).toMatch(ADDRESS_KEY_IMPORT);
+    expect(Object.keys(grantsOfRole(stacks.action, 'ReopenRole'))).not.toContain('secretsmanager:GetSecretValue');
+  });
+
+  describe('the SendEmail rule of the permission boundaries', () => {
+    let entries: PermissionEntry[];
+    let actionRole: string;
+    let reopenRole: string;
+    beforeAll(() => {
+      entries = collectPermissions({ [ACTION_STACK_ID]: stacks.action.toJSON() as CfnTemplate });
+      const roleNamed = (prefix: string): string =>
+        entries.find((entry) => entry.kind === 'trust' && entry.role.startsWith(prefix))?.role ?? `${prefix} not found`;
+      actionRole = roleNamed('ActionRole');
+      reopenRole = roleNamed('ReopenRole');
+    });
+
+    const sendEntries = (): PermissionEntry[] => entries.filter((entry) => entry.effect === 'Allow' && entry.action === SEND_EMAIL);
+
+    it('finds nothing in the clean synthesis, which holds the three SendEmail grants', () => {
+      expect(sendEntries()).toHaveLength(3);
+      expect(permissionViolations(entries, stacks.laneMap)).toEqual([]);
+    });
+
+    it('reports ses:SendEmail planted on the reopen role, on each of the three resources', () => {
+      const planted = sendEntries().map((entry) => ({ ...entry, role: reopenRole }));
+      const violations = permissionViolations([...entries, ...planted], stacks.laneMap);
+      expect(violations).toEqual(planted.map(() => `FotheringAction/${reopenRole} ${SEND_EMAIL}: only the action role may hold ${SEND_EMAIL}`));
+    });
+
+    it('reports ses:SendEmail planted on the action role over every identity', () => {
+      const [first] = sendEntries();
+      const everyIdentity = JSON.stringify({ 'Fn::Join': ['', ['arn:aws:ses:eu-central-1:', { Ref: 'AWS::AccountId' }, ':identity/*']] });
+      const violations = permissionViolations([...entries, { ...(first as PermissionEntry), resource: everyIdentity }], stacks.laneMap);
+      expect(violations).toEqual([
+        `FotheringAction/${actionRole} ${SEND_EMAIL}: ${SEND_EMAIL} reaches a resource other than the From identity, its domain or the operator-alert set`,
+      ]);
+    });
+
+    it('reports ses:Send* on the From identity as the raw and bulk sends, which no role may hold', () => {
+      const [first] = sendEntries();
+      const violations = permissionViolations([...entries, { ...(first as PermissionEntry), action: 'ses:Send*' }], stacks.laneMap);
+      expect(violations).toEqual([
+        `FotheringAction/${actionRole} ses:Send*: no role may hold ses:SendRawEmail`,
+        `FotheringAction/${actionRole} ses:Send*: no role may hold ses:SendBulkEmail`,
+      ]);
+    });
+  });
+});
+
+// The send needs exactly one set to go through; with none or two the action sends nothing, so the
+// role holds no send at all.
+describe('an action stack whose lane map does not hold exactly one operator-alert lane', () => {
+  function grantCounts(action: Template): { addressKey: number; send: number } {
+    const statements = Object.values(statementsByRole(action)).flat();
+    const granting = (probe: string) => statements.filter((statement) => statement.actions.some((granted) => grantsAction(granted, probe))).length;
+    return { addressKey: granting('secretsmanager:GetSecretValue'), send: granting(SEND_EMAIL) };
+  }
+
+  it('synthesizes no ses:SendEmail statement over a map with no operator-alert lane', { timeout: 60_000 }, () => {
+    expect(grantCounts(synthActionAlone(laneMapWithOperatorAlerts([])))).toEqual({ addressKey: 1, send: 0 });
+  });
+
+  it('synthesizes no ses:SendEmail statement over a map with two operator-alert lanes', { timeout: 60_000 }, () => {
+    const laneMap = laneMapWithOperatorAlerts(['fothering-alerts', 'fothering-transactional']);
+    expect(grantCounts(synthActionAlone(laneMap))).toEqual({ addressKey: 1, send: 0 });
   });
 });
 
@@ -183,23 +330,13 @@ describe('an action stack over a lane map with nothing statically closeable', ()
     const lanes = lanesJson.lanes.map((lane) => (lane.configurationSet === 'fothering-bulk' ? { ...lane, criticality: 'transactional' } : lane));
     const laneMap = parseLaneMap({ ...lanesJson, lanes });
     expect(laneMap.lanes.filter(isStaticallyCloseable)).toEqual([]);
-    const assets = createStubAssets();
-    try {
-      const env = { region: 'eu-central-1' };
-      const app = new App({ context: { ...cdkJsonContext }, outdir: assets.outdir });
-      const ingest = new IngestStack(app, 'PlantedIngest', { env, laneMap, ingestAssetDir: assets.ingestAssetDir, forgetAssetDir: assets.forgetAssetDir });
-      const action = Template.fromStack(
-        new ActionStack(app, 'PlantedAction', { env, laneMap, actionAssetDir: assets.ingestAssetDir, reopenAssetDir: assets.forgetAssetDir, ingest }),
-      );
-      for (const role of PAUSING_ROLES) expect(Object.keys(grantsOfRole(action, role))).toContain('dynamodb:GetItem');
-      const statements = Object.values(statementsByRole(action)).flat();
-      expect(statements.some((statement) => statement.actions.includes('dynamodb:Query'))).toBe(true);
-      for (const statement of statements) {
-        expect(statement.actions.some((granted) => grantsAction(granted, 'ses:PutConfigurationSetSendingOptions'))).toBe(false);
-        expect(statement.resources.length).toBeGreaterThan(0);
-      }
-    } finally {
-      assets.remove();
+    const action = synthActionAlone(laneMap);
+    for (const role of PAUSING_ROLES) expect(Object.keys(grantsOfRole(action, role))).toContain('dynamodb:GetItem');
+    const statements = Object.values(statementsByRole(action)).flat();
+    expect(statements.some((statement) => statement.actions.includes('dynamodb:Query'))).toBe(true);
+    for (const statement of statements) {
+      expect(statement.actions.some((granted) => grantsAction(granted, 'ses:PutConfigurationSetSendingOptions'))).toBe(false);
+      expect(statement.resources.length).toBeGreaterThan(0);
     }
   });
 });

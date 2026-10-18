@@ -144,8 +144,14 @@ describe('the permissions snapshot', () => {
 
   it('holds exactly the actions of the action role', () => {
     expect(actionsOf(rolesOf(synthesized, 'FotheringAction', 'ActionRole')).join(',')).toBe(
-      'dynamodb:GetItem,dynamodb:PutItem,dynamodb:Query,dynamodb:UpdateItem,logs:CreateLogStream,logs:PutLogEvents,ses:GetConfigurationSet,ses:GetConfigurationSetEventDestinations,ses:GetEmailIdentity,ses:ListConfigurationSets,ses:ListEmailIdentities,ses:PutConfigurationSetSendingOptions',
+      'dynamodb:GetItem,dynamodb:PutItem,dynamodb:Query,dynamodb:UpdateItem,logs:CreateLogStream,logs:PutLogEvents,secretsmanager:GetSecretValue,ses:GetConfigurationSet,ses:GetConfigurationSetEventDestinations,ses:GetEmailIdentity,ses:ListConfigurationSets,ses:ListEmailIdentities,ses:PutConfigurationSetSendingOptions,ses:SendEmail',
     );
+  });
+
+  // The operator and From addresses are deploy parameters, so the snapshot holds their intrinsics and
+  // never a value.
+  it('holds no address', () => {
+    expect(readFileSync(SNAPSHOT_URL, 'utf8')).not.toContain('@');
   });
 
   it('holds exactly the actions of the reopen role: named items read and updated, the reopen and its read-back (D-104)', () => {
@@ -154,12 +160,12 @@ describe('the permissions snapshot', () => {
     );
   });
 
-  it('allows SES actions on the detection, action and reopen roles only: the four reads, the pause and its read-back on the action role, and the reopen role the pause pair alone', () => {
+  it('allows SES actions on the detection, action and reopen roles only: the four reads, the pause, its read-back and the send on the action role, and the reopen role the pause pair alone', () => {
     const sesEntries = synthesized.filter((entry) => entry.effect === 'Allow' && entry.action.toLowerCase().startsWith('ses:'));
     expect(sesEntries.length).toBeGreaterThan(0);
     const allowed: Record<string, readonly string[]> = {
       'FotheringDetection/DetectRole': SES_READS,
-      'FotheringAction/ActionRole': [...SES_READS, ...PAUSE_ACTIONS],
+      'FotheringAction/ActionRole': [...SES_READS, ...PAUSE_ACTIONS, 'ses:SendEmail'],
       'FotheringAction/ReopenRole': PAUSE_ACTIONS,
     };
     for (const entry of sesEntries) {
