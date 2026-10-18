@@ -128,12 +128,14 @@ const INTERLOCK_DESC = 'Stored events, which hold no addresses, go to detection 
           <FlowSwitch />
         </figcaption>
       </figure>
-      <Schedule
-        fit
-        columns={['Field', 'Identifies', 'What is stored']}
-        rows={fieldRows}
-        caption="Stored fields that can identify a person, generated from the record type on every build."
-      />
+      <div class="fit-form">
+        <Schedule
+          fit
+          columns={['Field', 'Identifies', 'What is stored']}
+          rows={fieldRows}
+          caption="Stored fields that can identify a person, generated from the record type on every build."
+        />
+      </div>
       <div class="after-schedule">
         <p>Not stored: the recipient address itself, <Identifier value="mail.destination" />, <Identifier value="mail.headers" />, <Identifier value="mail.commonHeaders" />, and the free text of a bounce's <Identifier value="diagnosticCode" />, of which only the reply code and the enhanced status code are kept.</p>
         <p>{privacy('tag-values')} They are stored as written, so a cause can be named by them.</p>

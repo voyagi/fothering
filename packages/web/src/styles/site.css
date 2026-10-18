@@ -577,7 +577,14 @@ ul.site { display: grid; gap: var(--space-12); margin: 0; padding-left: var(--sp
 .fit-model td[data-col="Value"] .cell-text { min-inline-size: 16em; }
 /* Measured 2026-10-18 on the rendered tables: the stored-field table needs 536px with its paths on
    one line, the model record 391px with its 16em value column. */
-@container fields (width < 540px) {
+/* The stored-field table also stacks at 620px and below (UI-SPEC 583): there the frame runs edge to
+   edge, so its section is wider at 620px than at 657px and would otherwise switch form three times.
+   Either condition names the wrapper fields-stacked, and the stacked rules below query that name,
+   so they are written once for both. */
+.fit-fields .fit-form { container-type: inline-size; }
+@container fields (width < 540px) { .fit-fields .fit-form { container-name: fields-stacked; } }
+@media (max-width: 620px) { .fit-fields .fit-form { container-name: fields-stacked; } }
+@container fields-stacked (width >= 0px) {
   .fit-fields .fit, .fit-fields .fit :is(thead, tbody, tr, th, td) { display: block; width: auto; }
   .fit-fields .fit thead { display: none; }
   .fit-fields .fit tbody tr { padding: var(--space-xs) 0 var(--space-sm); }
