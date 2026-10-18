@@ -70,7 +70,7 @@ until you remove it; the test suite fails when `cdk.json` carries it.
 
 The app has four stacks: `FotheringIngest` (the event table, the ingest and forget functions),
 `FotheringRuntime` (the agent on AgentCore Runtime), `FotheringDetection` (the detection function
-and its schedule) and `FotheringAction` (the action function and its schedule). Detection imports
+and its schedule) and `FotheringAction` (the action function, its schedule and the reopen function). Detection imports
 the table and the runtime ARN from the first two. `FotheringAction` imports the table from
 `FotheringIngest` and depends on neither `FotheringRuntime` nor `FotheringDetection`. Neither the
 ingest nor the runtime stack can be removed, or replace the table or the runtime, while a stack
@@ -80,7 +80,9 @@ that imports from it is deployed.
 setting back, granted on the lanes `lanes.json` lets the action close and on no other set. A
 deployment without it holds no SES write at all, so detection can be deployed and watched on its
 own first. Every role in every stack also carries an explicit Deny on the three actions that change
-account-level sending, so no grant added later can stop the whole account.
+account-level sending, so no grant added later can stop the whole account. `FotheringAction` also
+holds the reopen function, which turns sending back on for a set Fothering paused, only when you
+run it by hand; [docs/reopen-a-lane.md](docs/reopen-a-lane.md) has the command.
 
 Run from the owner's account, in `eu-central-1`. Deploy the first three stacks, check them in the
 CloudFormation console, then deploy `FotheringAction` last. Remove it first:

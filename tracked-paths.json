@@ -24,7 +24,8 @@
     "vitest.config.ts",
     "vitest.stryker.config.ts",
     "docs/forget-one-recipient.md",
-    "docs/agent-unavailable.md"
+    "docs/agent-unavailable.md",
+    "docs/reopen-a-lane.md"
   ],
   "prefixes": [
     ".github/workflows/",
