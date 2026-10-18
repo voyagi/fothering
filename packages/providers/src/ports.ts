@@ -139,10 +139,11 @@ export const PORT_TABLE = {
       ),
   },
   // Incident, evidence, decision and counter items in the event table (D-65, D-66). Like the event
-  // store, Fothering's own table: its writes mutate but never wait for the switch.
+  // store, Fothering's own table: its writes mutate but never wait for the switch, the lane-hour
+  // reservation included (D-99).
   decisionStore: {
-    operations: ['putIfAbsent', 'getItem', 'updateIfVersion', 'reserveInvocation', 'recordUsage'],
-    mutatingOperations: ['putIfAbsent', 'updateIfVersion', 'reserveInvocation', 'recordUsage'],
+    operations: ['putIfAbsent', 'getItem', 'updateIfVersion', 'reserveInvocation', 'recordUsage', 'reserveLaneAttempt'],
+    mutatingOperations: ['putIfAbsent', 'updateIfVersion', 'reserveInvocation', 'recordUsage', 'reserveLaneAttempt'],
     gatedOperations: [],
     fixture: (fixtures: FixtureOptions, dryRun: DryRunLog) => createFixtureDecisionStore(fixtures, dryRun),
     live: ({ liveConfig, liveClients }) =>

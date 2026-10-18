@@ -25,6 +25,7 @@ import {
   type ReadBack,
   type StoredDecision,
 } from '@fothering/core/closure';
+import { reserveLaneAttempt } from '@fothering/core/counters';
 import { evidenceRecordSchema, incidentItemKey, incidentLaneKey, incidentPauseKey, type EvidenceRecord } from '@fothering/core/evidence-record';
 import { markerOf, stateOf, type IncidentMarker, type IncidentState } from '@fothering/core/incident';
 import { expiresAtFor } from '@fothering/core/records';
@@ -320,6 +321,9 @@ async function actOn(run: Run, act: Act): Promise<ClosureOutcome | undefined> {
   const pointer = await readPointer(deps, configurationSet);
   if (heldByAnother(pointer, act.incidentId)) return refuse(run, act, 'lane-already-paused', readings);
   if (deps.kinds.ses?.pauseConfigurationSet === 'dry-run') return dryRunPause(run, act, configurationSet, readings);
+  // D-99 and AC-E15: the attempt counts from here whether the put then succeeds or throws.
+  const attempt = await reserveLaneAttempt(deps.ports.decisionStore, { configurationSet, nowMs: deps.now() });
+  if (attempt.outcome === 'cap') return refuse(run, act, 'lane-cap-reached', readings);
   if (!(await movePointer(deps, configurationSet, act.incidentId, pointer))) return refuse(run, act, 'lane-already-paused', readings);
   return pause(run, act, configurationSet, readings);
 }

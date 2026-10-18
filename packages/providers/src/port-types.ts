@@ -1,6 +1,7 @@
 import type { Message, ModelStreamEvent, StreamOptions } from '@strands-agents/sdk';
 import { lanePartitionKey, type EventRecord, type RecordKey } from '@fothering/core/records';
 import type { AddressKeySet } from '@fothering/core/address';
+import { CONFIGURATION_SET_PATTERN } from '@fothering/core/lanes';
 import type { DnsMxOutcome, DnsTxtOutcome, IdentityAuthFacts } from '@fothering/core/evidence-rows';
 import type { LaneFold } from '@fothering/core/window-fold';
 
@@ -121,15 +122,15 @@ function requireWholeNumber(name: string, value: number, minimum: number): void 
 
 /**
  * A decision item never sits under an event record's LANE# key (D-65), and a counter moves only
- * through reserveInvocation and recordUsage, which only add: a put or a versioned update could
- * otherwise write one back to zero.
+ * through reserveInvocation, recordUsage and reserveLaneAttempt, which only add: a put or a versioned
+ * update could otherwise write one back to zero.
  */
 export function assertDecisionItemKey(key: RecordKey): void {
   if (key.pk.startsWith(LANE_PARTITION_PREFIX)) {
     throw new RangeError('a decision store item never takes a LANE# partition key, which belongs to event records');
   }
   if (key.sk === COUNTER_SORT_KEY) {
-    throw new RangeError('a counter item changes only through reserveInvocation and recordUsage, which only add');
+    throw new RangeError('a counter item changes only through reserveInvocation, recordUsage and reserveLaneAttempt, which only add');
   }
 }
 
@@ -185,7 +186,19 @@ export function assertReservation(request: ReservationRequest): void {
   if (request.tokenReservation > request.dayTokenCap) throw new RangeError('tokenReservation is larger than dayTokenCap');
 }
 
-export function assertLaneAttempt(_request: LaneAttemptRequest): void {}
+const LANE_HOUR_PARTITION_KEY = /^COUNTER_LANE_HOUR#(.+)#\d{4}-\d{2}-\d{2}T\d{2}$/;
+
+function isLaneHourKey(key: RecordKey): boolean {
+  const set = LANE_HOUR_PARTITION_KEY.exec(key.pk)?.[1];
+  return key.sk === COUNTER_SORT_KEY && set !== undefined && CONFIGURATION_SET_PATTERN.test(set);
+}
+
+/** A lane attempt names one lane-hour counter and a cap of at least one; nothing else reaches the table. */
+export function assertLaneAttempt(request: LaneAttemptRequest): void {
+  if (!isLaneHourKey(request.key)) throw new RangeError('key must be a COUNTER_LANE_HOUR#<set>#<YYYY-MM-DDTHH> COUNTER key');
+  requireWholeNumber('cap', request.cap, 1);
+  requireWholeNumber('expiresAt', request.expiresAt, 0);
+}
 
 export function assertUsage(usage: UsageRecord): void {
   assertCounterKeys(usage.incidentKey, usage.dayKey);

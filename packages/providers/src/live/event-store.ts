@@ -25,6 +25,7 @@ import {
 import { assertFoldWindow } from '@fothering/core/window-fold';
 import {
   assertDecisionItemKey,
+  assertLaneAttempt,
   assertReservation,
   assertUsage,
   assertVersionedUpdate,
@@ -352,8 +353,26 @@ export function createDynamoDecisionStore(options: CreateDynamoEventStoreOptions
       }
     },
 
-    async reserveLaneAttempt() {
-      return 'reserved';
+    // D-99: one conditional update sent alone; attempts only ever rises, and expiresAt keeps the value
+    // of the hour's first attempt.
+    async reserveLaneAttempt(request) {
+      assertLaneAttempt(request);
+      const tableName = requireTableName(options.tableName);
+      try {
+        await options.client().send(
+          new UpdateCommand({
+            TableName: tableName,
+            Key: tableKey(request.key),
+            UpdateExpression: 'ADD attempts :one SET expiresAt = if_not_exists(expiresAt, :exp)',
+            ConditionExpression: 'attribute_not_exists(attempts) OR attempts < :cap',
+            ExpressionAttributeValues: { ':one': 1, ':cap': request.cap, ':exp': request.expiresAt },
+          }),
+        );
+        return 'reserved';
+      } catch (error) {
+        if (hasErrorName(error, CONDITIONAL_CHECK_FAILED)) return 'cap';
+        throw error;
+      }
     },
   };
 }

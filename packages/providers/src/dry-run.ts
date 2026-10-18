@@ -34,18 +34,19 @@ const RECORD_PARTITION_KEY = new RegExp(`^LANE#${CONFIGURATION_SET_PATTERN.sourc
 // recordKey's sort key: B#, a 13-digit bucket start, then the event type and an identity made of
 // SES ids, HMAC hex and a timestamp, joined by #. A key built any other way is refused, not printed.
 const RECORD_SORT_KEY = /^B#\d{13}#[A-Za-z0-9._#-]{1,1024}$/;
-// The decision store's three partition key shapes (D-65): the incident marker under a configuration
-// set, an incident by its 32-hex id, and a UTC day counter. Its sort keys are a closed set of words.
+// The decision store's four partition key shapes (D-65, D-99): the incident marker and pause pointer
+// under a configuration set, an incident by its 32-hex id, a UTC day counter and a lane-hour counter.
+// Its sort keys are a closed set of words.
 const INCIDENT_LANE_PARTITION_KEY = new RegExp(`^INCIDENT_LANE#${CONFIGURATION_SET_PATTERN.source.replace(/^\^/, '')}`);
 const INCIDENT_PARTITION_KEY = /^INCIDENT#[0-9a-f]{32}$/;
 const COUNTER_DAY_PARTITION_KEY = /^COUNTER_DAY#\d{4}-\d{2}-\d{2}$/;
-const DECISION_PARTITION_KEYS = [INCIDENT_LANE_PARTITION_KEY, INCIDENT_PARTITION_KEY, COUNTER_DAY_PARTITION_KEY];
-// MARKER and PAUSE sit under INCIDENT_LANE#, the incident parts under INCIDENT#.
-const DECISION_SORT_KEY = new RegExp(`^(?:MARKER|PAUSE|${INCIDENT_PARTS.join('|')})$`);
 // Pitfall 8: the set rule goes in the middle of this key, so both its anchors come off; a $ left in
 // place would match nothing and refuse every lane-hour line.
 const CONFIGURATION_SET_BODY = CONFIGURATION_SET_PATTERN.source.replace(/^\^/, '').replace(/\$$/, '');
 const COUNTER_LANE_HOUR_PARTITION_KEY = new RegExp(`^COUNTER_LANE_HOUR#${CONFIGURATION_SET_BODY}#\\d{4}-\\d{2}-\\d{2}T\\d{2}$`);
+const DECISION_PARTITION_KEYS = [INCIDENT_LANE_PARTITION_KEY, INCIDENT_PARTITION_KEY, COUNTER_DAY_PARTITION_KEY, COUNTER_LANE_HOUR_PARTITION_KEY];
+// MARKER and PAUSE sit under INCIDENT_LANE#, the incident parts under INCIDENT#.
+const DECISION_SORT_KEY = new RegExp(`^(?:MARKER|PAUSE|${INCIDENT_PARTS.join('|')})$`);
 const MODEL_ID = /^[A-Za-z0-9._:-]{1,256}$/;
 const RUNTIME_ARN = /^arn:[A-Za-z0-9:/_.-]{1,512}$/;
 const DEAD_LETTER_TARGET = new RegExp(`^${DEAD_LETTER_QUEUE_TARGET}$`);

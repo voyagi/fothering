@@ -13,6 +13,7 @@ import type {
 } from '../port-types.js';
 import {
   assertDecisionItemKey,
+  assertLaneAttempt,
   assertReservation,
   assertUsage,
   assertVersionedUpdate,
@@ -282,7 +283,12 @@ export function createFixtureDecisionStore(options: FixtureOptions = {}, dryRun?
       addToCounter(items, usage.dayKey, amounts);
       return 'recorded';
     },
-    async reserveLaneAttempt() {
+    // The live condition reads "attribute_not_exists(attempts) OR attempts < cap" on one item.
+    async reserveLaneAttempt(request) {
+      assertLaneAttempt(request);
+      await dryRun?.would('decisionStore.reserveLaneAttempt', request.key.pk, request);
+      if (!hasRoom(numberAttribute(items.get(keyOf(request.key)), 'attempts'), request.cap)) return 'cap';
+      addToCounter(items, request.key, { attempts: 1 }, request.expiresAt);
       return 'reserved';
     },
   }, 'fixture');
