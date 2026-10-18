@@ -179,6 +179,50 @@ function assertReplayable(artifact: ReplayArtifact): void {
   for (const step of STEP_NUMBERS) {
     if (!artifact.events.some((event) => event.step === step)) refuse('events', `step ${String(step)} has no event`, 'Add the events of every step');
   }
+  assertBounceClaims(artifact);
+  assertTimeOrder(artifact);
+}
+
+// Step one says the bounces arrive on the paused lane only, each with one SMTP code, from the
+// providers their receiving domains name. Each claim is checked against the events, so a capture
+// where one is false stops the build instead of printing it (WR-03).
+function assertBounceClaims(artifact: ReplayArtifact): void {
+  const bounces = artifact.events.filter((event) => event.kind === 'bounce');
+  const elsewhere = bounces.find((event) => event.lane !== artifact.closedLane);
+  if (elsewhere !== undefined) {
+    refuse('events', `a bounce sits on ${elsewhere.lane}, and step one says bounces arrive on ${artifact.closedLane} only`, 'Replay an incident whose bounces are all on the paused lane');
+  }
+  const codes = [...new Set(bounces.map((event) => event.smtpCode ?? 'no code'))];
+  if (codes.length > 1) {
+    refuse('events', `the bounces on ${artifact.closedLane} carry ${codes.join(' and ')}, and step one says each carries one code`, 'Replay an incident whose bounces on the paused lane share one SMTP code');
+  }
+  if (bounces.some((event) => event.receivingDomain === undefined)) {
+    refuse('events', `a bounce on ${artifact.closedLane} has no receiving domain, so the providers it came from cannot be counted`, 'Add the receiving domain to every bounce on the paused lane');
+  }
+}
+
+function refuseBefore(path: string, later: string, earlierPath: string, earlier: string): void {
+  if (Date.parse(later) < Date.parse(earlier)) refuse(path, `${later} is before ${earlierPath} ${earlier}`, 'Correct the times so the replay reads in the order things happened');
+}
+
+// The summary and the steps read top to bottom as the incident ran, so the recorded times must too.
+function assertTimeOrder(artifact: ReplayArtifact): void {
+  const { window, pause, reopen } = artifact;
+  if (Date.parse(window.startUtc) > Date.parse(window.endUtc)) {
+    refuse('window.startUtc', `${window.startUtc} is after window.endUtc ${window.endUtc}`, 'Correct the window times');
+  }
+  refuseBefore('pause.readBack.atUtc', pause.readBack.atUtc, 'pause.atUtc', pause.atUtc);
+  refuseBefore('reopen.atUtc', reopen.atUtc, 'pause.readBack.atUtc', pause.readBack.atUtc);
+  refuseBefore('reopen.readBack.atUtc', reopen.readBack.atUtc, 'reopen.atUtc', reopen.atUtc);
+  // Within a step the events sort by time, so a time that runs backwards is a later step's event
+  // set before an earlier step's.
+  const events = orderedEvents(artifact.events);
+  events.forEach((event, index) => {
+    const previous = events[index - 1];
+    if (previous !== undefined && Date.parse(event.atUtc) < Date.parse(previous.atUtc)) {
+      refuse('events', `step ${String(event.step)} has an event at ${event.atUtc}, before a step ${String(previous.step)} event at ${previous.atUtc}`, 'Correct the times so every step follows the one before it');
+    }
+  });
 }
 
 // Step first, then time; the index breaks ties so equal times keep the artifact's order.
@@ -252,9 +296,16 @@ function firstEventTime(events: readonly ReplayEvent[], step: number): string {
   return event === undefined ? '' : clockTime(event.atUtc);
 }
 
+// The providers the bounces came from: the distinct receiving domains of the paused lane's bounces,
+// never the window-wide figure, which counts where every send went.
+function bounceProviders(artifact: ReplayArtifact): string {
+  const domains = new Set(artifact.events.filter((event) => event.kind === 'bounce' && event.lane === artifact.closedLane).map((event) => event.receivingDomain));
+  return `${String(domains.size)} ${domains.size === 1 ? 'provider' : 'providers'}`;
+}
+
 function stepOneText(artifact: ReplayArtifact, bounce: ReplayEvent & { smtpCode: string }, openLanes: readonly string[]): string {
   const others = openLanes.length === 0 ? '' : openLanes.length === 1 ? ' The other lane keeps delivering.' : ' The other lanes keep delivering.';
-  return `${String(bounce.bounceType)} bounces arrive on ${artifact.closedLane} only, each \`${bounce.smtpCode}\`, from ${String(artifact.window.receivingProviders)} providers.${others}`;
+  return `${String(bounce.bounceType)} bounces arrive on ${artifact.closedLane} only, each \`${bounce.smtpCode}\`, from ${bounceProviders(artifact)}.${others}`;
 }
 
 function stepThreeText(artifact: ReplayArtifact, held: boolean): string {
@@ -273,10 +324,10 @@ function logNote(hardBounces: number): string {
   return `Showing the first ${COUNT_WORDS[hardBounces] ?? String(hardBounces)} hard bounces and every decision, call and email.`;
 }
 
-function tagEvidence(row: EvidenceRow, smtpCode: string, providers: number): string {
+function tagEvidence(row: EvidenceRow, smtpCode: string, providers: string): string {
   const share = row.count === row.denominator ? `All ${String(row.count)}` : `${String(row.count)} of ${String(row.denominator)}`;
   // The count stays in the sentence and the code ends it, so no figure is set against the mono code.
-  return `${share} ${row.unit} in the window carry that tag, from ${String(providers)} providers: \`${smtpCode}\`.`;
+  return `${share} ${row.unit} in the window carry that tag, from ${providers}: \`${smtpCode}\`.`;
 }
 
 export function buildReplayView(artifact: ReplayArtifact): ReplayView {
@@ -334,7 +385,7 @@ export function buildReplayView(artifact: ReplayArtifact): ReplayView {
       lane: artifact.closedLane,
       stamp: label.stamp,
       cause,
-      evidence: tagEvidence(causeRow(artifact), bounce.smtpCode, artifact.window.receivingProviders),
+      evidence: tagEvidence(causeRow(artifact), bounce.smtpCode, bounceProviders(artifact)),
       readBack: `${artifact.pause.readBack.field}: ${artifact.pause.readBack.value}, ${pausedAt} UTC`,
       replayReadBack: `${fieldName(artifact.pause.readBack.field)}: ${artifact.pause.readBack.value}, ${pausedAt} UTC`,
       reopens: 'Run the reopen command',
