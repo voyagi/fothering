@@ -58,7 +58,7 @@ describe('repoRoot', () => {
     expect(repoRoot(join(PLANT, 'tree/listed'))).toBe(join(PLANT, 'tree'));
   });
 
-  it('passes on a manifest read failure other than a missing file', () => {
+  it('rethrows a manifest read failure other than a missing file', () => {
     expect(() => repoRoot(join(PLANT, 'folder-manifest'))).toThrow(/EISDIR/);
   });
 
@@ -111,7 +111,7 @@ describe('readRepoText', () => {
     expect(readRepoText('..notes.txt', root)).toBe('kept\n');
   });
 
-  it('passes on a read failure other than a missing file', () => {
+  it('rethrows a read failure other than a missing file', () => {
     expect(() => readRepoText('folder', root)).toThrow(/EISDIR/);
   });
 });

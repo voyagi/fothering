@@ -811,8 +811,11 @@ describe('requestsVerdict (AC-57, AC-E52)', () => {
   });
 
   it('fails a request to another origin, protocol-relative ones resolved included', () => {
-    const reading = { ...healthyRequests('/'), requests: [...healthyRequests('/').requests, 'https://fonts.gstatic.com/s/x.woff2', 'http://127.0.0.1:4001/x.js'] };
-    expect(requestsVerdict(reading)).toEqual(failed(E2E_MESSAGES.foreignRequest(BASE, ['http://127.0.0.1:4001', 'https://fonts.gstatic.com'])));
+    // A page's request event reports a protocol-relative src already resolved against the page.
+    const protocolRelative = new URL('//cdn.fothering.test/x.js', `${BASE}/`).href;
+    expect(protocolRelative).toBe('http://cdn.fothering.test/x.js');
+    const reading = { ...healthyRequests('/'), requests: [...healthyRequests('/').requests, 'https://fonts.gstatic.com/s/x.woff2', 'http://127.0.0.1:4001/x.js', protocolRelative] };
+    expect(requestsVerdict(reading)).toEqual(failed(E2E_MESSAGES.foreignRequest(BASE, ['http://127.0.0.1:4001', 'http://cdn.fothering.test', 'https://fonts.gstatic.com'])));
   });
 
   it('gives the same verdict for the same requests in another order', () => {
