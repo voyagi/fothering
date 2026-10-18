@@ -41,7 +41,6 @@ import {
   fontsVerdict,
   isExpectedNotFound,
   keyboardVerdict,
-  loadCheckContext,
   overflowVerdict,
   pageErrorVerdict,
   pinVerdict,
@@ -1587,8 +1586,7 @@ describe('the built checks through the CLI and the e2e step (D-150, D-151)', () 
     expect(out).toContain(E2E_MESSAGES.checksFail(E2E_MESSAGES.unregistered('no-such-rule')));
   });
 
-  it('the e2e step and the built-checks subcommand judge one build with equal contexts', async () => {
-    expect(loadCheckContext(dashed.root)).toEqual(loadCheckContext(dashed.root));
+  it('the e2e step and the built-checks subcommand judge one build to the same findings', async () => {
     const e2eLines: string[] = [];
     expect(await runSiteE2e({ repoRoot: dashed.root, globalModules: dashed.root, print: (line) => e2eLines.push(line), clientSecretsScript: SECRETS_SCRIPT, sizeLimit: passingSize })).toBe(1);
     const { out } = await builtChecks(dashed.dist);
