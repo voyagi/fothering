@@ -297,6 +297,17 @@ describe('the accessibility record (D-156, AC-53)', () => {
     expect(recorded).toEqual([]);
   });
 
+  // A how-checked note is the method a person follows, never an outcome nobody has seen yet.
+  it('writes every how-checked note as a method a person follows, in plain short words', () => {
+    const emDash = String.fromCharCode(0x2014);
+    for (const criterion of HAND_CHECK_CRITERIA) {
+      expect(criterion.how, criterion.number).toMatch(/^Check that /);
+      expect(criterion.how, criterion.number).not.toContain(';');
+      expect(criterion.how, criterion.number).not.toContain(emDash);
+      expect(criterion.how.split(/\s+/).length, criterion.number).toBeLessThanOrEqual(20);
+    }
+  });
+
   it('labels the four results as the statement prints them', () => {
     expect(HAND_CHECK_RESULT_LABELS).toEqual({ 'not-yet-checked': 'Not yet checked', 'not-applicable': 'Not applicable', 'passed': 'Passed', 'failed': 'Failed' });
   });
