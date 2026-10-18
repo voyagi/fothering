@@ -1,11 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { BUCKET_MS, bucketStartMs } from '@fothering/core/buckets';
-import { ACTION_FUNCTION_TIMEOUT_MS, HOLD_MS } from '@fothering/core/close-values';
-import { closureClaimItem, type Closure } from '@fothering/core/closure';
-import { buildEvidenceRecord, incidentLaneKey, type EvidenceRecord, type EvidenceRecordInput } from '@fothering/core/evidence-record';
-import { spikeWindowFor, type BucketWindow } from '@fothering/core/window-fold';
+import { ACTION_FUNCTION_TIMEOUT_MS, HOLD_CHECK_DELAY_MS, HOLD_MS } from '@fothering/core/close-values';
+import { closureClaimItem, closureKey, parseClosure, type Closure } from '@fothering/core/closure';
+import { buildEvidenceRecord, incidentLaneKey, incidentPauseKey, type EvidenceRecord, type EvidenceRecordInput } from '@fothering/core/evidence-record';
+import { spikeWindowFor, type BucketWindow, type LaneFold } from '@fothering/core/window-fold';
 import { createFixtureTableState } from '@fothering/providers/fixtures/ingest-ports';
-import type { DecisionStoreItem, DecisionStorePort, FixtureSesState, FixtureTableState, Recording } from '@fothering/providers/port-types';
+import type { DecisionStoreItem, DecisionStorePort, EventStorePort, FixtureSesState, FixtureTableState, Recording } from '@fothering/providers/port-types';
 import { MAX_IDENTITY_READS, SES_READ_SPACING_MS } from '@fothering/providers/ses-facts';
 import { assertRootMatrix } from '@fothering/providers/test/root-matrix';
 import {
@@ -19,6 +19,7 @@ import {
   buildTestActionRoot,
   closeRuntime,
   closeState,
+  closedWordViolations,
   decidingRuntime,
   incidentIdOf,
   moveMarker,
@@ -26,6 +27,7 @@ import {
   plantDecision,
   plantIncident,
   seedIncidents,
+  sendRecordAt,
   storedClosure,
   storedRecord,
   type TestActionRootInput,
@@ -657,6 +659,204 @@ describe('a pause that resolves dry-run claims nothing it did not do (D-120, AC-
     expect(lines).toEqual([PAUSE_LINE]);
     expect(sesState.calls.filter((call) => call.startsWith('get-issued') || call.startsWith('put-'))).toEqual([]);
     expect(sesState.calls.filter((call) => call === 'write:paused' || call === 'write:closed')).toEqual([]);
+  });
+});
+
+const T = ACT_MS;
+const HOLD_END_MS = T + HOLD_MS;
+const HOLD_CHECK_MS = HOLD_END_MS + HOLD_CHECK_DELAY_MS;
+const NEXT_BULK_INCIDENT_ID = incidentIdOf(BULK, LATER_MS);
+
+function countingFolds(deps: ActionDeps): { deps: ActionDeps; folds: { count: number } } {
+  const folds = { count: 0 };
+  const eventStore = deps.ports.eventStore;
+  const counted: EventStorePort = {
+    ...eventStore,
+    foldLane<S>(configurationSet: string, fromBucketMs: number, toBucketMs: number, nowMs: number, fold: LaneFold<S>): Promise<S> {
+      folds.count += 1;
+      return eventStore.foldLane(configurationSet, fromBucketMs, toBucketMs, nowMs, fold);
+    },
+  };
+  return { deps: { ...deps, ports: { ...deps.ports, eventStore: counted } }, folds };
+}
+
+interface PausedLane extends Scenario {
+  deps: ActionDeps;
+  sesState: FixtureSesState;
+}
+
+/** 03-01's tracer: the seeded bulk close paused at T, with the pause pointer naming it. */
+async function pausedAtT(script: (state: FixtureSesState) => void = () => {}): Promise<PausedLane> {
+  const scenario = await seeded();
+  const { deps, sesState } = scenario.root();
+  script(sesState);
+  await runActionCycle(deps);
+  return { ...scenario, deps, sesState };
+}
+
+function loggedEvents(lines: readonly string[], event: string): Record<string, unknown>[] {
+  return lines.map((line) => JSON.parse(line) as Record<string, unknown>).filter((entry) => entry.event === event);
+}
+
+// A second bulk incident detection opened after the first: the marker moves to it and its record is the
+// seeded one with only its id and window changed, so the gate passes it and a refusal comes from step 6.
+async function plantNextBulkIncident(deps: ActionDeps): Promise<void> {
+  const seededRecord = await storedRecord(deps, INCIDENT_ID, NOW_MS);
+  const window = spikeWindowFor(LATER_MS);
+  const record = buildEvidenceRecord({ ...recordInputOf(seededRecord), incidentId: NEXT_BULK_INCIDENT_ID, window });
+  const optionId = record.approvedOptions[0]?.optionId;
+  await moveMarker(deps, BULK, NEXT_BULK_INCIDENT_ID, NOW_MS);
+  await plantIncident(deps, { configurationSet: BULK, incidentId: NEXT_BULK_INCIDENT_ID, openingWindow: window, record, decision: { outcome: 'close', optionId, explanation: 'planted' }, nowMs: NOW_MS, omit: ['marker'] });
+}
+
+async function plantReopened(deps: ActionDeps, incidentId: string): Promise<void> {
+  const closure = await storedClosure(deps, incidentId, T);
+  if (closure === undefined) throw new Error('no closure is stored to reopen');
+  const reopen = { attempts: 1, claimedAtMs: T + 100_000, requestedAtMs: T + 101_000, readBackAtMs: T + 102_000, outcome: 'reopened' };
+  if ((await deps.ports.decisionStore.updateIfVersion(closureKey(incidentId), closure.version, { reopen }, T + 102_000)) !== 'updated') {
+    throw new Error('the closure moved while the test reopened it');
+  }
+}
+
+describe('a paused lane is called closed only after the hold check finds no send accepted after the hold (R2)', () => {
+  it('folds the stored Send records at the first run due and writes closed with sendsAfterHold 0 (tracer)', async () => {
+    const { deps } = await pausedAtT();
+
+    await runActionCycle(at(deps, HOLD_CHECK_MS));
+
+    const closure = await storedClosure(deps, INCIDENT_ID, HOLD_CHECK_MS);
+    expect(closure?.outcome).toBe('closed');
+    expect(closure).toMatchObject({ sendsAfterHold: 0, holdCheckedAtMs: HOLD_CHECK_MS, holdCheckedThroughMs: HOLD_CHECK_MS, holdEndMs: HOLD_END_MS });
+    expect(await deps.ports.decisionStore.getItem(incidentPauseKey(BULK), HOLD_CHECK_MS)).toMatchObject({ incidentId: INCIDENT_ID });
+  });
+
+  it('writes nothing one millisecond before the hold check is due and folds nothing (AC-5)', async () => {
+    const { deps } = await pausedAtT();
+    const counted = countingFolds(at(deps, HOLD_CHECK_MS - 1));
+
+    await runActionCycle(counted.deps);
+
+    expect((await storedClosure(deps, INCIDENT_ID, HOLD_CHECK_MS - 1))?.outcome).toBe('paused');
+    expect(counted.folds.count).toBe(0);
+  });
+
+  it('writes not-holding with the count when a Send record follows the hold end (AC-4)', async () => {
+    const { deps } = await pausedAtT();
+    await deps.ports.eventStore.putIfAbsent(sendRecordAt(BULK, HOLD_END_MS + 10_000, 'after-hold-1'));
+
+    await runActionCycle(at(deps, HOLD_CHECK_MS));
+
+    expect(await storedClosure(deps, INCIDENT_ID, HOLD_CHECK_MS)).toMatchObject({ outcome: 'not-holding', sendsAfterHold: 1, holdCheckedAtMs: HOLD_CHECK_MS });
+  });
+
+  it('counts a Send record whose mail timestamp is the hold end exactly (AC-E3)', async () => {
+    const { deps } = await pausedAtT();
+    await deps.ports.eventStore.putIfAbsent(sendRecordAt(BULK, HOLD_END_MS, 'at-hold-end'));
+
+    await runActionCycle(at(deps, HOLD_CHECK_MS));
+
+    expect(await storedClosure(deps, INCIDENT_ID, HOLD_CHECK_MS)).toMatchObject({ outcome: 'not-holding', sendsAfterHold: 1 });
+  });
+
+  it('writes closed with one fold when no Send record at all follows the pause (AC-E4, closure half)', async () => {
+    const { deps } = await pausedAtT();
+    const counted = countingFolds(at(deps, HOLD_CHECK_MS));
+
+    await runActionCycle(counted.deps);
+
+    expect(await storedClosure(deps, INCIDENT_ID, HOLD_CHECK_MS)).toMatchObject({ outcome: 'closed', sendsAfterHold: 0 });
+    expect(counted.folds.count).toBe(1);
+  });
+
+  it('decides on the mail timestamp alone, whatever order the Send records were stored in (AC-E5)', async () => {
+    const { root } = await seeded();
+    const { deps } = root();
+    for (const offset of [59_999, 50_000, 30_000]) await deps.ports.eventStore.putIfAbsent(sendRecordAt(BULK, T + offset, `before-hold-${offset}`));
+    await runActionCycle(deps);
+    await deps.ports.eventStore.putIfAbsent(sendRecordAt(BULK, T + 20_000, 'stored-late'));
+
+    await runActionCycle(at(deps, HOLD_CHECK_MS));
+
+    expect(await storedClosure(deps, INCIDENT_ID, HOLD_CHECK_MS)).toMatchObject({ outcome: 'closed', sendsAfterHold: 0 });
+  });
+
+  it('never hold-checks a paused closure the operator reopened, logging hold-check-skipped (D-94)', async () => {
+    const { deps, root } = await pausedAtT();
+    await plantReopened(deps, INCIDENT_ID);
+    const lines: string[] = [];
+    const counted = countingFolds(root({ now: () => HOLD_CHECK_MS, logSink: (line) => lines.push(line) }).deps);
+
+    await runActionCycle(counted.deps);
+
+    expect((await storedClosure(deps, INCIDENT_ID, HOLD_CHECK_MS))?.outcome).toBe('paused');
+    expect(counted.folds.count).toBe(0);
+    expect(loggedEvents(lines, 'hold-check-skipped')).toEqual([{ event: 'hold-check-skipped', level: 'info', incidentId: INCIDENT_ID }]);
+  });
+
+  it('says closed only as a hold-checked outcome across closures and log lines, and reports a closure written closed on the read-back (AC-6)', async () => {
+    const lines: string[] = [];
+    const closures: Closure[] = [];
+    for (const extraSend of [false, true]) {
+      const { store, deps, root } = await pausedAtT();
+      if (extraSend) await deps.ports.eventStore.putIfAbsent(sendRecordAt(BULK, HOLD_END_MS + 1, 'after-hold'));
+      await runActionCycle(root({ now: () => HOLD_CHECK_MS, logSink: (line) => lines.push(line) }).deps);
+      for (const item of store.items.values()) {
+        const closure = parseClosure(item);
+        if (closure !== undefined) closures.push(closure);
+      }
+    }
+
+    expect(closures.map((closure) => closure.outcome).sort()).toEqual(['closed', 'not-holding']);
+    expect(loggedEvents(lines, 'hold-check').map((entry) => entry.outcome).sort()).toEqual(['closed', 'not-holding']);
+    expect(closedWordViolations({ closures, logLines: lines })).toEqual([]);
+    const planted = { ...closureClaimItem({ incidentId: INCIDENT_ID, configurationSet: BULK, decisionOutcome: 'close', nowMs: T }), outcome: 'closed' as const, readBack: false, readBackAtMs: T };
+    expect(closedWordViolations({ closures: [planted], logLines: [] })).toHaveLength(1);
+  });
+});
+
+describe('one lane holds at most one pause Fothering may still own (D-95)', () => {
+  it('refuses lane-already-paused for a second incident on a lane whose pointer names a paused closure', async () => {
+    const { deps, sesState } = await pausedAtT();
+    await plantNextBulkIncident(deps);
+
+    await runActionCycle(at(deps, T + 120_000));
+
+    expect(await storedClosure(deps, NEXT_BULK_INCIDENT_ID, T + 120_000)).toMatchObject({ outcome: 'refused', reason: 'lane-already-paused' });
+    expect(putsOf(sesState)).toEqual(['put-issued:fothering-bulk:false']);
+    expect(await deps.ports.decisionStore.getItem(incidentPauseKey(BULK), T + 120_000)).toMatchObject({ incidentId: INCIDENT_ID });
+  });
+
+  it('moves the pointer by a versioned update and pauses once the closure it names failed to pause', async () => {
+    const { deps, sesState } = await pausedAtT((state) => state.putFaults.set(BULK, 'throw'));
+    expect((await storedClosure(deps, INCIDENT_ID, T))?.outcome).toBe('pause-failed');
+    sesState.putFaults.delete(BULK);
+    await plantNextBulkIncident(deps);
+
+    await runActionCycle(at(deps, T + 120_000));
+
+    expect((await storedClosure(deps, NEXT_BULK_INCIDENT_ID, T + 120_000))?.outcome).toBe('paused');
+    expect(await deps.ports.decisionStore.getItem(incidentPauseKey(BULK), T + 120_000)).toMatchObject({ incidentId: NEXT_BULK_INCIDENT_ID, version: 1 });
+  });
+
+  it('writes no pointer for an act whose pause resolved dry-run (D-120)', async () => {
+    const { root } = await seeded();
+    const { deps } = root();
+
+    await runActionCycle(withDryRunWrites(deps, []));
+
+    expect((await storedClosure(deps, INCIDENT_ID, T))?.outcome).toBe('dry-run');
+    expect(await deps.ports.decisionStore.getItem(incidentPauseKey(BULK), T)).toBeUndefined();
+  });
+
+  it('stores fothering-bulk as paused-by-fothering in the lane block of a later act on another lane (D-102)', async () => {
+    const { deps } = await pausedAtT();
+    const incidentId = await plantApprovingIncident(deps, TRANSACTIONAL);
+
+    await runActionCycle(at(deps, T + 120_000));
+
+    const closure = await storedClosure(deps, incidentId, T + 120_000);
+    expect(closure?.outcome).toBe('refused');
+    expect(laneOf(closure, BULK)?.state).toBe('paused-by-fothering');
   });
 });
 

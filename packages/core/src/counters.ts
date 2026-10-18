@@ -70,6 +70,32 @@ export async function recordUsage<Result>(store: UsageStore<Result>, input: Usag
   });
 }
 
+export interface LaneAttemptReservation {
+  key: RecordKey;
+  cap: number;
+  expiresAt: number;
+}
+
+/** Structural like CounterStore: the decision store port's reserveLaneAttempt satisfies it as it is. */
+export interface LaneAttemptStore<Result> {
+  reserveLaneAttempt(request: LaneAttemptReservation): Promise<Result>;
+}
+
+export interface LaneAttemptInput {
+  configurationSet: string;
+  nowMs: number;
+}
+
+export interface LaneAttemptAnswer<Result> {
+  outcome: Result;
+  /** The end of the UTC hour the attempt was counted in, which a cap refusal prints (D-98). */
+  hourEndsAtMs: number;
+}
+
+export async function reserveLaneAttempt<Result>(_store: LaneAttemptStore<Result>, _input: LaneAttemptInput): Promise<LaneAttemptAnswer<Result>> {
+  return { outcome: undefined as Result, hourEndsAtMs: 0 };
+}
+
 /** Every number the reservation carries is computed here, so no caller can pass a cap of its own. */
 export function reserveInvocation<Result>(store: CounterStore<Result>, input: ReserveInput): Promise<Result> {
   return store.reserveInvocation({

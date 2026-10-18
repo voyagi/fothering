@@ -276,3 +276,11 @@ export function counterDayKey(utcDate: string): RecordKey {
   if (!UTC_DATE.test(utcDate)) throw new RangeError('a counter day is a UTC date written YYYY-MM-DD');
   return { pk: `COUNTER_DAY#${utcDate}`, sk: 'COUNTER' };
 }
+
+export function incidentPauseKey(configurationSet: string): RecordKey {
+  return { pk: `INCIDENT_LANE#${configurationSet}`, sk: 'MARKER' };
+}
+
+export function counterLaneHourKey(configurationSet: string, utcHour: string): RecordKey {
+  return { pk: `COUNTER_LANE_HOUR#${configurationSet}#${utcHour}`, sk: 'COUNTER' };
+}

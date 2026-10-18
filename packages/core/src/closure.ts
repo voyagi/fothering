@@ -1,11 +1,13 @@
 import * as z from 'zod';
 import { AGENT_DECISIONS, GATE_REFUSALS, type AgentAnswer } from './agent-answer.js';
+import { bucketStartMs } from './buckets.js';
 import { ACTION_FUNCTION_TIMEOUT_MS, RECORD_MAX_AGE_MS } from './close-values.js';
 import { REFUSAL_REASONS, type RefusalReason } from './closeability.js';
 import { incidentItemKey, type EvidenceRecord } from './evidence-record.js';
 import type { IncidentMarker, IncidentState } from './incident.js';
 import { CONFIGURATION_SET_PATTERN } from './lanes.js';
 import { SES_ID_PATTERN, expiresAtFor, type RecordKey } from './records.js';
+import type { BucketWindow, LaneFold } from './window-fold.js';
 
 // The closed vocabularies of phase 3, written complete here so later plans fill them in and the
 // logger's sets change once. This module imports nothing from log.ts: the logger reads these.
@@ -188,6 +190,28 @@ export function claimStateOf(closure: Closure, nowMs: number): ClaimState {
   if (closure.outcome !== null) return 'finished';
   if (nowMs < closure.claimedAtMs + ACTION_FUNCTION_TIMEOUT_MS) return 'in-flight';
   return closure.pauseRequestedAtMs === null ? 'reclaimable' : 'put-may-have-taken';
+}
+
+export const PAUSE_MAY_HOLD_OUTCOMES = ['paused', 'closed', 'not-holding', 'pause-unknown'] as const satisfies readonly ClosureOutcome[];
+
+export function pauseMayHold(_closure: Closure | undefined, _nowMs: number): boolean {
+  return false;
+}
+
+export function holdCheckDue(_closure: Closure, _nowMs: number): boolean {
+  return false;
+}
+
+export interface HoldCheckWindow extends BucketWindow {
+  checkedThroughMs: number;
+}
+
+export function holdCheckWindow(holdEndMs: number, nowMs: number): HoldCheckWindow {
+  return { fromBucketMs: bucketStartMs(holdEndMs), toBucketMs: bucketStartMs(nowMs), checkedThroughMs: nowMs };
+}
+
+export function holdFold(_holdEndMs: number): LaneFold<number> {
+  return { initial: 0, step: (count) => count };
 }
 
 /** Another lane-map lane as the act read it: its marker not open, open with its STATE's opening window end, or unreadable. */

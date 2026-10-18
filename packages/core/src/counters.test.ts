@@ -1,10 +1,11 @@
-import { describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import fc from 'fast-check';
 import { createFixtureDecisionStore, createFixtureTableState } from '@fothering/providers/fixtures/ingest-ports';
 import type { FixtureTableState, UsageRecord } from '@fothering/providers/port-types';
+import { LANE_HOUR_ATTEMPT_CAP } from './close-values.js';
 import * as counters from './counters.js';
-import { recordUsage, reserveInvocation, type CounterReservation } from './counters.js';
-import { counterDayKey, incidentItemKey } from './evidence-record.js';
+import { recordUsage, reserveInvocation, reserveLaneAttempt, type CounterReservation, type LaneAttemptReservation } from './counters.js';
+import { counterDayKey, counterLaneHourKey, incidentItemKey } from './evidence-record.js';
 import { MODEL_VALUES, TOKEN_RESERVATION_PER_INVOCATION } from './model-values.js';
 import { RETENTION_SECONDS } from './records.js';
 import { propertySeed } from './test/property-seed.js';
@@ -36,12 +37,13 @@ async function reserveTimes(store: ReturnType<typeof createFixtureDecisionStore>
 }
 
 describe('the counter module only reserves and records (AC-22)', () => {
-  it('exports exactly reserveInvocation and recordUsage as its functions', () => {
+  // Widened by one in phase 3: reserveLaneAttempt is the only way a lane-hour counter moves (D-99).
+  it('exports exactly reserveInvocation, recordUsage and reserveLaneAttempt as its functions', () => {
     const functions = Object.entries(counters)
       .filter(([, value]) => typeof value === 'function')
       .map(([name]) => name)
       .sort();
-    expect(functions.join(',')).toBe('recordUsage,reserveInvocation');
+    expect(functions.join(',')).toBe('recordUsage,reserveInvocation,reserveLaneAttempt');
   });
 
   it('never lowers, resets or deletes a counter attribute over any sequence of reserve and record calls', async () => {
@@ -228,4 +230,82 @@ describe('reserveInvocation holds both caps at the day boundaries (D-67, D-76)',
     invocationsOnly.items.set(dayKey, { ...DAY, invocations: 6, tokenReservations: 0, expiresAt: 1 });
     expect(await reserveInvocation(storeOver(invocationsOnly).store, { incidentId: incidentIdOf(7), nowMs: NOW_MS })).toEqual({ ok: false, reason: 'cap', items: ['day'] });
   });
+});
+
+const BULK = 'fothering-bulk';
+const LAST_MS_OF_HOUR = Date.UTC(2026, 9, 11, 12, 59, 59, 999);
+const FIRST_MS_OF_NEXT_HOUR = Date.UTC(2026, 9, 11, 13, 0, 0, 0);
+
+function recordingLaneStore(answer: 'reserved' | 'cap' = 'reserved') {
+  const requests: LaneAttemptReservation[] = [];
+  return {
+    requests,
+    store: {
+      reserveLaneAttempt: async (request: LaneAttemptReservation) => {
+        requests.push(request);
+        return answer;
+      },
+    },
+  };
+}
+
+function registerLaneHourCases(): void {
+  it('counts 12:59:59.999 UTC in hour T12 and 13:00:00.000 UTC in hour T13, from the injected clock (AC-E12)', async () => {
+    const { requests, store } = recordingLaneStore();
+    const before = await reserveLaneAttempt(store, { configurationSet: BULK, nowMs: LAST_MS_OF_HOUR });
+    const after = await reserveLaneAttempt(store, { configurationSet: BULK, nowMs: FIRST_MS_OF_NEXT_HOUR });
+
+    expect(requests.map((request) => request.key)).toEqual([counterLaneHourKey(BULK, '2026-10-11T12'), counterLaneHourKey(BULK, '2026-10-11T13')]);
+    expect(requests[0]?.key.pk).toBe('COUNTER_LANE_HOUR#fothering-bulk#2026-10-11T12');
+    expect([before.hourEndsAtMs, after.hourEndsAtMs]).toEqual([FIRST_MS_OF_NEXT_HOUR, Date.UTC(2026, 9, 11, 14)]);
+  });
+
+  it('answers the hour end of NOW_MS as 13:00 UTC', async () => {
+    const { store } = recordingLaneStore();
+    expect((await reserveLaneAttempt(store, { configurationSet: BULK, nowMs: NOW_MS })).hourEndsAtMs).toBe(FIRST_MS_OF_NEXT_HOUR);
+  });
+}
+
+describe('reserveLaneAttempt computes every number of a lane-hour reservation itself (D-99)', () => {
+  it('asks for the lane-hour key, the cap and a 30-day expiry, and answers the store outcome with the hour end', async () => {
+    const { requests, store } = recordingLaneStore();
+    const answer = await reserveLaneAttempt(store, { configurationSet: BULK, nowMs: NOW_MS });
+
+    expect(requests).toEqual([
+      { key: { pk: 'COUNTER_LANE_HOUR#fothering-bulk#2026-10-11T12', sk: 'COUNTER' }, cap: LANE_HOUR_ATTEMPT_CAP, expiresAt: Math.floor(NOW_MS / 1000) + RETENTION_SECONDS },
+    ]);
+    expect(answer).toEqual({ outcome: 'reserved', hourEndsAtMs: FIRST_MS_OF_NEXT_HOUR });
+  });
+
+  it('passes a cap answer through unchanged', async () => {
+    const { store } = recordingLaneStore('cap');
+    expect((await reserveLaneAttempt(store, { configurationSet: BULK, nowMs: NOW_MS })).outcome).toBe('cap');
+  });
+
+  it.each(['2026-10-11T1', '2026-10-11 12'])('refuses the hour %j with a RangeError', (hour) => {
+    expect(() => counterLaneHourKey(BULK, hour)).toThrow(RangeError);
+  });
+
+  registerLaneHourCases();
+});
+
+// The same cases with the host clock moved off UTC (T-03-13): the hour comes from the epoch
+// milliseconds through toISOString, so the keys are identical. Stryker's worker threads cannot move
+// the timezone (buckets.property.test.ts), so this runs only outside the mutation run.
+describe.skipIf(process.env.STRYKER_MUTATOR_WORKER !== undefined)('the lane-hour keys under Asia/Kolkata (R5 backstop)', () => {
+  let originalTz: string | undefined;
+
+  beforeAll(() => {
+    originalTz = process.env.TZ;
+    process.env.TZ = 'Asia/Kolkata';
+    // Positive control: the worker really moved before any case below is trusted (UTC+5:30, no DST).
+    expect(new Date(0).getTimezoneOffset()).toBe(-330);
+  });
+
+  afterAll(() => {
+    if (originalTz === undefined) delete process.env.TZ;
+    else process.env.TZ = originalTz;
+  });
+
+  registerLaneHourCases();
 });

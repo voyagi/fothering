@@ -6,7 +6,8 @@ import { markerOf, openIncident, stateOf, storedStateOf, type IncidentStatus } f
 import { parseLaneMap, type LaneMap } from '@fothering/core/lanes';
 import type { LogSink } from '@fothering/core/log';
 import { PINNED_MODEL_VALUES } from '@fothering/core/model-values';
-import { expiresAtFor } from '@fothering/core/records';
+import { HOLD_CHECK_DELAY_MS } from '@fothering/core/close-values';
+import { expiresAtFor, recordKey, type EventRecord } from '@fothering/core/records';
 import { scenarioRecords, type LaneScenario } from '@fothering/core/test/event-arbitraries';
 import type { BucketWindow } from '@fothering/core/window-fold';
 import { TEST_ADDRESS_KEY_SET } from '@fothering/providers/fixtures/ingest-ports';
@@ -219,6 +220,54 @@ export async function closeState(deps: ActionDeps, incidentId: string, nowMs: nu
   if (state === undefined) throw new Error(`no STATE is stored for incident ${incidentId}`);
   const result = await store.updateIfVersion(key, state.version, { state: storedStateOf({ ...state, status: 'closed' }) }, nowMs);
   if (result !== 'updated') throw new Error(`the STATE of ${incidentId} moved while the test closed it`);
+}
+
+/** One minimal Send record, stored in the bucket its mail timestamp falls in, as ingest stores one (D-08). */
+export function sendRecordAt(configurationSet: string, mailTimestampMs: number, identity: string): EventRecord {
+  const bucket = bucketStartMs(mailTimestampMs);
+  return {
+    ...recordKey({ configurationSet, bucketStartMs: bucket, eventType: 'Send', identity }),
+    kind: 'send',
+    eventType: 'Send',
+    configurationSet,
+    bucketStartMs: bucket,
+    mailTimestampMs,
+    envelopeTimeMs: mailTimestampMs,
+    arrivalTimeMs: mailTimestampMs,
+    messageId: identity,
+    provenance: 'generated',
+    expiresAt: expiresAtFor(mailTimestampMs),
+    fields: {},
+  };
+}
+
+const CLOSED_WORD = /\bclosed\b/gi;
+const CLOSED_OUTCOME_VALUE = '"outcome":"closed"';
+
+function occurrences(text: string, pattern: RegExp | string): number {
+  return typeof pattern === 'string' ? text.split(pattern).length - 1 : (text.match(pattern) ?? []).length;
+}
+
+function holdCheckBacksClosed(closure: Closure): boolean {
+  const { outcome, holdEndMs, holdCheckedAtMs, sendsAfterHold } = closure;
+  return outcome === 'closed' && holdEndMs !== null && holdCheckedAtMs !== null && holdCheckedAtMs >= holdEndMs + HOLD_CHECK_DELAY_MS && sendsAfterHold === 0;
+}
+
+/**
+ * AC-6: the word closed may appear only as the outcome of a closure a passed hold check backs, or as a
+ * log line's outcome value. Each closure or line holding it anywhere else is returned as a violation.
+ */
+export function closedWordViolations(input: { closures: readonly Closure[]; logLines: readonly string[] }): string[] {
+  const violations: string[] = [];
+  for (const closure of input.closures) {
+    const text = JSON.stringify(closure);
+    const allowed = holdCheckBacksClosed(closure) ? 1 : 0;
+    if (occurrences(text, CLOSED_WORD) > allowed) violations.push(`closure ${closure.incidentId} says closed without a passed hold check`);
+  }
+  for (const line of input.logLines) {
+    if (occurrences(line, CLOSED_WORD) > occurrences(line, CLOSED_OUTCOME_VALUE)) violations.push(`log line says closed outside an outcome value: ${line}`);
+  }
+  return violations;
 }
 
 export async function storedRecord(deps: ActionDeps, incidentId: string, nowMs: number): Promise<EvidenceRecord> {

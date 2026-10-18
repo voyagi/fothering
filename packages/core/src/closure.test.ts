@@ -11,12 +11,17 @@ import {
 import {
   CLOSURE_LOG_OUTCOMES,
   CLOSURE_LOG_REASONS,
+  PAUSE_MAY_HOLD_OUTCOMES,
   actionCloseabilityRefusal,
   claimStateOf,
   closureClaimItem,
   closureItemSchema,
   freshnessRefusal,
+  holdCheckDue,
+  holdCheckWindow,
+  holdFold,
   parseClosure,
+  pauseMayHold,
   pauseOutcomeOf,
   type Closure,
   type FreshnessInput,
@@ -25,7 +30,8 @@ import {
 import { BUCKET_MS } from './buckets.js';
 import { openIncident, type IncidentMarker, type IncidentState } from './incident.js';
 import { createLogger } from './log.js';
-import { spikeWindowFor } from './window-fold.js';
+import type { EventRecord } from './records.js';
+import { MAX_WINDOW_BUCKETS, spikeWindowFor } from './window-fold.js';
 
 const INCIDENT_ID = '0123456789abcdef0123456789abcdef';
 const CLAIMED_AT_MS = Date.UTC(2026, 9, 11, 12, 3, 0);
@@ -237,5 +243,129 @@ describe('actionCloseabilityRefusal checks the record before the configuration r
 
   it('passes a closeable record whose target lane holds no code', () => {
     expect(actionCloseabilityRefusal('closeable', { configurationRefusals: [] })).toBeUndefined();
+  });
+});
+
+const HOLD_END_MS = CLAIMED_AT_MS + 2_000 + HOLD_MS;
+
+function pausedClosure(overrides: Partial<Closure> = {}): Closure {
+  return { ...claim(), outcome: 'paused', pauseRequestedAtMs: HOLD_END_MS - HOLD_MS, readBack: false, readBackAtMs: CLAIMED_AT_MS + 4_000, holdEndMs: HOLD_END_MS, ...overrides };
+}
+
+const REOPENED = { attempts: 1, claimedAtMs: HOLD_END_MS, requestedAtMs: HOLD_END_MS + 1_000, readBackAtMs: HOLD_END_MS + 2_000, outcome: 'reopened' } as const;
+
+describe('holdCheckDue waits HOLD_CHECK_DELAY_MS past the hold end and skips a reopened pause (R2, D-94)', () => {
+  it('is false one millisecond before the delay has passed and true at it (AC-5)', () => {
+    expect(holdCheckDue(pausedClosure(), HOLD_END_MS + HOLD_CHECK_DELAY_MS - 1)).toBe(false);
+    expect(holdCheckDue(pausedClosure(), HOLD_END_MS + HOLD_CHECK_DELAY_MS)).toBe(true);
+  });
+
+  it.each(['closed', 'not-holding', 'pause-unknown', 'pause-failed', 'refused', 'dry-run'] as const)('is false for a closure whose outcome is %s', (outcome) => {
+    expect(holdCheckDue(pausedClosure({ outcome }), HOLD_END_MS + HOLD_CHECK_DELAY_MS)).toBe(false);
+  });
+
+  it('is false for a paused closure the operator reopened', () => {
+    expect(holdCheckDue(pausedClosure({ reopen: REOPENED }), HOLD_END_MS + HOLD_CHECK_DELAY_MS)).toBe(false);
+  });
+});
+
+describe('holdCheckWindow reads from the hold end to now, at most MAX_WINDOW_BUCKETS buckets (D-100)', () => {
+  const fromBucketMs = Math.floor(HOLD_END_MS / BUCKET_MS) * BUCKET_MS;
+
+  it('reads every bucket of a gap of MAX_WINDOW_BUCKETS buckets, checked through now', () => {
+    const nowMs = fromBucketMs + (MAX_WINDOW_BUCKETS - 1) * BUCKET_MS + 7;
+    expect(holdCheckWindow(HOLD_END_MS, nowMs)).toEqual({ fromBucketMs, toBucketMs: nowMs - 7, checkedThroughMs: nowMs });
+  });
+
+  it('clamps a gap one bucket longer and is checked through the last millisecond of the last bucket read', () => {
+    const lastReadMs = fromBucketMs + (MAX_WINDOW_BUCKETS - 1) * BUCKET_MS;
+    const window = holdCheckWindow(HOLD_END_MS, lastReadMs + BUCKET_MS + 7);
+    expect(window).toEqual({ fromBucketMs, toBucketMs: lastReadMs, checkedThroughMs: lastReadMs + BUCKET_MS - 1 });
+    expect((window.toBucketMs - window.fromBucketMs) / BUCKET_MS + 1).toBe(MAX_WINDOW_BUCKETS);
+  });
+});
+
+function eventAt(eventType: 'Send' | 'Delivery', mailTimestampMs: number): EventRecord {
+  const bucketStartMs = Math.floor(mailTimestampMs / BUCKET_MS) * BUCKET_MS;
+  return {
+    pk: 'LANE#fothering-bulk',
+    sk: `B#${String(bucketStartMs).padStart(13, '0')}#${eventType}#m-${mailTimestampMs}`,
+    kind: eventType === 'Send' ? 'send' : 'outcome',
+    eventType,
+    configurationSet: 'fothering-bulk',
+    bucketStartMs,
+    mailTimestampMs,
+    envelopeTimeMs: mailTimestampMs,
+    arrivalTimeMs: mailTimestampMs,
+    messageId: `m-${mailTimestampMs}`,
+    provenance: 'generated',
+    expiresAt: 0,
+    fields: {},
+  };
+}
+
+function folded(records: readonly EventRecord[], pages = 1): number {
+  const fold = holdFold(HOLD_END_MS);
+  let state = fold.initial;
+  const size = Math.ceil(records.length / pages);
+  for (let start = 0; start < records.length; start += size) state = fold.step(state, records.slice(start, start + size));
+  return state;
+}
+
+describe('holdFold counts Send records accepted at or after the hold end (R2, Pitfall 5)', () => {
+  it('counts a Send record at the hold end exactly (AC-E3) and not one a millisecond before', () => {
+    expect(folded([eventAt('Send', HOLD_END_MS)])).toBe(1);
+    expect(folded([eventAt('Send', HOLD_END_MS - 1)])).toBe(0);
+  });
+
+  it('never counts a Delivery record, whatever its time', () => {
+    expect(folded([eventAt('Delivery', HOLD_END_MS), eventAt('Delivery', HOLD_END_MS + 60_000)])).toBe(0);
+  });
+
+  it('adds across pages', () => {
+    const records = [eventAt('Send', HOLD_END_MS + 1), eventAt('Send', HOLD_END_MS - 5), eventAt('Send', HOLD_END_MS + 9), eventAt('Send', HOLD_END_MS + 30)];
+    expect(folded(records, 2)).toBe(3);
+  });
+});
+
+describe('pauseMayHold says whether a closure a pause pointer names may still hold its lane (D-95)', () => {
+  const nowMs = CLAIMED_AT_MS + 1_000;
+  const staleMs = CLAIMED_AT_MS + ACTION_FUNCTION_TIMEOUT_MS;
+
+  it.each([
+    ['paused', true],
+    ['closed', true],
+    ['not-holding', true],
+    ['pause-unknown', true],
+    ['pause-failed', false],
+    ['refused', false],
+    ['dry-run', false],
+  ] as const)('reads %s as %s', (outcome, holds) => {
+    expect(pauseMayHold(pausedClosure({ outcome }), nowMs)).toBe(holds);
+  });
+
+  it.each(['paused', 'closed', 'not-holding', 'pause-unknown'] as const)('reads a reopened %s closure as not holding', (outcome) => {
+    expect(pauseMayHold(pausedClosure({ outcome, reopen: REOPENED }), nowMs)).toBe(false);
+  });
+
+  it('keeps holding when the reopen did not end reopened', () => {
+    expect(pauseMayHold(pausedClosure({ reopen: { ...REOPENED, outcome: 'reopen-failed' } }), nowMs)).toBe(true);
+  });
+
+  it('reads a claim in flight, and a stale claim whose pause was requested, as holding', () => {
+    expect(pauseMayHold(claim(), nowMs)).toBe(true);
+    expect(pauseMayHold({ ...claim(), pauseRequestedAtMs: CLAIMED_AT_MS + 2_000 }, staleMs)).toBe(true);
+  });
+
+  it('reads a stale claim with no pause requested as not holding', () => {
+    expect(pauseMayHold(claim(), staleMs)).toBe(false);
+  });
+
+  it('reads a missing or unreadable closure as holding, failing closed', () => {
+    expect(pauseMayHold(undefined, nowMs)).toBe(true);
+  });
+
+  it('lists exactly the outcomes whose pause may hold', () => {
+    expect([...PAUSE_MAY_HOLD_OUTCOMES]).toEqual(['paused', 'closed', 'not-holding', 'pause-unknown']);
   });
 });
