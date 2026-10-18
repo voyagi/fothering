@@ -1332,10 +1332,13 @@ describe('replayLayoutVerdict (AC-6, UI-SPEC 6 and 10.3)', () => {
     const logRows = [{ header: '14:01:07', baselines: [1498, 1500.5, 1500.5, 1500.5] }];
     expect(layoutReason({ ...healthyLayout(1280), logRows })).toBe(E2E_MESSAGES.layoutBaseline(1280, '14:01:07', [1498, 1500.5, 1500.5, 1500.5]));
     expect(replayLayoutVerdict({ ...healthyLayout(320), logRows })).toEqual({ ok: true });
+    expect(replayLayoutVerdict({ ...healthyLayout(960), logRows })).toEqual({ ok: true });
+    expect(layoutReason({ ...healthyLayout(961), logRows })).toBe(E2E_MESSAGES.layoutBaseline(961, '14:01:07', [1498, 1500.5, 1500.5, 1500.5]));
   });
 
-  it('fails a table log the run never measured', () => {
+  it('fails a table log the run never measured, and passes a stacked log with none', () => {
     expect(layoutReason({ ...healthyLayout(1024), logRows: [] })).toBe(E2E_MESSAGES.layoutLogMissing(1024));
+    expect(replayLayoutVerdict({ ...healthyLayout(960), logRows: [] })).toEqual({ ok: true });
   });
 
   it('fails an identifier that computes a weight other than 500, and a run that measured none', () => {

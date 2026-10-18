@@ -609,9 +609,9 @@ export function noScriptVerdict(reading: NoScriptReading): Verdict {
   return verdictOf(reasons);
 }
 
-// The replay's layout where its two arrangements meet: the board stacks above the story at 960 px and
-// below, sits beside it from 961 px up (where the story column is narrowest), and the log stacks at
-// 620 px and below.
+// The replay's layout where its arrangements meet: the board stacks above the story at 960 px and
+// below and sits beside it from 961 px up (where the story column is narrowest); the log, whose lane
+// and tag values never break, stacks at 960 px and below too.
 export const REPLAY_LAYOUT_WIDTHS = Object.freeze([320, 620, 960, 961, 1024, 1280, 1440]);
 
 export interface ReplayLayoutStep {
@@ -637,7 +637,7 @@ export interface ReplayLayoutReading {
 }
 
 const STACKED_BOARD_WIDTH = 960;
-const STACKED_LOG_WIDTH = 620;
+const STACKED_LOG_WIDTH = 960;
 const IDENTIFIER_WEIGHT = '500';
 const spread = (values: readonly number[]): number => Math.max(...values) - Math.min(...values);
 

@@ -401,13 +401,14 @@ ol.steps { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); marg
 .state-mark-shut rect { fill: var(--lock); stroke: var(--lock); }
 .state-mark-shut rect.bar { fill: var(--sheet); stroke: none; }
 
-/* Beside the board the story column can be narrower than four columns of evidence and an unbroken
-   tag value. There each row's dimension spans its row as a heading over its three readings, so no
-   identifier breaks and nothing leaves the panel; the rows sit in one anonymous table cell, which
-   keeps the caption below the outline. The Dimension header stays for screen readers only. */
+/* Beside the board, and on a narrow screen, the story column can be narrower than four columns of
+   evidence and an unbroken tag value. There each row's dimension spans its row as a heading over its
+   three readings, so no identifier breaks and nothing leaves the panel; the rows sit in one
+   anonymous table cell, which keeps the caption below the outline. The Dimension header stays for
+   screen readers only. */
 .panel { container-type: inline-size; }
 @container (width < 460px) {
-  .schedule.compact tr { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .schedule.compact tr { display: grid; grid-template-columns: repeat(3, minmax(min-content, 1fr)); }
   .schedule.compact tbody th { grid-column: 1 / -1; }
   .schedule.compact tr > :nth-child(2) { border-left: 0; }
   .schedule.compact tbody tr:first-child > th { border-top: 0; }
@@ -428,16 +429,8 @@ ol.steps { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); marg
   .board { position: static; border-right: 0; border-bottom: var(--w-rule) solid var(--rule); }
   :root.js:not([data-step="3"]) .tag-slot { display: block; visibility: hidden; }
   :root.js:not([data-step="3"]) .tag-phantom { display: block; visibility: visible; }
-}
-@media (max-width: 620px) {
-  /* The sticky controls cover the top of the viewport, so focus scrolled into view lands below them. */
-  :root:has(.controls) { scroll-padding-top: 120px; }
-  ol.steps { grid-template-columns: repeat(2, minmax(0, 1fr)); row-gap: var(--space-xs); }
-  .controls { position: sticky; top: 0; z-index: 2; margin: -12px 0 0; padding: var(--space-12) 0; background: var(--sheet); border-bottom: var(--w-rule) solid var(--rule); }
-  .controls .button { flex: 1 1 40%; justify-content: center; }
-  .controls .clock { width: 100%; margin-left: 0; }
-  ol.summary { grid-template-columns: minmax(0, 1fr); }
-  .summary li + li { padding-left: 0; border-left: 0; }
+  /* A stacking schedule holds identifiers in several columns (the log's lane and its tag values),
+     which never break, so it becomes one block per row from 960px rather than scroll sideways. */
   table.schedule.stack, .schedule.stack thead, .schedule.stack tbody, .schedule.stack tr, .schedule.stack th, .schedule.stack td { display: block; width: auto; }
   .schedule.stack thead { display: none; }
   .schedule.stack caption { display: block; padding: 10px 14px; }
@@ -448,5 +441,15 @@ ol.steps { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); marg
   .schedule.stack td::before { content: attr(data-col); display: block; font: 600 var(--text-label-small)/1.4 var(--font-mono); letter-spacing: 0.06em; text-transform: uppercase; color: var(--label); }
   /* A log detail is a long value, not an identifier, so it may break as the last resort. */
   .schedule.stack td { overflow-wrap: anywhere; }
+}
+@media (max-width: 620px) {
+  /* The sticky controls cover the top of the viewport, so focus scrolled into view lands below them. */
+  :root:has(.controls) { scroll-padding-top: 120px; }
+  ol.steps { grid-template-columns: repeat(2, minmax(0, 1fr)); row-gap: var(--space-xs); }
+  .controls { position: sticky; top: 0; z-index: 2; margin: -12px 0 0; padding: var(--space-12) 0; background: var(--sheet); border-bottom: var(--w-rule) solid var(--rule); }
+  .controls .button { flex: 1 1 40%; justify-content: center; }
+  .controls .clock { width: 100%; margin-left: 0; }
+  ol.summary { grid-template-columns: minmax(0, 1fr); }
+  .summary li + li { padding-left: 0; border-left: 0; }
   .message dl, .message-body { padding-inline: var(--space-md); }
 }

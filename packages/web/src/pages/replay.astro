@@ -37,13 +37,17 @@ const evidenceRows = view.schedule.rows.map((row) => ({
 
 // A row shows from the step that reaches it to the last, and carries its own step for the tint.
 const fromStep = (step: number): string => Array.from({ length: STEP_COUNT - step + 1 }, (_, index) => String(step + index)).join(' ');
+// The lane is a configuration set name and a detail's key=value is a message tag: both are
+// identifiers, so they render through the Identifier component and never break mid-name.
+const TAG_VALUE = /([A-Za-z_][\w-]*=[\w.-]*\w)/g;
+const markTagValues = (text: string): string => text.replace(TAG_VALUE, '`$1`');
 const logRows = view.eventLog.rows.map((row) => ({
   header: row.time,
   attrs: { 'data-steps': fromStep(row.step), 'data-log-step': String(row.step) },
   cells: [
     { text: row.kind },
-    { text: row.lane },
-    { text: [row.detail, row.smtpCode === '' ? '' : `\`${row.smtpCode}\``, row.receivingDomain].filter((part) => part !== '').join(', ') },
+    { text: `\`${row.lane}\`` },
+    { text: [markTagValues(row.detail), row.smtpCode === '' ? '' : `\`${row.smtpCode}\``, row.receivingDomain].filter((part) => part !== '').join(', ') },
   ],
 }));
 ---
@@ -124,7 +128,6 @@ const logRows = view.eventLog.rows.map((row) => ({
             <h2 id="step-2-title">{two?.heading}</h2>
             <Schedule
               compact
-              stack
               columns={['Dimension', 'Count', 'Verdict', 'Threshold']}
               rows={evidenceRows}
               caption={view.schedule.caption}

@@ -31,8 +31,9 @@ interface Props {
   caption?: string;
   captionAttrs?: Record<string, string>;
   variant?: 'schedule' | 'ruled';
+  // The replay's evidence; where its panel is narrow each row's header spans the row.
   compact?: boolean;
-  // One block per row at 620px and below, each cell under its column name.
+  // One block per row at 960px and below, each cell under its column name.
   stack?: boolean;
 }
 
@@ -40,9 +41,10 @@ const { columns, rows, narrowHidden = [], monoColumns = [], caption, captionAttr
 const classes = (column: number): string | undefined =>
   [narrowHidden.includes(column) ? 'hide-narrow' : '', monoColumns.includes(column) ? 'mono' : ''].filter((name) => name !== '').join(' ') || undefined;
 const tableClass = [variant, compact ? 'compact' : '', stack ? 'stack' : ''].filter((name) => name !== '').join(' ');
-// display: block drops table semantics in some engines, so a stacking table states its roles.
+// display: block or grid drops table semantics in some engines, so a table that stacks or whose rows
+// become grids states its roles.
 type TableRole = 'table' | 'rowgroup' | 'row' | 'columnheader' | 'rowheader' | 'cell';
-const role = (name: TableRole): TableRole | undefined => (stack ? name : undefined);
+const role = (name: TableRole): TableRole | undefined => (stack || compact ? name : undefined);
 const spans = (text: string): string[] => text.split('`');
 ---
 <table class={tableClass} role={role('table')}>
