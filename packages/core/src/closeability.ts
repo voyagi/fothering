@@ -24,17 +24,19 @@ export const REFUSAL_REASONS = [
 ] as const;
 export type RefusalReason = (typeof REFUSAL_REASONS)[number];
 
-export const LANE_MAP_REFUSALS: readonly RefusalReason[] = [];
-export const SES_CONFIGURATION_REFUSALS: readonly RefusalReason[] = [];
-export type ConfigurationRefusal = RefusalReason;
-
-export function isStaticallyCloseable(_lane: LaneEntry): boolean {
-  return false;
-}
-
-export function configurationRefusals(_configurationSet: string, _options: { laneMap: LaneMap; ses: SesConfigurationFacts | undefined }): ConfigurationRefusal[] {
-  return [];
-}
+// D-102: the configuration half of the table, split in two. The lane-map half reads the lane entry
+// alone, so IAM at synth and the action at run time judge it the same way (D-104); the SES half reads
+// the configuration facts, which an operator can change between detection and action.
+export const LANE_MAP_REFUSALS = ['multiple-declared-streams', 'operator-alert', 'transactional'] as const satisfies readonly RefusalReason[];
+export const SES_CONFIGURATION_REFUSALS = [
+  'unlisted-configuration-set',
+  'default-configuration-set',
+  'destination-missing-event-types',
+] as const satisfies readonly RefusalReason[];
+type LaneMapRefusal = (typeof LANE_MAP_REFUSALS)[number];
+type SesConfigurationRefusal = (typeof SES_CONFIGURATION_REFUSALS)[number];
+export type ConfigurationRefusal = LaneMapRefusal | SesConfigurationRefusal;
+type ObservedRefusal = Exclude<RefusalReason, ConfigurationRefusal>;
 
 // Not exported: a value typed with this key can only come from a cast written in this module, so
 // checkCloseability is the one place a lane becomes closeable.
@@ -210,9 +212,9 @@ function sharesCallerWithAnotherSet(
 // Events from a set lanes.json does not list are dropped before storage, so caller-on-another-set
 // cannot see a caller that also sends through it. While SES holds such a set the check cannot tell
 // a lane's caller is its own, so it refuses instead of assuming the unlisted set is idle.
-function sesHoldsUnlistedSet(options: CheckCloseabilityOptions): boolean {
-  for (const configurationSet of options.ses.configurationSets) {
-    if (findLane(options.laneMap, configurationSet) === undefined) return true;
+function sesHoldsUnlistedSet(ses: SesConfigurationFacts, laneMap: LaneMap): boolean {
+  for (const configurationSet of ses.configurationSets) {
+    if (findLane(laneMap, configurationSet) === undefined) return true;
   }
   return false;
 }
@@ -228,21 +230,76 @@ function eventBridgePublishesEveryType(configurationSet: string, ses: SesConfigu
   return REQUIRED_EVENT_TYPES.every((type) => published.has(type));
 }
 
-function refusalReasons(lane: LaneEntry, own: ObservedLaneFacts, options: CheckCloseabilityOptions): RefusalReason[] {
-  const applies: Record<RefusalReason, boolean> = {
+function laneMapRefusals(lane: LaneEntry): Record<LaneMapRefusal, boolean> {
+  return {
     'multiple-declared-streams': lane.declaredStreams.length > 1,
+    'operator-alert': lane.operatorAlert,
+    transactional: lane.criticality === 'transactional',
+  };
+}
+
+function sesConfigurationRefusals(lane: LaneEntry, ses: SesConfigurationFacts, laneMap: LaneMap): Record<SesConfigurationRefusal, boolean> {
+  return {
+    'unlisted-configuration-set': sesHoldsUnlistedSet(ses, laneMap),
+    'default-configuration-set': ses.defaultConfigurationSets.has(lane.configurationSet),
+    'destination-missing-event-types': !eventBridgePublishesEveryType(lane.configurationSet, ses),
+  };
+}
+
+function observedRefusals(lane: LaneEntry, own: ObservedLaneFacts, observed: ReadonlyMap<string, ObservedLaneFacts>): Record<ObservedRefusal, boolean> {
+  return {
     'observed-second-stream': own.streamTagValues.size > 1,
     'observed-stream-undeclared': [...own.streamTagValues].some((stream) => !lane.declaredStreams.includes(stream)),
     'stream-tag-missing': own.recordsWithoutValidStream > 0,
     'caller-unknown': own.recordsWithoutCaller > 0,
-    'caller-on-another-set': sharesCallerWithAnotherSet(lane.configurationSet, options.observed, own),
-    'unlisted-configuration-set': sesHoldsUnlistedSet(options),
-    'default-configuration-set': options.ses.defaultConfigurationSets.has(lane.configurationSet),
-    'destination-missing-event-types': !eventBridgePublishesEveryType(lane.configurationSet, options.ses),
-    'operator-alert': lane.operatorAlert,
-    transactional: lane.criticality === 'transactional',
+    'caller-on-another-set': sharesCallerWithAnotherSet(lane.configurationSet, observed, own),
   };
-  return REFUSAL_REASONS.filter((reason) => applies[reason]);
+}
+
+function inRefusalOrder<T extends RefusalReason>(applies: Readonly<Partial<Record<T, boolean>>>): T[] {
+  return REFUSAL_REASONS.filter((reason): reason is T => applies[reason as T] === true);
+}
+
+function refusalReasons(lane: LaneEntry, own: ObservedLaneFacts, options: CheckCloseabilityOptions): RefusalReason[] {
+  return inRefusalOrder<RefusalReason>({
+    ...observedRefusals(lane, own, options.observed),
+    ...sesConfigurationRefusals(lane, options.ses, options.laneMap),
+    ...laneMapRefusals(lane),
+  });
+}
+
+/** D-104: what IAM may grant the pause on at synth, from the lane map alone (today fothering-bulk). */
+export function isStaticallyCloseable(lane: LaneEntry): boolean {
+  return inRefusalOrder(laneMapRefusals(lane)).length === 0;
+}
+
+function laneOrThrow(laneMap: LaneMap, configurationSet: string): LaneEntry {
+  const lane = findLane(laneMap, configurationSet);
+  if (lane === undefined) {
+    throw new RangeError(
+      `configuration set ${configurationSet} is not in the lane map, so its closeability cannot be judged; add it to lanes.json or ask about a listed set`,
+    );
+  }
+  return lane;
+}
+
+export interface ConfigurationRefusalsOptions {
+  laneMap: LaneMap;
+  /** undefined when the facts were not read, which leaves the lane-map refusals alone. */
+  ses: SesConfigurationFacts | undefined;
+}
+
+/**
+ * D-102 and CH-06: the refusals that need no observed event, in REFUSAL_REASONS order. It skips the
+ * NO DATA early return on purpose, so a quiet transactional lane still shows transactional; it never
+ * makes a lane closeable, which stays checkCloseability's alone.
+ */
+export function configurationRefusals(configurationSet: string, options: ConfigurationRefusalsOptions): ConfigurationRefusal[] {
+  const lane = laneOrThrow(options.laneMap, configurationSet);
+  return inRefusalOrder<ConfigurationRefusal>({
+    ...(options.ses === undefined ? {} : sesConfigurationRefusals(lane, options.ses, options.laneMap)),
+    ...laneMapRefusals(lane),
+  });
 }
 
 /**
@@ -251,12 +308,7 @@ function refusalReasons(lane: LaneEntry, own: ObservedLaneFacts, options: CheckC
  * overrides what the lane map declares, never the other way round.
  */
 export function checkCloseability(configurationSet: string, options: CheckCloseabilityOptions): CloseabilityResult {
-  const lane = findLane(options.laneMap, configurationSet);
-  if (lane === undefined) {
-    throw new RangeError(
-      `configuration set ${configurationSet} is not in the lane map, so its closeability cannot be judged; add it to lanes.json or ask about a listed set`,
-    );
-  }
+  const lane = laneOrThrow(options.laneMap, configurationSet);
 
   // Records in buckets still open count as data. A bucket completes only LATENESS_HORIZON_MS after
   // it ends, so requiring a complete one would keep every lane NO DATA that long after its first

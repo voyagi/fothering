@@ -403,11 +403,11 @@ describe('the statically closeable rule IAM and the action share (D-104)', () =>
     expect(LANE_MAP.lanes.filter((lane) => isStaticallyCloseable(lane)).map((lane) => lane.configurationSet)).toEqual([BULK]);
   });
 
-  it.each([
+  it.each<[string, Partial<LaneEntry>]>([
     ['two declared streams', { declaredStreams: ['newsletter', 'digest'] }],
     ['operatorAlert true', { operatorAlert: true }],
     ['a transactional criticality', { criticality: 'transactional' }],
-  ] as const)('refuses a bulk lane with %s', (_case, overrides) => {
+  ])('refuses a bulk lane with %s', (_case, overrides) => {
     const bulk = withBulkLane(overrides).lanes.find((lane) => lane.configurationSet === BULK);
     if (bulk === undefined) throw new Error('lanes.json holds no bulk lane');
     expect(isStaticallyCloseable(bulk)).toBe(false);

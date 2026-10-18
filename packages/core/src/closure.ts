@@ -227,10 +227,17 @@ export function freshnessRefusal(input: FreshnessInput): FreshnessRefusal | unde
 
 export type CloseabilityRefusal = Extract<ActionRefusal, 'record-not-closeable' | 'configuration-not-closeable'>;
 
+/**
+ * D-89 step 5 and D-102: observed-event refusals come from the record, which R3 bounds to one spike
+ * window, and configuration refusals from the facts read in this act. A target lane with no entry
+ * fails closed.
+ */
 export function actionCloseabilityRefusal(
-  _recordCloseability: EvidenceRecord['decision']['closeability']['state'],
-  _target: { configurationRefusals: readonly RefusalReason[] } | undefined,
+  recordCloseability: EvidenceRecord['decision']['closeability']['state'],
+  target: { configurationRefusals: readonly RefusalReason[] } | undefined,
 ): CloseabilityRefusal | undefined {
+  if (recordCloseability !== 'closeable') return 'record-not-closeable';
+  if (target === undefined || target.configurationRefusals.length > 0) return 'configuration-not-closeable';
   return undefined;
 }
 

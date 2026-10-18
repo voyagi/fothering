@@ -1,6 +1,8 @@
 import { actionGate } from '@fothering/core/agent-answer';
 import { HOLD_MS } from '@fothering/core/close-values';
+import { configurationRefusals, type SesConfigurationFacts } from '@fothering/core/closeability';
 import {
+  actionCloseabilityRefusal,
   claimStateOf,
   closureClaimItem,
   closureKey,
@@ -35,21 +37,34 @@ interface Act {
 
 type SesFactsState = NonNullable<Closure['sesFacts']>;
 
+interface RunFacts {
+  state: SesFactsState;
+  /** Present only when state is read. */
+  facts: SesConfigurationFacts | undefined;
+}
+
 interface Run {
   deps: ActionDeps;
   /** D-89 step 2: read at most once per run, by the first act whose claim succeeds, and shared. */
-  facts: () => Promise<SesFactsState>;
+  facts: () => Promise<RunFacts>;
+}
+
+/** What one act read before the gate (D-89), written with every outcome so the email renders it, never a fresh read. */
+interface Readings {
+  sesFacts: SesFactsState;
+  lanes: Closure['lanes'];
 }
 
 // A fact read that throws (throttling, a fault) is recorded as failed and never retried in the run:
 // readSesFacts throws rather than return partial facts, and no act may pause on facts it did not read.
 function newRun(deps: ActionDeps): Run {
-  let read: Promise<SesFactsState> | undefined;
-  const readOnce = async (): Promise<SesFactsState> => {
+  let read: Promise<RunFacts> | undefined;
+  const readOnce = async (): Promise<RunFacts> => {
     try {
-      return (await readSesFacts(deps.ports.ses, deps.laneMap, { wait: deps.wait })).ok ? 'read' : 'bound';
+      const result = await readSesFacts(deps.ports.ses, deps.laneMap, { wait: deps.wait });
+      return result.ok ? { state: 'read', facts: result.facts } : { state: 'bound', facts: undefined };
     } catch {
-      return 'failed';
+      return { state: 'failed', facts: undefined };
     }
   };
   return {
@@ -79,8 +94,8 @@ async function finish(run: Run, act: Act, outcome: ClosureOutcome, attributes: R
   return outcome;
 }
 
-async function refuse(run: Run, act: Act, reason: ActionRefusal, sesFacts: SesFactsState): Promise<ClosureOutcome | undefined> {
-  if (!(await updateClosure(run, act, { outcome: 'refused', reason, sesFacts }))) return undefined;
+async function refuse(run: Run, act: Act, reason: ActionRefusal, readings: Readings): Promise<ClosureOutcome | undefined> {
+  if (!(await updateClosure(run, act, { outcome: 'refused', reason, sesFacts: readings.sesFacts, lanes: readings.lanes }))) return undefined;
   run.deps.log.info({ event: 'closure-refused', incidentId: act.incidentId, reason });
   return 'refused';
 }
@@ -114,10 +129,10 @@ async function putPause(deps: ActionDeps, configurationSet: string): Promise<boo
 // D-89 steps 9 to 12. SES throttles every action but sending at one request a second per account, so
 // the put and the read-back each wait out the spacing after the fact reads (Pitfall 3). Whether SES can
 // read back a stale true right after an accepted put is UNVERIFIED; it maps to pause-failed either way.
-async function pause(run: Run, act: Act, configurationSet: string): Promise<ClosureOutcome | undefined> {
+async function pause(run: Run, act: Act, configurationSet: string, readings: Readings): Promise<ClosureOutcome | undefined> {
   const { deps } = run;
   const pauseRequestedAtMs = deps.now();
-  if (!(await updateClosure(run, act, { pauseRequestedAtMs, configurationSet, sesFacts: 'read' }))) return undefined;
+  if (!(await updateClosure(run, act, { pauseRequestedAtMs, configurationSet, sesFacts: 'read', lanes: readings.lanes }))) return undefined;
   deps.log.info({ event: 'pause-requested', incidentId: act.incidentId });
   await deps.wait(SES_READ_SPACING_MS);
   if (!(await putPause(deps, configurationSet))) return finish(run, act, 'pause-failed', { readBack: null, readBackAtMs: null });
@@ -133,9 +148,9 @@ async function pause(run: Run, act: Act, configurationSet: string): Promise<Clos
 
 // D-120: nothing reached SES, so no pause is requested and no read-back is claimed. This sits right
 // before the lane-hour reservation (step 7), so a dry run reserves nothing and moves no pause pointer.
-async function dryRunPause(run: Run, act: Act, configurationSet: string): Promise<ClosureOutcome | undefined> {
+async function dryRunPause(run: Run, act: Act, configurationSet: string, readings: Readings): Promise<ClosureOutcome | undefined> {
   await run.deps.ports.ses.pauseConfigurationSet(configurationSet);
-  return finish(run, act, 'dry-run', { configurationSet, sesFacts: 'read' });
+  return finish(run, act, 'dry-run', { configurationSet, sesFacts: 'read', lanes: readings.lanes });
 }
 
 type MarkerReading = { kind: 'absent' } | { kind: 'read'; marker: IncidentMarker } | { kind: 'unreadable' };
@@ -205,13 +220,28 @@ async function freshnessOf(deps: ActionDeps, context: FreshnessContext): Promise
   });
 }
 
+// D-102: lane states come from the markers this act read and the refusals from this run's facts; an
+// unreadable marker shows as no open incident. Unread facts leave the lane-map refusals alone.
+function laneBlock(deps: ActionDeps, markers: ReadonlyMap<string, MarkerReading>, facts: SesConfigurationFacts | undefined): Closure['lanes'] {
+  return deps.laneMap.lanes.map(({ configurationSet }) => {
+    const reading = markers.get(configurationSet);
+    return {
+      configurationSet,
+      state: reading?.kind === 'read' && reading.marker.status === 'open' ? 'incident-open' : 'no-open-incident',
+      configurationRefusals: configurationRefusals(configurationSet, { laneMap: deps.laneMap, ses: facts }),
+    };
+  });
+}
+
 // D-89, each step only if the one before it passed. Step 6 (the pause pointer check) goes between
-// freshness and the dry-run branch, steps 7 and 8 (the lane-hour reservation and the pointer write)
-// between the dry-run branch and the pause stage, and step 13 (the email) after the outcome.
+// closeability and the dry-run branch, steps 7 and 8 (the lane-hour reservation and the pointer write)
+// between the dry-run branch and the pause stage, and step 13 (the email) after the outcome. Every
+// refusal before step 7 takes no cap (AC-E18).
 async function actOn(run: Run, act: Act): Promise<ClosureOutcome | undefined> {
   const { deps } = run;
-  const sesFacts = await run.facts();
+  const facts = await run.facts();
   const markers = await readMarkers(deps);
+  const readings: Readings = { sesFacts: facts.state, lanes: laneBlock(deps, markers, facts.facts) };
   let accepted: EvidenceRecord | undefined;
   const gate = await actionGate({
     decision: { decision: act.decision.outcome, optionId: act.decision.optionId },
@@ -219,14 +249,16 @@ async function actOn(run: Run, act: Act): Promise<ClosureOutcome | undefined> {
     loadRecord: async (incidentId) => (accepted = await loadRecord(deps, incidentId)),
     laneMap: deps.laneMap,
   });
-  if (!gate.ok) return refuse(run, act, gate.refusal, sesFacts);
-  if (sesFacts !== 'read') return refuse(run, act, sesFacts === 'bound' ? 'ses-facts-bound' : 'ses-facts-unavailable', sesFacts);
+  if (!gate.ok) return refuse(run, act, gate.refusal, readings);
+  if (facts.state !== 'read') return refuse(run, act, facts.state === 'bound' ? 'ses-facts-bound' : 'ses-facts-unavailable', readings);
   const { configurationSet } = gate.intent;
   const record = evidenceRecordSchema.parse(accepted);
-  const stale = await freshnessOf(deps, { incidentId: act.incidentId, configurationSet, record, markers });
-  if (stale !== undefined) return refuse(run, act, stale, sesFacts);
-  if (deps.kinds.ses?.pauseConfigurationSet === 'dry-run') return dryRunPause(run, act, configurationSet);
-  return pause(run, act, configurationSet);
+  const refusal =
+    (await freshnessOf(deps, { incidentId: act.incidentId, configurationSet, record, markers })) ??
+    actionCloseabilityRefusal(record.decision.closeability.state, readings.lanes.find((lane) => lane.configurationSet === configurationSet));
+  if (refusal !== undefined) return refuse(run, act, refusal, readings);
+  if (deps.kinds.ses?.pauseConfigurationSet === 'dry-run') return dryRunPause(run, act, configurationSet, readings);
+  return pause(run, act, configurationSet, readings);
 }
 
 type WorkItem = { kind: 'act'; act: Act } | { kind: 'settled'; incidentId: string; outcome: ClosureOutcome };
