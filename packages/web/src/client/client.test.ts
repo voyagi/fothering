@@ -266,6 +266,26 @@ describe('initFlowSwitch (AC-43 and AC-E31 unit half, D-141)', () => {
     expect(labels(page)).toEqual(['Run flow']);
   });
 
+  it('a pageshow with persisted rereads the stored flow and relabels, one without it does not', () => {
+    const page = makePage({ buttons: 1, reduce: false });
+    initFlowSwitch(page.deps);
+    page.store.set('fothering-flow', 'stopped');
+    page.win.dispatch('pageshow', { persisted: false });
+    expect(labels(page)).toEqual(['Stop flow']);
+    page.win.dispatch('pageshow', { persisted: true });
+    expect(page.attrs.get('data-flow')).toBe('stopped');
+    expect(labels(page)).toEqual(['Run flow']);
+  });
+
+  it('a page restored from the back/forward cache labels a reduced-motion change it missed', () => {
+    const page = makePage({ buttons: 1, reduce: false });
+    initFlowSwitch(page.deps);
+    page.media.matches = true;
+    page.win.dispatch('pageshow', { persisted: true });
+    expect(page.attrs.has('data-flow')).toBe(false);
+    expect(labels(page)).toEqual(['Run flow']);
+  });
+
   it('waits for DOMContentLoaded while the document is still loading', () => {
     const page = makePage({ buttons: 1, reduce: true, readyState: 'loading' });
     initFlowSwitch(page.deps);
