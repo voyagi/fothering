@@ -1733,3 +1733,99 @@ describe('end to end on fixtures, a close and an unknown each end in one email (
     expect(everyKindIsFixture(run.deps)).toBe(true);
   });
 });
+
+// A store or event-store fault the live adapters rethrow, named as DynamoDB names a throttled request.
+function throttled(): Error {
+  return Object.assign(new Error('the fixture was scripted to fail this call'), { name: 'ThrottlingException' });
+}
+
+function getItemThrowsOnce(deps: ActionDeps, key: { pk: string; sk: string }, always = false): ActionDeps {
+  const store = deps.ports.decisionStore;
+  let thrown = false;
+  return withStore(deps, {
+    getItem: async (read, nowMs) => {
+      if ((always || !thrown) && read.pk === key.pk && read.sk === key.sk) {
+        thrown = true;
+        throw throttled();
+      }
+      return store.getItem(read, nowMs);
+    },
+  });
+}
+
+describe('one failing unit leaves the rest of the run going (WR-06)', () => {
+  it('pauses fothering-bulk when the first read of the fothering-transactional marker throws, and logs act-failed for that lane', async () => {
+    const { root } = await seeded();
+    const logLines: string[] = [];
+    const { deps, sesState } = root({ logSink: (line) => logLines.push(line) });
+
+    await runActionCycle(getItemThrowsOnce(deps, incidentLaneKey(TRANSACTIONAL)));
+
+    expect(putsOf(sesState)).toEqual(['put-issued:fothering-bulk:false']);
+    expect((await storedClosure(deps, INCIDENT_ID, ACT_MS))?.outcome).toBe('paused');
+    expect(loggedEvents(logLines, 'act-failed')).toEqual([{ event: 'act-failed', level: 'error', configurationSet: TRANSACTIONAL, errorName: 'ThrottlingException' }]);
+  });
+
+  it('still hold-checks the incident a marker reached when a pause pointer read throws, and logs pause-pointer-read-failed', async () => {
+    const lane = await pausedAtT();
+    const logLines: string[] = [];
+    const { deps } = lane.root({ sesState: lane.sesState, now: () => HOLD_CHECK_MS, logSink: (line) => logLines.push(line) });
+
+    await runActionCycle(getItemThrowsOnce(deps, incidentPauseKey(BULK), true));
+
+    expect((await storedClosure(deps, INCIDENT_ID, HOLD_CHECK_MS))?.outcome).toBe('closed');
+    expect(loggedEvents(logLines, 'pause-pointer-read-failed')).toEqual([
+      { event: 'pause-pointer-read-failed', level: 'error', configurationSet: BULK, errorName: 'ThrottlingException' },
+    ]);
+  });
+
+  it('logs hold-check-failed when the hold-check fold throws, keeps the closure paused and checks it on the next run', async () => {
+    const lane = await pausedAtT();
+    const logLines: string[] = [];
+    const { deps } = lane.root({ sesState: lane.sesState, now: () => HOLD_CHECK_MS, logSink: (line) => logLines.push(line) });
+    const failing: ActionDeps = {
+      ...deps,
+      ports: {
+        ...deps.ports,
+        eventStore: {
+          ...deps.ports.eventStore,
+          foldLane: async () => {
+            throw throttled();
+          },
+        },
+      },
+    };
+
+    await runActionCycle(failing);
+    expect(loggedEvents(logLines, 'hold-check-failed')).toEqual([{ event: 'hold-check-failed', level: 'error', incidentId: INCIDENT_ID, errorName: 'ThrottlingException' }]);
+    expect((await storedClosure(deps, INCIDENT_ID, HOLD_CHECK_MS))?.outcome).toBe('paused');
+
+    await runActionCycle(at(deps, HOLD_CHECK_MS + 60_000));
+    expect((await storedClosure(deps, INCIDENT_ID, HOLD_CHECK_MS))?.outcome).toBe('closed');
+  });
+
+  it('logs email-step-failed when the email claim write throws, and the next run sends the email', async () => {
+    const { store, sesState } = await closedLaneScripted([]);
+    const logLines: string[] = [];
+    const { deps } = buildTestActionRoot({ store, sesState, now: () => HOLD_CHECKED_AT_MS, operator: OPERATOR, logSink: (line) => logLines.push(line) });
+    const decisionStore = deps.ports.decisionStore;
+    let thrown = false;
+    const failing = withStore(deps, {
+      updateIfVersion: async (key, expectedVersion, attributes, nowMs, expected) => {
+        if (!thrown && Object.hasOwn(attributes, 'email')) {
+          thrown = true;
+          throw throttled();
+        }
+        return decisionStore.updateIfVersion(key, expectedVersion, attributes, nowMs, expected);
+      },
+    });
+
+    await runActionCycle(failing);
+    expect(sendsIssued(sesState)).toBe(0);
+    expect(loggedEvents(logLines, 'email-step-failed')).toEqual([{ event: 'email-step-failed', level: 'error', incidentId: INCIDENT_ID, errorName: 'ThrottlingException' }]);
+    expect((await storedClosure(deps, INCIDENT_ID, HOLD_CHECKED_AT_MS))?.outcome).toBe('closed');
+
+    await runActionCycle(at(deps, HOLD_CHECKED_AT_MS + 60_000));
+    expect(sendsIssued(sesState)).toBe(1);
+  });
+});

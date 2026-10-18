@@ -89,6 +89,15 @@ function newRun(deps: ActionDeps): Run {
   };
 }
 
+type UnitFailureEvent = 'act-failed' | 'pause-pointer-read-failed' | 'hold-check-failed' | 'email-step-failed';
+
+// One unit (a lane's act, a pointer read, a hold check, an email) that throws is logged and the run
+// goes on, as detection isolates each lane. A claim the unit left half done is the timeout's and the
+// takeover rules' to settle. Only the error's name reaches the log: a message can carry a request.
+function logUnitFailure(deps: ActionDeps, event: UnitFailureEvent, unit: { configurationSet: string } | { incidentId: string }, error: unknown): void {
+  deps.log.error({ event, ...unit, errorName: error instanceof Error ? error.name : 'UnknownError' });
+}
+
 async function updateClosure(run: Run, act: Pick<Act, 'incidentId' | 'version'>, attributes: Readonly<Record<string, unknown>>): Promise<boolean> {
   const { deps } = run;
   const result = await deps.ports.decisionStore.updateIfVersion(closureKey(act.incidentId), act.version, attributes, deps.now());
@@ -404,8 +413,12 @@ async function incidentsReached(run: Run, reached: ReadonlySet<string>): Promise
   const { deps } = run;
   const incidentIds = new Set(reached);
   for (const lane of deps.laneMap.lanes) {
-    const pointer = pausePointerOf(await deps.ports.decisionStore.getItem(incidentPauseKey(lane.configurationSet), deps.now()));
-    if (pointer !== undefined) incidentIds.add(pointer.incidentId);
+    try {
+      const pointer = pausePointerOf(await deps.ports.decisionStore.getItem(incidentPauseKey(lane.configurationSet), deps.now()));
+      if (pointer !== undefined) incidentIds.add(pointer.incidentId);
+    } catch (error) {
+      logUnitFailure(deps, 'pause-pointer-read-failed', { configurationSet: lane.configurationSet }, error);
+    }
   }
   return incidentIds;
 }
@@ -415,13 +428,17 @@ async function holdChecks(run: Run, incidentIds: ReadonlySet<string>): Promise<A
   const store = deps.ports.decisionStore;
   const acted: ActionRunSummary['acted'] = [];
   for (const incidentId of incidentIds) {
-    const closure = parseClosure(await store.getItem(closureKey(incidentId), deps.now()));
-    if (closure === undefined) continue;
-    if (holdCheckDue(closure, deps.now())) {
-      const outcome = await holdCheck(run, closure);
-      if (outcome !== undefined) acted.push({ incidentId, outcome });
-    } else if (holdCheckSkipped(closure, deps.now())) {
-      deps.log.info({ event: 'hold-check-skipped', incidentId });
+    try {
+      const closure = parseClosure(await store.getItem(closureKey(incidentId), deps.now()));
+      if (closure === undefined) continue;
+      if (holdCheckDue(closure, deps.now())) {
+        const outcome = await holdCheck(run, closure);
+        if (outcome !== undefined) acted.push({ incidentId, outcome });
+      } else if (holdCheckSkipped(closure, deps.now())) {
+        deps.log.info({ event: 'hold-check-skipped', incidentId });
+      }
+    } catch (error) {
+      logUnitFailure(deps, 'hold-check-failed', { incidentId }, error);
     }
   }
   return acted;
@@ -528,8 +545,12 @@ async function sendOperatorEmail(run: Run, closure: Closure): Promise<void> {
 async function operatorEmails(run: Run, incidentIds: ReadonlySet<string>): Promise<void> {
   const { deps } = run;
   for (const incidentId of incidentIds) {
-    const closure = parseClosure(await deps.ports.decisionStore.getItem(closureKey(incidentId), deps.now()));
-    if (closure !== undefined && emailKindOf(closure.outcome) !== undefined && emailAttemptDue(closure, deps.now())) await sendOperatorEmail(run, closure);
+    try {
+      const closure = parseClosure(await deps.ports.decisionStore.getItem(closureKey(incidentId), deps.now()));
+      if (closure !== undefined && emailKindOf(closure.outcome) !== undefined && emailAttemptDue(closure, deps.now())) await sendOperatorEmail(run, closure);
+    } catch (error) {
+      logUnitFailure(deps, 'email-step-failed', { incidentId }, error);
+    }
   }
 }
 
@@ -539,11 +560,15 @@ export async function runActionCycle(deps: ActionDeps): Promise<ActionRunSummary
   const acted: ActionRunSummary['acted'] = [];
   const reached = new Set<string>();
   for (const lane of deps.laneMap.lanes) {
-    const item = await workItem(run, lane.configurationSet, reached);
-    if (item === undefined) continue;
-    const outcome = await outcomeOf(run, item);
-    const incidentId = item.kind === 'act' ? item.act.incidentId : item.incidentId;
-    if (outcome !== undefined) acted.push({ incidentId, outcome });
+    try {
+      const item = await workItem(run, lane.configurationSet, reached);
+      if (item === undefined) continue;
+      const outcome = await outcomeOf(run, item);
+      const incidentId = item.kind === 'act' ? item.act.incidentId : item.incidentId;
+      if (outcome !== undefined) acted.push({ incidentId, outcome });
+    } catch (error) {
+      logUnitFailure(deps, 'act-failed', { configurationSet: lane.configurationSet }, error);
+    }
   }
   const incidentIds = await incidentsReached(run, reached);
   acted.push(...(await holdChecks(run, incidentIds)));
