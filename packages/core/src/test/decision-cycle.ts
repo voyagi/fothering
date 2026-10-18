@@ -1,13 +1,14 @@
-import { bucketStartMs } from '../buckets.js';
+import { bucketStartMs, isCountedRecord } from '../buckets.js';
 import { REQUIRED_EVENT_TYPES, checkCloseability, type SesConfigurationFacts } from '../closeability.js';
-import { assembleEvidenceRecord, decideCycle, type LaneAnalysis } from '../decision.js';
-import { incidentIdFor, type EvidenceRecord } from '../evidence-record.js';
+import { assembleEvidenceRecord, decideCycle, decideLane, laneTotalsOf, type LaneAnalysis } from '../decision.js';
+import { buildEvidenceRecord, incidentIdFor, type EvidenceRecord } from '../evidence-record.js';
 import { buildLaneConfigurationRows, buildProviderRows, buildTagRows, type DnsTxtOutcome, type IdentityAuthFacts } from '../evidence-rows.js';
-import { findLane, type LaneEntry, type LaneMap } from '../lanes.js';
+import { findLane, parseLaneMap, type LaneEntry, type LaneMap } from '../lanes.js';
 import { RETENTION_SECONDS, type EventRecord } from '../records.js';
-import { coverageVerdict, laneSpikeVerdict } from '../verdicts.js';
+import { LANE_SHARE_LABEL, coverageVerdict, laneSpikeVerdict, renderPercent } from '../verdicts.js';
 import { createWindowFold, spikeWindowFor, summarizeWindow } from '../window-fold.js';
 import { TEST_KEY_SET, scenarioRecords, type ScenarioGroup } from './event-arbitraries.js';
+import lanesJson from '../../../../lanes.json' with { type: 'json' };
 
 export const CYCLE_NOW_MS = Date.UTC(2026, 9, 11, 12, 2, 0);
 
@@ -104,5 +105,58 @@ export function recordFor(laneMap: LaneMap, story: CycleStory, configurationSet:
     decision,
     analyses,
     expiresAt: CYCLE_EXPIRES_AT,
+  });
+}
+
+/**
+ * A real evidence record, built by the core path detection runs: one bad import batch on
+ * fothering-bulk with one approved option. The agent's local runtime test sends it as the request
+ * body, and packages/agent/fixtures/trial-record.json is this record as text (D-119).
+ */
+export function fixtureEvidenceRecord(): EvidenceRecord {
+  const lanes = parseLaneMap(lanesJson);
+  const bulk = 'fothering-bulk';
+  const nowMs = Date.UTC(2026, 9, 11, 12, 2, 0);
+  const records = scenarioRecords(
+    {
+      configurationSet: bulk,
+      streamTag: 'newsletter',
+      callerIdentity: 'bulk-sender',
+      fromDomain: 'news.example.com',
+      groups: [
+        { bucketOffset: 0, count: 40, batch: 'import-0915', permanentBounces: 15 },
+        { bucketOffset: 1, count: 160, batch: 'import-0901' },
+      ],
+    },
+    nowMs,
+    lanes,
+    TEST_KEY_SET,
+  );
+  const window = spikeWindowFor(nowMs);
+  const fold = createWindowFold({ lane: bulk, window, nowMs });
+  const summary = summarizeWindow(fold.step(fold.initial, records));
+  const spike = laneSpikeVerdict(summary.totals);
+  const rows = buildTagRows('batch', summary, spike);
+  const ses = {
+    configurationSets: new Set(lanes.lanes.map((lane) => lane.configurationSet)),
+    defaultConfigurationSets: new Set<string>(),
+    eventDestinations: new Map([[bulk, [{ enabled: true, eventBridge: true, matchingEventTypes: [...REQUIRED_EVENT_TYPES] }]]]),
+  };
+  const closeability = checkCloseability(bulk, { laneMap: lanes, observed: new Map([[bulk, summary.observed]]), ses });
+  const decision = decideLane({ spike, rows, configurationRows: [], closeability, coverageNoData: false, bound: null, otherSpikingLanes: [] });
+  const countable = records.filter(isCountedRecord).length;
+  return buildEvidenceRecord({
+    incidentId: incidentIdFor(bulk, bucketStartMs(nowMs)),
+    lane: { configurationSet: bulk, lane: bulk },
+    window,
+    laneTotals: laneTotalsOf(summary, spike),
+    share: { laneCountableEvents: countable, storedCountableEvents: countable, percent: renderPercent(countable, countable), label: LANE_SHARE_LABEL },
+    rows,
+    configurationRows: [],
+    isolation: 'confined',
+    decision: { ...decision, noData: false, bound: null, otherSpikingLanes: [], sharedCause: null },
+    question: null,
+    fix: null,
+    expiresAt: Math.floor(nowMs / 1000) + RETENTION_SECONDS,
   });
 }
