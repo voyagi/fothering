@@ -11,6 +11,12 @@ const COMMITTED_LANE_MAP: LaneMap = parseLaneMap(lanesJson);
 /** The action never reopens a set: only the operator's reopen command does (AC-P4). */
 export type ActionSesPort = Omit<SesPort, 'reopenConfigurationSet'>;
 
+/** The deploy-time addresses the operator email goes from and to; either may be unset (D-107). */
+export interface OperatorConfig {
+  from?: string;
+  to?: string;
+}
+
 export interface ActionDeps {
   ports: { decisionStore: DecisionStorePort; eventStore: EventStorePort; ses: ActionSesPort };
   kinds: KindTable;
@@ -18,12 +24,14 @@ export interface ActionDeps {
   log: Logger;
   now: () => number;
   wait: (ms: number) => Promise<void>;
+  operator: { from: string | undefined; to: string | undefined };
 }
 
 export interface BuildActionRootOptions extends RootOptions {
   laneMap?: LaneMap;
   /** Replaces the one-second SES spacing, so a test run does not sleep. */
   wait?: (ms: number) => Promise<void>;
+  operator?: OperatorConfig;
 }
 
 // Each changes what a deployed run reads or how long it waits, so a deployed caller gets the committed
@@ -33,6 +41,10 @@ const TEST_ONLY_OVERRIDES = ['laneMap', 'wait'] as const;
 export function readActionLiveConfig(): LiveConfig {
   const tableName = process.env.FOTHERING_TABLE_NAME;
   return tableName !== undefined ? { tableName } : {};
+}
+
+export function readActionOperatorConfig(): OperatorConfig {
+  return {};
 }
 
 // Each operation is named, never spread from the resolved port, so the reopen operation cannot ride
@@ -65,5 +77,6 @@ export function buildActionRoot(options: BuildActionRootOptions): ActionDeps {
     log: buildRootLogger(options.runtimeContext, options.logSink),
     now: options.now ?? Date.now,
     wait: options.wait ?? sleep,
+    operator: { from: options.operator?.from, to: options.operator?.to },
   };
 }

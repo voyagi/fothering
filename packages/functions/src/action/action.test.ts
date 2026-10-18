@@ -2,33 +2,58 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import fc from 'fast-check';
 import { BUCKET_MS, bucketStartMs } from '@fothering/core/buckets';
 import { ACTION_FUNCTION_TIMEOUT_MS, HOLD_CHECK_DELAY_MS, HOLD_MS, LANE_HOUR_ATTEMPT_CAP } from '@fothering/core/close-values';
-import { closureClaimItem, closureKey, parseClosure, type Closure } from '@fothering/core/closure';
+import type { ConfigurationRefusal } from '@fothering/core/closeability';
+import { closureClaimItem, closureKey, decisionOf, parseClosure, type Closure } from '@fothering/core/closure';
 import { reserveLaneAttempt } from '@fothering/core/counters';
 import {
   buildEvidenceRecord,
   counterLaneHourKey,
+  incidentItemKey,
   incidentLaneKey,
   incidentPauseKey,
   type EvidenceRecord,
   type EvidenceRecordInput,
 } from '@fothering/core/evidence-record';
+import type { LaneMap } from '@fothering/core/lanes';
+import {
+  ACCOUNT_PAUSE_LIMIT_SENTENCE,
+  LANE_STATE_WORDS,
+  PAUSED_APP_SENTENCE,
+  REASON_SENTENCES,
+  SECTION_HEADINGS,
+  isoOf,
+  renderOperatorEmail,
+  type RenderedEmail,
+} from '@fothering/core/operator-email';
 import { RETENTION_SECONDS } from '@fothering/core/records';
+import { incidentLimitSentence, reopenCommandFor, reputationResetSentence } from '@fothering/core/reopen';
 import { propertySeed } from '@fothering/core/test/property-seed';
 import { spikeWindowFor, type BucketWindow, type LaneFold } from '@fothering/core/window-fold';
 import { createFixtureTableState } from '@fothering/providers/fixtures/ingest-ports';
 import { createFixtureSesState } from '@fothering/providers/fixtures/later-ports';
-import type { DecisionStoreItem, DecisionStorePort, EventStorePort, FixtureSesState, FixtureTableState, Recording } from '@fothering/providers/port-types';
+import type {
+  DecisionStoreItem,
+  DecisionStorePort,
+  EventStorePort,
+  FixtureSesState,
+  FixtureTableState,
+  Recording,
+  SendEmailRequest,
+} from '@fothering/providers/port-types';
 import { MAX_IDENTITY_READS, SES_READ_SPACING_MS } from '@fothering/providers/ses-facts';
 import { assertRootMatrix } from '@fothering/providers/test/root-matrix';
 import {
   BAD_BATCH,
   BULK,
   COMPLETE_SES_RECORDINGS,
+  HOLD_CHECKED_AT_MS,
   LANES,
   NOW_MS,
+  OPERATOR,
   RECEIPT_BATCH,
   TRANSACTIONAL,
   buildTestActionRoot,
+  capturingSends,
   closeRuntime,
   closeState,
   closedWordViolations,
@@ -38,6 +63,7 @@ import {
   plantClosure,
   plantDecision,
   plantIncident,
+  seedClosedLane,
   seedIncidents,
   sendRecordAt,
   storedClosure,
@@ -1263,5 +1289,169 @@ describe('the action entry', () => {
     expect(built).toHaveLength(1);
     expect(built[0]).toMatchObject({ runtimeContext: 'deployed' });
     expect(first.acted).toEqual([]);
+  });
+});
+
+const SEND_LINE_PREFIX = '(dry-run) WOULD ses.sendEmail fothering-alerts ';
+
+interface EmailRun {
+  deps: ActionDeps;
+  sesState: FixtureSesState;
+  requests: SendEmailRequest[];
+  dryRunLines: string[];
+  logLines: string[];
+}
+
+function sendLinesOf(lines: readonly string[]): string[] {
+  return lines.filter((line) => line.startsWith(SEND_LINE_PREFIX));
+}
+
+// 03-04's seeded close paused at T, then the hold-check run at T + 360,000 with the operator configured.
+async function closedEmailRun(): Promise<EmailRun> {
+  const store = createFixtureTableState();
+  const sesState = createFixtureSesState();
+  await seedClosedLane({ store, sesState, through: 'paused', operator: OPERATOR });
+  const dryRunLines: string[] = [];
+  const logLines: string[] = [];
+  const root = buildTestActionRoot({
+    store,
+    sesState,
+    now: () => HOLD_CHECKED_AT_MS,
+    operator: OPERATOR,
+    dryRunSink: (line) => dryRunLines.push(line),
+    logSink: (line) => logLines.push(line),
+  });
+  const captured = capturingSends(root.deps);
+  await runActionCycle(captured.deps);
+  return { deps: captured.deps, sesState, requests: captured.requests, dryRunLines, logLines };
+}
+
+async function renderedFromStore(deps: ActionDeps, incidentId: string, nowMs: number): Promise<{ closure: Closure | undefined; record: EvidenceRecord; email: RenderedEmail | undefined }> {
+  const closure = await storedClosure(deps, incidentId, nowMs);
+  const record = await storedRecord(deps, incidentId, nowMs);
+  const decision = decisionOf(await deps.ports.decisionStore.getItem(incidentItemKey(incidentId, 'DECISION'), nowMs));
+  const email = closure === undefined ? undefined : renderOperatorEmail({ closure, record, decision, laneMap: LANES });
+  return { closure, record, email };
+}
+
+function sectionOf(email: RenderedEmail | undefined, heading: string): string {
+  return email?.sections.find((section) => section.heading === heading)?.lines.join('\n') ?? '';
+}
+
+function laneMapWithAlerts(alertSets: readonly string[]): LaneMap {
+  return { ...LANES, lanes: LANES.lanes.map((lane) => ({ ...lane, operatorAlert: alertSets.includes(lane.configurationSet) })) };
+}
+
+describe('a closed lane becomes one closed-path email sent once through fothering-alerts (R9)', () => {
+  it('claims, renders and sends the closed-path email once from the configured identity, and a later run sends nothing (tracer)', async () => {
+    const run = await closedEmailRun();
+
+    const sendLines = sendLinesOf(run.dryRunLines);
+    expect(sendLines).toHaveLength(1);
+    expect(sendLines[0]).not.toContain('@');
+    expect(sendLines[0]).toContain('"recipients":[{"receivingDomain":"example.com","recipientHmac":"');
+    expect(run.requests).toHaveLength(1);
+    expect(run.requests[0]).toMatchObject({
+      from: 'Fothering <alerts@example.com>',
+      to: ['ops@example.com'],
+      subject: '[Fothering] fothering-bulk closed: sending paused and holding',
+      configurationSetName: ALERTS,
+    });
+    expect(Object.keys(run.requests[0] ?? {}).sort()).toEqual(['configurationSetName', 'from', 'subject', 'text', 'to']);
+    expect(typeof run.requests[0]?.text).toBe('string');
+    expect((await storedClosure(run.deps, INCIDENT_ID, HOLD_CHECKED_AT_MS))?.email).toEqual({
+      kind: 'closed',
+      attempts: 1,
+      claimedAtMs: HOLD_CHECKED_AT_MS,
+      sentAtMs: HOLD_CHECKED_AT_MS,
+      messageId: 'fixture-message-1',
+      failed: false,
+    });
+
+    const later = capturingSends(at(run.deps, HOLD_CHECKED_AT_MS + 300_000));
+    await runActionCycle(later.deps);
+    expect(later.requests).toEqual([]);
+    expect(sendLinesOf(run.dryRunLines)).toHaveLength(1);
+  });
+
+  it('holds every element AC-19 lists, each matched to the stored record and closure (AC-19)', async () => {
+    const run = await closedEmailRun();
+    const { closure, record, email } = await renderedFromStore(run.deps, INCIDENT_ID, HOLD_CHECKED_AT_MS);
+    const text = run.requests[0]?.text ?? '';
+    const { laneTotals } = record;
+    const causeRows = record.rows.filter((row) => row.verdict === 'cause');
+
+    expect(email?.text).toBe(text);
+    expect(causeRows.length).toBeGreaterThan(0);
+    const expected = [
+      `${laneTotals.permanentBounces} of ${laneTotals.recipientSends} recipient-sends`,
+      `${laneTotals.complaints} of ${laneTotals.recipientSends} recipient-sends`,
+      `${laneTotals.label.hardBounceRatio}: ${laneTotals.hardBounceRatio ?? 'not computed'}`,
+      `${laneTotals.label.complaintRatio}: ${laneTotals.complaintRatio ?? 'not computed'}`,
+      ...causeRows.map((row) => `${row.dimension} ${row.value ?? 'with no value'}: ${row.permanentBounces} permanent bounces and ${row.complaints} complaints of ${row.sends} recipient-sends`),
+      `Isolation verdict: ${record.isolation}`,
+      `${isoOf(closure?.pauseRequestedAtMs ?? 0)}`,
+      `${isoOf(closure?.readBackAtMs ?? 0)}`,
+      `no send was seen accepted on ${BULK} from ${isoOf(closure?.holdEndMs ?? 0)} through ${isoOf(closure?.holdCheckedThroughMs ?? 0)}`,
+      reopenCommandFor(BULK),
+      PAUSED_APP_SENTENCE,
+      reputationResetSentence(BULK),
+      ACCOUNT_PAUSE_LIMIT_SENTENCE,
+    ];
+    expect(expected.filter((part) => !text.includes(part))).toEqual([]);
+    const open = sectionOf(email, SECTION_HEADINGS.open);
+    for (const lane of closure?.lanes.filter((entry) => entry.configurationSet !== BULK) ?? []) {
+      expect(open).toContain(`${lane.configurationSet}: ${LANE_STATE_WORDS[lane.state]}.`);
+      for (const refusal of lane.configurationRefusals) expect(open).toContain(REASON_SENTENCES[refusal as ConfigurationRefusal]);
+    }
+    expect(text).toContain('SendingPausedException');
+    expect(text).not.toMatch(/<\/?(html|body|p|br|div)\b/i);
+  });
+
+  it('holds the incident limit once in the reopen section, after the reputation sentence', async () => {
+    const run = await closedEmailRun();
+    const reopen = sectionOf((await renderedFromStore(run.deps, INCIDENT_ID, HOLD_CHECKED_AT_MS)).email, SECTION_HEADINGS.reopen);
+
+    expect(reopen.split(incidentLimitSentence(BULK))).toHaveLength(2);
+    expect(reopen.indexOf(incidentLimitSentence(BULK))).toBeGreaterThan(reopen.indexOf(reputationResetSentence(BULK)));
+  });
+
+  it('names fothering-bulk in what happened only, and each other lane once in what stays open (AC-E25)', async () => {
+    const run = await closedEmailRun();
+    const { email } = await renderedFromStore(run.deps, INCIDENT_ID, HOLD_CHECKED_AT_MS);
+    const open = sectionOf(email, SECTION_HEADINGS.open);
+
+    expect(sectionOf(email, SECTION_HEADINGS.happened)).toContain(BULK);
+    expect(open).not.toContain(BULK);
+    expect(open.split(TRANSACTIONAL)).toHaveLength(2);
+    expect(open.split(ALERTS)).toHaveLength(2);
+  });
+
+  it.each([
+    { label: 'no', alertSets: [] },
+    { label: 'two', alertSets: [BULK, ALERTS] },
+  ])('sends nothing and logs operator-alert-lane-count with $label operator-alert lanes (AC-21)', async ({ alertSets }) => {
+    const { root } = await seeded(decidingRuntime, [RECEIPT_BATCH]);
+    const logLines: string[] = [];
+    const dryRunLines: string[] = [];
+    const { deps } = root({ laneMap: laneMapWithAlerts(alertSets), operator: OPERATOR, logSink: (line) => logLines.push(line), dryRunSink: (line) => dryRunLines.push(line) });
+
+    await runActionCycle(deps);
+
+    expect(dryRunLines.filter((line) => line.includes('ses.sendEmail'))).toEqual([]);
+    expect(loggedEvents(logLines, 'email-refused')).toEqual([{ event: 'email-refused', level: 'error', incidentId: RECEIPT_INCIDENT_ID, reason: 'operator-alert-lane-count' }]);
+  });
+
+  it('sends nothing and logs operator-config-missing, naming no address, when the operator address is unset', async () => {
+    const { root } = await seeded(decidingRuntime, [RECEIPT_BATCH]);
+    const logLines: string[] = [];
+    const dryRunLines: string[] = [];
+    const { deps } = root({ operator: { from: 'alerts@example.com' }, logSink: (line) => logLines.push(line), dryRunSink: (line) => dryRunLines.push(line) });
+
+    await runActionCycle(deps);
+
+    expect(dryRunLines.filter((line) => line.includes('ses.sendEmail'))).toEqual([]);
+    expect(loggedEvents(logLines, 'email-refused')).toEqual([{ event: 'email-refused', level: 'error', incidentId: RECEIPT_INCIDENT_ID, reason: 'operator-config-missing' }]);
+    expect(logLines.filter((line) => line.includes('@'))).toEqual([]);
   });
 });

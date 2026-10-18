@@ -12,9 +12,17 @@ import { scenarioRecords, type LaneScenario } from '@fothering/core/test/event-a
 import type { BucketWindow } from '@fothering/core/window-fold';
 import { TEST_ADDRESS_KEY_SET } from '@fothering/providers/fixtures/ingest-ports';
 import { createFixtureSesState } from '@fothering/providers/fixtures/later-ports';
-import type { DecisionStoreItem, DecisionStorePort, DryRunSink, FixtureSesState, FixtureTableState, Recording } from '@fothering/providers/port-types';
+import type {
+  DecisionStoreItem,
+  DecisionStorePort,
+  DryRunSink,
+  FixtureSesState,
+  FixtureTableState,
+  Recording,
+  SendEmailRequest,
+} from '@fothering/providers/port-types';
 import { runActionCycle } from '../action/action.js';
-import { buildActionRoot, type ActionDeps, type BuildActionRootOptions } from '../action/root.js';
+import { buildActionRoot, type ActionDeps, type BuildActionRootOptions, type OperatorConfig } from '../action/root.js';
 import { runDetectionCycle, type DetectionCycleSummary } from '../detect/detect.js';
 import { buildDetectRoot, type DetectDeps } from '../detect/root.js';
 import { buildReopenRoot, type BuildReopenRootOptions, type ReopenDeps } from '../reopen/root.js';
@@ -128,7 +136,12 @@ export interface TestActionRootInput {
   recordings?: readonly Recording[];
   /** Every fixture store operation yields a macrotask first, so roots sharing the store interleave (Pitfall 9). */
   yieldBetweenOperations?: boolean;
+  /** The action's deploy-time addresses; unset, the run renders no email and logs operator-config-missing. */
+  operator?: OperatorConfig;
 }
+
+/** The addresses the email tests deploy with; fixture addresses live only in tests. */
+export const OPERATOR: OperatorConfig = { from: 'alerts@example.com', to: 'ops@example.com' };
 
 export interface TestActionRoot {
   deps: ActionDeps;
@@ -162,7 +175,19 @@ function testRootOptions(input: TestActionRootInput, sesState: FixtureSesState, 
 export function buildTestActionRoot(input: TestActionRootInput): TestActionRoot {
   const sesState = input.sesState ?? createFixtureSesState();
   const waits: number[] = [];
-  return { deps: buildActionRoot(testRootOptions(input, sesState, waits)), sesState, waits };
+  const options = { ...testRootOptions(input, sesState, waits), ...(input.operator === undefined ? {} : { operator: input.operator }) };
+  return { deps: buildActionRoot(options), sesState, waits };
+}
+
+/** The deps with every SendEmailRequest the run issues recorded before it reaches the fixture SES. */
+export function capturingSends(deps: ActionDeps): { deps: ActionDeps; requests: SendEmailRequest[] } {
+  const requests: SendEmailRequest[] = [];
+  const ses = deps.ports.ses;
+  const sendEmail = (request: SendEmailRequest): Promise<{ messageId: string }> => {
+    requests.push(structuredClone(request));
+    return ses.sendEmail(request);
+  };
+  return { deps: { ...deps, ports: { ...deps.ports, ses: { ...ses, sendEmail } } }, requests };
 }
 
 export interface TestReopenRoot {
@@ -192,9 +217,15 @@ export interface SeededPause {
  * Detection over BAD_BATCH, then the action run that pauses fothering-bulk at PAUSED_AT_MS and, unless
  * through is paused, the run that hold-checks it closed at HOLD_CHECKED_AT_MS, all over one store and SES.
  */
-export async function seedClosedLane(input: { store: FixtureTableState; sesState: FixtureSesState; through?: 'paused' | 'closed' }): Promise<SeededPause> {
+export async function seedClosedLane(input: {
+  store: FixtureTableState;
+  sesState: FixtureSesState;
+  through?: 'paused' | 'closed';
+  operator?: OperatorConfig;
+}): Promise<SeededPause> {
   await seedIncidents({ store: input.store, runtime: closeRuntime, scenarios: [BAD_BATCH], nowMs: NOW_MS });
-  const { deps } = buildTestActionRoot({ store: input.store, sesState: input.sesState, now: () => PAUSED_AT_MS });
+  const operator = input.operator === undefined ? {} : { operator: input.operator };
+  const { deps } = buildTestActionRoot({ store: input.store, sesState: input.sesState, now: () => PAUSED_AT_MS, ...operator });
   await runActionCycle(deps);
   if (input.through !== 'paused') await runActionCycle({ ...deps, now: () => HOLD_CHECKED_AT_MS });
   return { incidentId: incidentIdOf(BULK, NOW_MS), pausedAtMs: PAUSED_AT_MS };
