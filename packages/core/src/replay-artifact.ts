@@ -25,6 +25,15 @@ const READ_BACK_VALUES = ['false', 'true'] as const;
 
 const UTC_TIME_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z$/;
 
+// Date.parse rolls an impossible day over (2026-02-30 reads as 2026-03-02) instead of failing, so a
+// time is real only when the parsed date prints back as the same text, milliseconds padded to three.
+function isCalendarTime(value: string): boolean {
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return false;
+  const [whole = '', fraction = ''] = value.slice(0, -1).split('.');
+  return parsed.toISOString() === `${whole}.${fraction.padEnd(3, '0')}Z`;
+}
+
 const text = z.string().min(1);
 const count = z.number().int().min(0);
 const utcTime = z
@@ -32,7 +41,7 @@ const utcTime = z
   .regex(UTC_TIME_PATTERN, 'must be an ISO 8601 UTC time such as 2026-10-14T14:01:00Z')
   // zod runs this refine even after the regex fails, so it judges only well-formed text and a
   // malformed time gets the one format message.
-  .refine((value) => !UTC_TIME_PATTERN.test(value) || !Number.isNaN(Date.parse(value)), 'is not a real calendar time');
+  .refine((value) => !UTC_TIME_PATTERN.test(value) || isCalendarTime(value), 'is not a real calendar time');
 const configurationSet = z.string().regex(CONFIGURATION_SET_PATTERN, 'must be an SES configuration set name');
 const provenance = z.enum(PROVENANCES);
 
