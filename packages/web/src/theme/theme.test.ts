@@ -115,6 +115,19 @@ describe('parseTokens refuses a token source it cannot render safely', () => {
     }
   });
 
+  it('refuses a value holding a comment opener or closer, a backslash or an unbalanced quote', () => {
+    const backslash = String.fromCharCode(92);
+    for (const value of ['1px /* x', '1px */', `"A${backslash}"B", serif`, `a${backslash}9`, '"Inter, sans-serif', "'Inter, sans-serif", `"Inter', sans-serif`, '"Inter" "Plex']) {
+      expect(() => parseTokens({ ...valid(), static: [{ name: '--measure', value }] }), value).toThrow(/tokens\.json: --measure has an unsafe value/);
+    }
+  });
+
+  it('accepts a font stack whose quotes are balanced', () => {
+    for (const value of ['"IBM Plex Sans", system-ui, sans-serif', "'Inter', 'Plex Mono', monospace", `"It's Mono", monospace`]) {
+      expect(parseTokens({ ...valid(), static: [{ name: '--measure', value }] }).static[0]?.value, value).toBe(value);
+    }
+  });
+
   it('refuses a missing value and a duplicate name', () => {
     expect(() => parseTokens({ ...valid(), themed: [{ name: '--ground', light: '#FFF' }] })).toThrow('tokens.json: --ground has an unsafe value');
     expect(() => parseTokens({ ...valid(), static: [{ name: '--ground', value: '1px' }] })).toThrow('tokens.json: --ground is declared twice');
