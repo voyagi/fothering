@@ -625,13 +625,16 @@ ul.site { display: grid; gap: var(--space-12); margin: 0; padding-left: var(--sp
 .fit-record { container: record / inline-size; }
 .fit-checks { container: checks / inline-size; }
 .fit-record td[data-col="Record"] .cell-text, .fit-checks td[data-col="How checked"] .cell-text { min-inline-size: 16em; }
+/* The longest criterion name, 1.2.3, takes three lines at 173px of 600-weight text (measured
+   2026-10-18), so the column keeps 11em of text plus the cell's 16px paddings (border-box). */
+.fit-checks .fit tbody th { min-inline-size: calc(11em + 32px); }
 .fit-record .fit-form, .fit-checks .fit-form { container-type: inline-size; }
 /* Either condition names the wrapper statement-stacked, so the stacked rules are written once for
    both schedules; each schedule's own section decides its own form. */
 /* Measured 2026-10-18 on the rendered tables with the 16em minimums: the record needs 409px and the
-   hand-check schedule 612px. */
+   hand-check schedule, with its criterion column minimum, 672px. */
 @container record (width < 412px) { .fit-record .fit-form { container-name: statement-stacked; } }
-@container checks (width < 616px) { .fit-checks .fit-form { container-name: statement-stacked; } }
+@container checks (width < 676px) { .fit-checks .fit-form { container-name: statement-stacked; } }
 @media (max-width: 620px) {
   :is(.fit-record, .fit-checks) .fit-form { container-name: statement-stacked; }
 }
@@ -644,6 +647,7 @@ ul.site { display: grid; gap: var(--space-12); margin: 0; padding-left: var(--sp
   :is(.fit-record, .fit-checks) .fit :is(th, td)::before { content: attr(data-col); display: block; font: 600 var(--text-label-small)/1.4 var(--font-mono); letter-spacing: 0.06em; text-transform: uppercase; color: var(--label); }
   :is(.fit-record, .fit-checks) .fit caption { display: block; padding: var(--space-sm) var(--space-md); }
   :is(.fit-record, .fit-checks) .fit :is(th, td) .cell-text { min-inline-size: 0; }
+  .fit-checks .fit tbody th { min-inline-size: 0; }
   /* One state per block, so there is no column of names to keep aligned. */
   .fit-checks .fit .state-mark-none { display: none; }
 }
