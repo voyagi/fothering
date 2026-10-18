@@ -120,18 +120,25 @@ const LANDING_DESCRIPTION = 'Fothering reads Amazon SES events, pauses only the 
 const REPLAY_TITLE = 'Incident replay: one SES lane paused and reopened';
 const REPLAY_DESCRIPTION = 'One SES incident in four steps: bounces arrive on one configuration set, code names the cause with counts, the lane is paused and read back, and the operator reopens it by command.';
 
+const DEPLOY_TITLE = 'Deploy Fothering into your own AWS account';
+const DEPLOY_DESCRIPTION = 'The steps to deploy and remove Fothering, everything the template creates, and every IAM permission it holds with the reason, generated from the template.';
+
 describe('the route list (D-153)', () => {
   it('holds an RFC 2606 reserved origin with no trailing slash until the deployed host is known', () => {
     expect(SITE_ORIGIN).toMatch(/^https:\/\/[a-z-]+\.example$/);
   });
 
   it('holds / as sheet FTH-001 with the UI-SPEC 11.2 title and description, indexable', () => {
-    expect(ROUTES.map((route) => route.path)).toEqual(['/', '/replay/']);
+    expect(ROUTES.map((route) => route.path)).toEqual(['/', '/replay/', '/deploy/']);
     expect(ROUTES[0]).toEqual({ path: '/', sheet: 'FTH-001', label: 'Landing', title: LANDING_TITLE, description: LANDING_DESCRIPTION, indexable: true });
   });
 
   it('holds /replay/ as sheet FTH-002 with the UI-SPEC 11.2 title and description, indexable', () => {
     expect(ROUTES[1]).toEqual({ path: '/replay/', sheet: 'FTH-002', label: 'Replay', title: REPLAY_TITLE, description: REPLAY_DESCRIPTION, indexable: true });
+  });
+
+  it('holds /deploy/ as sheet FTH-003 with the UI-SPEC 11.2 title and description, indexable', () => {
+    expect(ROUTES[2]).toEqual({ path: '/deploy/', sheet: 'FTH-003', label: 'Deploy', title: DEPLOY_TITLE, description: DEPLOY_DESCRIPTION, indexable: true });
   });
 
   it('holds the 404 title, description and Drawing cell text, with no path and not indexable', () => {
@@ -168,7 +175,7 @@ describe('routeFor', () => {
   });
 
   it('throws by name for a path the route list does not hold', () => {
-    expect(() => routeFor('/deploy/', planted)).toThrow('/deploy/: not in the route list; add its entry to ROUTES in packages/web/src/site/route-list.ts');
+    expect(() => routeFor('/no-such-sheet/', planted)).toThrow('/no-such-sheet/: not in the route list; add its entry to ROUTES in packages/web/src/site/route-list.ts');
   });
 });
 

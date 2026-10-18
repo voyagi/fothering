@@ -12,6 +12,10 @@ interface Cell {
   text: string;
   mark?: Mark;
   attrs?: Record<string, string>;
+  // A long value (a resource expression, a principal): mono, and it may wrap after / : and , only.
+  long?: boolean;
+  // Command lines set after the text, each wrapping between its arguments.
+  commands?: readonly string[];
 }
 
 interface Row {
@@ -38,6 +42,9 @@ interface Props {
   // One block per row where the table's container (.log) is narrower than the table needs, each
   // cell under its column name.
   stack?: boolean;
+  // One block per row where the section holding it (a deploy schedule's own container) is narrower
+  // than this table needs; every cell, the row header included, prints its column name above it.
+  fit?: boolean;
   // Column indexes whose API names may break between their capitalised words (the replay log's
   // Detail column only, UI-SPEC line 208).
   wordColumns?: readonly number[];
@@ -45,18 +52,22 @@ interface Props {
   terms?: IdentifierTerms;
 }
 
-const { columns, rows, narrowHidden = [], monoColumns = [], caption, captionAttrs = {}, variant = 'schedule', compact = false, stack = false, wordColumns = [], terms = { names: [], values: [] } } = Astro.props;
+const { columns, rows, narrowHidden = [], monoColumns = [], caption, captionAttrs = {}, variant = 'schedule', compact = false, stack = false, fit = false, wordColumns = [], terms = { names: [], values: [] } } = Astro.props;
 const segmentsOf = (text: string): Segment[] => textSegments(text, terms);
 const classes = (column: number): string | undefined =>
   [narrowHidden.includes(column) ? 'hide-narrow' : '', monoColumns.includes(column) ? 'mono' : ''].filter((name) => name !== '').join(' ') || undefined;
 // A column header is a label like its siblings; only the column's values are set in mono.
 const headClass = (column: number): string | undefined => (narrowHidden.includes(column) ? 'hide-narrow' : undefined);
-const tableClass = [variant, compact ? 'compact' : '', stack ? 'stack' : ''].filter((name) => name !== '').join(' ');
+const tableClass = [variant, compact ? 'compact' : '', stack ? 'stack' : '', fit ? 'fit' : ''].filter((name) => name !== '').join(' ');
 // display: block or grid drops table semantics in some engines, so a table that stacks or whose rows
 // become grids states its roles.
 type TableRole = 'table' | 'rowgroup' | 'row' | 'columnheader' | 'rowheader' | 'cell';
-const role = (name: TableRole): TableRole | undefined => (stack || compact ? name : undefined);
+const role = (name: TableRole): TableRole | undefined => (stack || compact || fit ? name : undefined);
 const faceOf = (segment: Segment): 'mono' | 'inherit' => (segment.kind === 'name' ? 'inherit' : 'mono');
+const columnOf = (index: number): string | undefined => (stack || fit ? columns[index] : undefined);
+// A long value may end a line only right after a slash, a colon or a comma.
+const longParts = (text: string): string[] => text.split(/(?<=[/:,])/);
+const isEmpty = (cell: Cell): boolean => cell.text === '' && (cell.commands ?? []).length === 0;
 ---
 <table class={tableClass} role={role('table')}>
   {caption !== undefined && <caption {...captionAttrs}>{segmentsOf(caption).map((segment) => (segment.kind === 'text' ? segment.text : <Identifier value={segment.text} face={faceOf(segment)} />))}</caption>}
@@ -66,15 +77,19 @@ const faceOf = (segment: Segment): 'mono' | 'inherit' => (segment.kind === 'name
   <tbody role={role('rowgroup')}>
     {rows.map((row) => (
       <tr {...row.attrs} role={role('row')}>
-        <th scope="row" class={classes(0)} role={role('rowheader')}>
+        <th scope="row" class={classes(0)} data-col={fit ? columnOf(0) : undefined} role={role('rowheader')}>
           {row.headerHref === undefined
             ? segmentsOf(row.header).map((segment) => (segment.kind === 'text' ? segment.text : <Identifier value={segment.text} face={faceOf(segment)} />))
             : <a href={row.headerHref}>{segmentsOf(row.header).map((segment) => (segment.kind === 'text' ? segment.text : <Identifier value={segment.text} face={faceOf(segment)} />))}</a>}
           {row.headerNote !== undefined && <Fragment> <span class="note">{row.headerNote}</span></Fragment>}
         </th>
         {row.cells.map((cell, index) => (
-          <td class={classes(index + 1)} data-col={stack ? columns[index + 1] : undefined} role={role('cell')} {...cell.attrs}>
-            {cell.mark === undefined ? <span class="cell-text">{segmentsOf(cell.text).map((segment) => (segment.kind === 'text' ? segment.text : <Identifier value={segment.text} face={faceOf(segment)} words={wordColumns.includes(index + 1)} />))}</span> : (
+          <td class={classes(index + 1)} data-col={columnOf(index + 1)} data-empty={isEmpty(cell) ? '' : undefined} role={role('cell')} {...cell.attrs}>
+            {isEmpty(cell) ? null : cell.long ? <span class="long-value">{longParts(cell.text).map((part, partIndex) => <Fragment>{partIndex > 0 && <wbr />}{part}</Fragment>)}</span> : cell.mark === undefined ? (
+              <span class="cell-text">{segmentsOf(cell.text).map((segment) => (segment.kind === 'text' ? segment.text : <Identifier value={segment.text} face={faceOf(segment)} words={wordColumns.includes(index + 1)} />))}{(cell.commands ?? []).map((command, commandIndex) => (
+                <Fragment>{commandIndex > 0 ? ' and ' : ' '}<code class="command-inline">{command.split(' ').map((token, tokenIndex) => <Fragment>{tokenIndex > 0 && ' '}<span>{token}</span></Fragment>)}</code></Fragment>
+              ))}</span>
+            ) : (
               <span class="state">
                 <svg class={`state-mark state-mark-${cell.mark}`} viewBox="0 0 12 12" aria-hidden="true"><rect x="1" y="1" width="10" height="10" /></svg>
                 {cell.text}

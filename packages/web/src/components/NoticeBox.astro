@@ -1,0 +1,11 @@
+---
+// A dashed outline marks what is not built yet (DESIGN.md Notice Box); the run-in label is read
+// before the sentence, so the notice never passes as an ordinary paragraph.
+interface Props {
+  label: string;
+  text: string;
+}
+
+const { label, text } = Astro.props;
+---
+<p class="notice" role="note" data-notice><b>{label}</b> {text}</p>

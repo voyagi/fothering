@@ -42,6 +42,14 @@ export const ROUTES: readonly SiteRoute[] = Object.freeze([
     description: 'One SES incident in four steps: bounces arrive on one configuration set, code names the cause with counts, the lane is paused and read back, and the operator reopens it by command.',
     indexable: true,
   }),
+  Object.freeze({
+    path: '/deploy/',
+    sheet: 'FTH-003',
+    label: 'Deploy',
+    title: 'Deploy Fothering into your own AWS account',
+    description: 'The steps to deploy and remove Fothering, everything the template creates, and every IAM permission it holds with the reason, generated from the template.',
+    indexable: true,
+  }),
 ]);
 
 export const NOT_FOUND_ROUTE: NotFoundRoute = Object.freeze({

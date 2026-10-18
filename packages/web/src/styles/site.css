@@ -447,6 +447,79 @@ ol.steps { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); marg
   /* A log detail is a long value, not an identifier, so it may break as the last resort. */
   .schedule.stack td { overflow-wrap: anywhere; }
 }
+/* Deploy. The intro row, the notice, the command blocks inside procedure steps and schedule cells,
+   the role schedules and the removal list. */
+.sheet-intro { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: var(--space-lg) var(--space-40); align-items: end; padding: clamp(32px, 5vw, 72px) var(--gutter) clamp(28px, 4vw, 52px); }
+.sheet-intro > p { margin: 0; font-size: var(--text-intro); color: var(--ink-2); }
+/* The box keeps the sentence at the measure, its own padding and outline added outside it. */
+.notice { grid-column: 1 / -1; margin: var(--space-sm) 0 0; max-inline-size: calc(var(--measure) + 2 * var(--space-md) + 2 * var(--w-outline)); padding: var(--space-12) var(--space-md); border: var(--w-outline) dashed var(--ink); }
+.notice b { margin-right: var(--space-12); font: 600 var(--text-label)/1 var(--font-mono); letter-spacing: 0.05em; }
+.procedure pre.command { margin-top: var(--space-12); padding: var(--space-sm) var(--space-12); }
+/* Element-qualified so a note inside a procedure step keeps its label face over .procedure p. */
+p.command-note { margin: var(--space-sm) 0 0; font: 500 var(--text-label)/1.4 var(--font-mono); color: var(--label); }
+.command-inline > span { display: inline-block; }
+/* A resource expression or a principal is a long value: it ends a line at its <wbr>s, after a slash,
+   a colon or a comma, and breaks inside a part only if that part alone is wider than the cell.
+   break-word, unlike anywhere, leaves the column's min-content at its longest part. */
+.long-value { font-family: var(--font-mono); font-feature-settings: "tnum" 1; font-size: var(--text-mono-value); font-weight: 500; overflow-wrap: break-word; }
+.roles { display: grid; gap: var(--space-2xl); }
+.role-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: var(--space-sm) var(--space-lg); margin-bottom: var(--space-md); }
+.role-head h3 { margin: 0; }
+.role-stack { margin: 0; color: var(--label); }
+.role-stack > span { margin-right: var(--space-sm); font: 600 var(--text-label)/1 var(--font-mono); letter-spacing: 0.05em; text-transform: uppercase; }
+.perm-notes { display: grid; gap: var(--space-12); margin-top: var(--space-2xl); }
+.perm-notes p { margin: 0; }
+.perm-notes p + p { color: var(--ink-2); }
+/* The Deny box reads as the exception: an emphasis-weight rule over its heading and schedule, not a
+   box around a box. */
+.deny { margin-top: var(--space-2xl); padding-top: var(--space-md); border-top: var(--w-emph) solid var(--ink); }
+ol.removal { counter-reset: removal; max-inline-size: 80ch; margin: 0; padding: 0; list-style: none; border-top: var(--w-outline) solid var(--ink); }
+.removal li { counter-increment: removal; display: grid; grid-template-columns: 44px minmax(0, 1fr); gap: var(--space-12); max-inline-size: none; padding: var(--space-md) 0; border-bottom: var(--w-rule) solid var(--rule); }
+.removal li::before { content: counter(removal); font: 800 var(--text-numeral-small)/1 var(--font-display); }
+.removal p { margin: 0; }
+.removal pre.command { margin-top: var(--space-sm); }
+
+/* Each deploy schedule keeps its table form while its own section is as wide as the table needs
+   (measured on the rendered tables), and below that becomes one block per row, every cell under its
+   column name; an empty cell, a trust row's missing condition, is left out of the block. */
+.fit-resources { container: resources / inline-size; }
+.fit-permissions { container: permissions / inline-size; }
+/* In table form a reason or a removal keeps a readable column instead of one word per line; these
+   minimums are part of what each table needs. */
+.fit td[data-col="Why"] .cell-text { min-inline-size: 12em; }
+.fit td[data-col="On removal"] .cell-text { min-inline-size: 12em; }
+/* Measured 2026-10-18 on the rendered tables with the minimums above: the resource table needs
+   761px and the widest role table 1030px; a later snapshot that widens either moves its threshold. */
+@container resources (width < 764px) {
+  .fit-resources .fit, .fit-resources .fit :is(thead, tbody, tr, th, td) { display: block; width: auto; }
+  .fit-resources .fit :is(thead, td[data-empty]) { display: none; }
+  .fit-resources .fit tbody tr { padding: var(--space-xs) 0 var(--space-sm); }
+  .fit-resources .fit tbody tr + tr { border-top: var(--w-outline) solid var(--ink); }
+  .fit-resources .fit :is(th, td) { padding: 6px 14px; border: 0; }
+  .fit-resources .fit :is(th, td)::before { content: attr(data-col); display: block; font: 600 var(--text-label-small)/1.4 var(--font-mono); letter-spacing: 0.06em; text-transform: uppercase; color: var(--label); }
+  .fit-resources .fit caption { display: block; padding: 10px 14px; }
+  .fit-resources .fit .cell-text { min-inline-size: 0; }
+}
+/* The longest logical id, 32 mono characters, needs 250px at the identifier step; under 282px of
+   section it steps down to the label size rather than break mid-name (UI-SPEC 9.3, E10). */
+@container resources (width < 282px) {
+  .fit-resources .fit code { font-size: var(--text-label); }
+}
+@container permissions (width < 1032px) {
+  .fit-permissions .fit, .fit-permissions .fit :is(thead, tbody, tr, th, td) { display: block; width: auto; }
+  .fit-permissions .fit :is(thead, td[data-empty]) { display: none; }
+  .fit-permissions .fit tbody tr { padding: var(--space-xs) 0 var(--space-sm); }
+  .fit-permissions .fit tbody tr + tr { border-top: var(--w-outline) solid var(--ink); }
+  .fit-permissions .fit :is(th, td) { padding: 6px 14px; border: 0; }
+  .fit-permissions .fit :is(th, td)::before { content: attr(data-col); display: block; font: 600 var(--text-label-small)/1.4 var(--font-mono); letter-spacing: 0.06em; text-transform: uppercase; color: var(--label); }
+  .fit-permissions .fit caption { display: block; padding: 10px 14px; }
+  .fit-permissions .fit .cell-text { min-inline-size: 0; }
+}
+
+@media (max-width: 960px) {
+  .sheet-intro { grid-template-columns: minmax(0, 1fr); }
+}
+
 @media (max-width: 620px) {
   /* The sticky controls cover the top of the viewport, so focus scrolled into view lands below them. */
   :root:has(.controls) { scroll-padding-top: 120px; }
