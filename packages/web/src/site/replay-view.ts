@@ -105,6 +105,12 @@ function readFixture(projectRoot: string, inProject: string, shownAs: string): u
     if (!message.startsWith(`${inProject}: `)) throw error;
     throw new Error(`${shownAs}${message.slice(inProject.length)}. Commit the file at that path.`);
   }
+  // The build refuses a fixture holding a real address, so a capture cannot publish one (IN-10).
+  const folder = shownAs.slice(0, shownAs.lastIndexOf('/') + 1);
+  const findings = fixtureFindings(shownAs.slice(folder.length), text);
+  if (findings.length > 0) {
+    throw new Error(findings.map((finding) => `${folder}${finding}. Replace it with a reserved or documentation value.`).join('\n'));
+  }
   try {
     return JSON.parse(text);
   } catch (error) {
@@ -420,6 +426,9 @@ export function buildReplayView(artifact: ReplayArtifact): ReplayView {
 // address, IP or number itself.
 const EMAIL_PATTERN = /[A-Za-z0-9._%+-]+@([A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+)/g;
 const IPV4_PATTERN = /(?<![\d.])(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})(?![\d.])/g;
+// Eight groups, or a compressed form holding "::". A clock time such as 14:01:07 has neither.
+const HEX_GROUP = '[0-9A-Fa-f]{1,4}';
+const IPV6_PATTERN = new RegExp(`(?<![0-9A-Za-z:])(?:(?:${HEX_GROUP}:){7}${HEX_GROUP}|(?:${HEX_GROUP}:)*(?:${HEX_GROUP})?::(?:${HEX_GROUP}(?::${HEX_GROUP})*)?)(?![0-9A-Za-z:])`, 'g');
 // Letters and digits on either side mean the run is part of a longer token, such as a hash.
 const TWELVE_DIGITS_PATTERN = /(?<![0-9A-Za-z])\d{12}(?![0-9A-Za-z])/g;
 const RESERVED_TOP_LEVEL = new Set(['test', 'example', 'invalid', 'localhost']);
@@ -433,6 +442,12 @@ function allowedMailDomain(domain: string): boolean {
   if (lower === 'simulator.amazonses.com') return true;
   if (RESERVED_TOP_LEVEL.has(lower.slice(lower.lastIndexOf('.') + 1))) return true;
   return RESERVED_DOMAINS.some((reserved) => lower === reserved || lower.endsWith(`.${reserved}`));
+}
+
+// RFC 3849 reserves 2001:db8::/32 for documentation: the first group 2001, the second db8.
+function documentationIpv6(address: string): boolean {
+  const [first = '', second = ''] = (address.split('::')[0] ?? '').split(':');
+  return Number.parseInt(first, 16) === 0x2001 && Number.parseInt(second, 16) === 0xdb8;
 }
 
 function manifestAccountId(fileName: string, text: string): string | undefined {
@@ -462,6 +477,10 @@ export function fixtureFindings(fileName: string, text: string): string[] {
     if (!DOCUMENTATION_NETWORKS.has(octets.slice(0, 3).join('.'))) {
       findings.push({ index: match.index, message: 'an IP address outside 192.0.2.0/24, 198.51.100.0/24 and 203.0.113.0/24' });
     }
+  }
+  for (const match of text.matchAll(IPV6_PATTERN)) {
+    if (!/[0-9A-Fa-f]/.test(match[0]) || documentationIpv6(match[0])) continue;
+    findings.push({ index: match.index, message: 'an IPv6 address outside 2001:db8::/32' });
   }
   const accountId = manifestAccountId(fileName, text);
   for (const match of text.matchAll(TWELVE_DIGITS_PATTERN)) {
