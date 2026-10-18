@@ -47,13 +47,26 @@ export function headScriptHash(): string {
 const SHAPE_ERROR = 'tokens.json: expected an object with themed and static lists';
 const NAME = /^--[a-z0-9]+(?:-[a-z0-9]+)*$/;
 // A value is written straight into a declaration, so nothing in it may end the declaration or the
-// block, open another, or close the style context.
-const UNSAFE_VALUE = /[;{}<>]/;
+// block, open another, close the style context, open or close a comment that would swallow the
+// declarations after it, or escape the character that follows.
+const UNSAFE_VALUE = /[;{}<>\\]|\/\*|\*\//;
 
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null;
 
+// A font stack may quote family names, so quotes are allowed, but only as closed strings: an open
+// one would run on into the next declaration. A quote of the other kind inside a string is text.
+function quotesBalanced(value: string): boolean {
+  let open: string | undefined;
+  for (const character of value) {
+    if (character !== '"' && character !== "'") continue;
+    if (open === undefined) open = character;
+    else if (open === character) open = undefined;
+  }
+  return open === undefined;
+}
+
 function checkValue(name: string, value: unknown): string {
-  if (typeof value !== 'string' || value.trim() === '' || UNSAFE_VALUE.test(value)) throw new Error(`tokens.json: ${name} has an unsafe value`);
+  if (typeof value !== 'string' || value.trim() === '' || UNSAFE_VALUE.test(value) || !quotesBalanced(value)) throw new Error(`tokens.json: ${name} has an unsafe value`);
   return value;
 }
 
