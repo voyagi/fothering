@@ -163,9 +163,11 @@ function decodePath(rawUrl: string): string | undefined {
 
 // The html_handling "auto-trailing-slash" rows from Cloudflare's table that this site produces;
 // nothing beyond them is claimed.
+// A path that starts with // is refused before any redirect is built: its Location would be
+// protocol-relative and send a browser to the host named after the slashes.
 function answerFor(files: SiteFiles, rawUrl: string): Answer {
   const path = decodePath(rawUrl);
-  if (path === undefined || !path.startsWith('/') || path.includes('\0')) return { kind: 'text', status: 400, body: 'Bad request' };
+  if (path === undefined || !path.startsWith('/') || path.startsWith('//') || path.includes('\0')) return { kind: 'text', status: 400, body: 'Bad request' };
   const search = rawUrl.includes('?') ? rawUrl.slice(rawUrl.indexOf('?')) : '';
   if (hasUnsafeSegment(path)) return files.notFound('/');
   const redirect = (location: string): Answer => ({ kind: 'redirect', location: `${encodeURI(location)}${search}` });
