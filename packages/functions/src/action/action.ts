@@ -524,6 +524,22 @@ async function sendOperatorEmail(run: Run, closure: Closure): Promise<void> {
   if (addresses === undefined) return;
   const rendered = await renderFor(deps, closure);
   if (rendered === undefined) return;
+  const request: SendEmailRequest = {
+    from: `${FROM_DISPLAY_NAME} <${addresses.from}>`,
+    to: [addresses.to],
+    subject: rendered.subject,
+    text: rendered.text,
+    configurationSetName: addresses.configurationSet,
+    ...(rendered.headers.length === 0 ? {} : { headers: rendered.headers }),
+  };
+  // D-120's rule for the pause, applied to the send: a dry run writes its would-send line and nothing on
+  // the closure, so no message id or send time is claimed for mail that never left, and the email is
+  // still due once the switch is live. Until then each run that reaches the closure writes one line.
+  if (deps.kinds.ses?.sendEmail === 'dry-run') {
+    await deps.ports.ses.sendEmail(request);
+    deps.log.info({ event: 'email-dry-run', incidentId: closure.incidentId });
+    return;
+  }
   const act = { incidentId: closure.incidentId, version: closure.version };
   const claimed: EmailState = {
     kind: rendered.kind,
@@ -534,14 +550,7 @@ async function sendOperatorEmail(run: Run, closure: Closure): Promise<void> {
     failed: false,
   };
   if (!(await updateClosure(run, act, { email: claimed }))) return;
-  await sendClaimed(run, act, claimed, {
-    from: `${FROM_DISPLAY_NAME} <${addresses.from}>`,
-    to: [addresses.to],
-    subject: rendered.subject,
-    text: rendered.text,
-    configurationSetName: addresses.configurationSet,
-    ...(rendered.headers.length === 0 ? {} : { headers: rendered.headers }),
-  });
+  await sendClaimed(run, act, claimed, request);
 }
 
 // D-88 source (c): every closure sources (a) and (b) reached that ended in a state that sends (D-109),

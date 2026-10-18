@@ -30,6 +30,7 @@ import { RETENTION_SECONDS } from '@fothering/core/records';
 import { incidentLimitSentence, reopenCommandFor, reputationResetSentence } from '@fothering/core/reopen';
 import { propertySeed } from '@fothering/core/test/property-seed';
 import { spikeWindowFor, type BucketWindow, type LaneFold } from '@fothering/core/window-fold';
+import { DRY_RUN_MESSAGE_ID } from '@fothering/providers/dry-run';
 import { createFixtureTableState } from '@fothering/providers/fixtures/ingest-ports';
 import { createFixtureSesState } from '@fothering/providers/fixtures/later-ports';
 import type {
@@ -1728,6 +1729,37 @@ describe('the model paragraph and its machine-readable mark reach the send (D-11
     expect(Object.hasOwn(run.requests[0] ?? {}, 'headers')).toBe(false);
     expect(run.requests[0]?.text).not.toContain(MODEL_PARAGRAPH_LABEL);
     expect(sendLinesOf(run.dryRunLines)[0]).not.toContain('"headers"');
+  });
+});
+
+// The send resolved to its dry-run recorder, as in a deployed run with the switch unset; the recorder
+// here answers as the real one does and counts the would-send lines.
+function withDryRunSend(deps: ActionDeps, wouldSend: SendEmailRequest[]): ActionDeps {
+  const sendEmail = async (request: SendEmailRequest): Promise<{ messageId: string }> => {
+    wouldSend.push(request);
+    return { messageId: DRY_RUN_MESSAGE_ID };
+  };
+  const ses = deps.kinds.ses ?? {};
+  return { ...deps, ports: { ...deps.ports, ses: { ...deps.ports.ses, sendEmail } }, kinds: { ...deps.kinds, ses: { ...ses, sendEmail: 'dry-run' } } };
+}
+
+describe('a send that resolved dry-run is never recorded as sent (WR-02)', () => {
+  it('writes the would-send line, stores no email on the closure, logs email-dry-run, and mails once the send is live', async () => {
+    const { store } = await seeded(decidingRuntime, [RECEIPT_BATCH]);
+    const run = emailRoot({ store, now: () => ACT_MS });
+    const wouldSend: SendEmailRequest[] = [];
+
+    await runActionCycle(withDryRunSend(run.deps, wouldSend));
+
+    expect(wouldSend).toHaveLength(1);
+    expect((await storedClosure(run.deps, RECEIPT_INCIDENT_ID, ACT_MS))?.email).toBeNull();
+    expect(loggedEvents(run.logLines, 'email-sent')).toEqual([]);
+    expect(loggedEvents(run.logLines, 'email-dry-run')).toEqual([{ event: 'email-dry-run', level: 'info', incidentId: RECEIPT_INCIDENT_ID }]);
+    expect(run.logLines.filter((line) => line.includes(DRY_RUN_MESSAGE_ID))).toEqual([]);
+
+    await runActionCycle(at(run.deps, ACT_MS + 60_000));
+    expect(run.requests).toHaveLength(1);
+    expect((await storedClosure(run.deps, RECEIPT_INCIDENT_ID, ACT_MS))?.email).toMatchObject({ attempts: 1, messageId: 'fixture-message-1' });
   });
 });
 
