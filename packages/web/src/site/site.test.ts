@@ -6,7 +6,7 @@ import { afterAll, describe, expect, it } from 'vitest';
 import { AXE_CONFIG } from '../harness/gates.js';
 import { GET as robotsGet } from '../pages/robots.txt.js';
 import { GET as sitemapGet } from '../pages/sitemap.xml.js';
-import { ACCESSIBILITY_RECORD, accessibilityStatements, CONTROLLER, HAND_CHECK_CRITERIA, HAND_CHECK_RESULT_LABELS, type HandCheckResult } from './content.js';
+import { ACCESSIBILITY_RECORD, accessibilityStatements, CONTROLLER, HAND_CHECK_CRITERIA, HAND_CHECK_RESULT_LABELS, handCheckRows, type HandCheckResult } from './content.js';
 import { readRepoText, repoRoot } from './repo-facts.js';
 import { headMeta, NOT_FOUND_ROUTE, renderRobots, renderSitemap, routeFor, ROUTES, SITE_ORIGIN, sitemapUrls, type SiteRoute } from './route-list.js';
 
@@ -314,6 +314,19 @@ describe('the accessibility record (D-156, AC-53)', () => {
 
   it('labels the four results as the statement prints them', () => {
     expect(HAND_CHECK_RESULT_LABELS).toEqual({ 'not-yet-checked': 'Not yet checked', 'not-applicable': 'Not applicable', 'passed': 'Passed', 'failed': 'Failed' });
+  });
+
+  // IN-12: a failed criterion is the one result that most needs its mark, so it never shares one.
+  it('gives a planted failed row its own mark, distinct from every other result', () => {
+    const [first] = HAND_CHECK_CRITERIA;
+    if (first === undefined) throw new Error('no criterion to plant');
+    const results: HandCheckResult[] = ['failed', 'not-applicable', 'passed', 'not-yet-checked'];
+    const rows = handCheckRows(results.map((result) => ({ ...first, result })));
+    const [failed, ...others] = rows.map((row) => row.cells[0]);
+    expect(failed).toEqual({ text: 'Failed', mark: 'failed' });
+    expect(others.map((cell) => cell?.mark)).not.toContain('failed');
+    expect(new Set(rows.map((row) => row.cells[0]?.mark)).size).toBe(results.length);
+    expect(rows[0]).toMatchObject({ header: `${first.number} ${first.name}`, attrs: { 'data-criterion': first.number }, cells: [{ text: 'Failed' }, { text: first.how }] });
   });
 });
 
