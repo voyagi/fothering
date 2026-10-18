@@ -253,9 +253,15 @@ describe('buildReplayView step contents', () => {
     expect(view.email.subject).toBe('Closed: fothering-bulk, one lane in eu-central-1');
   });
 
+  it('shows the operator email subject the artifact recorded, not one the view builds', () => {
+    const artifact = shippedArtifact();
+    expect(buildReplayView({ ...artifact, email: { ...artifact.email, subject: 'Paused: fothering-bulk' } }).email.subject).toBe('Paused: fothering-bulk');
+    expect(buildReplayView(artifact).email.subject).toBe(artifact.email.subject);
+  });
+
   it('says paused and LANE PAUSED without a hold check, and no view string says closed', () => {
     const { holdCheck: _dropped, ...rest } = shippedArtifact();
-    const view = buildReplayView(rest);
+    const view = buildReplayView({ ...rest, email: { ...rest.email, subject: 'Paused: fothering-bulk, one lane in eu-central-1' } });
     expect(view.tag.legend).toBe('LANE PAUSED');
     expect(view.steps[2]?.heading).toBe('Paused, then read back');
     expect(view.lanesLines.paused).toMatch(/^Paused: fothering-bulk\./);
