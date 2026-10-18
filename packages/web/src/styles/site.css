@@ -315,7 +315,7 @@ table.ruled { width: 100%; border-collapse: collapse; }
 /* Disabled keeps the same box, so the controls never move between steps. */
 .button[disabled], .button[disabled]:hover { cursor: not-allowed; background: var(--rule); color: var(--label); box-shadow: none; }
 table.schedule { width: 100%; border-collapse: collapse; font-size: var(--text-cell); line-height: 1.5; border: var(--w-outline) solid var(--ink); }
-.schedule caption { caption-side: bottom; padding-top: 10px; text-align: left; font: 500 var(--text-label)/1.4 var(--font-mono); color: var(--label); }
+.schedule caption { caption-side: bottom; padding-top: var(--space-sm); text-align: left; font: 500 var(--text-label)/1.4 var(--font-mono); color: var(--label); }
 /* Cells meet on their first baseline, so a 13px mono time sits on the line of the 16px text beside it. */
 .schedule th, .schedule td { padding: 13px 16px; text-align: left; vertical-align: baseline; border-top: var(--w-rule) solid var(--rule); border-left: var(--w-rule) solid var(--rule); }
 .schedule thead th { border-top: 0; border-bottom: var(--w-outline) solid var(--ink); font: 600 var(--text-label)/1.3 var(--font-mono); letter-spacing: 0.05em; text-transform: uppercase; color: var(--ink-2); }
@@ -326,10 +326,10 @@ table.schedule { width: 100%; border-collapse: collapse; font-size: var(--text-c
 .schedule .note { display: block; margin-top: var(--space-xs); font: 600 var(--text-label)/1.3 var(--font-mono); letter-spacing: 0.05em; text-transform: uppercase; color: var(--label); }
 .schedule.compact { font-size: var(--text-schedule-compact); line-height: 1.4; }
 .schedule.compact th, .schedule.compact td { padding: var(--space-sm) var(--space-12); }
-.schedule.compact tbody th code { display: block; margin-top: 2px; }
+.schedule.compact tbody th code { display: block; margin-top: var(--space-xs); }
 
 .message { max-inline-size: calc(44ch + 48px); border: var(--w-outline) solid var(--ink); background: var(--sheet); }
-.message dl { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 6px var(--space-md); margin: 0; padding: var(--space-12) var(--space-lg); border-bottom: var(--w-rule) solid var(--rule); font: 500 var(--text-mono-value)/1.45 var(--font-mono); }
+.message dl { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: var(--space-sm) var(--space-md); margin: 0; padding: var(--space-12) var(--space-lg); border-bottom: var(--w-rule) solid var(--rule); font: 500 var(--text-mono-value)/1.45 var(--font-mono); }
 .message dt { color: var(--label); }
 .message dd { margin: 0; }
 .message-body { padding: var(--space-md) var(--space-lg) var(--space-lg); }
@@ -371,14 +371,14 @@ ol.summary { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(4
 ol.steps { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); margin: 0; padding: 0 var(--gutter); list-style: none; border-bottom: var(--w-rule) solid var(--rule); }
 .steps li { position: relative; max-inline-size: none; }
 .steps li::before { content: ""; position: absolute; top: 29px; left: 0; right: 0; border-top: 2.5px solid var(--line); }
-.steps .step { position: relative; display: flex; flex-direction: column; align-items: flex-start; gap: var(--space-sm); width: 100%; padding: 18px var(--space-12) var(--space-md) 0; border: 0; background: none; color: var(--ink); font: 400 var(--text-cell)/1.3 var(--font-text); text-align: left; cursor: pointer; }
+.steps .step { position: relative; display: flex; flex-direction: column; align-items: flex-start; gap: var(--space-sm); width: 100%; padding: var(--space-md) var(--space-12) var(--space-md) 0; border: 0; background: none; color: var(--ink); font: 400 var(--text-cell)/1.3 var(--font-text); text-align: left; cursor: pointer; }
 .steps .dot { width: 22px; height: 22px; border: 2px solid var(--ink); border-radius: 50%; background: var(--sheet); }
 .steps .step[aria-current="step"] .dot { background: var(--ink); box-shadow: 0 0 0 4px var(--sheet), 0 0 0 6px var(--ink); }
 .steps .step:hover .step-label { text-decoration: underline; text-underline-offset: 0.22em; }
 .steps .t { font: 600 var(--text-label)/1 var(--font-mono); font-feature-settings: "tnum" 1; color: var(--label); }
 
 .stage { display: grid; grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); align-items: start; }
-.board { position: sticky; top: 0; padding: clamp(20px, 3vw, 44px) var(--gutter) var(--space-40); border-right: var(--w-rule) solid var(--rule); }
+.board { position: sticky; top: 0; padding: clamp(24px, 3vw, 44px) var(--gutter) var(--space-40); border-right: var(--w-rule) solid var(--rule); }
 .board-drawing { max-inline-size: 420px; margin-inline: auto; }
 .dwg-board .dwg-lane { font-size: 12px; }
 .dwg-mark { fill: none; stroke: var(--ink); stroke-width: 2; }
@@ -396,7 +396,7 @@ ol.steps { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); marg
 .board .caption-row { flex-direction: column; justify-content: center; margin-top: var(--space-lg); padding-right: 0; text-align: center; }
 .board .caption { max-inline-size: 44ch; }
 
-.narrative { display: flex; flex-direction: column; gap: var(--space-lg); padding: clamp(20px, 3vw, 44px) var(--gutter) var(--space-40); }
+.narrative { display: flex; flex-direction: column; gap: var(--space-lg); padding: clamp(24px, 3vw, 44px) var(--gutter) var(--space-40); }
 .controls { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-12); }
 .controls .clock { margin: 0 0 0 auto; font: 600 var(--text-mono-value)/1.4 var(--font-mono); font-feature-settings: "tnum" 1; color: var(--label); }
 .panel { display: flex; flex-direction: column; gap: var(--space-md); }
@@ -444,11 +444,11 @@ ol.steps { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); marg
 @container (width < 604px) {
   table.schedule.stack, .schedule.stack thead, .schedule.stack tbody, .schedule.stack tr, .schedule.stack th, .schedule.stack td { display: block; width: auto; }
   .schedule.stack thead { display: none; }
-  .schedule.stack caption { display: block; padding: 10px 14px; }
+  .schedule.stack caption { display: block; padding: var(--space-sm) var(--space-md); }
   .schedule.stack tbody tr { padding: var(--space-xs) 0 var(--space-sm); border-top: var(--w-outline) solid var(--ink); }
   .schedule.stack tbody tr:first-child { border-top: 0; }
-  .schedule.stack tbody th, .schedule.stack td { padding: 6px 14px; border: 0; }
-  .schedule.stack tbody th { padding-top: 10px; }
+  .schedule.stack tbody th, .schedule.stack td { padding: var(--space-sm) var(--space-md); border: 0; }
+  .schedule.stack tbody th { padding-top: var(--space-12); }
   .schedule.stack td::before { content: attr(data-col); display: block; font: 600 var(--text-label-small)/1.4 var(--font-mono); letter-spacing: 0.06em; text-transform: uppercase; color: var(--label); }
   /* A log detail is a long value, not an identifier, so it may break as the last resort. */
   .schedule.stack td { overflow-wrap: anywhere; }
@@ -504,14 +504,15 @@ ol.removal { counter-reset: removal; max-inline-size: 80ch; margin: 0; padding: 
   .fit-resources .fit :is(thead, td[data-empty]) { display: none; }
   .fit-resources .fit tbody tr { padding: var(--space-xs) 0 var(--space-sm); }
   .fit-resources .fit tbody tr + tr { border-top: var(--w-outline) solid var(--ink); }
-  .fit-resources .fit :is(th, td) { padding: 6px 14px; border: 0; }
+  .fit-resources .fit :is(th, td) { padding: var(--space-sm) var(--space-md); border: 0; }
   .fit-resources .fit :is(th, td)::before { content: attr(data-col); display: block; font: 600 var(--text-label-small)/1.4 var(--font-mono); letter-spacing: 0.06em; text-transform: uppercase; color: var(--label); }
-  .fit-resources .fit caption { display: block; padding: 10px 14px; }
+  .fit-resources .fit caption { display: block; padding: var(--space-sm) var(--space-md); }
   .fit-resources .fit :is(th, td) .cell-text { min-inline-size: 0; }
 }
-/* The longest logical id, 32 mono characters, needs 250px at the identifier step; under 282px of
-   section it steps down to the label size rather than break mid-name (UI-SPEC 9.3, E10). */
-@container resources (width < 282px) {
+/* The longest logical id, 32 mono characters, needs 250px at the identifier step, plus the stacked
+   cell's 16px inline padding and the outline; under 286px of section it steps down to the label size
+   rather than break mid-name (UI-SPEC 9.3, E10). */
+@container resources (width < 286px) {
   .fit-resources .fit code { font-size: var(--text-label); }
 }
 @container permissions (width < 1032px) {
@@ -519,9 +520,9 @@ ol.removal { counter-reset: removal; max-inline-size: 80ch; margin: 0; padding: 
   .fit-permissions .fit :is(thead, td[data-empty]) { display: none; }
   .fit-permissions .fit tbody tr { padding: var(--space-xs) 0 var(--space-sm); }
   .fit-permissions .fit tbody tr + tr { border-top: var(--w-outline) solid var(--ink); }
-  .fit-permissions .fit :is(th, td) { padding: 6px 14px; border: 0; }
+  .fit-permissions .fit :is(th, td) { padding: var(--space-sm) var(--space-md); border: 0; }
   .fit-permissions .fit :is(th, td)::before { content: attr(data-col); display: block; font: 600 var(--text-label-small)/1.4 var(--font-mono); letter-spacing: 0.06em; text-transform: uppercase; color: var(--label); }
-  .fit-permissions .fit caption { display: block; padding: 10px 14px; }
+  .fit-permissions .fit caption { display: block; padding: var(--space-sm) var(--space-md); }
   .fit-permissions .fit :is(th, td) .cell-text { min-inline-size: 0; }
 }
 
@@ -591,9 +592,9 @@ ul.site { display: grid; gap: var(--space-12); margin: 0; padding-left: var(--sp
   .fit-fields .fit thead { display: none; }
   .fit-fields .fit tbody tr { padding: var(--space-xs) 0 var(--space-sm); }
   .fit-fields .fit tbody tr + tr { border-top: var(--w-outline) solid var(--ink); }
-  .fit-fields .fit :is(th, td) { padding: 6px 14px; border: 0; }
+  .fit-fields .fit :is(th, td) { padding: var(--space-sm) var(--space-md); border: 0; }
   .fit-fields .fit :is(th, td)::before { content: attr(data-col); display: block; font: 600 var(--text-label-small)/1.4 var(--font-mono); letter-spacing: 0.06em; text-transform: uppercase; color: var(--label); }
-  .fit-fields .fit caption { display: block; padding: 10px 14px; }
+  .fit-fields .fit caption { display: block; padding: var(--space-sm) var(--space-md); }
   .fit-fields .fit :is(th, td) .cell-text { min-inline-size: 0; }
   .fit-fields .fit tbody th wbr { display: inline; }
 }
@@ -602,9 +603,9 @@ ul.site { display: grid; gap: var(--space-12); margin: 0; padding-left: var(--sp
   .fit-model .fit thead { display: none; }
   .fit-model .fit tbody tr { padding: var(--space-xs) 0 var(--space-sm); }
   .fit-model .fit tbody tr + tr { border-top: var(--w-outline) solid var(--ink); }
-  .fit-model .fit :is(th, td) { padding: 6px 14px; border: 0; }
+  .fit-model .fit :is(th, td) { padding: var(--space-sm) var(--space-md); border: 0; }
   .fit-model .fit :is(th, td)::before { content: attr(data-col); display: block; font: 600 var(--text-label-small)/1.4 var(--font-mono); letter-spacing: 0.06em; text-transform: uppercase; color: var(--label); }
-  .fit-model .fit caption { display: block; padding: 10px 14px; }
+  .fit-model .fit caption { display: block; padding: var(--space-sm) var(--space-md); }
   .fit-model .fit :is(th, td) .cell-text { min-inline-size: 0; }
 }
 
@@ -639,9 +640,9 @@ ul.site { display: grid; gap: var(--space-12); margin: 0; padding-left: var(--sp
   :is(.fit-record, .fit-checks) .fit thead { display: none; }
   :is(.fit-record, .fit-checks) .fit tbody tr { padding: var(--space-xs) 0 var(--space-sm); }
   :is(.fit-record, .fit-checks) .fit tbody tr + tr { border-top: var(--w-outline) solid var(--ink); }
-  :is(.fit-record, .fit-checks) .fit :is(th, td) { padding: 6px 14px; border: 0; }
+  :is(.fit-record, .fit-checks) .fit :is(th, td) { padding: var(--space-sm) var(--space-md); border: 0; }
   :is(.fit-record, .fit-checks) .fit :is(th, td)::before { content: attr(data-col); display: block; font: 600 var(--text-label-small)/1.4 var(--font-mono); letter-spacing: 0.06em; text-transform: uppercase; color: var(--label); }
-  :is(.fit-record, .fit-checks) .fit caption { display: block; padding: 10px 14px; }
+  :is(.fit-record, .fit-checks) .fit caption { display: block; padding: var(--space-sm) var(--space-md); }
   :is(.fit-record, .fit-checks) .fit :is(th, td) .cell-text { min-inline-size: 0; }
   /* One state per block, so there is no column of names to keep aligned. */
   .fit-checks .fit .state-mark-none { display: none; }
