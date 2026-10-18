@@ -1,7 +1,7 @@
 import * as z from 'zod';
 import { AGENT_DECISIONS, GATE_REFUSALS, type AgentAnswer } from './agent-answer.js';
 import { BUCKET_MS, bucketStartMs } from './buckets.js';
-import { ACTION_FUNCTION_TIMEOUT_MS, HOLD_CHECK_DELAY_MS, RECORD_MAX_AGE_MS } from './close-values.js';
+import { ACTION_FUNCTION_TIMEOUT_MS, HOLD_CHECK_DELAY_MS, RECORD_MAX_AGE_MS, REOPEN_FUNCTION_TIMEOUT_MS } from './close-values.js';
 import { REFUSAL_REASONS, type RefusalReason } from './closeability.js';
 import { incidentItemKey, type EvidenceRecord } from './evidence-record.js';
 import type { IncidentMarker, IncidentState } from './incident.js';
@@ -214,9 +214,24 @@ export function pauseMayHold(closure: Closure | undefined, nowMs: number): boole
   return PAUSE_MAY_HOLD.has(closure.outcome) && !reopened(closure);
 }
 
-/** D-100: the first run at or after the hold end plus HOLD_CHECK_DELAY_MS, on a pause the operator has not reopened (D-94). */
+// A reopen already sent to SES whose outcome the command has not written yet. A hold check now would
+// read about a lane that may be open again and could write closed about it, so it waits; the reopen
+// claim's own timeout ends the wait if the command stopped.
+function reopenUnderway(closure: Closure, nowMs: number): boolean {
+  const { reopen } = closure;
+  if (reopen === null || reopen.outcome !== null || reopen.requestedAtMs === null || reopen.claimedAtMs === null) return false;
+  return nowMs < reopen.claimedAtMs + REOPEN_FUNCTION_TIMEOUT_MS;
+}
+
+/** D-100: the first run at or after the hold end plus HOLD_CHECK_DELAY_MS, on a pause the operator has not reopened (D-94) and is not reopening. */
 export function holdCheckDue(closure: Closure, nowMs: number): closure is Closure & { holdEndMs: number } {
-  return closure.outcome === 'paused' && !reopened(closure) && closure.holdEndMs !== null && nowMs >= closure.holdEndMs + HOLD_CHECK_DELAY_MS;
+  return (
+    closure.outcome === 'paused' &&
+    !reopened(closure) &&
+    !reopenUnderway(closure, nowMs) &&
+    closure.holdEndMs !== null &&
+    nowMs >= closure.holdEndMs + HOLD_CHECK_DELAY_MS
+  );
 }
 
 /** D-94: a reopened pause whose hold check would otherwise be due; it is skipped and keeps outcome paused. */

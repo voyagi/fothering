@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import fc from 'fast-check';
 import { BUCKET_MS, bucketStartMs } from '@fothering/core/buckets';
-import { ACTION_FUNCTION_TIMEOUT_MS, HOLD_CHECK_DELAY_MS, HOLD_MS, LANE_HOUR_ATTEMPT_CAP } from '@fothering/core/close-values';
+import { ACTION_FUNCTION_TIMEOUT_MS, HOLD_CHECK_DELAY_MS, HOLD_MS, LANE_HOUR_ATTEMPT_CAP, REOPEN_FUNCTION_TIMEOUT_MS } from '@fothering/core/close-values';
 import type { ConfigurationRefusal } from '@fothering/core/closeability';
 import { closureClaimItem, closureKey, decisionOf, parseClosure, type Closure, type FreshnessRefusal } from '@fothering/core/closure';
 import { AUTOMATED_SENDER_FOOTER, MODEL_PARAGRAPH_LABEL, MODEL_TEXT_MARKER_HEADER } from '@fothering/core/disclosure';
@@ -842,6 +842,21 @@ describe('a paused lane is called closed only after the hold check finds no send
     expect((await storedClosure(deps, INCIDENT_ID, HOLD_CHECK_MS))?.outcome).toBe('paused');
     expect(counted.folds.count).toBe(0);
     expect(loggedEvents(lines, 'hold-check-skipped')).toEqual([{ event: 'hold-check-skipped', level: 'info', incidentId: INCIDENT_ID }]);
+  });
+
+  it('waits while a reopen sent to SES has no outcome yet, and hold-checks once that reopen claim is stale (WR-04)', async () => {
+    const { deps } = await pausedAtT();
+    const closure = await storedClosure(deps, INCIDENT_ID, T);
+    const underway = { attempts: 1, claimedAtMs: HOLD_CHECK_MS - 2_000, requestedAtMs: HOLD_CHECK_MS - 1_000, readBackAtMs: null, outcome: null };
+    await deps.ports.decisionStore.updateIfVersion(closureKey(INCIDENT_ID), closure?.version ?? -1, { reopen: underway }, HOLD_CHECK_MS - 1_000);
+    const counted = countingFolds(at(deps, HOLD_CHECK_MS));
+
+    await runActionCycle(counted.deps);
+    expect((await storedClosure(deps, INCIDENT_ID, HOLD_CHECK_MS))?.outcome).toBe('paused');
+    expect(counted.folds.count).toBe(0);
+
+    await runActionCycle(at(deps, underway.claimedAtMs + REOPEN_FUNCTION_TIMEOUT_MS));
+    expect((await storedClosure(deps, INCIDENT_ID, HOLD_CHECK_MS))?.outcome).toBe('closed');
   });
 
   it('says closed only as a hold-checked outcome across closures and log lines, and reports a closure written closed on the read-back (AC-6)', async () => {

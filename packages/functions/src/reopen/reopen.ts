@@ -56,6 +56,29 @@ async function writeReopen(deps: ReopenDeps, target: Target, reopen: ReopenRecor
   return true;
 }
 
+function sameReopen(stored: ReopenRecord | null, expected: ReopenRecord | null): boolean {
+  if (stored === null || expected === null) return stored === expected;
+  return (
+    stored.attempts === expected.attempts &&
+    stored.claimedAtMs === expected.claimedAtMs &&
+    stored.requestedAtMs === expected.requestedAtMs &&
+    stored.readBackAtMs === expected.readBackAtMs &&
+    stored.outcome === expected.outcome
+  );
+}
+
+// The action run moves the same closure's version with its hold-check and email writes, but never its
+// reopen sub-record, which only this command writes. So a lost version whose reopen is still the one
+// this run expects was moved by the action, and the write is tried once more from the fresh version;
+// a reopen another command changed is never written over.
+async function writeOwnReopen(deps: ReopenDeps, target: Target, expected: ReopenRecord | null, reopen: ReopenRecord | null): Promise<boolean> {
+  if (await writeReopen(deps, target, reopen)) return true;
+  const fresh = parseClosure(await deps.ports.decisionStore.getItem(closureKey(target.incidentId), deps.now()));
+  if (fresh === undefined || !sameReopen(fresh.reopen, expected)) return false;
+  target.version = fresh.version;
+  return writeReopen(deps, target, reopen);
+}
+
 // A put that throws is reopen-failed with no read-back; only a read of true is a reopen (T-03-18).
 async function putAndReadBack(deps: ReopenDeps, configurationSet: string): Promise<{ outcome: ReopenOutcome; readBackAtMs: number | null }> {
   await deps.wait(SES_READ_SPACING_MS);
@@ -84,23 +107,30 @@ function outcomeOfRead(sendingEnabled: boolean | undefined): ReopenOutcome {
 async function reopenClaimed(deps: ReopenDeps, target: Target, previous: ReopenRecord | null): Promise<ReopenReport> {
   const { configurationSet, incidentId } = target;
   const claimed: ReopenRecord = { attempts: (previous?.attempts ?? 0) + 1, claimedAtMs: deps.now(), requestedAtMs: null, readBackAtMs: null, outcome: null };
-  if (!(await writeReopen(deps, target, claimed))) return refuse(deps, configurationSet, 'reopen-in-progress');
+  if (!(await writeOwnReopen(deps, target, previous, claimed))) return refuse(deps, configurationSet, 'reopen-in-progress');
   deps.log.info({ event: 'reopen-claimed', configurationSet, incidentId, attempt: claimed.attempts });
 
   const attempt = await reserveLaneAttempt(deps.ports.decisionStore, { configurationSet, nowMs: deps.now() });
   if (attempt.outcome === 'cap') {
-    await writeReopen(deps, target, previous);
+    await writeOwnReopen(deps, target, claimed, previous);
     return refuse(deps, configurationSet, 'lane-cap-reached', { capHourEndsAt: new Date(attempt.hourEndsAtMs).toISOString() });
   }
 
   const requestedAtMs = deps.now();
-  if (!(await writeReopen(deps, target, { ...claimed, requestedAtMs }))) return refuse(deps, configurationSet, 'reopen-in-progress');
+  const requested: ReopenRecord = { ...claimed, requestedAtMs };
+  if (!(await writeOwnReopen(deps, target, claimed, requested))) return refuse(deps, configurationSet, 'reopen-in-progress');
   deps.log.info({ event: 'reopen-requested', configurationSet, incidentId });
 
   const { outcome, readBackAtMs } = await putAndReadBack(deps, configurationSet);
-  await writeReopen(deps, target, { ...claimed, requestedAtMs, readBackAtMs, outcome });
+  const times = { requestedAtMs, ...(readBackAtMs === null ? {} : { readBackAtMs }) };
+  // A reopen the closure does not record leaves the lane held for later incidents, so the operator is
+  // told to run the command again rather than shown a result the record contradicts.
+  if (!(await writeOwnReopen(deps, target, requested, { ...requested, readBackAtMs, outcome }))) {
+    deps.log.error({ event: 'reopen-unrecorded', configurationSet, incidentId, outcome });
+    return report(configurationSet, 'reopen-unknown', times);
+  }
   deps.log.info({ event: 'reopen-outcome', configurationSet, incidentId, outcome });
-  return report(configurationSet, outcome, { requestedAtMs, ...(readBackAtMs === null ? {} : { readBackAtMs }) });
+  return report(configurationSet, outcome, times);
 }
 
 /**

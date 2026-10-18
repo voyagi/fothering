@@ -333,6 +333,63 @@ describe('two reopen commands run together make one reopen (AC-E22)', () => {
   });
 });
 
+// An action-run write lands on the closure just before the chosen reopen writes (counted from 1 in the
+// order the command issues them), as the action's email claims and sends can while the command runs.
+function actionWritesBefore(deps: ReopenDeps, incidentId: string, ordinals: readonly number[]): ReopenDeps {
+  const real = deps.ports.decisionStore;
+  let reopenWrites = 0;
+  const decisionStore: DecisionStorePort = {
+    putIfAbsent: (item, nowMs) => real.putIfAbsent(item, nowMs),
+    getItem: (key, nowMs) => real.getItem(key, nowMs),
+    updateIfVersion: async (key, expectedVersion, attributes, nowMs, expected) => {
+      if (Object.hasOwn(attributes, 'reopen')) {
+        reopenWrites += 1;
+        if (ordinals.includes(reopenWrites)) {
+          const email = { kind: 'closed', attempts: 1, claimedAtMs: nowMs, sentAtMs: nowMs, messageId: `fixture-message-${reopenWrites}`, failed: false };
+          await rewriteClosure(deps, incidentId, { email }, nowMs);
+        }
+      }
+      return real.updateIfVersion(key, expectedVersion, attributes, nowMs, expected);
+    },
+    reserveInvocation: (request) => real.reserveInvocation(request),
+    recordUsage: (usage) => real.recordUsage(usage),
+    reserveLaneAttempt: (request) => real.reserveLaneAttempt(request),
+  };
+  return { ...deps, ports: { ...deps.ports, decisionStore } };
+}
+
+describe('an action write landing while the command runs never leaves the reopen unrecorded (WR-04)', () => {
+  it.each([
+    { label: 'the claim', ordinal: 1 },
+    { label: 'the requested stage', ordinal: 2 },
+    { label: 'the outcome write', ordinal: 3 },
+  ])('records reopened when an action write moves the closure just before $label', async ({ ordinal }) => {
+    const { incidentId, reopenAtMs, sesState, reopenRoot } = await closedLane();
+    const { deps } = reopenRoot();
+
+    const report = await reopenFromPayload(BULK_PAYLOAD, actionWritesBefore(deps, incidentId, [ordinal]));
+
+    expect(report.result).toBe('reopened');
+    expect((await storedClosure(deps, incidentId, reopenAtMs))?.reopen).toMatchObject({ attempts: 1, outcome: 'reopened' });
+    expect(putsOf(sesState).filter((call) => call.endsWith(':true'))).toHaveLength(1);
+  });
+
+  it('reports reopen-unknown and logs reopen-unrecorded when the outcome write loses twice, and a rerun records it', async () => {
+    const lane = await closedLane();
+    const { deps } = lane.reopenRoot();
+
+    const report = await reopenFromPayload(BULK_PAYLOAD, actionWritesBefore(deps, lane.incidentId, [3, 4]));
+
+    expect(report.result).toBe('reopen-unknown');
+    expect(loggedEvents(lane.lines, 'reopen-unrecorded')).toEqual([
+      { event: 'reopen-unrecorded', level: 'error', configurationSet: BULK, incidentId: lane.incidentId, outcome: 'reopened' },
+    ]);
+    const rerunAtMs = lane.reopenAtMs + 60_000;
+    expect((await reopenFromPayload(BULK_PAYLOAD, lane.reopenRoot(rerunAtMs).deps)).result).toBe('reopened');
+    expect((await storedClosure(deps, lane.incidentId, rerunAtMs))?.reopen).toMatchObject({ attempts: 2, outcome: 'reopened' });
+  });
+});
+
 describe('a reopen before the hold check, and the switch unset', () => {
   it('keeps a paused closure paused after a reopen, and the next run past the hold check logs hold-check-skipped (D-94)', async () => {
     const lane = await closedLane('paused');

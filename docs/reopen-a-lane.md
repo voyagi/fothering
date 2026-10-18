@@ -56,6 +56,9 @@ It never holds the payload, an address or a hash.
   stays paused; run the command again.
 - `reopen-unknown`: the read-back failed or came back without the sending setting, so the command
   cannot say whether the set is sending. Check the set in the SES console, or run the command again.
+  The same result comes back when the command could not record what it read on the pause, which
+  leaves Fothering treating the set as still paused: run the command again after 30 seconds so the
+  record matches SES.
 - `refused`: the command changed nothing and made no SES call; `reason` says why.
 - `dry-run`: the live switch is off for this deployment, so the command wrote one log line naming
   the reopen it would have made and changed nothing.
