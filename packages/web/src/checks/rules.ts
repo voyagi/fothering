@@ -981,9 +981,37 @@ export function typeTokenUseRule(site: BuiltSite, _context: CheckContext): Findi
     .map(([name]) => ({ rule: 'type-token-use' as const, route: fileRoute('*.css'), text: `the built CSS never uses ${name} through var()` }));
 }
 
-// Stub until the identifier break rule is written.
+// AC-65 and AC-E55 (UI-SPEC line 208): an identifier may end a line only at a <wbr> right after a
+// dot. The one exception is an API operation name in word mode (data-identifier-words) inside a
+// replay log Detail cell, which may also break between its capitalised words (S4 note 2026-10-18).
+function inLogDetail(element: BuiltElement, parents: ReadonlyMap<BuiltElement, BuiltElement>): boolean {
+  const cell = ancestorWith(element, parents, (node) => node.tag === 'td');
+  const row = cell === undefined ? undefined : parents.get(cell);
+  return cell?.attrs['data-col'] === 'Detail' && row?.tag === 'tr' && row.attrs['data-log-step'] !== undefined;
+}
+
+function identifierBreakFindings(page: BuiltPage): string[] {
+  const parents = parentsOf(page.root);
+  const texts: string[] = [];
+  walk(page.root, (element) => {
+    if (element.attrs['data-identifier'] === undefined) return;
+    const wordsAllowed = element.attrs['data-identifier-words'] !== undefined && inLogDetail(element, parents);
+    let before: BuiltElement | undefined;
+    for (const child of element.children) {
+      if (typeof child === 'string') continue;
+      const part = before === undefined ? '' : textOf(before);
+      if (child.tag === 'wbr' && !part.endsWith('.') && !wordsAllowed) {
+        const where = element.attrs['data-identifier-words'] === undefined ? '' : ' outside a replay log Detail cell';
+        texts.push(`the identifier ${textOf(element)} may break after "${part}", and${where} only a dot may end an identifier's line`);
+      }
+      before = child;
+    }
+  });
+  return texts;
+}
+
 export function identifierBreakRule(site: BuiltSite, _context: CheckContext): Finding[] {
-  return site.pages.length < 0 ? [{ rule: 'identifier-break', route: '', text: '' }] : [];
+  return site.pages.flatMap((page) => identifierBreakFindings(page).map((text) => ({ rule: 'identifier-break' as const, route: page.route, text })));
 }
 
 // Workers limits: 20,000 files per version on the Free plan and 25 MiB per file (AC-62).

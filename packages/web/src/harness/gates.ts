@@ -368,10 +368,30 @@ export interface IdentifierReading {
   readonly parts?: readonly string[];
 }
 
-// AC-E55: every line of an identifier but the last must end right after a dot.
+// The offsets at which a word-mode identifier may end a line: the end of each word part but the last.
+function partEnds(parts: readonly string[]): Set<number> {
+  const ends = new Set<number>();
+  let offset = 0;
+  for (const part of parts.slice(0, -1)) {
+    offset += part.length;
+    ends.add(offset);
+  }
+  return ends;
+}
+
+// AC-E55: every line of an identifier but the last must end right after a dot, or, for a word-mode
+// API name in a replay log Detail cell, at the end of one of its word parts.
 export function identifierBreakVerdict(reading: IdentifierReading): Verdict {
   const lines = reading.lines.map((line) => line.trim());
-  return lines.slice(0, -1).every((line) => line.endsWith('.')) ? { ok: true } : { ok: false, reason: E2E_MESSAGES.identifierBreak(reading.text, lines) };
+  const fail = { ok: false, reason: E2E_MESSAGES.identifierBreak(reading.text, lines) } as const;
+  if (reading.parts === undefined) return lines.slice(0, -1).every((line) => line.endsWith('.')) ? { ok: true } : fail;
+  const allowed = partEnds(reading.parts);
+  let offset = 0;
+  for (const line of lines.slice(0, -1)) {
+    offset += line.length;
+    if (!allowed.has(offset)) return fail;
+  }
+  return { ok: true };
 }
 
 export interface Box {
@@ -653,6 +673,7 @@ export interface ReplayLayoutReading {
 const STACKED_BOARD_WIDTH = 960;
 const STACKED_LOG_WIDTH = 960;
 const IDENTIFIER_WEIGHT = '500';
+const IDENTIFIER_FAMILY = 'Red Hat Mono';
 const spread = (values: readonly number[]): number => Math.max(...values) - Math.min(...values);
 
 // UI-SPEC 10.3 and AC-6: stacked, the board keeps one height and the reserved slot draws where the
@@ -685,10 +706,12 @@ function typeReasons(reading: ReplayLayoutReading): string[] {
     }
   }
   if (identifiers.length === 0) reasons.push(E2E_MESSAGES.layoutIdentifiersMissing(width));
-  for (const { text, weight, lines } of identifiers) {
+  for (const { text, weight, family, lines, parts } of identifiers) {
     if (weight !== IDENTIFIER_WEIGHT) reasons.push(E2E_MESSAGES.layoutIdentifierWeight(width, text, weight));
-    if (!identifierBreakVerdict({ text, lines }).ok) reasons.push(E2E_MESSAGES.layoutIdentifierBreak(width, text, lines.map((line) => line.trim())));
+    if (!family.includes(IDENTIFIER_FAMILY)) reasons.push(E2E_MESSAGES.layoutIdentifierFamily(width, text, family));
+    if (!identifierBreakVerdict({ text, lines, ...(parts === undefined ? {} : { parts }) }).ok) reasons.push(E2E_MESSAGES.layoutIdentifierBreak(width, text, lines.map((line) => line.trim())));
   }
+  for (const name of reading.plainApiNames) reasons.push(E2E_MESSAGES.layoutPlainApiName(width, name));
   return reasons;
 }
 
@@ -1611,7 +1634,8 @@ const isFlowState = (value: unknown): value is FlowState => isObject(value) && i
 const isLinesReading = (value: unknown): value is LinesReading => isObject(value) && typeof value.route === 'string' && isNumber(value.blocks) && isStringList(value.lines);
 const isDrawing = (value: unknown): value is DrawingReading => isObject(value) && isBox(value.box)
   && Array.isArray(value.texts) && value.texts.every((text) => isObject(text) && typeof text.text === 'string' && isBox(text.box));
-const isIdentifier = (value: unknown): value is IdentifierReading => isObject(value) && typeof value.text === 'string' && isStringList(value.lines);
+const isIdentifier = (value: unknown): value is IdentifierReading => isObject(value) && typeof value.text === 'string' && isStringList(value.lines)
+  && (value.parts === undefined || isStringList(value.parts));
 
 interface NarrowReading extends OverlapReading {
   readonly route: string;
@@ -1733,7 +1757,9 @@ const isReplayLayoutReading = (value: unknown): value is ReplayLayoutReading => 
   && isNumber(value.phantomExposed)
   && (value.evidence === null || (isObject(value.evidence) && isNumber(value.evidence.tableRight) && isNumber(value.evidence.panelRight)))
   && Array.isArray(value.logRows) && value.logRows.every((row) => isObject(row) && typeof row.header === 'string' && Array.isArray(row.baselines) && row.baselines.every(isNumber))
-  && Array.isArray(value.identifiers) && value.identifiers.every((item) => isObject(item) && typeof item.text === 'string' && typeof item.weight === 'string' && isStringList(item.lines))
+  && Array.isArray(value.identifiers) && value.identifiers.every((item) => isObject(item) && typeof item.text === 'string' && typeof item.weight === 'string'
+    && typeof item.family === 'string' && isStringList(item.lines) && (item.parts === undefined || isStringList(item.parts)))
+  && isStringList(value.plainApiNames)
   && Array.isArray(value.logHeaders) && value.logHeaders.every((item) => isObject(item) && typeof item.text === 'string' && typeof item.type === 'string');
 
 // The replay checks run only where the build holds the replay; a replay route that printed no line
@@ -1789,7 +1815,7 @@ function judgeRendered(run: DriverRun, routes: readonly string[], print: (line: 
     ['NOSCRIPT', judgeReplayCheck('NOSCRIPT', routeLines.get('NOSCRIPT') ?? [], routes, isNoScriptReading, noScriptVerdict,
       `with the js class removed every panel showed in order, no control showed and the board held the paused step at 320 and 1440 px (${NO_SCRIPT_METHOD})`)],
     ['LAYOUT', judgeReplayCheck('LAYOUT', routeLines.get('LAYOUT') ?? [], routes, isReplayLayoutReading, replayLayoutVerdict,
-      `the stacked board held one height with the tag's place drawn, the step 2 schedule stayed inside its panel, log cells shared a baseline and identifiers computed 500 on ${REPLAY} at ${REPLAY_LAYOUT_WIDTHS.join(', ')} px`,
+      `the stacked board held one height with the tag's place drawn, the step 2 schedule stayed inside its panel, log cells shared a baseline, log headers took the label style, every API name in the log was a mono identifier and identifiers computed 500 and broke only after a dot or between an API name's words on ${REPLAY} at ${REPLAY_LAYOUT_WIDTHS.join(', ')} px`,
       REPLAY_LAYOUT_WIDTHS)],
     ['STORAGE', judgeStorage(records.get('STORAGE'))],
     ['CONSOLE', { verdict: consoleVerdict(consoleErrors), detail: 'no console error, no Content Security Policy violation' }],

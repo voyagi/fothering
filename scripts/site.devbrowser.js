@@ -297,7 +297,11 @@ const narrowRun = async (route) => {
       texts: Array.from(svg.querySelectorAll('text')).filter(shown).map((text) => ({ text: text.textContent.trim(), box: boxOf(text) })),
     }));
     const identifiers = Array.from(document.querySelectorAll('[data-identifier]')).filter(shown)
-      .map((element) => ({ text: element.textContent, lines: window.fotheringLines(element) }));
+      .map((element) => ({
+        text: element.textContent,
+        lines: window.fotheringLines(element),
+        ...(element.hasAttribute('data-identifier-words') ? { parts: Array.from(element.children).filter((child) => child.tagName === 'SPAN').map((child) => child.textContent) } : {}),
+      }));
     return { route: path, tag: tag ? boxOf(tag) : null, drawings, identifiers };
   }, route);
 };
@@ -486,9 +490,20 @@ const layoutStep = (step) => page.evaluate((args) => {
     }
     return lines;
   };
-  // Every identifier this step shows, the log's mono cells (times and lane names) included.
+  // Every identifier this step shows, the log's mono cells (times and lane names) included; a
+  // word-mode API name carries its word parts, whose ends are its allowed breaks.
+  const partsOf = (element) => (element.hasAttribute('data-identifier-words')
+    ? { parts: Array.from(element.children).filter((child) => child.tagName === 'SPAN').map((child) => child.textContent) } : {});
   reading.identifiers = Array.from(document.querySelectorAll('[data-identifier], tr[data-log-step] .mono')).filter(visible)
-    .map((element) => ({ text: element.textContent.trim(), weight: getComputedStyle(element).fontWeight, lines: linesOf(element) }));
+    .map((element) => {
+      const style = getComputedStyle(element);
+      return { text: element.textContent.trim(), weight: style.fontWeight, family: style.fontFamily, lines: linesOf(element), ...partsOf(element) };
+    });
+  // An API operation name (capitalised words run together) left as plain text in a log Detail cell.
+  const API_NAME = /[A-Z][a-z]+(?:[A-Z][a-z]+)+/g;
+  reading.plainApiNames = Array.from(document.querySelectorAll('tr[data-log-step] td[data-col="Detail"]')).filter(visible)
+    .flatMap((cell) => textNodes(cell).filter((node) => node.parentElement.closest('[data-identifier]') === null))
+    .flatMap((node) => node.textContent.match(API_NAME) ?? []);
   if (args.step === 2) {
     const panel = document.querySelector('[data-wordcount="step"][data-steps="2"]');
     const table = panel === null ? null : panel.querySelector('table');
@@ -527,6 +542,7 @@ const layoutRun = async (width) => {
   let logRows = [];
   let logHeaders = [];
   const identifiers = [];
+  const plainApiNames = [];
   for (const step of [1, 2, 3, 4]) {
     await loadReplay(width, '#step-' + step);
     const reading = await layoutStep(step);
@@ -537,11 +553,14 @@ const layoutRun = async (width) => {
       logRows = reading.logRows;
       logHeaders = reading.logHeaders;
     }
+    for (const name of reading.plainApiNames) {
+      if (!plainApiNames.includes(name)) plainApiNames.push(name);
+    }
     for (const item of reading.identifiers) {
       if (!identifiers.some((seen) => seen.text === item.text && seen.weight === item.weight && seen.lines.join('|') === item.lines.join('|'))) identifiers.push(item);
     }
   }
-  return { route: JOB.replayRoute, width, steps, phantomExposed, evidence, logRows, identifiers, logHeaders };
+  return { route: JOB.replayRoute, width, steps, phantomExposed, evidence, logRows, identifiers, logHeaders, plainApiNames };
 };
 
 if (JOB.routes.includes(JOB.replayRoute)) {
