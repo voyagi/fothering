@@ -98,8 +98,11 @@ export function initFlowSwitch(deps: ChromeDeps): void {
     const controls = Array.from(doc.querySelectorAll<HTMLButtonElement>(FLOW_CONTROLS));
     if (controls.length === 0) return;
     const root = doc.documentElement;
-    const stored = known(read(deps, FLOW_KEY), FLOW_CHOICES);
-    if (stored !== null) root.setAttribute('data-flow', stored);
+    const applyStored = (): void => {
+      const stored = known(read(deps, FLOW_KEY), FLOW_CHOICES);
+      if (stored !== null) root.setAttribute('data-flow', stored);
+    };
+    applyStored();
     // With no stored choice the CSS follows prefers-reduced-motion live, so the label must too.
     const reduce = deps.window.matchMedia('(prefers-reduced-motion: reduce)');
     const isStopped = (): boolean => {
@@ -119,6 +122,13 @@ export function initFlowSwitch(deps: ChromeDeps): void {
       });
     }
     reduce.addEventListener('change', label);
+    // A page restored from the back/forward cache missed any choice made on another page and any
+    // motion preference change, so it rereads storage and relabels, as the theme switch does.
+    deps.window.addEventListener('pageshow', (event) => {
+      if (!event.persisted) return;
+      applyStored();
+      label();
+    });
     label();
   });
 }
