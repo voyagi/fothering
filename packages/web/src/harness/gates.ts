@@ -612,7 +612,7 @@ export function noScriptVerdict(reading: NoScriptReading): Verdict {
 // The replay's layout where its two arrangements meet: the board stacks above the story at 960 px and
 // below, sits beside it from 961 px up (where the story column is narrowest), and the log stacks at
 // 620 px and below.
-export const REPLAY_LAYOUT_WIDTHS = Object.freeze([320, 960, 961, 1024, 1280, 1440]);
+export const REPLAY_LAYOUT_WIDTHS = Object.freeze([320, 620, 960, 961, 1024, 1280, 1440]);
 
 export interface ReplayLayoutStep {
   readonly step: number;
@@ -671,8 +671,9 @@ function typeReasons(reading: ReplayLayoutReading): string[] {
     }
   }
   if (identifiers.length === 0) reasons.push(E2E_MESSAGES.layoutIdentifiersMissing(width));
-  for (const { text, weight } of identifiers) {
+  for (const { text, weight, lines } of identifiers) {
     if (weight !== IDENTIFIER_WEIGHT) reasons.push(E2E_MESSAGES.layoutIdentifierWeight(width, text, weight));
+    if (!identifierBreakVerdict({ text, lines }).ok) reasons.push(E2E_MESSAGES.layoutIdentifierBreak(width, text, lines.map((line) => line.trim())));
   }
   return reasons;
 }
@@ -1707,7 +1708,7 @@ const isReplayLayoutReading = (value: unknown): value is ReplayLayoutReading => 
   && isNumber(value.phantomExposed)
   && (value.evidence === null || (isObject(value.evidence) && isNumber(value.evidence.tableRight) && isNumber(value.evidence.panelRight)))
   && Array.isArray(value.logRows) && value.logRows.every((row) => isObject(row) && typeof row.header === 'string' && Array.isArray(row.baselines) && row.baselines.every(isNumber))
-  && Array.isArray(value.identifiers) && value.identifiers.every((item) => isObject(item) && typeof item.text === 'string' && typeof item.weight === 'string');
+  && Array.isArray(value.identifiers) && value.identifiers.every((item) => isObject(item) && typeof item.text === 'string' && typeof item.weight === 'string' && isStringList(item.lines));
 
 // The replay checks run only where the build holds the replay; a replay route that printed no line
 // fails as missing, like every other check.

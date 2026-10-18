@@ -461,19 +461,41 @@ const layoutStep = (step) => page.evaluate((args) => {
     phantom: phantoms.some(visible),
     phantomExposed: phantoms.filter((element) => element.closest('[aria-hidden="true"]') === null).length,
   };
-  const weights = (elements) => elements.filter(visible).map((element) => ({ text: element.textContent.trim(), weight: getComputedStyle(element).fontWeight }));
+  const { NodeFilter: filter } = window;
+  const textNodes = (element) => {
+    const walker = document.createTreeWalker(element, filter.SHOW_TEXT, { acceptNode: (node) => (node.textContent.trim() === '' ? filter.FILTER_SKIP : filter.FILTER_ACCEPT) });
+    const nodes = [];
+    for (let node = walker.nextNode(); node !== null; node = walker.nextNode()) nodes.push(node);
+    return nodes;
+  };
+  // An identifier's rendered lines: a character that starts left of the one before it opens a new
+  // line. Tops are not compared, since the hung tag is tilted and its one line climbs as it runs.
+  const linesOf = (element) => {
+    const lines = [];
+    let left = null;
+    for (const node of textNodes(element)) {
+      for (let index = 0; index < node.textContent.length; index += 1) {
+        const range = document.createRange();
+        range.setStart(node, index);
+        range.setEnd(node, index + 1);
+        const rect = range.getBoundingClientRect();
+        if (left === null || rect.left < left - 1) lines.push('');
+        left = rect.left;
+        lines[lines.length - 1] += node.textContent[index];
+      }
+    }
+    return lines;
+  };
+  // Every identifier this step shows, the log's mono cells (times and lane names) included.
+  reading.identifiers = Array.from(document.querySelectorAll('[data-identifier], tr[data-log-step] .mono')).filter(visible)
+    .map((element) => ({ text: element.textContent.trim(), weight: getComputedStyle(element).fontWeight, lines: linesOf(element) }));
   if (args.step === 2) {
     const panel = document.querySelector('[data-wordcount="step"][data-steps="2"]');
     const table = panel === null ? null : panel.querySelector('table');
     reading.evidence = table === null ? null : { tableRight: round(table.getBoundingClientRect().right), panelRight: round(panel.getBoundingClientRect().right) };
-    reading.identifiers = panel === null ? [] : weights(Array.from(panel.querySelectorAll('table [data-identifier]')));
   }
   if (args.step === 4) {
-    const firstText = (cell) => {
-      const { NodeFilter: filter } = window;
-      const walker = document.createTreeWalker(cell, filter.SHOW_TEXT, { acceptNode: (node) => (node.textContent.trim() === '' ? filter.FILTER_SKIP : filter.FILTER_ACCEPT) });
-      return walker.nextNode();
-    };
+    const firstText = (cell) => textNodes(cell)[0] ?? null;
     const baselineOf = (cell) => {
       const text = firstText(cell);
       if (text === null) return null;
@@ -489,7 +511,6 @@ const layoutStep = (step) => page.evaluate((args) => {
       header: (row.firstElementChild === null ? '' : row.firstElementChild.textContent.trim()),
       baselines: Array.from(row.children).filter(visible).map(baselineOf).filter((value) => value !== null),
     }));
-    reading.identifiers = weights(rows.flatMap((row) => Array.from(row.querySelectorAll('.mono, [data-identifier]'))));
   }
   return reading;
 }, { step });
@@ -507,7 +528,9 @@ const layoutRun = async (width) => {
     phantomExposed = Math.max(phantomExposed, reading.phantomExposed);
     if (step === 2) evidence = reading.evidence;
     if (step === 4) logRows = reading.logRows;
-    if (reading.identifiers !== undefined) identifiers.push(...reading.identifiers);
+    for (const item of reading.identifiers) {
+      if (!identifiers.some((seen) => seen.text === item.text && seen.weight === item.weight && seen.lines.join('|') === item.lines.join('|'))) identifiers.push(item);
+    }
   }
   return { route: JOB.replayRoute, width, steps, phantomExposed, evidence, logRows, identifiers };
 };
