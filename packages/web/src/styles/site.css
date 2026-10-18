@@ -491,7 +491,8 @@ ol.removal { counter-reset: removal; max-inline-size: 80ch; margin: 0; padding: 
 .fit-resources { container: resources / inline-size; }
 .fit-permissions { container: permissions / inline-size; }
 /* In table form a reason or a removal keeps a readable column instead of one word per line; these
-   minimums are part of what each table needs. */
+   minimums are part of what each table needs. Every stacked block's reset names th and td, so it
+   matches these minimums' specificity and, later in the file, wins over them (here and below). */
 .fit td[data-col="Why"] .cell-text { min-inline-size: 12em; }
 .fit td[data-col="On removal"] .cell-text { min-inline-size: 12em; }
 /* Measured 2026-10-18 on the rendered tables with the minimums above: the resource table needs
@@ -504,7 +505,7 @@ ol.removal { counter-reset: removal; max-inline-size: 80ch; margin: 0; padding: 
   .fit-resources .fit :is(th, td) { padding: 6px 14px; border: 0; }
   .fit-resources .fit :is(th, td)::before { content: attr(data-col); display: block; font: 600 var(--text-label-small)/1.4 var(--font-mono); letter-spacing: 0.06em; text-transform: uppercase; color: var(--label); }
   .fit-resources .fit caption { display: block; padding: 10px 14px; }
-  .fit-resources .fit .cell-text { min-inline-size: 0; }
+  .fit-resources .fit :is(th, td) .cell-text { min-inline-size: 0; }
 }
 /* The longest logical id, 32 mono characters, needs 250px at the identifier step; under 282px of
    section it steps down to the label size rather than break mid-name (UI-SPEC 9.3, E10). */
@@ -519,7 +520,7 @@ ol.removal { counter-reset: removal; max-inline-size: 80ch; margin: 0; padding: 
   .fit-permissions .fit :is(th, td) { padding: 6px 14px; border: 0; }
   .fit-permissions .fit :is(th, td)::before { content: attr(data-col); display: block; font: 600 var(--text-label-small)/1.4 var(--font-mono); letter-spacing: 0.06em; text-transform: uppercase; color: var(--label); }
   .fit-permissions .fit caption { display: block; padding: 10px 14px; }
-  .fit-permissions .fit .cell-text { min-inline-size: 0; }
+  .fit-permissions .fit :is(th, td) .cell-text { min-inline-size: 0; }
 }
 
 @media (max-width: 960px) {
@@ -584,7 +585,7 @@ ul.site { display: grid; gap: var(--space-12); margin: 0; padding-left: var(--sp
   .fit-fields .fit :is(th, td) { padding: 6px 14px; border: 0; }
   .fit-fields .fit :is(th, td)::before { content: attr(data-col); display: block; font: 600 var(--text-label-small)/1.4 var(--font-mono); letter-spacing: 0.06em; text-transform: uppercase; color: var(--label); }
   .fit-fields .fit caption { display: block; padding: 10px 14px; }
-  .fit-fields .fit .cell-text { min-inline-size: 0; }
+  .fit-fields .fit :is(th, td) .cell-text { min-inline-size: 0; }
   .fit-fields .fit tbody th wbr { display: inline; }
 }
 @container model (width < 394px) {
@@ -595,7 +596,7 @@ ul.site { display: grid; gap: var(--space-12); margin: 0; padding-left: var(--sp
   .fit-model .fit :is(th, td) { padding: 6px 14px; border: 0; }
   .fit-model .fit :is(th, td)::before { content: attr(data-col); display: block; font: 600 var(--text-label-small)/1.4 var(--font-mono); letter-spacing: 0.06em; text-transform: uppercase; color: var(--label); }
   .fit-model .fit caption { display: block; padding: 10px 14px; }
-  .fit-model .fit .cell-text { min-inline-size: 0; }
+  .fit-model .fit :is(th, td) .cell-text { min-inline-size: 0; }
 }
 
 @media (max-width: 960px) {
