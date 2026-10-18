@@ -647,7 +647,8 @@ ul.site { display: grid; gap: var(--space-12); margin: 0; padding-left: var(--sp
   /* One state per block, so there is no column of names to keep aligned. */
   .fit-checks .fit .state-mark-none { display: none; }
 }
-.split .report { margin: 0; padding-top: var(--space-md); border-top: var(--w-outline) solid var(--ink); font-weight: 600; }
+/* A sentence, so Red Hat Text 400 like every other (UI-SPEC 171); the rule above it carries the weight. */
+.split .report { margin: 0; padding-top: var(--space-md); border-top: var(--w-outline) solid var(--ink); }
 
 /* The 404 page: the intro row of every sheet, its action under the paragraph. */
 .not-found-action { margin: 0; }
