@@ -184,7 +184,8 @@ describe('modelRecordRows (AC-26, UI-SPEC E12)', () => {
   it('gives the four fixed rows with the pinned id and Region filled in', () => {
     const rows = modelRecordRows('eu.planted.model-v1', 'eu-planted-1');
     expect(rows.map((row) => row.label)).toEqual(['Model', 'Region', 'Default', 'Labelled output']);
-    expect(rows[0]?.text).toContain('`eu.planted.model-v1`');
+    expect(rows[0]).toEqual({ label: 'Model', text: '`eu.planted.model-v1`', attrs: { 'data-model-id': '' } });
+    expect(rows[3]?.attrs).toEqual({ 'data-model-role': '' });
     expect(rows[1]?.text).toContain('`eu-planted-1`');
   });
 

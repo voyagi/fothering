@@ -50,6 +50,14 @@ export const ROUTES: readonly SiteRoute[] = Object.freeze([
     description: 'The steps to deploy and remove Fothering, everything the template creates, and every IAM permission it holds with the reason, generated from the template.',
     indexable: true,
   }),
+  Object.freeze({
+    path: '/privacy-and-ai/',
+    sheet: 'FTH-004',
+    label: 'Privacy and AI',
+    title: 'Privacy and AI: what Fothering keeps and what the model decides',
+    description: 'Which SES event fields a Fothering deployment stores, where and for how long, how to delete them, what this site keeps, and what the AI model may and may not do.',
+    indexable: true,
+  }),
 ]);
 
 export const NOT_FOUND_ROUTE: NotFoundRoute = Object.freeze({

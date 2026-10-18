@@ -289,6 +289,8 @@ export const MODEL_FORBIDDEN: readonly ForbiddenClaim[] = Object.freeze([
 export interface ModelRecordRow {
   readonly label: string;
   readonly text: string;
+  // Markers the built checks read: the cell holding only the id, and the row that states the model's role.
+  readonly attrs?: Readonly<Record<string, string>>;
 }
 
 // UI-SPEC E12: four fixed rows. The profile must be an EU one, or the Bedrock sentence above would be
@@ -298,9 +300,10 @@ export function modelRecordRows(modelId: string, region: string): ModelRecordRow
     throw new Error(`model id: ${modelId} is not an EU inference profile, and the privacy section says requests are processed in EU Regions. Pin an eu. profile.`);
   }
   return [
-    { label: 'Model', text: `The model behind the Amazon Bedrock inference profile \`${modelId}\`.` },
-    { label: 'Region', text: `Called from \`${region}\` through the EU inference profile. Requests are processed in EU Regions and may be stored in the Region that served them for abuse detection.` },
+    // The id names the model itself, so no model name is typed beside it and the row follows the pin.
+    { label: 'Model', text: `\`${modelId}\``, attrs: { 'data-model-id': '' } },
+    { label: 'Region', text: `Called through Amazon Bedrock from \`${region}\`, using the EU inference profile. Requests are processed in EU Regions and may be stored in the Region that served them for abuse detection.` },
     { label: 'Default', text: 'Dry run. With the go-live switch unset, events are read and stored, while model calls, SES changes and emails are skipped and each is logged as what it would have done.' },
-    { label: 'Labelled output', text: 'Every operator email says at the top which paragraph the agent wrote.' },
+    { label: 'Labelled output', text: 'Every operator email says at the top which paragraph the agent wrote.', attrs: { 'data-model-role': '' } },
   ];
 }

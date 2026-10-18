@@ -526,6 +526,87 @@ ol.removal { counter-reset: removal; max-inline-size: 80ch; margin: 0; padding: 
   .sheet-intro { grid-template-columns: minmax(0, 1fr); }
 }
 
+/* Privacy and AI. The intro's in-page links, the two drawings, the stored-field and model schedules,
+   the facts grid, the website list and the does and never-does lists. */
+.intro-side { display: grid; gap: var(--space-md); align-self: end; }
+.intro-side p { margin: 0; font-size: var(--text-intro); color: var(--ink-2); }
+.intro-side .jump { display: flex; flex-wrap: wrap; gap: var(--space-lg); font-size: var(--text-body); color: var(--ink); }
+.jump a { padding: var(--space-12) 0; font-weight: 600; }
+figure.filter, figure.interlock { margin: 0; }
+.dwg-filter.dwg-wide { max-inline-size: 920px; margin-inline: auto; }
+.dwg-interlock.dwg-wide { max-inline-size: 1000px; margin-inline: auto; }
+.dwg-filter.dwg-narrow { max-inline-size: 360px; margin-inline: auto; }
+.dwg-interlock.dwg-narrow { max-inline-size: 300px; margin-inline: auto; }
+.dwg-unit { fill: var(--sheet); stroke: var(--ink); stroke-width: 2; }
+.dwg-funnel { fill: none; stroke: var(--ink); stroke-width: 1.5; }
+/* The model's box is dashed, the one part that writes no state; the action check is drawn at the
+   emphasis weight, the interlock itself. */
+.dwg-model { stroke-dasharray: 6 4; }
+.dwg-check { stroke-width: 3; }
+.dwg-stem { fill: none; }
+.filter-caption { justify-content: space-between; margin: var(--space-md) 0 clamp(28px, 4vw, 48px); padding-right: 0; }
+.after-schedule { display: grid; gap: var(--space-12); margin-top: var(--space-lg); }
+.after-schedule p { margin: 0; color: var(--ink-2); }
+.facts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border-top: var(--w-outline) solid var(--ink); }
+.facts > div { padding: var(--space-md) var(--space-lg) var(--space-lg) 0; border-bottom: var(--w-rule) solid var(--rule); }
+.facts > div + div { padding-left: var(--space-lg); border-left: var(--w-rule) solid var(--rule); }
+.facts h3 { margin: 0 0 var(--space-sm); }
+.facts p { margin: 0 0 var(--space-12); color: var(--ink-2); }
+.facts p:last-child { margin-bottom: 0; }
+.decides { margin-top: var(--space-2xl); }
+.decides p { margin: 0; color: var(--ink-2); }
+ul.site { display: grid; gap: var(--space-12); margin: 0; padding-left: var(--space-lg); }
+.split { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-xl) var(--space-2xl); }
+.split ul { margin: 0; padding: 0; list-style: none; border-top: var(--w-outline) solid var(--ink); }
+.split li { padding: var(--space-md) 0; border-bottom: var(--w-rule) solid var(--rule); }
+.split h3 { margin-bottom: var(--space-12); }
+.split-note { margin: var(--space-md) 0 0; font-weight: 600; }
+.wrong { display: grid; gap: var(--space-md); }
+.wrong p { margin: 0; color: var(--ink-2); }
+
+/* Like the deploy schedules: each keeps its table form while its section is as wide as the table
+   needs, and below that becomes one block per row with every cell under its column name. */
+.fit-fields { container: fields / inline-size; }
+.fit-model { container: model / inline-size; }
+.fit-fields td[data-col="What is stored"] .cell-text { min-inline-size: 12em; }
+/* In table form a field path keeps one line, which is part of what the table needs; stacked, it
+   may break after its dot like every identifier. */
+.fit-fields .fit tbody th wbr { display: none; }
+/* A model record value is prose, so in table form it keeps a readable column. */
+.fit-model td[data-col="Value"] .cell-text { min-inline-size: 16em; }
+/* Measured 2026-10-18 on the rendered tables: the stored-field table needs 536px with its paths on
+   one line, the model record 391px with its 16em value column. */
+@container fields (width < 540px) {
+  .fit-fields .fit, .fit-fields .fit :is(thead, tbody, tr, th, td) { display: block; width: auto; }
+  .fit-fields .fit thead { display: none; }
+  .fit-fields .fit tbody tr { padding: var(--space-xs) 0 var(--space-sm); }
+  .fit-fields .fit tbody tr + tr { border-top: var(--w-outline) solid var(--ink); }
+  .fit-fields .fit :is(th, td) { padding: 6px 14px; border: 0; }
+  .fit-fields .fit :is(th, td)::before { content: attr(data-col); display: block; font: 600 var(--text-label-small)/1.4 var(--font-mono); letter-spacing: 0.06em; text-transform: uppercase; color: var(--label); }
+  .fit-fields .fit caption { display: block; padding: 10px 14px; }
+  .fit-fields .fit .cell-text { min-inline-size: 0; }
+  .fit-fields .fit tbody th wbr { display: inline; }
+}
+@container model (width < 394px) {
+  .fit-model .fit, .fit-model .fit :is(thead, tbody, tr, th, td) { display: block; width: auto; }
+  .fit-model .fit thead { display: none; }
+  .fit-model .fit tbody tr { padding: var(--space-xs) 0 var(--space-sm); }
+  .fit-model .fit tbody tr + tr { border-top: var(--w-outline) solid var(--ink); }
+  .fit-model .fit :is(th, td) { padding: 6px 14px; border: 0; }
+  .fit-model .fit :is(th, td)::before { content: attr(data-col); display: block; font: 600 var(--text-label-small)/1.4 var(--font-mono); letter-spacing: 0.06em; text-transform: uppercase; color: var(--label); }
+  .fit-model .fit caption { display: block; padding: 10px 14px; }
+  .fit-model .fit .cell-text { min-inline-size: 0; }
+}
+
+@media (max-width: 960px) {
+  .facts, .split { grid-template-columns: minmax(0, 1fr); }
+  .facts > div + div { padding-left: 0; border-left: 0; }
+}
+@media (max-width: 620px) {
+  /* The narrow filter drawing does not move, so there is no flow to stop. */
+  .filter-caption .flow-toggle { display: none; }
+}
+
 @media (max-width: 620px) {
   /* The sticky controls cover the top of the viewport, so focus scrolled into view lands below them. */
   :root:has(.controls) { scroll-padding-top: 120px; }

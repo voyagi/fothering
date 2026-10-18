@@ -123,13 +123,16 @@ const REPLAY_DESCRIPTION = 'One SES incident in four steps: bounces arrive on on
 const DEPLOY_TITLE = 'Deploy Fothering into your own AWS account';
 const DEPLOY_DESCRIPTION = 'The steps to deploy and remove Fothering, everything the template creates, and every IAM permission it holds with the reason, generated from the template.';
 
+const PRIVACY_TITLE = 'Privacy and AI: what Fothering keeps and what the model decides';
+const PRIVACY_DESCRIPTION = 'Which SES event fields a Fothering deployment stores, where and for how long, how to delete them, what this site keeps, and what the AI model may and may not do.';
+
 describe('the route list (D-153)', () => {
   it('holds an RFC 2606 reserved origin with no trailing slash until the deployed host is known', () => {
     expect(SITE_ORIGIN).toMatch(/^https:\/\/[a-z-]+\.example$/);
   });
 
   it('holds / as sheet FTH-001 with the UI-SPEC 11.2 title and description, indexable', () => {
-    expect(ROUTES.map((route) => route.path)).toEqual(['/', '/replay/', '/deploy/']);
+    expect(ROUTES.map((route) => route.path)).toEqual(['/', '/replay/', '/deploy/', '/privacy-and-ai/']);
     expect(ROUTES[0]).toEqual({ path: '/', sheet: 'FTH-001', label: 'Landing', title: LANDING_TITLE, description: LANDING_DESCRIPTION, indexable: true });
   });
 
@@ -139,6 +142,10 @@ describe('the route list (D-153)', () => {
 
   it('holds /deploy/ as sheet FTH-003 with the UI-SPEC 11.2 title and description, indexable', () => {
     expect(ROUTES[2]).toEqual({ path: '/deploy/', sheet: 'FTH-003', label: 'Deploy', title: DEPLOY_TITLE, description: DEPLOY_DESCRIPTION, indexable: true });
+  });
+
+  it('holds /privacy-and-ai/ as sheet FTH-004 with the UI-SPEC 11.2 title and description, indexable', () => {
+    expect(ROUTES[3]).toEqual({ path: '/privacy-and-ai/', sheet: 'FTH-004', label: 'Privacy and AI', title: PRIVACY_TITLE, description: PRIVACY_DESCRIPTION, indexable: true });
   });
 
   it('holds the 404 title, description and Drawing cell text, with no path and not indexable', () => {
