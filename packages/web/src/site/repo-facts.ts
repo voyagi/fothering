@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
-import { DEPLOY_STEPS, REMOVAL_STEP_TEXTS, type DeployCommandUse } from './content.js';
+import { DEPLOY_STEPS, FORGET_DOC, REMOVAL_STEP_TEXTS, type DeployCommandUse } from './content.js';
 
 const REPO_PACKAGE_NAME = 'fothering';
 
@@ -78,19 +78,23 @@ function commandOf(line: string): DeployCommand | undefined {
   return { command, note: note === undefined || note === '' ? null : note };
 }
 
-export function readDeployCommands(readmeText: string): DeployCommand[] {
-  const commands: DeployCommand[] = [];
-  let inBlock = false;
-  for (const line of deploySectionLines(readmeText)) {
+// The lines inside fenced sh blocks, and whether the last block was left open.
+function shBlockLines(lines: readonly string[]): { lines: string[]; open: boolean } {
+  const inside: string[] = [];
+  let open = false;
+  for (const line of lines) {
     const fence = line.trim();
-    if (!inBlock && fence === '```sh') inBlock = true;
-    else if (inBlock && fence === '```') inBlock = false;
-    else if (inBlock) {
-      const command = commandOf(line);
-      if (command) commands.push(command);
-    }
+    if (!open && fence === '```sh') open = true;
+    else if (open && fence === '```') open = false;
+    else if (open) inside.push(line);
   }
-  if (inBlock) throw new Error(`${README_PREFIX}: a sh block is not closed. Close it with a line holding three backticks.`);
+  return { lines: inside, open };
+}
+
+export function readDeployCommands(readmeText: string): DeployCommand[] {
+  const block = shBlockLines(deploySectionLines(readmeText));
+  if (block.open) throw new Error(`${README_PREFIX}: a sh block is not closed. Close it with a line holding three backticks.`);
+  const commands = block.lines.map(commandOf).filter((command): command is DeployCommand => command !== undefined);
   if (commands.length === 0) throw new Error(`${README_PREFIX}: no fenced sh block with a command. Put the deploy commands in sh blocks.`);
   return commands;
 }
@@ -193,6 +197,24 @@ export function removalSteps(facts: { deployCommands: readonly DeployCommand[] }
 
 export function removedByText(commands: readonly DeployCommand[]): string {
   return commandsFor(commands, 'destroy').map(({ command }) => command).join(' and ');
+}
+
+export interface ForgetCommand {
+  // The command line that runs the forget function, without its arguments.
+  readonly command: string;
+  // The stack output that names the function the command runs.
+  readonly output: string;
+}
+
+// The privacy section names the delete-one-recipient command as the doc writes it, so a renamed
+// command or function output reaches the page with no edit there. The argument lines carry an
+// example address, which no page may show, so only the command and the output name are read.
+export function readForgetCommand(docText: string): ForgetCommand {
+  const invoke = shBlockLines(docText.split(/\r?\n/)).lines.map((line) => line.trim()).find((line) => line.startsWith('aws lambda invoke'));
+  if (invoke === undefined) throw new Error(`${FORGET_DOC}: no aws lambda invoke line in a sh block. Restore the command that runs the forget function.`);
+  const output = /<(\w+) stack output>/.exec(docText)?.[1];
+  if (output === undefined) throw new Error(`${FORGET_DOC}: no stack output names the function. Restore the --function-name <...> stack output placeholder.`);
+  return { command: invoke.replace(/\s*\\$/, ''), output };
 }
 
 const CREATE_APP_PATH = 'packages/infra/src/create-app.ts';

@@ -8,12 +8,18 @@ import {
   deployBody,
   HEADERS_TEXT,
   landingBody,
+  forgetSentence,
   LIMITS_ROWS,
   limitsRow,
   limitsSection,
+  modelRoleList,
   page,
   permissionRow,
   plantDist,
+  privacyBody,
+  rightsSentence,
+  statementParagraph,
+  storedFieldRow,
   REPLAY_LIMITS_STATE,
   REPLAY_VIEW,
   replayBody,
@@ -32,7 +38,7 @@ import {
 import type { ReplayView } from '../site/replay-view.js';
 import { loadCheckContext } from '../harness/gates.js';
 import { HEAD_SCRIPT, headScriptHash, renderTokensCss } from '../theme/head-script.js';
-import { BANNED_NAMES, CONSOLE_DELETE_PHRASES, LANDING_SECTIONS, LEDE_TERMS, LIMITS_FIXED_ROWS, REPLY_PROMISE_PHRASES } from '../site/content.js';
+import { BANNED_NAMES, CONSOLE_DELETE_PHRASES, LANDING_SECTIONS, LEDE_TERMS, LIMITS_FIXED_ROWS, REPLY_PROMISE_PHRASES, type Statement } from '../site/content.js';
 import { PROVENANCE_LABELS } from '../site/labels.js';
 import { PERMISSION_REASONS, permissionKey, permissionSchedules } from '../site/permissions-view.js';
 import { removedByText } from '../site/repo-facts.js';
@@ -54,17 +60,26 @@ import {
   deployPermissionsRule,
   deployResourcesRule,
   exactThirtyDaysRule,
+  forgetCommandRule,
   formsCookiesAnalyticsRule,
   headScriptOrderRule,
   identifierBreakRule,
   landingSectionsRule,
   ledeRule,
   limitsRule,
+  modelIdRule,
+  modelRoleForbiddenRule,
+  modelRolePresentRule,
+  modelRoleRequiredRule,
+  noDeleteControlRule,
   noEllipsisRule,
   noInlineStyleRule,
   oneCallerRule,
   pageMetadataRule,
   preR6WordsRule,
+  PRIVACY_ROUTE,
+  privacyPageRule,
+  privacyStatementsRule,
   provenanceWordingRule,
   providerLabelRule,
   regionClaimRule,
@@ -82,12 +97,15 @@ import {
   sesPercentageLinkRule,
   sesRateWordingRule,
   sitemapRule,
+  sixRightsRule,
+  storedFieldRowsRule,
   switchMarkupRule,
   themeTokenBlocksRule,
   thirdPartyReferenceRule,
   typeTokenDeclaredRule,
   typeTokenUseRule,
   unitFigureRule,
+  websiteFactsRule,
   type DeployFacts,
   type Finding,
 } from './rules.js';
@@ -210,14 +228,15 @@ describe('runBuiltChecks', () => {
     expect([...rules].filter((rule) => ['page-metadata', 'sitemap', 'robots'].includes(rule)).sort()).toEqual(['page-metadata', 'robots', 'sitemap']);
   });
 
-  it('holds exactly the forty-two rule ids the plans name', () => {
+  it('holds exactly the fifty-three rule ids the plans name', () => {
     expect([...RULE_IDS].sort()).toEqual([
       'banned-name', 'command-pair', 'console-delete', 'dash', 'deploy-commands', 'deploy-deny', 'deploy-notice', 'deploy-page', 'deploy-permissions', 'deploy-resources',
-      'exact-30-days', 'forms-cookies-analytics', 'head-script-order', 'identifier-break', 'landing-sections', 'lede', 'limits',
-      'no-ellipsis', 'no-inline-style', 'one-caller', 'page-metadata', 'pre-r6-words', 'provenance-wording', 'provider-label', 'region-claim', 'replay-lanes',
+      'exact-30-days', 'forget-command', 'forms-cookies-analytics', 'head-script-order', 'identifier-break', 'landing-sections', 'lede', 'limits',
+      'model-id', 'model-role-forbidden', 'model-role-present', 'model-role-required',
+      'no-delete-control', 'no-ellipsis', 'no-inline-style', 'one-caller', 'page-metadata', 'pre-r6-words', 'privacy-page', 'privacy-statements', 'provenance-wording', 'provider-label', 'region-claim', 'replay-lanes',
       'replay-page', 'replay-panels', 'replay-summary', 'replay-word-count', 'reply-promise', 'robots', 'script-hash',
-      'ses-percentage-link', 'ses-rate-wording', 'sitemap', 'switch-markup', 'theme-token-blocks', 'third-party-reference', 'type-token-declared',
-      'type-token-use', 'unit-figure',
+      'ses-percentage-link', 'ses-rate-wording', 'sitemap', 'six-rights', 'stored-field-rows', 'switch-markup', 'theme-token-blocks', 'third-party-reference', 'type-token-declared',
+      'type-token-use', 'unit-figure', 'website-facts',
     ]);
   });
 
@@ -564,24 +583,24 @@ describe('the sitemap rule (AC-50, AC-E38, AC-E39)', () => {
   });
 
   it('fails a sitemap listing a route the build lacks', () => {
-    expect(sitemapFindings(sitemapOf(['/', '/replay/', '/deploy/', '/ghost/'])).map((finding) => finding.text)).toEqual(['the sitemap lists /ghost/, which the build lacks']);
+    expect(sitemapFindings(sitemapOf(['/', '/replay/', '/privacy-and-ai/', '/deploy/', '/ghost/'])).map((finding) => finding.text)).toEqual(['the sitemap lists /ghost/, which the build lacks']);
   });
 
   it('fails a sitemap listing a built route twice', () => {
-    expect(sitemapFindings(sitemapOf(['/', '/replay/', '/deploy/', '/'])).map((finding) => finding.text)).toEqual(['the sitemap lists / 2 times']);
+    expect(sitemapFindings(sitemapOf(['/', '/replay/', '/privacy-and-ai/', '/deploy/', '/'])).map((finding) => finding.text)).toEqual(['the sitemap lists / 2 times']);
   });
 
   it('fails a sitemap listing the 404 page', () => {
-    expect(sitemapFindings(sitemapOf(['/', '/replay/', '/deploy/', '/404.html'])).map((finding) => finding.text)).toEqual(['the sitemap lists the 404 page at /404.html']);
+    expect(sitemapFindings(sitemapOf(['/', '/replay/', '/privacy-and-ai/', '/deploy/', '/404.html'])).map((finding) => finding.text)).toEqual(['the sitemap lists the 404 page at /404.html']);
   });
 
   it('fails a built route missing from the sitemap, at that route', () => {
-    expect(sitemapFindings(sitemapOf(['/', '/deploy/']))).toEqual([{ rule: 'sitemap', route: '/replay/', text: '/replay/ is a built route missing from the sitemap' }]);
+    expect(sitemapFindings(sitemapOf(['/', '/privacy-and-ai/', '/deploy/']))).toEqual([{ rule: 'sitemap', route: '/replay/', text: '/replay/ is a built route missing from the sitemap' }]);
   });
 
   it('fails a relative URL and a URL on another origin', () => {
     const xml = `<urlset><url><loc>/</loc></url><url><loc>https://elsewhere.example/replay/</loc></url><url><loc>${SITE_ORIGIN}/</loc></url><url><loc>${SITE_ORIGIN}/replay/</loc></url>`
-      + `<url><loc>${SITE_ORIGIN}/deploy/</loc></url></urlset>`;
+      + `<url><loc>${SITE_ORIGIN}/privacy-and-ai/</loc></url><url><loc>${SITE_ORIGIN}/deploy/</loc></url></urlset>`;
     expect(sitemapFindings(xml).map((finding) => finding.text)).toEqual([
       `/ is not an absolute URL on ${SITE_ORIGIN}`,
       `https://elsewhere.example/replay/ is not an absolute URL on ${SITE_ORIGIN}`,
@@ -589,7 +608,7 @@ describe('the sitemap rule (AC-50, AC-E38, AC-E39)', () => {
   });
 
   it('leaves out a built route the route list marks not indexable', () => {
-    const site = siteOf({ ...completeSite(TWO_SHEETS), 'sitemap.xml': sitemapOf(['/', '/deploy/']) });
+    const site = siteOf({ ...completeSite(TWO_SHEETS), 'sitemap.xml': sitemapOf(['/', '/privacy-and-ai/', '/deploy/']) });
     const draft = { path: '/replay/', sheet: 'FTH-002', label: 'Replay', title: 't', description: 'd', indexable: false };
     expect(sitemapRule(site, { ...context, routes: [draft] })).toEqual([]);
   });
@@ -735,7 +754,7 @@ describe('the script hash rule (D-149, C6, T-05-21, T-05-24)', () => {
   it('fails a build with no _headers and one whose _headers has no script-src', () => {
     expect(texts(scriptHashRule(siteOf(withFile('_headers', null)), context))).toEqual(['dist/_headers is missing']);
     const findings = scriptHashRule(siteOf(withFile('_headers', '/*\n  X-Frame-Options: DENY\n')), context);
-    expect(findings.map((finding) => finding.route)).toEqual(['/', DEPLOY_ROUTE, REPLAY_ROUTE]);
+    expect(findings.map((finding) => finding.route)).toEqual(['/', DEPLOY_ROUTE, PRIVACY_ROUTE, REPLAY_ROUTE]);
   });
 });
 
@@ -1451,6 +1470,178 @@ describe('the one-caller rule (AC-36)', () => {
     expect(deployTexts(oneCallerRule, deployBody({ oneCaller: 'Each lane sends through its own IAM caller identity.' }))).toEqual([
       'the deploy page does not say that each lane sends through its own IAM caller identity, and why',
     ]);
+  });
+});
+
+const PRIVACY_SECTION_RULES = ['privacy-page', 'privacy-statements', 'stored-field-rows', 'website-facts', 'six-rights', 'forget-command', 'model-id'];
+const privacySite = (body: string): BuiltSite => siteOf({ 'privacy-and-ai/index.html': page(body) });
+const privacyTexts = (rule: RuleFunction, body: string, ruleContext = context): string[] => {
+  const findings = rule(privacySite(body), ruleContext);
+  expect(findings.every((finding) => finding.route === PRIVACY_ROUTE)).toBe(true);
+  return texts(findings);
+};
+const statementById = (statements: readonly Statement[], id: string): Statement => {
+  const found = statements.find((statement) => statement.id === id);
+  if (found === undefined) throw new Error(`no planted statement ${id}`);
+  return found;
+};
+const omitting = (statements: readonly Statement[], id: string): string => statements.filter((statement) => statement.id !== id).map(statementParagraph).join('');
+const { privacy } = context;
+const [FIRST_FIELD] = privacy.storedFields;
+
+describe('the privacy page rule (D-150 tracer)', () => {
+  it('reports a build without /privacy-and-ai/ once, under privacy-page, and no other privacy section rule', () => {
+    const findings = runBuiltChecks(siteOf({ 'index.html': page('<p>landing</p>') }), context).filter((finding) => PRIVACY_SECTION_RULES.includes(finding.rule));
+    expect(findings).toEqual([{ rule: 'privacy-page', route: PRIVACY_ROUTE, text: 'the build has no privacy and AI page at /privacy-and-ai/' }]);
+  });
+
+  it('passes a build that holds the page with both sections', () => {
+    expect(privacyPageRule(privacySite(privacyBody()), context)).toEqual([]);
+  });
+
+  it('fails a page with no #ai element, naming the id', () => {
+    expect(privacyTexts(privacyPageRule, privacyBody({ ai: '<h2>AI</h2>' }))).toEqual(['the privacy and AI page has no element with id ai']);
+  });
+});
+
+describe('the privacy statements rule (AC-19, AC-E14)', () => {
+  it('passes a privacy section holding every required statement', () => {
+    expect(privacyTexts(privacyStatementsRule, privacyBody())).toEqual([]);
+  });
+
+  it.each(['event-region', 'model-requests', 'keyed-hash', 'retention', 'dead-letter', 'logs', 'forget', 'forget-reach', 'addresses', 'deployment-controller', 'tag-values'])('fails a section missing the %s statement, naming it', (id) => {
+    const missing = statementById(privacy.required, id);
+    expect(privacyTexts(privacyStatementsRule, privacyBody({ statements: omitting(privacy.required, id) }))).toEqual([`the privacy section does not say "${missing.text}"`]);
+  });
+
+  it('fails the Bedrock sentence without its AWS page link in the same element', () => {
+    const bedrock = statementById(privacy.required, 'model-requests');
+    const unlinked = privacy.required.map((statement) => (statement.id === 'model-requests' ? `<p>${statement.text}</p>` : statementParagraph(statement))).join('');
+    expect(privacyTexts(privacyStatementsRule, privacyBody({ statements: unlinked }))).toEqual([`the privacy section says "${bedrock.text}" with no link to ${bedrock.link ?? ''} in the same element`]);
+  });
+
+  it('reads only the privacy part, so a statement placed after #ai does not count', () => {
+    const logs = statementById(privacy.required, 'logs');
+    const body = privacyBody({ statements: omitting(privacy.required, 'logs'), extra: statementParagraph(logs) });
+    expect(privacyTexts(privacyStatementsRule, body)).toEqual([`the privacy section does not say "${logs.text}"`]);
+  });
+});
+
+describe('the stored-field rows rule (AC-20, UI-SPEC E8)', () => {
+  const rows = (fields: readonly (typeof privacy.storedFields)[number][]): string => `<table>${fields.map(storedFieldRow).join('')}</table>`;
+
+  it('passes one row per field the map classes recipient or sender', () => {
+    expect(privacy.storedFields.length).toBeGreaterThan(1);
+    expect(privacyTexts(storedFieldRowsRule, privacyBody())).toEqual([]);
+  });
+
+  it('fails a schedule missing one identifying field', () => {
+    expect(privacyTexts(storedFieldRowsRule, privacyBody({ fields: rows(privacy.storedFields.slice(1)) }))).toEqual([`the stored-field schedule has no row for ${FIRST_FIELD?.path ?? ''}`]);
+  });
+
+  it('fails a row for a field the map classes as neither', () => {
+    const extra = { path: 'messageId', identifies: 'Recipient', row: 'The SES message id.' };
+    expect(privacyTexts(storedFieldRowsRule, privacyBody({ fields: rows([...privacy.storedFields, extra]) }))).toEqual([
+      'the stored-field schedule has a row for messageId, which the stored-field map does not class as identifying a recipient or a sender',
+    ]);
+  });
+
+  it('fails a field shown twice, and a row that does not say what its field identifies', () => {
+    const first = FIRST_FIELD ?? { path: '', identifies: '', row: '' };
+    expect(privacyTexts(storedFieldRowsRule, privacyBody({ fields: rows([first, ...privacy.storedFields]) }))).toEqual([`the stored-field schedule shows ${first.path} 2 times, once expected`]);
+    const unnamed = rows(privacy.storedFields).replace(`<td data-col="Identifies">${first.identifies}</td>`, '<td data-col="Identifies"></td>');
+    expect(privacyTexts(storedFieldRowsRule, privacyBody({ fields: unnamed }))).toEqual([`the stored-field row ${first.path} does not say that it identifies a ${first.identifies}`]);
+  });
+});
+
+describe('the website facts and six rights rules (AC-21, AC-E16)', () => {
+  it('passes a website part naming every fact', () => {
+    expect(privacyTexts(websiteFactsRule, privacyBody())).toEqual([]);
+  });
+
+  it.each(['controller', 'contact', 'legal-basis', 'complaint', 'cloudflare-dpa', 'aws-dpa', 'no-cookie', 'no-analytics'])('fails a website part missing the %s fact', (id) => {
+    const missing = statementById(privacy.website, id);
+    expect(privacyTexts(websiteFactsRule, privacyBody({ website: omitting(privacy.website, id) }))).toEqual([`the website part does not say "${missing.text}"`]);
+  });
+
+  it('passes the six rights in any order', () => {
+    expect(privacyTexts(sixRightsRule, privacyBody({ rights: rightsSentence([...privacy.rights].reverse()) }))).toEqual([]);
+  });
+
+  it('fails one right missing and one right repeated', () => {
+    const [first = '', ...rest] = privacy.rights;
+    expect(privacyTexts(sixRightsRule, privacyBody({ rights: rightsSentence(rest) }))).toEqual([`the privacy section does not name the right of ${first}`]);
+    expect(privacyTexts(sixRightsRule, privacyBody({ rights: rightsSentence([first, ...privacy.rights]) }))).toEqual([`the privacy section names the right of ${first} 2 times, once expected`]);
+  });
+
+  it('fails a marked right that is not one of the six', () => {
+    expect(privacyTexts(sixRightsRule, privacyBody({ rights: rightsSentence([...privacy.rights, 'appeal']) }))).toEqual(['the privacy section marks "appeal" as a right, which is not one of the six']);
+  });
+});
+
+describe('the forget command and no-delete-control rules (AC-23, AC-P7)', () => {
+  it('passes a privacy section naming the doc, its command and the stack output', () => {
+    expect(privacyTexts(forgetCommandRule, privacyBody())).toEqual([]);
+  });
+
+  it('fails a privacy section that names neither the doc nor the command', () => {
+    const statements = omitting(privacy.required, 'forget');
+    expect(privacyTexts(forgetCommandRule, privacyBody({ statements, forget: '<p>Ask the operator.</p>' }))).toEqual([
+      'the privacy section does not name docs/forget-one-recipient.md',
+      `the privacy section does not name the command ${privacy.forget.command} from docs/forget-one-recipient.md`,
+      `the privacy section does not name the stack output ${privacy.forget.output} that names the forget function`,
+    ]);
+  });
+
+  it('fails a button, a link or a form on any page that deletes or forgets a recipient', () => {
+    const findings = caseFindings(noDeleteControlRule, 'no-delete-control', [
+      '<button type="button">Delete this recipient</button>',
+      '<a href="/forget/">Forget a recipient</a>',
+      '<form action="/x"><button>Erase an address</button></form>',
+      '<button aria-label="Remove recipient">x</button>',
+    ]);
+    expect(findings.length).toBeGreaterThanOrEqual(4);
+  });
+
+  it('passes the doc named as text and controls that delete nothing', () => {
+    expect(noDeleteControlRule(casesSite([forgetSentence(privacy.forget), '<button type="button">Stop flow</button>']), context)).toEqual([]);
+  });
+});
+
+describe('the model-role rules (AC-24, AC-25, AC-E18 to AC-E20)', () => {
+  it('fails, never passes, a site where no page carries the marker', () => {
+    expect(texts(modelRolePresentRule(casesSite(['<p>The agent explains the evidence.</p>']), context))).toEqual([
+      'no built page carries a data-model-role element, so what the pages say about the model was not checked',
+    ]);
+  });
+
+  it('passes the required statements across the marked elements in any order', () => {
+    const reversed = modelRoleList([...privacy.modelRequired].reverse());
+    expect(modelRoleRequiredRule(casesSite([reversed]), context)).toEqual([]);
+  });
+
+  it('fails marked elements missing one required statement, naming it', () => {
+    const [first, ...rest] = privacy.modelRequired;
+    const findings = modelRoleRequiredRule(casesSite([modelRoleList(rest), `<p>${first?.text ?? ''}</p>`]), context);
+    expect(findings).toEqual([{ rule: 'model-role-required', route: PRIVACY_ROUTE, text: `no data-model-role element says "${first?.text ?? ''}"` }]);
+  });
+
+  it('fails a marked element holding a forbidden claim, naming route and text, and passes it unmarked', () => {
+    const findings = caseFindings(modelRoleForbiddenRule, 'model-role-forbidden', ['<p data-model-role>Code writes the record. The model approves a lane.</p>']);
+    expect(findings[0]?.text).toMatch(/^a data-model-role element claims what only code does \(lane-choice\): ".*The model approves a lane\./);
+    expect(modelRoleForbiddenRule(casesSite(['<p>The model approves a lane.</p>']), context)).toEqual([]);
+  });
+
+  it('passes the negated form a model-role element uses', () => {
+    expect(modelRoleForbiddenRule(casesSite(['<p data-model-role>The model never names the cause.</p>']), context)).toEqual([]);
+  });
+
+  it('passes the model id equal to the pin, and fails a different one or none', () => {
+    expect(privacyTexts(modelIdRule, privacyBody())).toEqual([]);
+    expect(privacyTexts(modelIdRule, privacyBody({ modelId: '<p><code data-model-id>eu.planted.other-model</code></p>' }))).toEqual([
+      `the AI section shows the model id eu.planted.other-model; the repository pins ${privacy.modelId}`,
+    ]);
+    expect(privacyTexts(modelIdRule, privacyBody({ modelId: '' }))).toEqual(['the AI section shows no model id (data-model-id)']);
   });
 });
 

@@ -180,3 +180,127 @@ export const RESOURCE_REMOVAL = Object.freeze({ deleted: 'Deleted by', kept: 'Ke
 
 export const PERMISSION_COLUMNS = Object.freeze(['Kind', 'Action', 'Effect', 'Resource or principal', 'Condition', 'Why'] as const);
 export const RESOURCE_COLUMNS = Object.freeze(['Resource', 'What it is', 'Stack', 'On removal'] as const);
+
+// The privacy and AI page (UI-SPEC 11.6). Each statement is the exact text the built page must hold,
+// with code spans in backticks and `{region}` filled from the stacks' Region pin, so no list here
+// names the Region, a model or its id (D-145).
+
+export interface Statement {
+  readonly id: string;
+  readonly text: string;
+  // A page the same element must link to.
+  readonly link?: string;
+}
+
+export const BEDROCK_GEOGRAPHY_URL = 'https://docs.aws.amazon.com/bedrock/latest/userguide/geographic-cross-region-inference.html';
+export const COMPLAINT_AUTHORITY_URL = 'https://autoriteitpersoonsgegevens.nl';
+export const FORGET_DOC = 'docs/forget-one-recipient.md';
+
+// What the page shows once the backticks become code elements and the Region is filled in.
+export const plainStatement = (text: string, region: string): string => text.replaceAll('{region}', region).replaceAll('`', '');
+
+// AC-19. The event-record sentence and the model-request sentence stay apart (AC-E14), and expiry is
+// worded the way DynamoDB TTL works: deletion follows within a few days, never at the day (AC-P12).
+export const PRIVACY_REQUIRED: readonly Statement[] = Object.freeze([
+  { id: 'event-region', text: "Event records stay in the operator's AWS account, in `{region}`." },
+  {
+    id: 'model-requests',
+    text: "The model is called through Amazon Bedrock's EU inference profile. Requests are processed in EU Regions, and AWS may store prompts and results in the Region that served them for abuse detection.",
+    link: BEDROCK_GEOGRAPHY_URL,
+  },
+  { id: 'keyed-hash', text: 'It is pseudonymised personal data: whoever holds the key can match an address to it.' },
+  { id: 'retention', text: 'Each event record expires 30 days after its mail was sent and is deleted within a few days after that.' },
+  { id: 'dead-letter', text: 'An event that could not be written waits in a dead-letter queue for up to 4 days.' },
+  { id: 'logs', text: 'Log lines are kept for one month.' },
+  { id: 'forget', text: `To delete one recipient, the operator runs the command in \`${FORGET_DOC}\`.` },
+  { id: 'forget-reach', text: 'It does not reach a message waiting in the dead-letter queue, which SQS drops within 4 days, or log lines, which go after one month.' },
+  { id: 'addresses', text: "The operator email's To and From addresses are deploy parameters held in that business's own account, never in this repository." },
+  { id: 'deployment-controller', text: "The business that deploys Fothering is the controller of its recipients' data." },
+  // RESEARCH A7: the minimizer stores the operator's own tag values, which no map can class.
+  { id: 'tag-values', text: 'Tag values are text you choose, so keep personal data out of them.' },
+]);
+
+// UI-SPEC section 17 item 1: the role-only default until the owner names a controller (AC-P16).
+export const CONTROLLER = Object.freeze({
+  name: 'the developer who built this hackathon entry',
+  contact: "open an issue on the project's repository",
+});
+
+// AC-21. The Cloudflare DPA sentence and the Dutch authority as complaint body are carried from the
+// GDPR audit unverified (UI-SPEC section 17 items 4 and 5).
+export const WEBSITE_FACTS: readonly Statement[] = Object.freeze([
+  { id: 'controller', text: `The controller of this website is ${CONTROLLER.name}.` },
+  { id: 'contact', text: `To reach them, ${CONTROLLER.contact}.` },
+  { id: 'no-cookie', text: 'They set no cookie' },
+  { id: 'no-analytics', text: 'run no analytics' },
+  { id: 'legal-basis', text: 'The legal basis is the legitimate interest in serving the pages (GDPR Article 6(1)(f)).' },
+  { id: 'cloudflare-dpa', text: 'Cloudflare processes it under its data processing addendum, part of its self-serve subscription agreement.' },
+  { id: 'aws-dpa', text: "AWS processes a deployment's data under the deploying business's own AWS agreement." },
+  { id: 'complaint', text: 'and the right to complain to the Dutch supervisory authority, the Autoriteit Persoonsgegevens.', link: COMPLAINT_AUTHORITY_URL },
+]);
+
+// AC-E16: matched as a set, each once, through the page's data-right marks.
+export const SIX_RIGHTS: readonly string[] = Object.freeze(['access', 'rectification', 'erasure', 'restriction of processing', 'data portability', 'objection']);
+
+// D-141: the site's only stored state, and what each key holds, named on the privacy section (AC-22).
+export const STORAGE_ENTRIES = Object.freeze([
+  { key: 'fothering-theme', holds: '`light` or `dark`, when you pick Light or Dark; Device removes it' },
+  { key: 'fothering-flow', holds: '`stopped` or `running`, when you use the Stop flow button' },
+]);
+
+export const RUNTIME_ROLE_STATEMENT = 'runtime-role';
+
+// AC-24, as UI-SPEC 11.6 words them. Code and the model stay in separate sentences, and every
+// negation names what the agent lacks rather than putting a verb after it (AC-E18).
+export const MODEL_REQUIRED: readonly Statement[] = Object.freeze([
+  { id: 'evidence-record', text: 'Detection code writes one evidence record and approves at most one lane.' },
+  { id: 'receives-only', text: 'An AI agent on Amazon Bedrock AgentCore Runtime receives only that record' },
+  { id: 'no-tool', text: 'It holds no tool that changes anything.' },
+  { id: 'returns', text: 'Returns close with an opaque option id, or unknown.' },
+  { id: 'one-paragraph', text: "Writes one explanation paragraph, which the operator email labels as the agent's." },
+  { id: 'reloads', text: 'The action function reloads the evidence record and checks it before any SES call.' },
+  { id: RUNTIME_ROLE_STATEMENT, text: DEPLOY_COPY.runtimeRoleSentence },
+  { id: 'refusals', text: 'Nothing closes when the cause is unsettled, the spike is not confined to one lane, or the agent is unavailable.' },
+]);
+
+// The runtime-role sentence is true only while the snapshot's runtime role holds no data action.
+export const modelStatements = (runtimeRoleHoldsNoDataAction: boolean): Statement[] =>
+  MODEL_REQUIRED.filter((statement) => runtimeRoleHoldsNoDataAction || statement.id !== RUNTIME_ROLE_STATEMENT);
+
+export interface ForbiddenClaim {
+  readonly claim: string;
+  readonly pattern: RegExp;
+}
+
+// AC-25. Each pattern is anchored on the model or the agent as subject with the verb straight after
+// it, so "the model never names the cause" passes and "the model names the cause" fails (AC-E18).
+const SUBJECT = String.raw`\b(?:the|an?|this|its)\s+(?:AI\s+)?(?:model|agent)\s+`;
+const claim = (name: string, verbs: string): ForbiddenClaim => ({ claim: name, pattern: new RegExp(`${SUBJECT}(?:${verbs})`, 'i') });
+
+export const MODEL_FORBIDDEN: readonly ForbiddenClaim[] = Object.freeze([
+  claim('cause', String.raw`(?:works?|worked)\s+out\s+the\s+cause|(?:names?|named|finds?|found|determines?|determined|decides?|decided|picks?|picked)\s+the\s+cause`),
+  claim('stored-data', String.raw`(?:reads?|receives?|received|sees?|saw|queries|queried|fetches|fetched)\s+(?:the\s+)?(?:stored\s+events|events|recipient\s+addresses|addresses|subjects|headers)\b`),
+  claim('lane-choice', String.raw`(?:picks?|picked|approves?|approved|chooses|chose|selects?|selected)\s+(?:a|the|one|which)\s+lane`),
+  claim('lane-change', String.raw`(?:closes?|closed|pauses?|paused|reopens?|reopened|stops?|stopped)\s+(?:a|the|one|that|this)\s+(?:lane|configuration\s+set)`),
+  claim('ses-call', String.raw`(?:calls?|called|invokes?|invoked)\s+(?:Amazon\s+)?SES\b`),
+  claim('reply', String.raw`(?:reads?|parses?|parsed)\s+(?:a|the|your|an)\s+(?:operator's\s+)?repl(?:y|ies)\b`),
+]);
+
+export interface ModelRecordRow {
+  readonly label: string;
+  readonly text: string;
+}
+
+// UI-SPEC E12: four fixed rows. The profile must be an EU one, or the Bedrock sentence above would be
+// false, so the build stops instead of printing it.
+export function modelRecordRows(modelId: string, region: string): ModelRecordRow[] {
+  if (!modelId.startsWith('eu.')) {
+    throw new Error(`model id: ${modelId} is not an EU inference profile, and the privacy section says requests are processed in EU Regions. Pin an eu. profile.`);
+  }
+  return [
+    { label: 'Model', text: `The model behind the Amazon Bedrock inference profile \`${modelId}\`.` },
+    { label: 'Region', text: `Called from \`${region}\` through the EU inference profile. Requests are processed in EU Regions and may be stored in the Region that served them for abuse detection.` },
+    { label: 'Default', text: 'Dry run. With the go-live switch unset, events are read and stored, while model calls, SES changes and emails are skipped and each is logged as what it would have done.' },
+    { label: 'Labelled output', text: 'Every operator email says at the top which paragraph the agent wrote.' },
+  ];
+}

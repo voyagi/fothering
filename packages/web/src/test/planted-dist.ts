@@ -1,9 +1,11 @@
-import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { NOT_FOUND_ROUTE, routeOf } from '../checks/built-site.js';
-import type { DeployFacts } from '../checks/rules.js';
+import type { DeployFacts, PrivacyFacts } from '../checks/rules.js';
+import { loadPrivacyFacts } from '../harness/gates.js';
 import {
+  FORGET_DOC,
   LANDING_SECTIONS,
   LIMITS_FIXED_ROWS,
   LIMITS_REPLAY_ROW,
@@ -13,7 +15,9 @@ import {
   PERMISSION_COLUMNS,
   RESOURCE_COLUMNS,
   RESOURCE_REMOVAL,
+  STORAGE_ENTRIES,
   type LandingSectionId,
+  type Statement,
 } from '../site/content.js';
 import { PROVENANCE_LABELS } from '../site/labels.js';
 import { denyRows, hasPauseGrant, loadPermissionSnapshot, PERMISSION_REASONS, permissionKey, permissionSchedules } from '../site/permissions-view.js';
@@ -41,15 +45,21 @@ export interface PlantedDist {
 // root carries the committed artifact.
 const ARTIFACT_FILE = join('packages', 'web', 'src', 'fixtures', 'replay-incident.json');
 
-// The deploy rules read the snapshots, the README and the package scripts from the root they judge.
-const DEPLOY_SOURCES = ['README.md', 'package.json', join('docs', 'adr', '0001-stack.md'), join('packages', 'infra', 'permissions.json'), join('packages', 'infra', 'resources.json')];
+// The deploy and privacy rules read the snapshots, the README, the package scripts, the stacks' Region
+// pin, the forget doc and the model pin from the root they judge.
+const DEPLOY_SOURCES = [
+  'README.md', 'package.json', join('docs', 'adr', '0001-stack.md'), FORGET_DOC, join('packages', 'infra', 'permissions.json'), join('packages', 'infra', 'resources.json'),
+  join('packages', 'infra', 'src', 'create-app.ts'),
+];
+// The model pin wins over the ADR row once the branch carries it, so a planted root copies it too.
+const OPTIONAL_SOURCES = [join('packages', 'core', 'src', 'model-values.ts')];
 
 export function plantDist(files: Readonly<Record<string, string | Buffer>>): PlantedDist {
   mkdirSync(CACHE, { recursive: true });
   const root = mkdtempSync(join(CACHE, 'fothering-built-'));
   const dist = join(root, 'packages', 'web', 'dist');
   mkdirSync(dist, { recursive: true });
-  for (const source of [ARTIFACT_FILE, ...DEPLOY_SOURCES]) {
+  for (const source of [ARTIFACT_FILE, ...DEPLOY_SOURCES, ...OPTIONAL_SOURCES.filter((file) => existsSync(join(REPO_ROOT, file)))]) {
     mkdirSync(dirname(join(root, source)), { recursive: true });
     copyFileSync(join(REPO_ROOT, source), join(root, source));
   }
@@ -276,23 +286,71 @@ export function deployBody(parts: DeployParts = {}, facts: DeployFacts = DEPLOY_
     + `<p>${parts.oneCaller ?? ONE_CALLER_SENTENCE}</p>${parts.deny ?? denyBox(facts)}${parts.extra ?? ''}</main>`;
 }
 
+// The privacy facts as the check context reads them from the repo root.
+export const PRIVACY_FACTS: PrivacyFacts = loadPrivacyFacts(REPO_ROOT);
+
+export function statementParagraph(statement: Statement): string {
+  const link = statement.link === undefined ? '' : ` <a href="${statement.link}">Source</a>`;
+  return `<p>${escapeHtml(statement.text)}${link}</p>`;
+}
+
+export function storedFieldRow(field: PrivacyFacts['storedFields'][number]): string {
+  return `<tr data-stored-field="${field.path}"><th data-col="Field">${field.path}</th><td data-col="Identifies">${field.identifies}</td><td data-col="What is stored">${escapeHtml(field.row)}</td></tr>`;
+}
+
+export const rightsSentence = (rights: readonly string[]): string => `<p>You have the right of ${rights.map((right) => `<span data-right>${right}</span>`).join(', ')}.</p>`;
+
+export function forgetSentence(forget: PrivacyFacts['forget']): string {
+  return `<p>Run <code>${forget.command}</code> on the function the <code>${forget.output}</code> stack output names, as <code>${FORGET_DOC}</code> shows.</p>`;
+}
+
+export const modelRoleList = (statements: readonly Statement[]): string => `<ul data-model-role>${statements.map((statement) => `<li>${escapeHtml(statement.text)}</li>`).join('')}</ul>`;
+
+export interface PrivacyParts {
+  readonly statements?: string;
+  readonly fields?: string;
+  readonly forget?: string;
+  readonly website?: string;
+  readonly rights?: string;
+  readonly storage?: string;
+  readonly model?: string;
+  readonly modelId?: string;
+  readonly ai?: string;
+  readonly extra?: string;
+}
+
+// The privacy and AI page every privacy and model-role rule passes, with any one part replaced.
+export function privacyBody(parts: PrivacyParts = {}, facts: PrivacyFacts = PRIVACY_FACTS): string {
+  const statements = parts.statements ?? facts.required.map(statementParagraph).join('');
+  const fields = parts.fields ?? `<table>${facts.storedFields.map(storedFieldRow).join('')}</table>`;
+  const website = parts.website ?? facts.website.map(statementParagraph).join('');
+  const storage = parts.storage ?? `<p>${STORAGE_ENTRIES.map((entry) => `<code>${entry.key}</code>`).join(' and ')}</p>`;
+  const ai = parts.ai ?? '<h2 id="ai">AI</h2>';
+  const model = parts.model ?? modelRoleList(facts.modelRequired);
+  const modelId = parts.modelId ?? `<p>Inference profile <code data-model-id>${facts.modelId}</code></p>`;
+  return `<main><h1>Privacy and AI</h1><h2 id="privacy">Privacy</h2>${statements}${fields}${parts.forget ?? forgetSentence(facts.forget)}`
+    + `<h3>This website</h3>${website}${parts.rights ?? rightsSentence(facts.rights)}${storage}${ai}${model}${modelId}${parts.extra ?? ''}</main>`;
+}
+
 const REPLAY_FILE = 'replay/index.html';
 const DEPLOY_FILE = 'deploy/index.html';
+export const PRIVACY_FILE = 'privacy-and-ai/index.html';
 
 function leadOf(file: string): string {
   if (routeOf(file) === '/') return landingBody();
   if (file === REPLAY_FILE) return replayBody();
+  if (file === PRIVACY_FILE) return privacyBody();
   return file === DEPLOY_FILE ? deployBody() : '';
 }
 
-// A planted build every head, file, landing, replay and deploy rule passes, so a case can plant one
-// fault and see only the rule it aims at fire. It always holds the replay and deploy pages, as the
-// real build does.
+// A planted build every head, file, landing, replay, privacy and deploy rule passes, so a case can
+// plant one fault and see only the rule it aims at fire. It always holds the replay, privacy and
+// deploy pages, as the real build does.
 export function completeSite(bodies: Readonly<Record<string, string>>, heads: Readonly<Record<string, SheetHead>> = {}): Record<string, string> {
   const files: Record<string, string> = {};
   const paths: string[] = [];
   const withSheets: Record<string, string> = { ...bodies };
-  for (const sheet of [REPLAY_FILE, DEPLOY_FILE]) {
+  for (const sheet of [REPLAY_FILE, PRIVACY_FILE, DEPLOY_FILE]) {
     if (!(sheet in withSheets)) withSheets[sheet] = '';
   }
   for (const [file, body] of Object.entries(withSheets)) {

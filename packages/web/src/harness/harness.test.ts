@@ -49,6 +49,7 @@ import {
   runA11yLive,
   runSiteE2e,
   SITE_FAMILIES,
+  storageKeysVerdict,
   storageVerdict,
   storedThemeVerdict,
   switchVerdict,
@@ -827,6 +828,24 @@ describe('storageVerdict (AC-22, D-141)', () => {
   });
 });
 
+describe('storageKeysVerdict (AC-22)', () => {
+  const named = 'Your browser keeps fothering-theme and fothering-flow, and nothing is sent anywhere.';
+
+  it('passes fothering-theme and fothering-flow when the privacy section names both', () => {
+    expect(storageKeysVerdict({ local: ['fothering-theme', 'fothering-flow'], session: [] }, named)).toEqual({ ok: true });
+  });
+
+  it('fails a key the run wrote that the privacy section does not name, from either storage area', () => {
+    expect(storageKeysVerdict({ local: ['fothering-theme', 'fothering-flow'], session: [] }, 'Your browser keeps fothering-theme.')).toEqual(failed(E2E_MESSAGES.storageUnnamed(['fothering-flow'])));
+    expect(storageKeysVerdict({ local: [], session: ['fothering-scratch'] }, named)).toEqual(failed(E2E_MESSAGES.storageUnnamed(['session:fothering-scratch'])));
+  });
+
+  it('fails a build with no privacy section, and a run that wrote no key at all', () => {
+    expect(storageKeysVerdict({ local: ['fothering-theme'], session: [] }, null)).toEqual(failed(E2E_MESSAGES.storageNoPrivacy()));
+    expect(storageKeysVerdict({ local: [], session: [] }, named)).toEqual(failed(E2E_MESSAGES.storageNothingWritten()));
+  });
+});
+
 describe('routesFromDist', () => {
   it('maps every built page except 404.html to its Workers route, sorted', () => {
     const planted = plantRepo({ pages: { 'index.html': 'a', 'replay/index.html': 'b', 'privacy.html': 'c', '404.html': 'd', 'replay/404.html': 'e', 'tokens.css': 'f' } });
@@ -1522,7 +1541,7 @@ describe('the built checks through the CLI and the e2e step (D-150, D-151)', () 
   it('built-checks over a clean dist returns 0', async () => {
     const { code, out } = await builtChecks(clean.dist);
     expect(code).toBe(0);
-    expect(out.at(-1)).toBe(E2E_MESSAGES.checksPass(3));
+    expect(out.at(-1)).toBe(E2E_MESSAGES.checksPass(4));
   });
 
   it('runSiteE2e over a missing dist returns 1 with its catalogue message', async () => {
@@ -1576,9 +1595,9 @@ describe('the built checks through the CLI and the e2e step (D-150, D-151)', () 
   type SiteLines = Partial<Record<'THEME' | 'DEVICE' | 'PIN' | 'STORAGE', unknown>>;
   type RouteLines = Partial<Record<'SWITCH' | 'FONTS' | 'REQUESTS' | 'LINES' | 'NARROW', (route: string) => unknown>>;
   type WidthLines = Partial<Record<'FLOW' | 'TABFLOW' | 'HANG', (route: string, width: number) => unknown>>;
-  // The planted tree's landing, deploy and replay pages, then the unknown address that answers with
-  // the 404 page.
-  const SITE_ROUTES = ['/', '/deploy/', '/replay/', UNKNOWN_PATH];
+  // The planted tree's landing, deploy, privacy and replay pages, then the unknown address that
+  // answers with the 404 page.
+  const SITE_ROUTES = ['/', '/deploy/', '/privacy-and-ai/', '/replay/', UNKNOWN_PATH];
   const healthyLines = (route: string): LinesReading => ({ route, blocks: 1, lines: ['closed - one lane'] });
   // The landing carries the one drawing; its tag hangs clear of the drawing text.
   const healthyNarrow = (route: string): unknown => ({
@@ -1657,7 +1676,7 @@ describe('the built checks through the CLI and the e2e step (D-150, D-151)', () 
     expect(code).toBe(0);
     const steps = lines.filter((line) => line.startsWith('[e2e] step '));
     expect(steps).toEqual(['client-secrets', 'file-budget', 'size', 'built-checks', 'second-build', 'copy-build', 'copy-provenance', 'copy-cause', 'rendered'].map((name) => E2E_MESSAGES.step(name)));
-    expect(lines.at(-1)).toBe(E2E_MESSAGES.pass(3, 9));
+    expect(lines.at(-1)).toBe(E2E_MESSAGES.pass(4, 9));
     expect(existsSync(join(tree.root, 'dist', 'site-second-build'))).toBe(false);
   });
 
@@ -1755,7 +1774,7 @@ describe('the built checks through the CLI and the e2e step (D-150, D-151)', () 
     for (const route of SITE_ROUTES) {
       for (const width of [320, 1440]) expect(flow, `${route} ${width}`).toContain(`${route} at ${width} px movingOnLoad ${String(route === '/')}`);
     }
-    expect(lines).toContain(E2E_MESSAGES.renderedOk('LINES', '4 prose block(s) measured at 1440 px, the longest line 17 characters'));
+    expect(lines).toContain(E2E_MESSAGES.renderedOk('LINES', '5 prose block(s) measured at 1440 px, the longest line 17 characters'));
     expect(lines.find((line) => line.startsWith('[e2e] rendered NARROW: ok, '))).toContain('1 drawing text(s)');
     expect(lines.find((line) => line.startsWith('[e2e] rendered TABFLOW: ok, '))).toBeDefined();
   });
@@ -1825,6 +1844,19 @@ describe('the built checks through the CLI and the e2e step (D-150, D-151)', () 
     expect(missing.lines).toContain(E2E_MESSAGES.renderedFailed('FONTS', E2E_MESSAGES.renderedMissingRoute('FONTS', UNKNOWN_PATH)));
     const storage = await e2e(renderedTree(), {}, { lines: siteLines({ STORAGE: { local: ['fothering-theme', 'other'], session: [] } }) });
     expect(storage.lines).toContain(E2E_MESSAGES.renderedFailed('STORAGE', E2E_MESSAGES.storageKeys(['other'])));
+  });
+
+  it('the rendered step fails a storage key the built privacy section does not name, and names both keys it does', async () => {
+    const both = { STORAGE: { local: ['fothering-theme', 'fothering-flow'], session: [] } };
+    const named = await e2e(renderedTree(), {}, { lines: siteLines(both) });
+    expect(named.code).toBe(0);
+    expect(named.lines.find((text) => text.startsWith('[e2e] rendered STORAGE: ok, '))).toContain('fothering-flow');
+    const unnamed = plantSite(completeSite({ 'index.html': '<p>closed - one lane</p>', 'privacy-and-ai/index.html': '' }));
+    const body = readFileSync(join(unnamed.dist, 'privacy-and-ai', 'index.html'), 'utf8');
+    writeFileSync(join(unnamed.dist, 'privacy-and-ai', 'index.html'), body.replace('<code>fothering-flow</code>', ''));
+    const failedRun = await e2e(unnamed, {}, { lines: siteLines(both) });
+    expect(failedRun.code).toBe(1);
+    expect(failedRun.lines).toContain(E2E_MESSAGES.renderedFailed('STORAGE', E2E_MESSAGES.storageUnnamed(['fothering-flow'])));
   });
 
   it('the rendered step serves the planted dist on 127.0.0.1 and hands the driver its base URL, the landing route and every route', async () => {
@@ -1962,7 +1994,7 @@ describe('the built checks through the CLI and the e2e step (D-150, D-151)', () 
   it('built-checks with --allow alone passes the allowed findings and prints the expected-red verdict', async () => {
     const { code, out } = await builtChecks(dashed.dist, '--allow', 'dash, ses-rate-wording');
     expect(code).toBe(0);
-    expect(out.at(-1)).toBe(E2E_MESSAGES.expectPass(3));
+    expect(out.at(-1)).toBe(E2E_MESSAGES.expectPass(4));
   });
 
   it('the CLI runs e2e only with the global npm folder, and reports its missing dist', async () => {
@@ -1988,7 +2020,7 @@ describe('the built checks through the CLI and the e2e step (D-150, D-151)', () 
       choiceNotKept: ['dark', null, null], osNotFollowed: ['#F5F7F8', '#F5F7F8', '#F5F7F8', '#0F1316'], invalidMissing: ['DARK'],
       invalidChecked: ['blue', null], domOrder: [['light']], boxOrder: [320, []], noBoxOrder: [], arrowStill: [null],
       fontMissing: ['Red Hat Mono'], fontNotLoaded: ['Red Hat Mono'], fontCheckFalse: ['Red Hat Mono'], fontControl: ['x'],
-      noRequests: [], foreignRequest: ['http://127.0.0.1:1', ['https://x.test']], storageKeys: [['x']], sizeLimit: [1],
+      noRequests: [], foreignRequest: ['http://127.0.0.1:1', ['https://x.test']], storageKeys: [['x']], storageUnnamed: [['x']], storageNoPrivacy: [], storageNothingWritten: [], sizeLimit: [1],
       noProseBlocks: [], lineTooLong: ['/', 81, 'x'], identifierBreak: ['a.b', ['a', '.b']], tagOverlap: ['x'], textOutside: ['x'], noDrawingText: [],
       flowNoControl: [320], flowControlWithoutMotion: [320], flowSmallControl: [320, 40, 40], flowStillRunning: [320, 1], flowLabel: [320, ['Stop flow']],
       flowReloadRuns: [320, 1], flowReduced: [320, 1], flowStoredRunning: [320], flowStoredStopped: [320, 1], flowTabUnreached: [320], flowTabLate: [320],

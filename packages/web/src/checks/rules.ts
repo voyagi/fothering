@@ -15,11 +15,13 @@ import {
   RESOURCE_COLUMNS,
   RESOURCE_REMOVAL,
   THEME_RADIO_LIMIT,
+  type ForbiddenClaim,
+  type Statement,
 } from '../site/content.js';
 import { PROVENANCE_LABELS } from '../site/labels.js';
 import { hasPauseGrant, permissionKey, permissionSchedules } from '../site/permissions-view.js';
 import type { ReplayView } from '../site/replay-view.js';
-import { isOfferedCommand, removedByText, type DeployCommand } from '../site/repo-facts.js';
+import { isOfferedCommand, removedByText, type DeployCommand, type ForgetCommand } from '../site/repo-facts.js';
 import { resourceRows } from '../site/resources-view.js';
 import { sitemapUrls, type SiteRoute } from '../site/route-list.js';
 import { scriptHash } from '../theme/head-script.js';
@@ -69,6 +71,17 @@ export const RULE_IDS = Object.freeze([
   'deploy-deny',
   'deploy-notice',
   'one-caller',
+  'privacy-page',
+  'privacy-statements',
+  'stored-field-rows',
+  'website-facts',
+  'six-rights',
+  'forget-command',
+  'no-delete-control',
+  'model-role-present',
+  'model-role-required',
+  'model-role-forbidden',
+  'model-id',
 ] as const);
 
 export type RuleId = (typeof RULE_IDS)[number];
@@ -101,6 +114,23 @@ export interface CheckContext {
   readonly replay: ReplayView;
   // The committed sources the deploy page is generated from, which the deploy rules read it against.
   readonly deploy: DeployFacts;
+  // The statement lists and repository facts the privacy and AI page is held to.
+  readonly privacy: PrivacyFacts;
+}
+
+export interface PrivacyFacts {
+  // The stored-field map's identifying entries, in map order.
+  readonly storedFields: readonly { readonly path: string; readonly identifies: string; readonly row: string }[];
+  readonly region: string;
+  readonly modelId: string;
+  // Each list as the page shows it: the Region filled in and code spans as plain text.
+  readonly required: readonly Statement[];
+  readonly website: readonly Statement[];
+  readonly rights: readonly string[];
+  // The runtime-role sentence is in this list only while the snapshot's runtime role holds no data action.
+  readonly modelRequired: readonly Statement[];
+  readonly modelForbidden: readonly ForbiddenClaim[];
+  readonly forget: ForgetCommand;
 }
 
 export interface DeployFacts {
@@ -1336,6 +1366,56 @@ export function oneCallerRule(site: BuiltSite, _context: CheckContext): Finding[
     (page.textOutsideSvg.includes(ONE_CALLER_SENTENCE) ? [] : ['the deploy page does not say that each lane sends through its own IAM caller identity, and why']));
 }
 
+export const PRIVACY_ROUTE = '/privacy-and-ai/';
+
+export function privacyPageRule(_site: BuiltSite, _context: CheckContext): Finding[] {
+  return [];
+}
+
+export function privacyStatementsRule(_site: BuiltSite, _context: CheckContext): Finding[] {
+  return [];
+}
+
+export function storedFieldRowsRule(_site: BuiltSite, _context: CheckContext): Finding[] {
+  return [];
+}
+
+export function websiteFactsRule(_site: BuiltSite, _context: CheckContext): Finding[] {
+  return [];
+}
+
+export function sixRightsRule(_site: BuiltSite, _context: CheckContext): Finding[] {
+  return [];
+}
+
+export function forgetCommandRule(_site: BuiltSite, _context: CheckContext): Finding[] {
+  return [];
+}
+
+export function noDeleteControlRule(_site: BuiltSite, _context: CheckContext): Finding[] {
+  return [];
+}
+
+export function modelRolePresentRule(_site: BuiltSite, _context: CheckContext): Finding[] {
+  return [];
+}
+
+export function modelRoleRequiredRule(_site: BuiltSite, _context: CheckContext): Finding[] {
+  return [];
+}
+
+export function modelRoleForbiddenRule(_site: BuiltSite, _context: CheckContext): Finding[] {
+  return [];
+}
+
+export function modelIdRule(_site: BuiltSite, _context: CheckContext): Finding[] {
+  return [];
+}
+
+export function privacySectionText(_site: BuiltSite): string | null {
+  return null;
+}
+
 // Workers limits: 20,000 files per version on the Free plan and 25 MiB per file (AC-62).
 const MAX_FILES = 20_000;
 const MAX_FILE_BYTES = 25 * 1024 * 1024;
@@ -1398,6 +1478,17 @@ const RULES: Readonly<Record<RuleId, Rule>> = {
   'deploy-deny': deployDenyRule,
   'deploy-notice': deployNoticeRule,
   'one-caller': oneCallerRule,
+  'privacy-page': privacyPageRule,
+  'privacy-statements': privacyStatementsRule,
+  'stored-field-rows': storedFieldRowsRule,
+  'website-facts': websiteFactsRule,
+  'six-rights': sixRightsRule,
+  'forget-command': forgetCommandRule,
+  'no-delete-control': noDeleteControlRule,
+  'model-role-present': modelRolePresentRule,
+  'model-role-required': modelRoleRequiredRule,
+  'model-role-forbidden': modelRoleForbiddenRule,
+  'model-id': modelIdRule,
 };
 
 // Every rule runs over the whole site and every hit is kept, so one report names them all.

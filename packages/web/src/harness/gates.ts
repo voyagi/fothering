@@ -13,14 +13,40 @@ import {
 } from './dev-browser.js';
 import { startPreviewServer, type PreviewServer } from './preview-server.js';
 import { filesIn, loadBuiltSite, NoBuiltPagesError, routeOf, textOf, walk, type BuiltElement, type BuiltSite } from '../checks/built-site.js';
-import { checkFileBudget, isRegisteredRule, runBuiltChecks, type BudgetViolation, type CheckContext, type DeployFacts, type Finding } from '../checks/rules.js';
-import { BANNED_NAMES, CONSOLE_DELETE_PHRASES, REPLY_PROMISE_PHRASES, REPUTATION_PAGE_URL } from '../site/content.js';
+import {
+  checkFileBudget,
+  isRegisteredRule,
+  PRIVACY_ROUTE,
+  privacySectionText,
+  runBuiltChecks,
+  type BudgetViolation,
+  type CheckContext,
+  type DeployFacts,
+  type Finding,
+  type PrivacyFacts,
+} from '../checks/rules.js';
+import {
+  BANNED_NAMES,
+  CONSOLE_DELETE_PHRASES,
+  FORGET_DOC,
+  MODEL_FORBIDDEN,
+  modelStatements,
+  plainStatement,
+  PRIVACY_REQUIRED,
+  REPLY_PROMISE_PHRASES,
+  REPUTATION_PAGE_URL,
+  SIX_RIGHTS,
+  STORAGE_ENTRIES,
+  WEBSITE_FACTS,
+  type Statement,
+} from '../site/content.js';
 import type { Provenance } from '@fothering/core/records';
 import { LOG_API_NAMES } from '../site/identifier-text.js';
 import { PROVENANCE_LABELS } from '../site/labels.js';
-import { loadPermissionSnapshot, PERMISSION_REASONS } from '../site/permissions-view.js';
+import { loadPermissionSnapshot, PERMISSION_REASONS, runtimeRoleHoldsNoDataAction } from '../site/permissions-view.js';
 import { buildReplayView, loadReplayArtifact } from '../site/replay-view.js';
-import { loadRepoFacts } from '../site/repo-facts.js';
+import { loadRepoFacts, readDeployRegion, readForgetCommand, readRepoText } from '../site/repo-facts.js';
+import { identifyingFields } from '../site/stored-fields.js';
 import { loadResourceSnapshot } from '../site/resources-view.js';
 import { ROUTES, SITE_ORIGIN, sitemapUrls } from '../site/route-list.js';
 import { HEAD_SCRIPT, themedValue, TOKENS } from '../theme/head-script.js';
@@ -269,7 +295,7 @@ const THEME_ORDER = ['device', 'light', 'dark'];
 const PINNED_CHOICES = ['light', 'dark'];
 // AC-E29 names these three stored values; each must leave Device checked.
 const INVALID_STORED = ['blue', '', 'DARK'];
-const STORAGE_KEYS: ReadonlySet<string> = new Set(['fothering-theme', 'fothering-flow']);
+const STORAGE_KEYS: ReadonlySet<string> = new Set(STORAGE_ENTRIES.map((entry) => entry.key));
 
 const verdictOf = (reasons: readonly string[]): Verdict => (reasons.length === 0 ? { ok: true } : { ok: false, reason: reasons.join('; ') });
 const sameOrder = (order: readonly string[]): boolean => order.join(',') === THEME_ORDER.join(',');
@@ -340,6 +366,10 @@ export function requestsVerdict(reading: RequestsReading): Verdict {
 export function storageVerdict(reading: StorageReading): Verdict {
   const outside = [...reading.local.filter((key) => !STORAGE_KEYS.has(key)), ...reading.session.map((key) => `session:${key}`)];
   return outside.length === 0 ? { ok: true } : { ok: false, reason: E2E_MESSAGES.storageKeys(outside) };
+}
+
+export function storageKeysVerdict(_reading: StorageReading, _privacyText: string | null): Verdict {
+  return { ok: true };
 }
 
 export interface LinesReading {
@@ -1206,6 +1236,9 @@ export const E2E_MESSAGES = Object.freeze({
   noRequests: () => 'the page recorded no request, so where its requests went is unknown',
   foreignRequest: (page: string, origins: readonly string[]) => `request(s) left the page's origin ${page}: ${origins.join(', ')}`,
   storageKeys: (keys: readonly string[]) => `storage holds ${keys.join(', ')}; only fothering-theme and fothering-flow in localStorage are allowed`,
+  storageUnnamed: (keys: readonly string[]) => `the privacy section at ${PRIVACY_ROUTE} does not name the storage key(s) ${keys.join(', ')} that the site wrote`,
+  storageNoPrivacy: () => `the build holds no privacy section at ${PRIVACY_ROUTE}, so the storage keys the site writes are named nowhere`,
+  storageNothingWritten: () => 'the run wrote no storage key after using the theme switch and the flow control, so the check named nothing',
   sizeLimit: (status: number | null) => `size-limit exited ${String(status)}, 0 expected; the client scripts are over the budget in packages/web/package.json or were not measured`,
   noProseBlocks: () => 'the line test measured zero prose blocks across the site, so no line was checked',
   lineTooLong: (route: string, characters: number, line: string) => `${route}: a rendered line holds ${characters} characters, at most 80 allowed: "${line.slice(0, 60)}"`,
@@ -1322,6 +1355,25 @@ export function loadCheckContext(repoRoot: string): CheckContext {
     provenance: artifact.provenance,
     replay: buildReplayView(artifact),
     deploy: loadDeployFacts(repoRoot),
+    privacy: loadPrivacyFacts(repoRoot),
+  });
+}
+
+const shown = (statements: readonly Statement[], region: string): Statement[] =>
+  statements.map((statement) => ({ ...statement, text: plainStatement(statement.text, region) }));
+
+export function loadPrivacyFacts(repoRoot: string): PrivacyFacts {
+  const region = readDeployRegion(repoRoot);
+  return Object.freeze({
+    storedFields: identifyingFields(),
+    region,
+    modelId: loadRepoFacts(repoRoot).modelId,
+    required: shown(PRIVACY_REQUIRED, region),
+    website: shown(WEBSITE_FACTS, region),
+    rights: SIX_RIGHTS,
+    modelRequired: shown(modelStatements(runtimeRoleHoldsNoDataAction(loadPermissionSnapshot(repoRoot))), region),
+    modelForbidden: MODEL_FORBIDDEN,
+    forget: readForgetCommand(readRepoText(FORGET_DOC, repoRoot)),
   });
 }
 
