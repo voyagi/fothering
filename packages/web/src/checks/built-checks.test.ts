@@ -1734,9 +1734,9 @@ describe('the accessibility statement rule (AC-53, UI-SPEC E13)', () => {
     ]);
   });
 
-  it('judges each row by its own state, so a mix of checked and not yet checked rows passes as recorded', () => {
+  it('judges each row by its own recorded state, so the schedule before the hand check passes with every row not yet checked', () => {
     const states = new Set(HAND_CHECK_CRITERIA.map((criterion) => criterion.result));
-    expect(states.size).toBeGreaterThan(1);
+    expect([...states]).toEqual(['not-yet-checked']);
     expect(accessibilityTexts(accessibilityStatementRule, accessibilityBody())).toEqual([]);
   });
 });

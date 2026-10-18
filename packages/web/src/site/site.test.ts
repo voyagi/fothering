@@ -228,10 +228,8 @@ const RESEARCH_CRITERIA = [
   '1.2.3', '1.2.4', '1.2.5', '1.3.2', '1.3.3', '1.4.5', '1.4.10', '1.4.11', '1.4.13', '2.1.2', '2.1.4', '2.3.1', '2.4.3', '2.4.5', '2.4.6', '2.4.7',
   '2.4.11', '2.5.1', '2.5.2', '2.5.4', '2.5.7', '3.2.1', '3.2.2', '3.2.3', '3.2.4', '3.2.6', '3.3.1', '3.3.3', '3.3.4', '3.3.7', '3.3.8', '4.1.3',
 ];
-// The research's not-applicable notes (no media, forms, authentication, gestures, dragging or
-// flashing), less 2.5.2: Pointer Cancellation covers every single-pointer control, and the site has
-// buttons, links and radios.
-const NOT_APPLICABLE = ['1.2.3', '1.2.4', '1.2.5', '2.3.1', '2.5.1', '2.5.4', '2.5.7', '3.3.1', '3.3.3', '3.3.4', '3.3.7', '3.3.8'];
+// The record keeps room for every result the hand check can give, so S5 records not applicable,
+// passed or failed without a type change.
 const RESULTS: readonly HandCheckResult[] = ['not-yet-checked', 'not-applicable', 'passed', 'failed'];
 
 describe('the accessibility record (D-156, AC-53)', () => {
@@ -292,10 +290,11 @@ describe('the accessibility record (D-156, AC-53)', () => {
     }
   });
 
-  it('marks not applicable exactly the criteria the research notes, less 2.5.2, each with its reason', () => {
-    const notApplicable = HAND_CHECK_CRITERIA.filter((criterion) => criterion.result === 'not-applicable');
-    expect(notApplicable.map((criterion) => criterion.number).sort()).toEqual([...NOT_APPLICABLE].sort());
-    for (const criterion of notApplicable) expect(criterion.how).toMatch(/^(?:The site has no|Nothing on the site)\b/);
+  // UI-SPEC E13 empty state: no person has checked any criterion before the S5 real-browser session,
+  // so no row may show a result. S5 records every result, and replaces this case, in one commit.
+  it('shows every criterion as not yet checked before the hand check in a real browser', () => {
+    const recorded = HAND_CHECK_CRITERIA.filter((criterion) => criterion.result !== 'not-yet-checked').map((criterion) => `${criterion.number} ${criterion.result}`);
+    expect(recorded).toEqual([]);
   });
 
   it('labels the four results as the statement prints them', () => {
