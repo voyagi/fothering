@@ -1,8 +1,11 @@
 import type { Provenance } from '@fothering/core/records';
 import {
+  accessibilityStatements,
   ANALYTICS_PATTERNS,
   EXACT_30_DAY_PATTERNS,
   FORGET_DOC,
+  HAND_CHECK_CRITERIA,
+  HAND_CHECK_RESULT_LABELS,
   LANDING_SECTIONS,
   LEDE_TERMS,
   LIMITS_FIXED_ROWS,
@@ -1591,13 +1594,43 @@ export function modelIdRule(site: BuiltSite, context: CheckContext): Finding[] {
 }
 
 export const ACCESSIBILITY_ROUTE = '/accessibility/';
+const CRITERION_MARK = 'data-criterion';
 
-export function accessibilityPageRule(_site: BuiltSite, _context: CheckContext): Finding[] {
-  return [];
+const accessibilityPage = (site: BuiltSite): BuiltPage | undefined => site.pages.find((page) => page.route === ACCESSIBILITY_ROUTE);
+
+export function accessibilityPageRule(site: BuiltSite, _context: CheckContext): Finding[] {
+  return accessibilityPage(site) === undefined ? [{ rule: 'accessibility-page', route: ACCESSIBILITY_ROUTE, text: `the build has no accessibility statement at ${ACCESSIBILITY_ROUTE}` }] : [];
 }
 
-export function accessibilityStatementRule(_site: BuiltSite, _context: CheckContext): Finding[] {
-  return [];
+// Each row is judged by its own recorded result, so a schedule part way through the hand check
+// passes as long as every row shows what the record holds for it (UI-SPEC E13, partial).
+function criterionFindings(page: BuiltPage): string[] {
+  const rows = markedIn(page.root, CRITERION_MARK);
+  const texts = countFindings(HAND_CHECK_CRITERIA.map((criterion) => criterion.number), rows.map((row) => row.attrs[CRITERION_MARK] ?? ''), {
+    missing: (number) => `the hand-check schedule has no row for ${number}`,
+    repeated: (number, seen, wanted) => `the hand-check schedule shows ${number} ${timesExpected(seen, wanted)}`,
+    unknown: (number) => `the hand-check schedule has a row for ${number}, which is not one of the criteria axe-core cannot decide`,
+  });
+  const byNumber = new Map(HAND_CHECK_CRITERIA.map((criterion) => [criterion.number, criterion]));
+  for (const row of rows) {
+    const criterion = byNumber.get(row.attrs[CRITERION_MARK] ?? '');
+    if (criterion === undefined) continue;
+    const text = textOf(row);
+    const label = HAND_CHECK_RESULT_LABELS[criterion.result];
+    if (!text.includes(criterion.name)) texts.push(`the hand-check row ${criterion.number} does not name "${criterion.name}"`);
+    if (!text.includes(label)) texts.push(`the hand-check row ${criterion.number} does not show its result "${label}"`);
+    if (!text.includes(criterion.how)) texts.push(`the hand-check row ${criterion.number} does not say how it is checked`);
+  }
+  return texts;
+}
+
+// AC-53: the target, the last automated audit, the tool, the limitations, the contact route and one
+// row per criterion axe cannot decide. While the page is absent only accessibility-page reports.
+export function accessibilityStatementRule(site: BuiltSite, _context: CheckContext): Finding[] {
+  const page = accessibilityPage(site);
+  if (page === undefined) return [];
+  const said = accessibilityStatements().filter((statement) => !page.text.includes(statement.text)).map((statement) => `the accessibility statement does not say "${statement.text}"`);
+  return [...said, ...criterionFindings(page)].map((text) => ({ rule: 'accessibility-statement' as const, route: ACCESSIBILITY_ROUTE, text }));
 }
 
 // Workers limits: 20,000 files per version on the Free plan and 25 MiB per file (AC-62).
