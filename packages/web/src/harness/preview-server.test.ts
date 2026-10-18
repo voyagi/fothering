@@ -185,7 +185,7 @@ describe('startPreviewServer refuses what it does not implement', () => {
     }
   });
 
-  it('passes on a _headers read failure other than a missing file', async () => {
+  it('rejects a _headers read failure other than a missing file', async () => {
     const site = plantSite('headers-folder', { 'index.html': 'x', '_headers/inner.txt': 'y' });
     await expect(startPreviewServer({ distDir: site.dist, wranglerConfigPath: site.config })).rejects.toThrow(/EISDIR/);
   });
