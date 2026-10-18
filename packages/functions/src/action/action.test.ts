@@ -1,10 +1,20 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { BUCKET_MS, bucketStartMs } from '@fothering/core/buckets';
-import { ACTION_FUNCTION_TIMEOUT_MS, HOLD_CHECK_DELAY_MS, HOLD_MS } from '@fothering/core/close-values';
+import { ACTION_FUNCTION_TIMEOUT_MS, HOLD_CHECK_DELAY_MS, HOLD_MS, LANE_HOUR_ATTEMPT_CAP } from '@fothering/core/close-values';
 import { closureClaimItem, closureKey, parseClosure, type Closure } from '@fothering/core/closure';
-import { buildEvidenceRecord, incidentLaneKey, incidentPauseKey, type EvidenceRecord, type EvidenceRecordInput } from '@fothering/core/evidence-record';
+import { reserveLaneAttempt } from '@fothering/core/counters';
+import {
+  buildEvidenceRecord,
+  counterLaneHourKey,
+  incidentLaneKey,
+  incidentPauseKey,
+  type EvidenceRecord,
+  type EvidenceRecordInput,
+} from '@fothering/core/evidence-record';
+import { RETENTION_SECONDS } from '@fothering/core/records';
 import { spikeWindowFor, type BucketWindow, type LaneFold } from '@fothering/core/window-fold';
 import { createFixtureTableState } from '@fothering/providers/fixtures/ingest-ports';
+import { createFixtureSesState } from '@fothering/providers/fixtures/later-ports';
 import type { DecisionStoreItem, DecisionStorePort, EventStorePort, FixtureSesState, FixtureTableState, Recording } from '@fothering/providers/port-types';
 import { MAX_IDENTITY_READS, SES_READ_SPACING_MS } from '@fothering/providers/ses-facts';
 import { assertRootMatrix } from '@fothering/providers/test/root-matrix';
@@ -54,6 +64,7 @@ function orderRecorded(deps: ActionDeps, calls: string[]): ActionDeps {
     },
     reserveInvocation: (request) => store.reserveInvocation(request),
     recordUsage: (usage) => store.recordUsage(usage),
+    reserveLaneAttempt: (request) => store.reserveLaneAttempt(request),
   };
   const wait = async (ms: number): Promise<void> => {
     calls.push(`wait:${ms}`);
@@ -361,6 +372,7 @@ function withStore(deps: ActionDeps, overrides: Partial<DecisionStorePort>): Act
     updateIfVersion: (key, expectedVersion, attributes, nowMs, expected) => store.updateIfVersion(key, expectedVersion, attributes, nowMs, expected),
     reserveInvocation: (request) => store.reserveInvocation(request),
     recordUsage: (usage) => store.recordUsage(usage),
+    reserveLaneAttempt: (request) => store.reserveLaneAttempt(request),
     ...overrides,
   };
   return { ...deps, ports: { ...deps.ports, decisionStore } };
@@ -698,15 +710,22 @@ function loggedEvents(lines: readonly string[], event: string): Record<string, u
   return lines.map((line) => JSON.parse(line) as Record<string, unknown>).filter((entry) => entry.event === event);
 }
 
-// A second bulk incident detection opened after the first: the marker moves to it and its record is the
-// seeded one with only its id and window changed, so the gate passes it and a refusal comes from step 6.
-async function plantNextBulkIncident(deps: ActionDeps): Promise<void> {
+// A later bulk incident detection opened after the seeded one: the marker moves to it and its record is
+// the seeded one with only its id and window changed, so the gate passes it and a refusal comes from
+// the step under test.
+async function plantBulkIncidentAt(deps: ActionDeps, openedAtMs: number): Promise<string> {
   const seededRecord = await storedRecord(deps, INCIDENT_ID, NOW_MS);
-  const window = spikeWindowFor(LATER_MS);
-  const record = buildEvidenceRecord({ ...recordInputOf(seededRecord), incidentId: NEXT_BULK_INCIDENT_ID, window });
+  const incidentId = incidentIdOf(BULK, openedAtMs);
+  const window = spikeWindowFor(openedAtMs);
+  const record = buildEvidenceRecord({ ...recordInputOf(seededRecord), incidentId, window });
   const optionId = record.approvedOptions[0]?.optionId;
-  await moveMarker(deps, BULK, NEXT_BULK_INCIDENT_ID, NOW_MS);
-  await plantIncident(deps, { configurationSet: BULK, incidentId: NEXT_BULK_INCIDENT_ID, openingWindow: window, record, decision: { outcome: 'close', optionId, explanation: 'planted' }, nowMs: NOW_MS, omit: ['marker'] });
+  await moveMarker(deps, BULK, incidentId, NOW_MS);
+  await plantIncident(deps, { configurationSet: BULK, incidentId, openingWindow: window, record, decision: { outcome: 'close', optionId, explanation: 'planted' }, nowMs: NOW_MS, omit: ['marker'] });
+  return incidentId;
+}
+
+async function plantNextBulkIncident(deps: ActionDeps): Promise<void> {
+  await plantBulkIncidentAt(deps, LATER_MS);
 }
 
 async function plantReopened(deps: ActionDeps, incidentId: string): Promise<void> {
@@ -857,6 +876,167 @@ describe('one lane holds at most one pause Fothering may still own (D-95)', () =
     const closure = await storedClosure(deps, incidentId, T + 120_000);
     expect(closure?.outcome).toBe('refused');
     expect(laneOf(closure, BULK)?.state).toBe('paused-by-fothering');
+  });
+});
+
+function laneHourItem(deps: ActionDeps, nowMs: number): Promise<DecisionStoreItem | undefined> {
+  return deps.ports.decisionStore.getItem(counterLaneHourKey(BULK, new Date(nowMs).toISOString().slice(0, 13)), nowMs);
+}
+
+async function prefillLaneAttempts(deps: ActionDeps, count: number, nowMs: number): Promise<void> {
+  for (let attempt = 0; attempt < count; attempt += 1) {
+    expect((await reserveLaneAttempt(deps.ports.decisionStore, { configurationSet: BULK, nowMs })).outcome).toBe('reserved');
+  }
+}
+
+function recordingReservations(deps: ActionDeps, calls: string[]): ActionDeps {
+  const store = deps.ports.decisionStore;
+  return withStore(deps, {
+    reserveLaneAttempt: (request) => {
+      calls.push('reserve');
+      return store.reserveLaneAttempt(request);
+    },
+  });
+}
+
+// One counter per action root, held in this process and never in the table: what a second process
+// could not see. The two-roots case must exceed the cap with it (AC-10, red).
+const PLANTED_LANE_COUNTERS = new Map<string, number>();
+
+function withPlantedLaneCounter(deps: ActionDeps, root: string): ActionDeps {
+  return withStore(deps, {
+    reserveLaneAttempt: async (request) => {
+      const attempts = PLANTED_LANE_COUNTERS.get(root) ?? 0;
+      if (attempts >= request.cap) return 'cap';
+      PLANTED_LANE_COUNTERS.set(root, attempts + 1);
+      return 'reserved';
+    },
+  });
+}
+
+// Ten bulk incidents, one opened per bucket after the seeded one, each acted on in turn by one of two
+// roots built over one store and one SES whose puts all throw, so every closure ends pause-failed, the
+// pointer never holds the lane, and only the lane-hour counter can stop the next put.
+async function tenAttemptsThroughTwoRoots(wrap: (deps: ActionDeps, root: string) => ActionDeps): Promise<number> {
+  const { store } = await seeded();
+  const sesState = createFixtureSesState();
+  sesState.putFaults.set(BULK, 'throw');
+  const runMs = Date.UTC(2026, 9, 11, 12, 55);
+  const roots = ['root-a', 'root-b'].map((root) => wrap(buildTestActionRoot({ store, sesState, now: () => runMs }).deps, root));
+  for (let index = 1; index <= 10; index += 1) {
+    const root = roots[index % 2];
+    if (root === undefined) throw new Error('no root to act with');
+    await plantBulkIncidentAt(root, NOW_MS + index * BUCKET_MS);
+    await runActionCycle(root);
+  }
+  return putsOf(sesState).length;
+}
+
+describe('pause attempts on one lane stop at 4 per UTC hour in the shared table (R5, D-99)', () => {
+  it('creates the lane-hour counter at 1 with its expiry on the first pause of the hour (AC-E13)', async () => {
+    const { deps } = await pausedAtT();
+    expect(await laneHourItem(deps, T)).toMatchObject({ attempts: 1, expiresAt: Math.floor(T / 1000) + RETENTION_SECONDS });
+  });
+
+  it('pauses on the fourth attempt of the hour and refuses a fifth incident lane-cap-reached with no SES call (AC-10)', async () => {
+    const { root } = await seeded();
+    const { deps, sesState } = root();
+    await prefillLaneAttempts(deps, 3, T);
+
+    await runActionCycle(deps);
+    expect((await storedClosure(deps, INCIDENT_ID, T))?.outcome).toBe('paused');
+    await plantReopened(deps, INCIDENT_ID);
+    await plantNextBulkIncident(deps);
+    const callsBefore = sesState.calls.length;
+    await runActionCycle(at(deps, T + 120_000));
+
+    expect(await storedClosure(deps, NEXT_BULK_INCIDENT_ID, T + 120_000)).toMatchObject({ outcome: 'refused', reason: 'lane-cap-reached' });
+    expect(sesState.calls.slice(callsBefore)).toEqual([]);
+    expect(await laneHourItem(deps, T + 120_000)).toMatchObject({ attempts: 4 });
+  });
+
+  it('lets at most 4 of 10 attempts through two roots sharing one store reach SES (AC-10)', async () => {
+    expect(await tenAttemptsThroughTwoRoots((deps) => deps)).toBe(LANE_HOUR_ATTEMPT_CAP);
+  });
+
+  it('is shown red by a planted counter each root keeps in its own process (AC-10)', async () => {
+    PLANTED_LANE_COUNTERS.clear();
+    expect(await tenAttemptsThroughTwoRoots(withPlantedLaneCounter)).toBeGreaterThan(LANE_HOUR_ATTEMPT_CAP);
+  });
+
+  it('reserves before the put, and a refused reservation makes no put (AC-E14)', async () => {
+    const paused = (await seeded()).root();
+    await runActionCycle(recordingReservations(paused.deps, paused.sesState.calls));
+    const reserveAt = paused.sesState.calls.indexOf('reserve');
+    expect(reserveAt).toBeGreaterThanOrEqual(0);
+    expect(reserveAt).toBeLessThan(paused.sesState.calls.indexOf('put-issued:fothering-bulk:false'));
+
+    const capped = (await seeded()).root();
+    await prefillLaneAttempts(capped.deps, LANE_HOUR_ATTEMPT_CAP, T);
+    await runActionCycle(recordingReservations(capped.deps, capped.sesState.calls));
+    expect(capped.sesState.calls).toEqual(['reserve']);
+    expect(await storedClosure(capped.deps, INCIDENT_ID, T)).toMatchObject({ outcome: 'refused', reason: 'lane-cap-reached' });
+  });
+
+  it('counts a reserved attempt whose put throws (AC-E15)', async () => {
+    const { deps } = await pausedAtT((state) => state.putFaults.set(BULK, 'throw'));
+    expect((await storedClosure(deps, INCIDENT_ID, T))?.outcome).toBe('pause-failed');
+    expect(await laneHourItem(deps, T)).toMatchObject({ attempts: 1 });
+  });
+});
+
+// AC-E18 and the cap halves of AC-8 and AC-11: every refusal before step 7 leaves the counter untouched.
+describe('no refusal and no dry run takes a lane-hour attempt (AC-E18)', () => {
+  it('takes none for a gate refusal (hash-mismatch)', async () => {
+    const { store, root } = await seeded();
+    const { deps } = root();
+    tamperEvidenceHash(store, INCIDENT_ID);
+    await runActionCycle(deps);
+    expect((await storedClosure(deps, INCIDENT_ID, T))?.reason).toBe('hash-mismatch');
+    expect(await laneHourItem(deps, T)).toBeUndefined();
+  });
+
+  it('takes none for a freshness refusal (newer-incident-elsewhere)', async () => {
+    const { root } = await seeded();
+    const { deps } = root();
+    await plantReceiptIncident(deps, spikeWindowFor(LATER_MS));
+    await runActionCycle(deps);
+    expect((await storedClosure(deps, INCIDENT_ID, T))?.reason).toBe('newer-incident-elsewhere');
+    expect(await laneHourItem(deps, T)).toBeUndefined();
+  });
+
+  it('takes none for a freshness refusal (record-too-old)', async () => {
+    const { root } = await seeded();
+    const { deps } = root();
+    const oldMs = (await storedRecord(deps, INCIDENT_ID, NOW_MS)).window.toBucketMs + 3_600_001;
+    await runActionCycle(at(deps, oldMs));
+    expect((await storedClosure(deps, INCIDENT_ID, oldMs))?.reason).toBe('record-too-old');
+    expect(await laneHourItem(deps, oldMs)).toBeUndefined();
+  });
+
+  it('takes none for a closeability refusal (configuration-not-closeable)', async () => {
+    const { root } = await seeded();
+    const { deps } = root({ recordings: bulkDestinationWithout('DELIVERY_DELAY') });
+    await runActionCycle(deps);
+    expect((await storedClosure(deps, INCIDENT_ID, T))?.reason).toBe('configuration-not-closeable');
+    expect(await laneHourItem(deps, T)).toBeUndefined();
+  });
+
+  it('takes none for lane-already-paused, acted on in the next UTC hour', async () => {
+    const { deps } = await pausedAtT();
+    await plantNextBulkIncident(deps);
+    const nextHourMs = Date.UTC(2026, 9, 11, 13, 4);
+    await runActionCycle(at(deps, nextHourMs));
+    expect((await storedClosure(deps, NEXT_BULK_INCIDENT_ID, nextHourMs))?.reason).toBe('lane-already-paused');
+    expect(await laneHourItem(deps, nextHourMs)).toBeUndefined();
+  });
+
+  it('takes none for a pause that resolved dry-run (D-120)', async () => {
+    const { root } = await seeded();
+    const { deps } = root();
+    await runActionCycle(withDryRunWrites(deps, []));
+    expect((await storedClosure(deps, INCIDENT_ID, T))?.outcome).toBe('dry-run');
+    expect(await laneHourItem(deps, T)).toBeUndefined();
   });
 });
 

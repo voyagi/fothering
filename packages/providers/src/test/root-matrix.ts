@@ -28,6 +28,7 @@ export const EXPECTED_KINDS: Readonly<Record<string, Readonly<Record<string, Kin
     updateIfVersion: ['fixture', 'live', 'live'],
     reserveInvocation: ['fixture', 'live', 'live'],
     recordUsage: ['fixture', 'live', 'live'],
+    reserveLaneAttempt: ['fixture', 'live', 'live'],
   },
   addressKey: {
     getKeySet: ['fixture', 'live', 'live'],

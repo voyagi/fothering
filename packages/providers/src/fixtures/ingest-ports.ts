@@ -282,6 +282,9 @@ export function createFixtureDecisionStore(options: FixtureOptions = {}, dryRun?
       addToCounter(items, usage.dayKey, amounts);
       return 'recorded';
     },
+    async reserveLaneAttempt() {
+      return 'reserved';
+    },
   }, 'fixture');
 }
 

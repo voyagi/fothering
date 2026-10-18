@@ -66,6 +66,14 @@ export interface UsageRecord {
   modelCalls: number;
 }
 
+/** One pause or reopen attempt on one lane in one UTC hour (D-99); the cap and the key are the caller's to compute. */
+export interface LaneAttemptRequest {
+  key: RecordKey;
+  cap: number;
+  /** Written on the counter's first attempt and kept after, as the invocation counters keep theirs. */
+  expiresAt: number;
+}
+
 /** No operation here deletes an item or lowers a counter: the caps hold only if nothing can (AC-P6). */
 export interface DecisionStorePort {
   /**
@@ -91,6 +99,8 @@ export interface DecisionStorePort {
   reserveInvocation(request: ReservationRequest): Promise<ReservationResult>;
   /** Adds to both counters only when both already exist, all or nothing. */
   recordUsage(usage: UsageRecord): Promise<UsageResult>;
+  /** Adds one attempt to a lane-hour counter while it is below the cap; it only ever adds (D-99). */
+  reserveLaneAttempt(request: LaneAttemptRequest): Promise<'reserved' | 'cap'>;
 }
 
 const LANE_PARTITION_PREFIX = lanePartitionKey('');
@@ -174,6 +184,8 @@ export function assertReservation(request: ReservationRequest): void {
   // pass on the first call of a day and leave the counter over its cap.
   if (request.tokenReservation > request.dayTokenCap) throw new RangeError('tokenReservation is larger than dayTokenCap');
 }
+
+export function assertLaneAttempt(_request: LaneAttemptRequest): void {}
 
 export function assertUsage(usage: UsageRecord): void {
   assertCounterKeys(usage.incidentKey, usage.dayKey);

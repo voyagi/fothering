@@ -185,6 +185,7 @@ function withDecisionStore(deps: DetectDeps, overrides: Partial<DecisionStorePor
     updateIfVersion: (key, expectedVersion, attributes, nowMs, expected) => store.updateIfVersion(key, expectedVersion, attributes, nowMs, expected),
     reserveInvocation: (request) => store.reserveInvocation(request),
     recordUsage: (usage) => store.recordUsage(usage),
+    reserveLaneAttempt: (request) => store.reserveLaneAttempt(request),
     ...overrides,
   };
   return { ...deps, ports: { ...deps.ports, decisionStore: wrapped } };

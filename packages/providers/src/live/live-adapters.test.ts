@@ -43,7 +43,7 @@ import {
 } from '@fothering/core/window-fold';
 import { findLane, parseLaneMap } from '@fothering/core/lanes';
 import lanesJson from '../../../../lanes.json' with { type: 'json' };
-import type { ReservationRequest, UsageRecord } from '../port-types.js';
+import type { LaneAttemptRequest, ReservationRequest, UsageRecord } from '../port-types.js';
 import { minimizeEvent } from '@fothering/core/minimize';
 import { parseSesEvent } from '@fothering/core/ses-events';
 import { resolvePortTable } from '../ports.js';
@@ -806,6 +806,11 @@ const LIVE_USAGE: UsageRecord = {
   outputTokens: 80,
   modelCalls: 2,
 };
+const LIVE_LANE_ATTEMPT: LaneAttemptRequest = {
+  key: { pk: 'COUNTER_LANE_HOUR#fothering-bulk#2026-10-11T12', sk: 'COUNTER' },
+  cap: 4,
+  expiresAt: 1_800_000_000,
+};
 
 function conditionalCheckFailed(): Error {
   const error = new Error('The conditional request failed');
@@ -1021,6 +1026,48 @@ describe('createDynamoDecisionStore', () => {
     await expect(store.recordUsage(LIVE_USAGE)).rejects.toThrow('network blip');
   });
 
+  // D-99, 03-RESEARCH Pattern 4: one conditional UpdateItem sent alone, ADD only, so a counter can rise
+  // to its cap and never come down.
+  it('reserves a lane-hour attempt with one conditional UpdateCommand that only adds', async () => {
+    const { store, calls } = decisionStoreAnswering(() => ({}));
+    await expect(store.reserveLaneAttempt(LIVE_LANE_ATTEMPT)).resolves.toBe('reserved');
+    expect(calls.map((call) => call.name).join(' ')).toBe('UpdateCommand');
+    expect(calls[0]?.input).toEqual({
+      TableName: 'events',
+      Key: LIVE_LANE_ATTEMPT.key,
+      UpdateExpression: 'ADD attempts :one SET expiresAt = if_not_exists(expiresAt, :exp)',
+      ConditionExpression: 'attribute_not_exists(attempts) OR attempts < :cap',
+      ExpressionAttributeValues: { ':one': 1, ':cap': 4, ':exp': 1_800_000_000 },
+    });
+  });
+
+  it('maps ConditionalCheckFailedException alone to cap and passes any other error on', async () => {
+    const errors: unknown[] = [conditionalCheckFailed(), new Error('network blip')];
+    const { store } = decisionStoreAnswering(() => {
+      throw errors.shift();
+    });
+    await expect(store.reserveLaneAttempt(LIVE_LANE_ATTEMPT)).resolves.toBe('cap');
+    await expect(store.reserveLaneAttempt(LIVE_LANE_ATTEMPT)).rejects.toThrow('network blip');
+  });
+
+  it.each<[string, LaneAttemptRequest]>([
+    ['a day counter key', { ...LIVE_LANE_ATTEMPT, key: LIVE_RESERVATION.dayKey }],
+    ['a lane-hour key under another sort key', { ...LIVE_LANE_ATTEMPT, key: { ...LIVE_LANE_ATTEMPT.key, sk: 'MARKER' } }],
+    ['a cap of zero', { ...LIVE_LANE_ATTEMPT, cap: 0 }],
+    ['a fractional expiresAt', { ...LIVE_LANE_ATTEMPT, expiresAt: 1.5 }],
+  ])('refuses %s with a RangeError before anything is sent', async (_label, request) => {
+    const { store, calls } = decisionStoreAnswering(() => ({}));
+    await expect(store.reserveLaneAttempt(request)).rejects.toThrow(RangeError);
+    expect(calls).toHaveLength(0);
+  });
+
+  it('still refuses a put or a versioned update of a lane-hour counter unsent', async () => {
+    const { store, calls } = decisionStoreAnswering(() => ({}));
+    await expect(store.putIfAbsent({ ...LIVE_LANE_ATTEMPT.key, attempts: 0, expiresAt: 1 }, DECISION_NOW_MS)).rejects.toThrow(RangeError);
+    await expect(store.updateIfVersion(LIVE_LANE_ATTEMPT.key, 0, { attempts: 0 }, DECISION_NOW_MS)).rejects.toThrow(RangeError);
+    expect(calls).toHaveLength(0);
+  });
+
   it('builds no client and names FOTHERING_TABLE_NAME from every operation when the table name is unset', async () => {
     let constructed = 0;
     const store = createDynamoDecisionStore({
@@ -1036,6 +1083,7 @@ describe('createDynamoDecisionStore', () => {
       store.updateIfVersion(STATE_ITEM_KEY, 1, {}, DECISION_NOW_MS),
       store.reserveInvocation(LIVE_RESERVATION),
       store.recordUsage(LIVE_USAGE),
+      store.reserveLaneAttempt(LIVE_LANE_ATTEMPT),
     ];
     for (const operation of operations) {
       await expect(operation).rejects.toMatchObject({ name: 'LiveConfigMissingError', envVar: 'FOTHERING_TABLE_NAME' });
@@ -1060,7 +1108,7 @@ describe('createDynamoDecisionStore', () => {
       dryRunSink: () => {},
     });
 
-    expect(Object.values(kinds.decisionStore ?? {}).join(' ')).toBe('live live live live live');
+    expect(Object.values(kinds.decisionStore ?? {}).join(' ')).toBe('live live live live live live');
     expect(built).toBe(0);
     await ports.decisionStore.getItem(STATE_ITEM_KEY, DECISION_NOW_MS);
     await ports.decisionStore.reserveInvocation(LIVE_RESERVATION);

@@ -351,5 +351,9 @@ export function createDynamoDecisionStore(options: CreateDynamoEventStoreOptions
         throw error;
       }
     },
+
+    async reserveLaneAttempt() {
+      return 'reserved';
+    },
   };
 }

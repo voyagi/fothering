@@ -11,6 +11,7 @@ import {
   NotBuiltError,
   brandPort,
   kindOf,
+  type LaneAttemptRequest,
   type ReservationRequest,
   type ResolvedKind,
   type SendEmailRequest,
@@ -53,6 +54,8 @@ const RESERVATION: ReservationRequest = {
   expiresAt: 1_800_000_000,
 };
 const TOKEN_USAGE: UsageRecord = { incidentKey: RESERVATION.incidentKey, dayKey: DAY_KEY, inputTokens: 1_200, outputTokens: 80, modelCalls: 2 };
+const LANE_HOUR_KEY = { pk: 'COUNTER_LANE_HOUR#fothering-bulk#2026-10-11T12', sk: 'COUNTER' };
+const LANE_ATTEMPT: LaneAttemptRequest = { key: LANE_HOUR_KEY, cap: 4, expiresAt: 1_800_000_000 };
 
 function userMessage(text: string): Message {
   return new Message({ role: 'user', content: [new TextBlock(text)] });
@@ -291,10 +294,10 @@ describe('the real port table', () => {
 
   // AC-P6, store half: the caps hold only if no process can take a counter back down, so the row
   // offers no operation that could.
-  it('gives the decisionStore row exactly five operations, four mutating, none gated, none that deletes or lowers', () => {
+  it('gives the decisionStore row exactly six operations, five mutating, none gated, none that deletes or lowers', () => {
     const row = PORT_TABLE.decisionStore;
-    expect(row.operations.join(' ')).toBe('putIfAbsent getItem updateIfVersion reserveInvocation recordUsage');
-    expect(row.mutatingOperations.join(' ')).toBe('putIfAbsent updateIfVersion reserveInvocation recordUsage');
+    expect(row.operations.join(' ')).toBe('putIfAbsent getItem updateIfVersion reserveInvocation recordUsage reserveLaneAttempt');
+    expect(row.mutatingOperations.join(' ')).toBe('putIfAbsent updateIfVersion reserveInvocation recordUsage reserveLaneAttempt');
     expect(row.gatedOperations.join(' ')).toBe('');
     expect(row.operations.filter((operation) => /delete|remove|decrement|reset|subtract/i.test(operation)).join(' ')).toBe('');
   });
@@ -605,7 +608,21 @@ describe('decisionStore dry-run lines (D-66, AC-P9)', () => {
     );
   });
 
+  it('records a lane-hour attempt as its cap and expiry, its key checked and named only as the target (D-99)', async () => {
+    const { log, lines } = decisionLines();
+    await log.would('decisionStore.reserveLaneAttempt', LANE_HOUR_KEY.pk, LANE_ATTEMPT);
+    await log.would('decisionStore.putIfAbsent', 'INCIDENT_LANE#fothering-bulk', { pk: 'INCIDENT_LANE#fothering-bulk', sk: 'PAUSE', expiresAt: 1 });
+    expect(lines).toEqual([
+      '(dry-run) WOULD decisionStore.reserveLaneAttempt COUNTER_LANE_HOUR#fothering-bulk#2026-10-11T12 {"cap":4,"expiresAt":1800000000}',
+      '(dry-run) WOULD decisionStore.putIfAbsent INCIDENT_LANE#fothering-bulk {"pk":"INCIDENT_LANE#fothering-bulk","sk":"PAUSE"}',
+    ]);
+  });
+
   it.each<[string, string, string, unknown]>([
+    ['a lane-hour target carrying the set rule anchor', 'decisionStore.reserveLaneAttempt', 'COUNTER_LANE_HOUR#fothering-bulk$#2026-10-11T12', LANE_ATTEMPT],
+    ['a lane-hour target naming no configuration set', 'decisionStore.reserveLaneAttempt', 'COUNTER_LANE_HOUR#jane@example.com#2026-10-11T12', LANE_ATTEMPT],
+    ['a lane-hour key holding an address', 'decisionStore.reserveLaneAttempt', LANE_HOUR_KEY.pk, { ...LANE_ATTEMPT, key: { pk: 'COUNTER_LANE_HOUR#jane@example.com#2026-10-11T12', sk: 'COUNTER' } }],
+    ['a lane-hour cap of zero', 'decisionStore.reserveLaneAttempt', LANE_HOUR_KEY.pk, { ...LANE_ATTEMPT, cap: 0 }],
     ['an event record key as a put target', 'decisionStore.putIfAbsent', 'LANE#fothering-bulk', { pk: 'LANE#fothering-bulk', sk: 'STATE', expiresAt: 1 }],
     ['an address as a put target', 'decisionStore.putIfAbsent', 'jane@example.com', INCIDENT_STATE_KEY],
     ['a sentence as a sort key', 'decisionStore.putIfAbsent', INCIDENT_PK, { pk: INCIDENT_PK, sk: PLANTED_SENTENCE }],
@@ -619,6 +636,36 @@ describe('decisionStore dry-run lines (D-66, AC-P9)', () => {
     expect((refusal as Error).message).toContain(`refusing to record ${operation}`);
     for (const text of ['jane', 'mailbox']) expect((refusal as Error).message).not.toContain(text);
     expect(lines).toEqual([]);
+  });
+});
+
+// D-99: the test-runtime store runs the same request checks the live adapter runs (live-adapters.test.ts).
+describe('the decision store adds lane-hour attempts and nothing else writes a counter (D-99, T-03-14)', () => {
+  function testStore(): ResolvedPorts['decisionStore'] {
+    return resolvePortTable({ runtimeContext: 'test', switchValue: undefined }).ports.decisionStore;
+  }
+
+  it.each<[string, LaneAttemptRequest]>([
+    ['a day counter key', { ...LANE_ATTEMPT, key: DAY_KEY }],
+    ['a lane-hour key with a sort key other than COUNTER', { ...LANE_ATTEMPT, key: { ...LANE_HOUR_KEY, sk: 'PAUSE' } }],
+    ['a lane-hour key whose hour is not YYYY-MM-DDTHH', { ...LANE_ATTEMPT, key: { ...LANE_HOUR_KEY, pk: 'COUNTER_LANE_HOUR#fothering-bulk#2026-10-11' } }],
+    ['a cap of zero', { ...LANE_ATTEMPT, cap: 0 }],
+    ['a fractional expiresAt', { ...LANE_ATTEMPT, expiresAt: 1.5 }],
+  ])('refuses %s with a RangeError', async (_label, request) => {
+    await expect(testStore().reserveLaneAttempt(request)).rejects.toThrow(RangeError);
+  });
+
+  it('still refuses a put or a versioned update of a lane-hour counter, so nothing can write one back down', async () => {
+    const store = testStore();
+    await expect(store.putIfAbsent({ ...LANE_HOUR_KEY, attempts: 0, expiresAt: 1 }, 1_000)).rejects.toThrow(RangeError);
+    await expect(store.updateIfVersion(LANE_HOUR_KEY, 0, { attempts: 0 }, 1_000)).rejects.toThrow(RangeError);
+  });
+
+  it('answers reserved up to the cap and cap after it', async () => {
+    const store = testStore();
+    const answers = [];
+    for (let attempt = 0; attempt < 5; attempt += 1) answers.push(await store.reserveLaneAttempt(LANE_ATTEMPT));
+    expect(answers).toEqual(['reserved', 'reserved', 'reserved', 'reserved', 'cap']);
   });
 });
 
@@ -760,6 +807,7 @@ const MUTATION_CALLS: Record<string, (ports: ResolvedPorts) => Promise<unknown>>
   'decisionStore.updateIfVersion': (ports) => ports.decisionStore.updateIfVersion(INCIDENT_STATE_KEY, 1, { state: 'closed' }, 1_000),
   'decisionStore.reserveInvocation': (ports) => ports.decisionStore.reserveInvocation(RESERVATION),
   'decisionStore.recordUsage': (ports) => ports.decisionStore.recordUsage(TOKEN_USAGE),
+  'decisionStore.reserveLaneAttempt': (ports) => ports.decisionStore.reserveLaneAttempt(LANE_ATTEMPT),
   'deadLetter.send': (ports) => ports.deadLetter.send([]),
   'ses.pauseConfigurationSet': (ports) => ports.ses.pauseConfigurationSet('fothering-bulk'),
   'ses.reopenConfigurationSet': (ports) => ports.ses.reopenConfigurationSet('fothering-bulk'),
