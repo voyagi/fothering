@@ -68,7 +68,9 @@ It never holds the payload, an address or a hash.
 - `not-in-lane-map`: the set is not in `lanes.json`.
 - `operator-alert`: the set carries Fothering's own operator alerts, which it never pauses.
 - `no-fothering-pause`: Fothering holds no pause on the set. That includes a set paused by hand or
-  by another tool: reopen such a set in the SES console.
+  by another tool: reopen such a set in the SES console. It also includes a pause Fothering made
+  that is still in place in SES after 30 days: Fothering keeps the record of a pause for 30 days
+  from its last update and then lets it expire, so reopen that set in the SES console too.
 - `not-reopenable`: Fothering's last action on the set did not pause it. It refused, ran as a dry
   run, failed to pause, or had not finished pausing yet.
 - `already-reopened`: this pause was already reopened.
