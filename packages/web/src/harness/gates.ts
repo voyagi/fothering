@@ -714,6 +714,9 @@ function typeReasons(reading: ReplayLayoutReading): string[] {
     if (!identifierBreakVerdict({ text, lines, ...(parts === undefined ? {} : { parts }) }).ok) reasons.push(E2E_MESSAGES.layoutIdentifierBreak(width, text, lines.map((line) => line.trim())));
   }
   for (const name of reading.plainApiNames) reasons.push(E2E_MESSAGES.layoutPlainApiName(width, name));
+  reading.scrollWidths.forEach((scrollWidth, index) => {
+    if (!overflowVerdict(scrollWidth, width).ok) reasons.push(E2E_MESSAGES.layoutScroll(width, index + 1, scrollWidth));
+  });
   return reasons;
 }
 
@@ -1763,6 +1766,7 @@ const isReplayLayoutReading = (value: unknown): value is ReplayLayoutReading => 
   && Array.isArray(value.identifiers) && value.identifiers.every((item) => isObject(item) && typeof item.text === 'string' && typeof item.weight === 'string'
     && typeof item.family === 'string' && isStringList(item.lines) && (item.parts === undefined || isStringList(item.parts)))
   && isStringList(value.plainApiNames)
+  && Array.isArray(value.scrollWidths) && value.scrollWidths.every(isNumber)
   && Array.isArray(value.logHeaders) && value.logHeaders.every((item) => isObject(item) && typeof item.text === 'string' && typeof item.type === 'string');
 
 // The replay checks run only where the build holds the replay; a replay route that printed no line
@@ -1818,7 +1822,7 @@ function judgeRendered(run: DriverRun, routes: readonly string[], print: (line: 
     ['NOSCRIPT', judgeReplayCheck('NOSCRIPT', routeLines.get('NOSCRIPT') ?? [], routes, isNoScriptReading, noScriptVerdict,
       `with the js class removed every panel showed in order, no control showed and the board held the paused step at 320 and 1440 px (${NO_SCRIPT_METHOD})`)],
     ['LAYOUT', judgeReplayCheck('LAYOUT', routeLines.get('LAYOUT') ?? [], routes, isReplayLayoutReading, replayLayoutVerdict,
-      `the stacked board held one height with the tag's place drawn, the step 2 schedule stayed inside its panel, log cells shared a baseline, log headers took the label style, every API name in the log was a mono identifier and identifiers computed 500 and broke only after a dot or between an API name's words on ${REPLAY} at ${REPLAY_LAYOUT_WIDTHS.join(', ')} px`,
+      `the stacked board held one height with the tag's place drawn, the step 2 schedule stayed inside its panel, log cells shared a baseline, log headers took the label style, every API name in the log was a mono identifier, no step scrolled sideways and identifiers computed 500 and broke only after a dot or between an API name's words on ${REPLAY} at ${REPLAY_LAYOUT_WIDTHS.join(', ')} px`,
       REPLAY_LAYOUT_WIDTHS)],
     ['STORAGE', judgeStorage(records.get('STORAGE'))],
     ['CONSOLE', { verdict: consoleVerdict(consoleErrors), detail: 'no console error, no Content Security Policy violation' }],

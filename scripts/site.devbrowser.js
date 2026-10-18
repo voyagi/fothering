@@ -461,6 +461,7 @@ const layoutStep = (step) => page.evaluate((args) => {
   const phantoms = Array.from(document.querySelectorAll('[data-tag-phantom]'));
   const reading = {
     step: args.step,
+    scrollWidth: document.documentElement.scrollWidth,
     boardHeight: board === null ? 0 : round(board.getBoundingClientRect().height),
     phantom: phantoms.some(visible),
     phantomExposed: phantoms.filter((element) => element.closest('[aria-hidden="true"]') === null).length,
@@ -543,10 +544,12 @@ const layoutRun = async (width) => {
   let logHeaders = [];
   const identifiers = [];
   const plainApiNames = [];
+  const scrollWidths = [];
   for (const step of [1, 2, 3, 4]) {
     await loadReplay(width, '#step-' + step);
     const reading = await layoutStep(step);
     steps.push({ step, boardHeight: reading.boardHeight, phantom: reading.phantom });
+    scrollWidths.push(reading.scrollWidth);
     phantomExposed = Math.max(phantomExposed, reading.phantomExposed);
     if (step === 2) evidence = reading.evidence;
     if (step === 4) {
@@ -560,7 +563,7 @@ const layoutRun = async (width) => {
       if (!identifiers.some((seen) => seen.text === item.text && seen.weight === item.weight && seen.lines.join('|') === item.lines.join('|'))) identifiers.push(item);
     }
   }
-  return { route: JOB.replayRoute, width, steps, phantomExposed, evidence, logRows, identifiers, logHeaders, plainApiNames };
+  return { route: JOB.replayRoute, width, steps, phantomExposed, evidence, logRows, identifiers, logHeaders, plainApiNames, scrollWidths };
 };
 
 if (JOB.routes.includes(JOB.replayRoute)) {
