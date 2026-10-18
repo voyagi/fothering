@@ -71,14 +71,15 @@ until you remove it; the test suite fails when `cdk.json` carries it.
 The app has four stacks: `FotheringIngest` (the event table, the ingest and forget functions),
 `FotheringRuntime` (the agent on AgentCore Runtime), `FotheringDetection` (the detection function
 and its schedule) and `FotheringAction` (the action function, its schedule and the reopen function). Detection imports
-the table and the runtime ARN from the first two. `FotheringAction` imports the table from
-`FotheringIngest` and depends on neither `FotheringRuntime` nor `FotheringDetection`. Neither the
+the table and the runtime ARN from the first two. `FotheringAction` imports the table and the address
+key from `FotheringIngest` and depends on neither `FotheringRuntime` nor `FotheringDetection`. Neither the
 ingest nor the runtime stack can be removed, or replace the table or the runtime, while a stack
 that imports from it is deployed.
 
-`FotheringAction` holds the only SES write in the app: pausing a configuration set and reading the
-setting back, granted on the lanes `lanes.json` lets the action close and on no other set. A
-deployment without it holds no SES write at all, so detection can be deployed and watched on its
+`FotheringAction` holds the only SES writes in the app: pausing a configuration set and reading the
+setting back, granted on the lanes `lanes.json` lets the action close and on no other set, and
+sending the operator email, granted on your From address, its domain and the `fothering-alerts`
+set alone. A deployment without it holds no SES write at all, so detection can be deployed and watched on its
 own first. Every role in every stack also carries an explicit Deny on the three actions that change
 account-level sending, so no grant added later can stop the whole account. `FotheringAction` also
 holds the reopen function, which turns sending back on for a set Fothering paused, only when you
@@ -91,10 +92,27 @@ CloudFormation console, then deploy `FotheringAction` last. Remove it first:
 npm run build
 npx cdk bootstrap             # once, before the first deploy
 npx cdk deploy FotheringIngest FotheringRuntime FotheringDetection
-npx cdk deploy FotheringAction
+npx cdk deploy FotheringAction --parameters FotheringAction:OperatorAddress=<address> --parameters FotheringAction:FromAddress=<address>
 npx cdk destroy FotheringAction
 npx cdk destroy FotheringIngest FotheringRuntime FotheringDetection
 ```
+
+`FotheringAction` takes two addresses as stack parameters: `OperatorAddress`, where the operator
+email goes, and `FromAddress`, the address it is sent from. They stay in the deployed stack and the
+action function's environment in your account, never in this repository. The first deploy of
+`FotheringAction` fails without both; later deploys keep the values they were given, because the CDK
+CLI reuses a stack's previous parameter values on every deploy unless you pass
+`--no-previous-parameters`.
+
+Before that first deploy:
+
+- `FromAddress` must be on a verified SES identity in `eu-central-1`: the address itself or its
+  domain.
+- The `fothering-alerts` configuration set must exist, with an enabled EventBridge destination for
+  the six event types Fothering reads: send, delivery, bounce, complaint, reject and delivery delay.
+  The stacks create no configuration set.
+- While the account is in the SES sandbox, SES delivers only to verified identities, so
+  `OperatorAddress` must be verified too.
 
 The detection function runs every five minutes. It reads SES configuration and DNS only when a
 spike opens an incident, and it may invoke the runtime and write its own incident, evidence,
@@ -109,7 +127,7 @@ week you are happy with:
 
 ```sh
 npx cdk deploy FotheringIngest FotheringRuntime FotheringDetection -c fothering:live=live
-npx cdk deploy FotheringAction -c fothering:live=live
+npx cdk deploy FotheringAction -c fothering:live=live --parameters FotheringAction:OperatorAddress=<address> --parameters FotheringAction:FromAddress=<address>
 ```
 
 To try the model on its own, deploy only the runtime with the switch on and invoke it once with the

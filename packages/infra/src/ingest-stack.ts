@@ -36,6 +36,8 @@ export interface IngestStackProps extends StackProps {
 // credentials, and no resource sets a physical name.
 export class IngestStack extends Stack {
   readonly table: Table;
+  /** The action stack reads it to pseudonymize the From and To addresses on its dry-run send line. */
+  readonly addressKey: Secret;
 
   constructor(scope: Construct, id: string, props: IngestStackProps) {
     super(scope, id, props);
@@ -59,6 +61,7 @@ export class IngestStack extends Stack {
       // leaves no key behind: no scheduled deletion to wait out or cancel.
       removalPolicy: RemovalPolicy.DESTROY,
     });
+    this.addressKey = addressKey;
 
     const ingestRole = createFunctionRole(this, 'Ingest', [
       new PolicyStatement({ effect: Effect.ALLOW, actions: ['dynamodb:PutItem'], resources: [table.tableArn] }),

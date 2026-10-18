@@ -1,4 +1,4 @@
-import { CfnOutput, Duration, Stack, type StackProps } from 'aws-cdk-lib';
+import { CfnOutput, CfnParameter, Duration, Fn, Stack, type StackProps } from 'aws-cdk-lib';
 import { Rule, Schedule } from 'aws-cdk-lib/aws-events';
 import { LambdaFunction as LambdaFunctionTarget } from 'aws-cdk-lib/aws-events-targets';
 import { Effect, PolicyStatement } from 'aws-cdk-lib/aws-iam';
@@ -17,7 +17,45 @@ export interface ActionStackProps extends StackProps {
   readonly actionAssetDir: string;
   /** Directory holding the bundled reopen handler (dist/reopen in a build, a stub folder in synth tests). */
   readonly reopenAssetDir: string;
-  readonly ingest: Pick<IngestStack, 'table'>;
+  readonly ingest: Pick<IngestStack, 'table' | 'addressKey'>;
+}
+
+// One bare address: no display name, no second @, no space.
+const ADDRESS_PATTERN = '^[^@\\s<>]+@[^@\\s<>]+\\.[^@\\s<>]+$';
+
+// The operator's addresses live only in the deployed stack's parameters and the action function's
+// environment, never in the repository or the committed snapshot. A first deploy without them fails;
+// later deploys keep the previous values.
+function addressParameter(stack: Stack, id: string, purpose: string): CfnParameter {
+  return new CfnParameter(stack, id, {
+    type: 'String',
+    allowedPattern: ADDRESS_PATTERN,
+    constraintDescription: 'one email address, with no display name',
+    description: `${purpose}. Set it with --parameters ${stack.stackName}:${id}=<address>.`,
+  });
+}
+
+// The operator email goes out through the single operator-alert set; with none or several the action
+// sends nothing, so the role holds no send. Both identities are granted because which one SES
+// authorizes a send against, when the From address and its domain are both verified identities, is
+// unverified until a live send. No ses:FromAddress condition: how SES compares it with a From header
+// carrying a display name is unverified too. The domain is split from the parameter at deploy time,
+// since at synth time the address is a token, not text.
+function sendStatement(stack: Stack, laneMap: LaneMap, fromAddress: string): PolicyStatement[] {
+  const [alertLane, ...otherAlertLanes] = laneMap.lanes.filter((lane) => lane.operatorAlert);
+  if (alertLane === undefined || otherAlertLanes.length > 0) return [];
+  const identity = (name: string): string => stack.formatArn({ service: 'ses', resource: 'identity', resourceName: name });
+  return [
+    new PolicyStatement({
+      effect: Effect.ALLOW,
+      actions: ['ses:SendEmail'],
+      resources: [
+        identity(fromAddress),
+        identity(Fn.select(1, Fn.split('@', fromAddress))),
+        stack.formatArn({ service: 'ses', resource: 'configuration-set', resourceName: alertLane.configurationSet }),
+      ],
+    }),
+  ];
 }
 
 // The lane-map rule the action applies at run time, so IAM can never let a role pause a set the code
@@ -49,8 +87,12 @@ export class ActionStack extends Stack {
   constructor(scope: Construct, id: string, props: ActionStackProps) {
     super(scope, id, props);
 
+    const operatorAddress = addressParameter(this, 'OperatorAddress', 'The address the operator email is sent to');
+    const fromAddress = addressParameter(this, 'FromAddress', 'The address the operator email is sent from, on a verified SES identity');
+
     // Query is for the hold check's fold over the lane's records; the action never deletes and never
     // scans. A conditional UpdateItem carries the lane-hour attempt counter and the pause pointer.
+    // The address key is read for the pseudonyms on the dry-run send line.
     const actionRole = createFunctionRole(this, 'Action', [
       new PolicyStatement({
         effect: Effect.ALLOW,
@@ -59,6 +101,8 @@ export class ActionStack extends Stack {
       }),
       ...sesFactReadStatements(this, props.laneMap),
       ...pauseStatement(staticallyCloseableArns(this, props.laneMap)),
+      ...sendStatement(this, props.laneMap, fromAddress.valueAsString),
+      new PolicyStatement({ effect: Effect.ALLOW, actions: ['secretsmanager:GetSecretValue'], resources: [props.ingest.addressKey.secretArn] }),
     ]);
 
     // No reserved concurrency: overlapping runs are carried by the conditional writes. No Lambda retry
@@ -70,6 +114,9 @@ export class ActionStack extends Stack {
       retryAttempts: 0,
       environment: {
         FOTHERING_TABLE_NAME: props.ingest.table.tableName,
+        FOTHERING_OPERATOR_ADDRESS: operatorAddress.valueAsString,
+        FOTHERING_FROM_ADDRESS: fromAddress.valueAsString,
+        FOTHERING_ADDRESS_KEY_SECRET_ID: props.ingest.addressKey.secretArn,
         ...liveSwitchEnvironment(this),
       },
     });

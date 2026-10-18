@@ -64,6 +64,16 @@
     "role": "ActionRole60B0EDF7",
     "kind": "permission",
     "effect": "Allow",
+    "action": "secretsmanager:GetSecretValue",
+    "resource": "{\"Fn::ImportValue\":\"FotheringIngest:ExportsOutputRefAddressKey1F8FD90DC57189D4\"}",
+    "principal": null,
+    "condition": null
+  },
+  {
+    "stack": "FotheringAction",
+    "role": "ActionRole60B0EDF7",
+    "kind": "permission",
+    "effect": "Allow",
     "action": "ses:GetConfigurationSet",
     "resource": "{\"Fn::Join\":[\"\",[\"arn:aws:ses:eu-central-1:\",{\"Ref\":\"AWS::AccountId\"},\":configuration-set/fothering-bulk\"]]}",
     "principal": null,
@@ -146,6 +156,36 @@
     "effect": "Allow",
     "action": "ses:PutConfigurationSetSendingOptions",
     "resource": "{\"Fn::Join\":[\"\",[\"arn:aws:ses:eu-central-1:\",{\"Ref\":\"AWS::AccountId\"},\":configuration-set/fothering-bulk\"]]}",
+    "principal": null,
+    "condition": null
+  },
+  {
+    "stack": "FotheringAction",
+    "role": "ActionRole60B0EDF7",
+    "kind": "permission",
+    "effect": "Allow",
+    "action": "ses:SendEmail",
+    "resource": "{\"Fn::Join\":[\"\",[\"arn:aws:ses:eu-central-1:\",{\"Ref\":\"AWS::AccountId\"},\":configuration-set/fothering-alerts\"]]}",
+    "principal": null,
+    "condition": null
+  },
+  {
+    "stack": "FotheringAction",
+    "role": "ActionRole60B0EDF7",
+    "kind": "permission",
+    "effect": "Allow",
+    "action": "ses:SendEmail",
+    "resource": "{\"Fn::Join\":[\"\",[\"arn:aws:ses:eu-central-1:\",{\"Ref\":\"AWS::AccountId\"},\":identity/\",{\"Fn::Select\":[1,{\"Fn::Split\":[\"@\",{\"Ref\":\"FromAddress\"}]}]}]]}",
+    "principal": null,
+    "condition": null
+  },
+  {
+    "stack": "FotheringAction",
+    "role": "ActionRole60B0EDF7",
+    "kind": "permission",
+    "effect": "Allow",
+    "action": "ses:SendEmail",
+    "resource": "{\"Fn::Join\":[\"\",[\"arn:aws:ses:eu-central-1:\",{\"Ref\":\"AWS::AccountId\"},\":identity/\",{\"Ref\":\"FromAddress\"}]]}",
     "principal": null,
     "condition": null
   },

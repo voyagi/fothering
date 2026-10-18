@@ -149,9 +149,13 @@ describe('the permissions snapshot', () => {
   });
 
   // The operator and From addresses are deploy parameters, so the snapshot holds their intrinsics and
-  // never a value.
+  // never a value. The From domain is split from the parameter at deploy time, so the split's "@"
+  // delimiter is the one @ allowed; any other would be part of an address.
   it('holds no address', () => {
-    expect(readFileSync(SNAPSHOT_URL, 'utf8')).not.toContain('@');
+    const snapshot = readFileSync(SNAPSHOT_URL, 'utf8');
+    const splitDelimiter = '{\\"Fn::Split\\":[\\"@\\",';
+    expect(snapshot).toContain(splitDelimiter);
+    expect(snapshot.split(splitDelimiter).join('')).not.toContain('@');
   });
 
   it('holds exactly the actions of the reopen role: named items read and updated, the reopen and its read-back (D-104)', () => {

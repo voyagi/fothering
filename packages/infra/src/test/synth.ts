@@ -130,14 +130,24 @@ const PAUSE_ACTION = 'ses:PutConfigurationSetSendingOptions';
 // its own when it joins.
 const PAUSING_ROLE_PREFIXES = ['ActionRole', 'ReopenRole'];
 const MODEL_SERVICES = ['bedrock', 'bedrock-agentcore'];
-const SES_WRITES = [...ACCOUNT_SENDING_ACTIONS, 'ses:SendEmail', 'ses:SendRawEmail', 'ses:SendBulkEmail'];
+// The operator email is the only send any role may make, and only the action role makes it; raw and
+// bulk sends stay refused everywhere.
+const SEND_EMAIL = 'ses:SendEmail';
+const SENDING_ROLE_PREFIX = 'ActionRole';
+const SES_WRITES = [...ACCOUNT_SENDING_ACTIONS, 'ses:SendRawEmail', 'ses:SendBulkEmail'];
 const CONFIGURATION_SET_ARN_TAIL = /:configuration-set\/([^*?]+)$/;
+const FROM_ADDRESS_REF = JSON.stringify({ Ref: 'FromAddress' });
+const FROM_DOMAIN = JSON.stringify({ 'Fn::Select': [1, { 'Fn::Split': ['@', { Ref: 'FromAddress' }] }] });
 
-function lastJoinedPart(value: unknown): unknown {
-  if (typeof value !== 'object' || value === null) return undefined;
+function joinedParts(value: unknown): unknown[] {
+  if (typeof value !== 'object' || value === null) return [];
   const join = (value as Record<string, unknown>)['Fn::Join'];
   const parts: unknown = Array.isArray(join) ? join[1] : undefined;
-  return Array.isArray(parts) ? parts.at(-1) : undefined;
+  return Array.isArray(parts) ? parts : [];
+}
+
+function lastJoinedPart(value: unknown): unknown {
+  return joinedParts(value).at(-1);
 }
 
 // The one configuration set a granted resource names, or undefined when it names anything wider (a *,
@@ -149,8 +159,45 @@ function pausedSetName(resource: string | null): string | undefined {
   return typeof tail === 'string' ? CONFIGURATION_SET_ARN_TAIL.exec(tail)?.[1] : undefined;
 }
 
+// The single operator-alert set's name, or undefined when the lane map holds none or several.
+function operatorAlertSet(laneMap: LaneMap): string | undefined {
+  const alerts = laneMap.lanes.filter((lane) => lane.operatorAlert);
+  return alerts.length === 1 ? alerts[0]?.configurationSet : undefined;
+}
+
+// Whether a granted resource is one of the three the operator email may use: the identity ARN whose
+// name is exactly the FromAddress parameter, the one whose name is that parameter's domain, or the
+// operator-alert set. A wildcard or any other name is something wider.
+function isOperatorEmailResource(resource: string | null, laneMap: LaneMap): boolean {
+  if (resource === null) return false;
+  const parts = joinedParts(JSON.parse(resource));
+  const [service] = parts;
+  const name = parts.at(-1);
+  const before = parts.at(-2);
+  const isSesArn = typeof service === 'string' && service.startsWith('arn:') && service.includes(':ses:');
+  if (isSesArn && typeof before === 'string' && before.endsWith(':identity/') && name !== undefined) {
+    const named = JSON.stringify(name);
+    return named === FROM_ADDRESS_REF || named === FROM_DOMAIN;
+  }
+  const alertSet = operatorAlertSet(laneMap);
+  return alertSet !== undefined && pausedSetName(resource) === alertSet;
+}
+
 function roleKey(entry: PermissionEntry): string {
   return `${entry.stack}/${entry.role}`;
+}
+
+function sendViolations(entry: PermissionEntry, laneMap: LaneMap): string[] {
+  if (!grantsAction(entry.action, SEND_EMAIL)) return [];
+  const where = `${roleKey(entry)} ${entry.action}`;
+  const violations: string[] = [];
+  if (!(entry.stack === ACTION_STACK_ID && entry.role.startsWith(SENDING_ROLE_PREFIX))) {
+    violations.push(`${where}: only the action role may hold ${SEND_EMAIL}`);
+  }
+  if (!isOperatorEmailResource(entry.resource, laneMap)) {
+    violations.push(`${where}: ${SEND_EMAIL} reaches a resource other than the From identity, its domain or the operator-alert set`);
+  }
+  return violations;
 }
 
 // Every role holding the pause beside any action of a model service: the action must stay code's
@@ -186,6 +233,7 @@ export function permissionViolations(entries: readonly PermissionEntry[], laneMa
     for (const service of RUNTIME_FORBIDDEN_SERVICES) {
       if (entry.stack === RUNTIME_STACK_ID && reachesService(entry.action, service)) violations.push(`${where}: the runtime role reaches ${service}`);
     }
+    violations.push(...sendViolations(entry, laneMap));
     if (!isDetectRole && grantsAction(entry.action, INVOKE_RUNTIME)) violations.push(`${where}: only the detection role may invoke the runtime`);
     for (const probe of [...NO_ROLE_MAY_HOLD, ...SES_WRITES]) {
       if (grantsAction(entry.action, probe)) violations.push(`${where}: no role may hold ${probe}`);
