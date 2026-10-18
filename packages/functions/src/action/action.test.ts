@@ -1062,6 +1062,35 @@ describe('concurrent runs leave one closure, at most one pause and one hold-chec
     expect(sesState.calls.slice(callsBefore)).toEqual([]);
   });
 
+  // Control for the case above: the 8 roots do interleave, so a store whose writes skip their
+  // conditions lets more than one of them reach the put.
+  it('is shown red by a planted store whose puts and versioned updates skip their conditions', async () => {
+    const { store } = await seeded();
+    const sesState = createFixtureSesState();
+    const tableKeyOf = (key: { pk: string; sk: string }): string => `${key.pk}${String.fromCharCode(0)}${key.sk}`;
+    // Each planted write yields first, as the fixture's own writes do with the option set.
+    const nextTurn = (): Promise<void> => new Promise((resolve) => setImmediate(resolve));
+    const unconditional = (deps: ActionDeps): ActionDeps =>
+      withStore(deps, {
+        putIfAbsent: async (item) => {
+          await nextTurn();
+          store.items.set(tableKeyOf(item), structuredClone(item));
+          return 'written';
+        },
+        updateIfVersion: async (key, expectedVersion, attributes) => {
+          await nextTurn();
+          const stored = store.items.get(tableKeyOf(key)) as DecisionStoreItem;
+          store.items.set(tableKeyOf(key), { ...stored, ...structuredClone(attributes), version: expectedVersion + 1 });
+          return 'updated';
+        },
+      });
+    const roots = Array.from({ length: 8 }, () => unconditional(buildTestActionRoot({ store, sesState, now: () => T, yieldBetweenOperations: true }).deps));
+
+    await Promise.all(roots.map((deps) => runActionCycle(deps)));
+
+    expect(putsOf(sesState).length).toBeGreaterThan(1);
+  });
+
   it('makes one versioned update to closed when two hold checks race on one paused closure (AC-E6)', async () => {
     const { store } = await pausedAtT();
     const closedWrites: string[] = [];
