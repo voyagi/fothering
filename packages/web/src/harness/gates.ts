@@ -662,7 +662,15 @@ export interface ReplayLayoutReading {
     readonly family: string;
     readonly lines: readonly string[];
     readonly parts?: readonly string[];
+    // 'inherit' for an identifier set in the face of the text around it (a configuration set name
+    // in running text), which is held to its breaks and not to mono 500.
+    readonly face?: string;
   }[];
+  // Configuration set names and tag values found as plain text anywhere on the page, each with the
+  // tag of the element holding it.
+  readonly plainTerms: readonly string[];
+  // The event log's form on step 4: its column headers shown, or stacked into blocks.
+  readonly logForm: 'table' | 'stack';
   // API operation names (two or more capitalised words run together) written in a log Detail cell
   // as plain text rather than as an identifier.
   readonly plainApiNames: readonly string[];
@@ -1238,6 +1246,8 @@ export const E2E_MESSAGES = Object.freeze({
   layoutBaseline: (width: number, header: string, baselines: readonly number[]) => `at ${width} px the log row ${header} sets its cells on baselines ${baselines.join(', ')}, one baseline within 1 px expected`,
   layoutIdentifiersMissing: (width: number) => `at ${width} px the run measured no identifier in the evidence schedule or the log`,
   layoutIdentifierWeight: (width: number, text: string, weight: string) => `at ${width} px the identifier ${text} computes weight ${weight}, 500 expected`,
+  layoutLogForm: (width: number, form: string, expected: string) => `at ${width} px the event log is a ${form}, ${expected} expected`,
+  layoutPlainTerm: (width: number, where: string) => `at ${width} px the identifier ${where} is plain text, so it can break mid-name`,
   layoutScroll: (width: number, step: number, scrollWidth: number) => `at ${width} px step ${step} scrolls sideways: the page is ${scrollWidth} px wide`,
   layoutPlainApiName: (width: number, text: string) => `at ${width} px the log names the API operation ${text} as plain text, not as a mono identifier`,
   layoutIdentifierFamily: (width: number, text: string, family: string) => `at ${width} px the identifier ${text} is set in ${family}, Red Hat Mono expected`,

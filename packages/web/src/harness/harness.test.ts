@@ -1304,8 +1304,10 @@ const healthyLayout = (width: number): ReplayLayoutReading => ({
     { text: 'PutConfigurationSetSendingOptions', weight: '500', family: MONO, lines: ['PutConfigurationSet', 'SendingOptions'], parts: API_PARTS },
   ],
   plainApiNames: [],
+  plainTerms: [],
   scrollWidths: [width, width, width, width],
-  logHeaders: width > 960 ? ['Time UTC', 'Kind', 'Lane', 'Detail'].map((text) => ({ text, type: HEADER_TYPE })) : [],
+  logForm: width >= 760 ? 'table' : 'stack',
+  logHeaders: width >= 760 ? ['Time UTC', 'Kind', 'Lane', 'Detail'].map((text) => ({ text, type: HEADER_TYPE })) : [],
 });
 const layoutReason = (reading: ReplayLayoutReading): string => {
   const verdict = replayLayoutVerdict(reading);
@@ -1353,13 +1355,13 @@ describe('replayLayoutVerdict (AC-6, UI-SPEC 6 and 10.3)', () => {
     const logRows = [{ header: '14:01:07', baselines: [1498, 1500.5, 1500.5, 1500.5] }];
     expect(layoutReason({ ...healthyLayout(1280), logRows })).toBe(E2E_MESSAGES.layoutBaseline(1280, '14:01:07', [1498, 1500.5, 1500.5, 1500.5]));
     expect(replayLayoutVerdict({ ...healthyLayout(320), logRows })).toEqual({ ok: true });
-    expect(replayLayoutVerdict({ ...healthyLayout(960), logRows })).toEqual({ ok: true });
-    expect(layoutReason({ ...healthyLayout(961), logRows })).toBe(E2E_MESSAGES.layoutBaseline(961, '14:01:07', [1498, 1500.5, 1500.5, 1500.5]));
+    expect(replayLayoutVerdict({ ...healthyLayout(740), logRows })).toEqual({ ok: true });
+    expect(layoutReason({ ...healthyLayout(760), logRows })).toBe(E2E_MESSAGES.layoutBaseline(760, '14:01:07', [1498, 1500.5, 1500.5, 1500.5]));
   });
 
   it('fails a table log the run never measured, and passes a stacked log with none', () => {
     expect(layoutReason({ ...healthyLayout(1024), logRows: [] })).toBe(E2E_MESSAGES.layoutLogMissing(1024));
-    expect(replayLayoutVerdict({ ...healthyLayout(960), logRows: [] })).toEqual({ ok: true });
+    expect(replayLayoutVerdict({ ...healthyLayout(740), logRows: [] })).toEqual({ ok: true });
   });
 
   it('fails an identifier that computes a weight other than 500, and a run that measured none', () => {
@@ -1377,6 +1379,23 @@ describe('replayLayoutVerdict (AC-6, UI-SPEC 6 and 10.3)', () => {
     const odd = '500 13px 0.65px uppercase';
     const logHeaders = ['Time UTC', 'Kind', 'Lane', 'Detail'].map((text, index) => ({ text, type: index % 2 === 0 ? odd : HEADER_TYPE }));
     expect(layoutReason({ ...healthyLayout(1440), logHeaders })).toBe([E2E_MESSAGES.layoutHeaderType(1440, 'Time UTC', odd, HEADER_TYPE), E2E_MESSAGES.layoutHeaderType(1440, 'Lane', odd, HEADER_TYPE)].join('; '));
+  });
+
+  it('fails a log stacked where its table fits, from 760 px, and a table at 620 px and below', () => {
+    expect(layoutReason({ ...healthyLayout(800), logForm: 'stack', logRows: [], logHeaders: [] })).toBe(E2E_MESSAGES.layoutLogForm(800, 'stack', 'table'));
+    expect(layoutReason({ ...healthyLayout(620), logForm: 'table' })).toBe(E2E_MESSAGES.layoutLogForm(620, 'table', 'stack'));
+    expect(replayLayoutVerdict({ ...healthyLayout(740), logForm: 'table', logRows: healthyLayout(800).logRows })).toEqual({ ok: true });
+  });
+
+  it('fails a configuration set name or tag value left as plain text anywhere on the page', () => {
+    expect(layoutReason({ ...healthyLayout(1024), plainTerms: ['fothering-bulk in li'] })).toBe(E2E_MESSAGES.layoutPlainTerm(1024, 'fothering-bulk in li'));
+  });
+
+  it('holds an identifier set in the face around it to its breaks, not to mono 500', () => {
+    const identifiers = [{ text: 'fothering-bulk', weight: '700', family: '"Red Hat Display", sans-serif', lines: ['fothering-bulk'], face: 'inherit' }];
+    expect(replayLayoutVerdict({ ...healthyLayout(1280), identifiers })).toEqual({ ok: true });
+    const broken = [{ ...identifiers[0], lines: ['fothering-', 'bulk'] }];
+    expect(layoutReason({ ...healthyLayout(1280), identifiers: broken })).toBe(E2E_MESSAGES.layoutIdentifierBreak(1280, 'fothering-bulk', ['fothering-', 'bulk']));
   });
 
   it('fails a step on which the page scrolls sideways', () => {
@@ -1981,7 +2000,8 @@ describe('the built checks through the CLI and the e2e step (D-150, D-151)', () 
       layoutStepsMissing: [320], layoutBoardHeight: [960, [638, 900]], layoutPhantomMissing: [960, 1], layoutPhantomShown: [1280, 2], layoutPhantomExposed: [960, 1],
       layoutEvidenceMissing: [961], layoutEvidenceSpill: [1280, 1220, 1201], layoutLogMissing: [1024], layoutBaseline: [1280, '14:01:07', [1498, 1500]],
       layoutIdentifiersMissing: [320], layoutIdentifierWeight: [1440, 'fothering-bulk', '600'], layoutIdentifierBreak: [960, 'a-b', ['a-', 'b']], layoutHeaderType: [1280, 'Time UTC', '500 13px', '600 12px'],
-      layoutPlainApiName: [320, 'GetConfigurationSet'], layoutScroll: [320, 4, 342], layoutIdentifierFamily: [1280, 'x', 'serif'],
+      layoutPlainApiName: [320, 'GetConfigurationSet'], layoutScroll: [320, 4, 342],
+      layoutLogForm: [800, 'stack', 'table'], layoutPlainTerm: [1024, 'fothering-bulk in li'], layoutIdentifierFamily: [1280, 'x', 'serif'],
       copyStampMissing: ['/'], copyStamp: ['/', 'FIXTURE RUN', 'SIMULATOR RUN'], copyCauseMissing: ['/', 'batch=x'], copyOldCause: ['/', 'x'],
       copyVariantFailed: ['cause', 1, 'x'], copyVariantUnjudged: ['cause'],
     };
