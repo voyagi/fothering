@@ -360,6 +360,8 @@ export interface SendEmailRequest {
   subject: string;
   text: string;
   configurationSetName?: string;
+  /** Article 50(2): only ever the one marker header, on an email that shows the model paragraph (D-114). */
+  headers?: readonly { name: string; value: string }[];
 }
 
 /** GetConfigurationSet's sending option; the key is absent when SES answered without it. */

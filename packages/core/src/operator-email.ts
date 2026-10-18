@@ -21,6 +21,7 @@ export interface RenderedEmail {
   subject: string;
   text: string;
   sections: readonly EmailSection[];
+  headers: readonly { name: string; value: string }[];
 }
 
 export interface RenderInput {
@@ -333,5 +334,10 @@ export function renderOperatorEmail(input: RenderInput): RenderedEmail | undefin
   const kind = emailKindOf(outcome);
   if (kind === undefined || outcome === null) return undefined;
   const sections = sectionsOf(kind, input);
-  return { kind, subject: subjectFor(subjectTemplateOf(kind, outcome), input.closure.configurationSet), text: textOf(sections), sections };
+  return { kind, subject: subjectFor(subjectTemplateOf(kind, outcome), input.closure.configurationSet), text: textOf(sections), sections, headers: [] };
+}
+
+export function modelParagraphOf(input: RenderInput): string | undefined {
+  void input;
+  return undefined;
 }

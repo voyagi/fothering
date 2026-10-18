@@ -704,6 +704,14 @@ describe('a sendEmail dry-run line (AC-P9)', () => {
     for (const sentence of ['invoice', 'mailbox is full', 'Dear Jane']) expect(line).not.toContain(sentence);
   });
 
+  it('names the headers a request carries, never their values, and names none for a request without', async () => {
+    const headers = [{ name: 'X-Fothering-AI-Generated', value: 'model-explanation-paragraph' }];
+    const line = await sendLine({ ...REQUEST, headers });
+    expect(line).toContain('"headers":["X-Fothering-AI-Generated"]');
+    expect(line).not.toContain('model-explanation-paragraph');
+    expect(await sendLine(REQUEST)).not.toContain('"headers"');
+  });
+
   it('refuses a configuration set name that is not one, rather than copying it', async () => {
     const log = createDryRunLog({ sink: NO_LINES, addressKey: createFixtureAddressKey(), now: () => 5_000 });
     await expect(log.would('ses.sendEmail', 'example.org', { ...REQUEST, configurationSetName: 'jane@example.com' })).rejects.toThrow(

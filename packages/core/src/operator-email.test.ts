@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { HOLD_CHECK_DELAY_MS, HOLD_MS } from './close-values.js';
 import { LANE_MAP_REFUSALS, SES_CONFIGURATION_REFUSALS } from './closeability.js';
 import { ACTION_REFUSALS, CLOSURE_OUTCOMES, closureClaimItem, type ActionRefusal, type Closure, type StoredDecision } from './closure.js';
-import { AUTOMATED_SENDER_FOOTER } from './disclosure.js';
+import { AUTOMATED_SENDER_FOOTER, MODEL_PARAGRAPH_LABEL, MODEL_TEXT_MARKER_HEADER } from './disclosure.js';
 import { buildEvidenceRecord, type EvidenceRecord } from './evidence-record.js';
 import { parseLaneMap } from './lanes.js';
 import {
@@ -12,6 +12,7 @@ import {
   SECTION_HEADINGS,
   emailKindOf,
   isoOf,
+  modelParagraphOf,
   renderOperatorEmail,
   type RenderInput,
   type RenderedEmail,
@@ -613,5 +614,97 @@ describe('no rendering asks for a reply, misnames a ratio or carries an address 
     expect(text).not.toMatch(/smtp;|user unknown/i);
     const figures = text.replace(ISO_TIME, ' ').match(/\d[\d,]*(?:\.\d+)?/g) ?? [];
     expect(figures.filter((figure) => ['60,000', '60000', '41.8', '38.5', '4.6', '3.5'].includes(figure))).toEqual([]);
+  });
+});
+
+const CLOSE_EXPLANATION = 'One import batch holds the permanent bounces on this lane, and pausing this lane stops it.';
+const EXPLAINED_CLOSE: StoredDecision = { ...CLOSE_DECISION, explanation: CLOSE_EXPLANATION };
+const UNKNOWN_EXPLANATION = AGENT_UNKNOWN.explanation ?? '';
+const EM_DASH = String.fromCodePoint(0x2014);
+const EN_DASH = String.fromCodePoint(0x2013);
+
+function withoutExplanation(decision: StoredDecision): StoredDecision {
+  const bare: StoredDecision = { ...decision };
+  delete bare.explanation;
+  return bare;
+}
+
+function sectionAfter(email: RenderedEmail | undefined, heading: string): string | undefined {
+  const headings = email?.sections.map((part) => part.heading) ?? [];
+  return headings[headings.indexOf(heading) + 1];
+}
+
+describe('the model paragraph shows once, labelled, only when it passes its checks again (D-113, AC-20)', () => {
+  it.each([
+    { name: 'closed', closure: closedClosure(), decision: EXPLAINED_CLOSE, before: SECTION_HEADINGS.saw },
+    { name: 'not-holding', closure: NOT_HOLDING, decision: EXPLAINED_CLOSE, before: SECTION_HEADINGS.saw },
+    { name: 'pause-unknown', closure: PAUSE_UNKNOWN, decision: EXPLAINED_CLOSE, before: SECTION_HEADINGS.saw },
+    { name: 'agent unknown', closure: refusedClosure('no-close'), decision: AGENT_UNKNOWN, before: SECTION_HEADINGS.found },
+  ])('shows the $name paragraph once, right under its label, after $before', ({ closure, decision, before }) => {
+    const email = render(closure, decision, ASKING_RECORD);
+    const paragraph = decision.explanation ?? '';
+    expect(paragraph).not.toBe('');
+    expect(sectionAfter(email, before)).toBe(MODEL_PARAGRAPH_LABEL);
+    expect(email?.text.split(paragraph)).toHaveLength(2);
+    expect(email?.text).toContain(`${MODEL_PARAGRAPH_LABEL}\n${paragraph}\n`);
+    expect(email?.text.split(MODEL_PARAGRAPH_LABEL)).toHaveLength(2);
+  });
+
+  it.each([
+    ['a URL', 'One import batch holds the permanent bounces, see https://example.org/batch for the list.'],
+    ['another lane set', 'One import batch holds the permanent bounces, and fothering-transactional is fine.'],
+    ['a number the record does not hold', 'One import batch holds 4321 permanent bounces on this lane.'],
+  ])('drops a stored paragraph holding %s, leaving every other byte of the email unchanged', (_name, planted) => {
+    const plantedDecision = { ...EXPLAINED_CLOSE, explanation: planted };
+    const dropped = render(closedClosure(), plantedDecision, ASKING_RECORD);
+    expect(modelParagraphOf({ closure: closedClosure(), record: ASKING_RECORD, decision: plantedDecision, laneMap: LANE_MAP })).toBeUndefined();
+    expect(dropped?.text).toBe(render(closedClosure(), withoutExplanation(EXPLAINED_CLOSE), ASKING_RECORD)?.text);
+    expect(dropped?.headers).toEqual([]);
+  });
+
+  it('removes nothing but the paragraph section when one passes', () => {
+    const shown = render(closedClosure(), EXPLAINED_CLOSE, ASKING_RECORD);
+    const bare = render(closedClosure(), withoutExplanation(EXPLAINED_CLOSE), ASKING_RECORD);
+    expect(shown?.text.replace(`${MODEL_PARAGRAPH_LABEL}\n${CLOSE_EXPLANATION}\n\n`, '')).toBe(bare?.text);
+  });
+
+  it('prints em and en dashes in a passing paragraph as plain hyphens', () => {
+    const dashed = `One import batch holds the permanent bounces ${EM_DASH} pausing this lane stops it ${EN_DASH} on this lane.`;
+    const text = render(closedClosure(), { ...EXPLAINED_CLOSE, explanation: dashed }, ASKING_RECORD)?.text ?? '';
+    expect(text).toContain('One import batch holds the permanent bounces - pausing this lane stops it - on this lane.');
+    expect(text.includes(EM_DASH) || text.includes(EN_DASH)).toBe(false);
+  });
+});
+
+describe('a close the action refused carries the template alone (AC-P6, R10)', () => {
+  it.each(ACTION_REFUSALS.filter((code) => code !== 'no-close'))('shows no model text for a %s refusal even when the paragraph would pass', (code) => {
+    const email = render(refusedClosure(code), EXPLAINED_CLOSE, ASKING_RECORD);
+    expect(email?.text).not.toContain(MODEL_PARAGRAPH_LABEL);
+    expect(email?.text).not.toContain(CLOSE_EXPLANATION);
+    expect(email?.headers).toEqual([]);
+  });
+
+  it('shows no model text for a cap-reached DECISION', () => {
+    const capped: StoredDecision = { ...CAP_REACHED, explanation: UNKNOWN_EXPLANATION };
+    expect(render(refusedClosure('no-close'), capped, ASKING_RECORD)?.text).not.toContain(MODEL_PARAGRAPH_LABEL);
+  });
+
+  it('shows no model text when the record is absent', () => {
+    expect(render(refusedClosure('no-close'), AGENT_UNKNOWN, undefined)?.text).not.toContain(MODEL_PARAGRAPH_LABEL);
+  });
+});
+
+describe('an email that shows the paragraph carries the machine-readable mark and no other does (Article 50(2))', () => {
+  it('gives the one marker header to an email showing the paragraph', () => {
+    expect(render(closedClosure(), EXPLAINED_CLOSE, ASKING_RECORD)?.headers).toEqual([MODEL_TEXT_MARKER_HEADER]);
+    expect(render(refusedClosure('no-close'), AGENT_UNKNOWN, ASKING_RECORD)?.headers).toEqual([MODEL_TEXT_MARKER_HEADER]);
+  });
+
+  it('gives no header to an email without the paragraph', () => {
+    for (const rendering of EVERY_RENDERING) {
+      const email = renderOperatorEmail(rendering.input);
+      expect(email?.headers).toEqual(email?.text.includes(MODEL_PARAGRAPH_LABEL) === true ? [MODEL_TEXT_MARKER_HEADER] : []);
+    }
+    expect(render(closedClosure(), withoutExplanation(EXPLAINED_CLOSE), ASKING_RECORD)?.headers).toEqual([]);
   });
 });

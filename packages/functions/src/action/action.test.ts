@@ -4,7 +4,7 @@ import { BUCKET_MS, bucketStartMs } from '@fothering/core/buckets';
 import { ACTION_FUNCTION_TIMEOUT_MS, HOLD_CHECK_DELAY_MS, HOLD_MS, LANE_HOUR_ATTEMPT_CAP } from '@fothering/core/close-values';
 import type { ConfigurationRefusal } from '@fothering/core/closeability';
 import { closureClaimItem, closureKey, decisionOf, parseClosure, type Closure, type FreshnessRefusal } from '@fothering/core/closure';
-import { AUTOMATED_SENDER_FOOTER } from '@fothering/core/disclosure';
+import { AUTOMATED_SENDER_FOOTER, MODEL_PARAGRAPH_LABEL, MODEL_TEXT_MARKER_HEADER } from '@fothering/core/disclosure';
 import { reserveLaneAttempt } from '@fothering/core/counters';
 import {
   buildEvidenceRecord,
@@ -1359,7 +1359,8 @@ describe('a closed lane becomes one closed-path email sent once through fotherin
       subject: '[Fothering] fothering-bulk closed: sending paused and holding',
       configurationSetName: ALERTS,
     });
-    expect(Object.keys(run.requests[0] ?? {}).sort()).toEqual(['configurationSetName', 'from', 'subject', 'text', 'to']);
+    expect(Object.keys(run.requests[0] ?? {}).sort()).toEqual(['configurationSetName', 'from', 'headers', 'subject', 'text', 'to']);
+    expect(run.requests[0]?.headers).toEqual([MODEL_TEXT_MARKER_HEADER]);
     expect(typeof run.requests[0]?.text).toBe('string');
     expect((await storedClosure(run.deps, INCIDENT_ID, HOLD_CHECKED_AT_MS))?.email).toEqual({
       kind: 'closed',
@@ -1666,6 +1667,33 @@ describe('closed appears only in a closed-path email a passed hold check backs (
       expect(text).not.toMatch(/SES bounce rate|SES complaint rate|your bounce rate/i);
       expect(text).not.toMatch(/reply with|reply to this|send us/i);
     }
+  });
+});
+
+describe('the model paragraph and its machine-readable mark reach the send (D-113, D-114)', () => {
+  it('sends the closed email with the stored paragraph under its label and the one marker header', async () => {
+    const run = await closedEmailRun();
+    const request = run.requests[0];
+    const [sendLine] = sendLinesOf(run.dryRunLines);
+
+    expect(request?.headers?.length).toBe(1);
+    expect(request?.headers).toEqual([MODEL_TEXT_MARKER_HEADER]);
+    expect(request?.text.split(MODEL_PARAGRAPH_LABEL)).toHaveLength(2);
+    expect(sendLine).toContain(`"headers":["${MODEL_TEXT_MARKER_HEADER.name}"]`);
+    expect(sendLine).not.toContain(MODEL_TEXT_MARKER_HEADER.value);
+  });
+
+  it('sends a template-only email with no header at all', async () => {
+    const { store } = await seeded(failingRuntime);
+    const run = emailRoot({ store, now: () => ACT_MS });
+    await plantDecision(run.deps, INCIDENT_ID, { outcome: 'unknown', reason: 'cap-reached', items: ['incident'] }, NOW_MS);
+
+    await runActionCycle(run.deps);
+
+    expect(run.requests).toHaveLength(1);
+    expect(Object.hasOwn(run.requests[0] ?? {}, 'headers')).toBe(false);
+    expect(run.requests[0]?.text).not.toContain(MODEL_PARAGRAPH_LABEL);
+    expect(sendLinesOf(run.dryRunLines)[0]).not.toContain('"headers"');
   });
 });
 

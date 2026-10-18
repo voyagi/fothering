@@ -1365,6 +1365,28 @@ describe('createSesWrites', () => {
     ]);
   });
 
+  it('carries the request headers as Content.Simple.Headers and nothing else new', async () => {
+    const client = sesClient();
+    const calls = stubSend(client, () => ({ MessageId: 'ses-message-2' }));
+    const headers = [{ name: 'X-Fothering-AI-Generated', value: 'model-explanation-paragraph' }];
+
+    await createSesWrites({ client: () => client }).sendEmail({ ...REQUEST, headers });
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.input).toEqual({
+      FromEmailAddress: REQUEST.from,
+      Destination: { ToAddresses: REQUEST.to },
+      Content: {
+        Simple: {
+          Subject: { Data: REQUEST.subject },
+          Body: { Text: { Data: REQUEST.text, Charset: 'UTF-8' } },
+          Headers: [{ Name: 'X-Fothering-AI-Generated', Value: 'model-explanation-paragraph' }],
+        },
+      },
+      ConfigurationSetName: 'fothering-alerts',
+    });
+  });
+
   it.each([
     ['no MessageId', {}],
     ['an empty MessageId', { MessageId: '' }],
