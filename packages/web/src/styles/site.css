@@ -411,7 +411,8 @@ ol.steps { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); marg
   .schedule.compact tr { display: grid; grid-template-columns: repeat(3, minmax(min-content, 1fr)); }
   .schedule.compact tbody th { grid-column: 1 / -1; }
   .schedule.compact tr > :nth-child(2) { border-left: 0; }
-  .schedule.compact tbody tr:first-child > th { border-top: 0; }
+  /* A gap and a rule part the column labels from the first dimension, so COUNT never reads as its label. */
+  .schedule.compact tbody tr:first-child > th { margin-top: var(--space-sm); }
   .schedule.compact thead th:first-child { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 }
 
