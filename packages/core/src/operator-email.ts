@@ -258,9 +258,9 @@ function pauseFailedLines(closure: Closure): string[] {
   if (closure.readBack === true) {
     return [`Read back at ${timeOf(closure.readBackAtMs)}: SES answered SendingEnabled true for ${set}, so the pause did not take and ${set} is still sending.`];
   }
-  // A put that throws (a timeout, a reset, a server error) can follow a change SES took, so this line
-  // claims neither outcome. The outcome stays pause-failed (AC-2), which the reopen command refuses, so
-  // the console is the place to undo a pause that did take.
+  // The action reads back after every put, a put that threw included, so it writes pause-failed only with a
+  // read-back of true. A schema-valid closure holding pause-failed with no read-back claims neither outcome
+  // here, and since the reopen command refuses pause-failed, the console is where a pause that took is undone.
   return [
     `SES answered the pause request with an error, so Fothering cannot confirm whether the pause took. Treat ${set} as still sending.`,
     `If the SES console shows sending paused for ${set}, re-enable it there: Fothering does not reopen a pause it could not confirm.`,

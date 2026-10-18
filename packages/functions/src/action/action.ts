@@ -139,25 +139,27 @@ async function readBackOf(deps: ActionDeps, configurationSet: string): Promise<R
   }
 }
 
-async function putPause(deps: ActionDeps, configurationSet: string): Promise<boolean> {
+// A put that throws (a timeout, a reset, a server error) can follow a change SES took, so it decides
+// nothing: the read-back after it does. Only the error's name reaches the log.
+async function putPause(deps: ActionDeps, incidentId: string, configurationSet: string): Promise<void> {
   try {
     await deps.ports.ses.pauseConfigurationSet(configurationSet);
-    return true;
-  } catch {
-    return false;
+  } catch (error) {
+    deps.log.info({ event: 'pause-put-threw', incidentId, errorName: error instanceof Error ? error.name : 'UnknownError' });
   }
 }
 
 // D-89 steps 9 to 12. SES throttles every action but sending at one request a second per account, so
-// the put and the read-back each wait out the spacing after the fact reads (Pitfall 3). Whether SES can
-// read back a stale true right after an accepted put is UNVERIFIED; it maps to pause-failed either way.
+// the put and the read-back each wait out the spacing after the fact reads (Pitfall 3). The read-back
+// runs after a put that threw too, and decides the outcome alone. Whether SES can read back a stale true
+// right after an accepted put is UNVERIFIED; it maps to pause-failed either way.
 async function pause(run: Run, act: Act, configurationSet: string, readings: Readings): Promise<ClosureOutcome | undefined> {
   const { deps } = run;
   const pauseRequestedAtMs = deps.now();
   if (!(await updateClosure(run, act, { pauseRequestedAtMs, configurationSet, sesFacts: 'read', lanes: readings.lanes }))) return undefined;
   deps.log.info({ event: 'pause-requested', incidentId: act.incidentId });
   await deps.wait(SES_READ_SPACING_MS);
-  if (!(await putPause(deps, configurationSet))) return finish(run, act, 'pause-failed', { readBack: null, readBackAtMs: null });
+  await putPause(deps, act.incidentId, configurationSet);
   await deps.wait(SES_READ_SPACING_MS);
   const readBack = await readBackOf(deps, configurationSet);
   const outcome = pauseOutcomeOf(readBack);

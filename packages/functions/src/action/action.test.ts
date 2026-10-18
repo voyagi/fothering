@@ -200,18 +200,27 @@ describe('every way the put or the read-back can end is failure or unknown, neve
     expect((await storedClosure(deps, INCIDENT_ID, ACT_MS))?.readBack).toBe(true);
   });
 
-  it('records a put that throws as pause-failed with no read-back issued', async () => {
+  // A put that throws can follow a change SES took, so the spaced read-back still runs and decides.
+  it.each([
+    ['still sending', 'pause-failed', undefined, true],
+    ['paused', 'paused', false, false],
+    ['unreadable', 'pause-unknown', 'throw', 'threw'],
+  ] as const)('reads back after a put that throws: a set read back %s is %s', async (_case, outcome, answer, readBack) => {
     const { root } = await seeded();
     const { deps, sesState } = root();
     sesState.putFaults.set(BULK, 'throw');
+    if (answer !== undefined) sesState.getAnswers.set(BULK, answer);
 
     await runActionCycle(orderRecorded(deps, sesState.calls));
 
     const closure = await storedClosure(deps, INCIDENT_ID, ACT_MS);
-    expect(closure?.outcome).toBe('pause-failed');
-    expect(closure?.readBack).toBeNull();
-    expect(sesState.calls.filter((call) => call.startsWith('get-issued'))).toEqual([]);
-    expect(sesState.calls).not.toContain('write:paused');
+    expect(closure?.outcome).toBe(outcome);
+    expect(closure?.readBack).toBe(readBack);
+    expect(putsOf(sesState)).toEqual(['put-issued:fothering-bulk:false']);
+    expect(sesState.calls.filter((call) => call.startsWith('get-issued'))).toEqual(['get-issued:fothering-bulk']);
+    expect(sesState.calls.indexOf('get-issued:fothering-bulk')).toBeGreaterThan(sesState.calls.indexOf('put-issued:fothering-bulk:false'));
+    const pausedAt = sesState.calls.indexOf('write:paused');
+    if (pausedAt !== -1) expect(pausedAt).toBeGreaterThan(sesState.calls.indexOf('get-resolved:fothering-bulk'));
   });
 
   it('reports a planted log that writes paused on the put resolving, and nothing over the real run', async () => {
