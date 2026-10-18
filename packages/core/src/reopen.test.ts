@@ -1,15 +1,36 @@
+import { existsSync, readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { LATENESS_HORIZON_MS } from './buckets.js';
 import { REOPEN_FUNCTION_TIMEOUT_MS } from './close-values.js';
-import { CLOSURE_OUTCOMES, closureClaimItem, type Closure } from './closure.js';
+import { CLOSURE_OUTCOMES, REOPEN_REFUSALS, REOPEN_RESULTS, closureClaimItem, type Closure } from './closure.js';
 import {
+  FIND_REOPEN_FUNCTION_COMMAND,
   REOPEN_COMMAND_TEMPLATE,
   REOPEN_FUNCTION_NAME_SLOT,
+  REOPEN_USAGE,
   incidentLimitSentence,
   reopenAcceptance,
   reopenCommandFor,
   reputationResetSentence,
 } from './reopen.js';
+
+const REOPEN_DOC_URL = new URL('../../../docs/reopen-a-lane.md', import.meta.url);
+
+// Read with LF line ends whatever the checkout wrote, so the comparison is about the text alone. A
+// missing document reads empty, so each case below fails on its own assertion rather than at load.
+const REOPEN_DOC = existsSync(REOPEN_DOC_URL) ? readFileSync(REOPEN_DOC_URL, 'utf8').replace(/\r\n/g, '\n') : '';
+
+function fencedBlocks(text: string, language: string): string[] {
+  return [...text.matchAll(new RegExp('```' + language + '\\n([\\s\\S]*?)\\n```', 'g'))].map((match) => match[1] ?? '');
+}
+
+function sectionOf(text: string, heading: string): string {
+  const start = text.indexOf(`\n${heading}\n`);
+  if (start === -1) throw new Error(`the document has no ${heading} heading`);
+  const rest = text.slice(start + heading.length + 2);
+  const next = rest.search(/^## /m);
+  return next === -1 ? rest : rest.slice(0, next);
+}
 
 const BULK = 'fothering-bulk';
 const INCIDENT_ID = 'a'.repeat(32);
@@ -78,6 +99,40 @@ describe('every reopen output carries two fixed sentences with the set name thei
       expect(sentence).toMatch(/^[\x20-\x7e]+$/);
       expect(sentence).not.toMatch(/\bclosed\b/i);
     }
+  });
+});
+
+describe('docs/reopen-a-lane.md prints the command text the code holds (AC-17)', () => {
+  it('holds the invoke command for fothering-bulk exactly as reopenCommandFor writes it', () => {
+    const invoke = fencedBlocks(REOPEN_DOC, 'sh').find((block) => block.includes('aws lambda invoke'));
+
+    expect(invoke).toBe(reopenCommandFor(BULK));
+  });
+
+  it('holds the stack output lookup exactly as FIND_REOPEN_FUNCTION_COMMAND writes it', () => {
+    const lookup = fencedBlocks(REOPEN_DOC, 'sh').find((block) => block.includes('describe-stacks'));
+
+    expect(lookup).toBe(FIND_REOPEN_FUNCTION_COMMAND);
+    expect(REOPEN_DOC).toContain('ReopenFunctionName');
+    expect(REOPEN_DOC).toContain('--cli-read-timeout 60');
+  });
+
+  it('prints the usage message in a text block', () => {
+    expect(fencedBlocks(REOPEN_DOC, 'text')).toContain(REOPEN_USAGE);
+  });
+
+  it('names every result and every refusal code', () => {
+    for (const code of [...REOPEN_RESULTS, ...REOPEN_REFUSALS]) expect(REOPEN_DOC).toContain(`\`${code}\``);
+  });
+
+  it('states the incident limit for fothering-bulk on one unwrapped line under What this does not cover', () => {
+    const lines = sectionOf(REOPEN_DOC, '## What this does not cover').split('\n');
+
+    expect(lines).toContain(incidentLimitSentence(BULK));
+  });
+
+  it('holds no example.com address', () => {
+    expect(REOPEN_DOC).not.toContain('example.com');
   });
 });
 
