@@ -1336,8 +1336,9 @@ export interface SecondBuildRun {
 }
 
 const OUTPUT_TAIL = 400;
-// sitemap.xml and robots.txt arrive with a later plan and are compared once they exist.
-const COMPARED_FILES = new Set(['sitemap.xml', 'robots.txt']);
+// Every unhashed generated file is compared beside the pages: tokens.css is rendered from tokens.json
+// and _headers carries the CSP. Content-hashed _astro files are covered through the pages naming them.
+const COMPARED_FILES = new Set(['sitemap.xml', 'robots.txt', 'tokens.css', '_headers']);
 
 function comparedFiles(folder: string): Set<string> {
   if (!existsSync(folder)) return new Set();
