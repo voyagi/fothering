@@ -54,6 +54,11 @@ const lastRight = SIX_RIGHTS.at(-1) ?? '';
 const complaint = website('complaint');
 const authority = 'the Autoriteit Persoonsgegevens';
 const complaintLead = complaint.slice(0, complaint.indexOf(authority));
+// The article reference is cited as one value, so it never ends a line inside its brackets.
+const legalBasis = website('legal-basis');
+const article = 'Article 6(1)(f)';
+const articleAt = legalBasis.indexOf(article);
+if (articleAt < 0) throw new Error(`privacy page: the legal-basis statement no longer cites ${article}`);
 
 const runtimeRole = modelSaid.find((statement) => statement.id === 'runtime-role');
 const neverItems = [
@@ -182,7 +187,7 @@ const INTERLOCK_DESC = 'Stored events, which hold no addresses, go to detection 
       </div>
       <ul class="site">
         <li>{website('controller')} {website('contact')}</li>
-        <li>Cloudflare delivers these pages and receives your IP address to do so. {website('legal-basis')} {website('cloudflare-dpa')}</li>
+        <li>Cloudflare delivers these pages and receives your IP address to do so. {legalBasis.slice(0, articleAt)}<span class="keep-whole">{article}</span>{legalBasis.slice(articleAt + article.length)} {website('cloudflare-dpa')}</li>
         <li>Your browser keeps two entries in localStorage, and nothing is sent anywhere: {STORAGE_ENTRIES.map((entry, index) => (
           <Fragment>{index > 0 && ' and '}<Identifier value={entry.key} /> ({segments(entry.holds).map((segment) => (segment.kind === 'text' ? segment.text : <Identifier value={segment.text} />))})</Fragment>
         ))}.</li>
