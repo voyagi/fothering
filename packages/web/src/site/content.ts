@@ -274,15 +274,21 @@ export interface ForbiddenClaim {
   readonly pattern: RegExp;
 }
 
-// AC-25. Each pattern is anchored on the model or the agent as subject with the verb straight after
-// it, so "the model never names the cause" passes and "the model names the cause" fails (AC-E18).
-const SUBJECT = String.raw`\b(?:the|an?|this|its)\s+(?:AI\s+)?(?:model|agent)\s+`;
+// AC-25. Each pattern is anchored on the model or the agent as subject: "the model", "an AI agent",
+// a possessive such as "Fothering's agent", or "it". At most one word may sit between subject and
+// verb ("the agent then pauses"), and never a negation, so "the model never names the cause" passes
+// and "the model names the cause" fails (AC-E18). The curly apostrophe is built from its code point
+// so the source stays ASCII.
+const APOSTROPHE = `['${String.fromCharCode(0x2019)}]`;
+const NOUN = String.raw`(?:AI\s+)?(?:model|agent)`;
+const BETWEEN = String.raw`(?:(?!(?:never|not|no|cannot)\b)[a-z]+\s+)?`;
+const SUBJECT = String.raw`(?:\b(?:the|an?|this|its)\s+${NOUN}|\b\w+${APOSTROPHE}s\s+${NOUN}|\bit)\s+${BETWEEN}`;
 const claim = (name: string, verbs: string): ForbiddenClaim => ({ claim: name, pattern: new RegExp(`${SUBJECT}(?:${verbs})`, 'i') });
 
 export const MODEL_FORBIDDEN: readonly ForbiddenClaim[] = Object.freeze([
   claim('cause', String.raw`(?:works?|worked)\s+out\s+the\s+cause|(?:names?|named|finds?|found|determines?|determined|decides?|decided|picks?|picked)\s+the\s+cause`),
   claim('stored-data', String.raw`(?:reads?|receives?|received|sees?|saw|queries|queried|fetches|fetched)\s+(?:the\s+)?(?:stored\s+events|events|recipient\s+addresses|addresses|subjects|headers)\b`),
-  claim('lane-choice', String.raw`(?:picks?|picked|approves?|approved|chooses|chose|selects?|selected)\s+(?:a|the|one|which)\s+lane`),
+  claim('lane-choice', String.raw`(?:picks?|picked|approves?|approved|chooses|chose|selects?|selected|adds?|added)\s+(?:a|the|one|which)\s+lane`),
   claim('lane-change', String.raw`(?:closes?|closed|pauses?|paused|reopens?|reopened|stops?|stopped)\s+(?:a|the|one|that|this)\s+(?:lane|configuration\s+set)`),
   claim('ses-call', String.raw`(?:calls?|called|invokes?|invoked)\s+(?:Amazon\s+)?SES\b`),
   claim('reply', String.raw`(?:reads?|parses?|parsed)\s+(?:a|the|your|an)\s+(?:operator's\s+)?repl(?:y|ies)\b`),

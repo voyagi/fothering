@@ -1569,15 +1569,27 @@ export function modelRoleRequiredRule(site: BuiltSite, context: CheckContext): F
     .map((statement) => ({ rule: 'model-role-required' as const, route: PRIVACY_ROUTE, text: `no ${MODEL_ROLE} element says "${statement.text}"` }));
 }
 
+const MODEL_SUBJECT = 'data-model-subject';
+
+// A list marked as what the model does holds items with no subject ("Adds a lane ..."), so each item
+// is judged as a sentence whose subject is the model. Every other marked element is judged as
+// written, the list of what the model never does among them: it names the forbidden actions on purpose.
+function modelRoleSentences(element: BuiltElement): string[] {
+  if (element.attrs[MODEL_SUBJECT] === undefined) return [outsideSvg(element)];
+  const items = elementsIn(element, 'li');
+  return (items.length === 0 ? [element] : items).map((item) => {
+    const text = outsideSvg(item).trim();
+    return `The model ${text.charAt(0).toLowerCase()}${text.slice(1)}`;
+  });
+}
+
 // AC-25: every marked element on every page, each hit named with its route and words.
 export function modelRoleForbiddenRule(site: BuiltSite, context: CheckContext): Finding[] {
-  return site.pages.flatMap((page) => modelRoleElements(page).flatMap((element) => {
-    const text = outsideSvg(element);
-    return context.privacy.modelForbidden.flatMap(({ claim, pattern }) => {
+  return site.pages.flatMap((page) => modelRoleElements(page).flatMap(modelRoleSentences).flatMap((text) =>
+    context.privacy.modelForbidden.flatMap(({ claim, pattern }) => {
       const match = new RegExp(pattern.source, pattern.flags.replace('g', '')).exec(text);
       return match === null ? [] : [{ rule: 'model-role-forbidden' as const, route: page.route, text: `a ${MODEL_ROLE} element claims what only code does (${claim}): "${excerpt(text, match.index, match[0].length)}"` }];
-    });
-  }));
+    })));
 }
 
 const MODEL_ID_MARK = 'data-model-id';
