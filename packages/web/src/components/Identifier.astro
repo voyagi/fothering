@@ -3,12 +3,20 @@
 // part is one unbreakable run, since a browser would otherwise break after the hyphens of a tag
 // value such as batch=2026-10-14-b; the <wbr> after each dot is the only break, and a space inside
 // a part (an SMTP code) is made non-breaking.
+// With `words`, an API operation name with no dot (PutConfigurationSetSendingOptions) may also end
+// a line between its capitalised words, each word one unbreakable run with no hyphen added. Only the
+// replay log's Detail cells pass it (UI-SPEC line 208, S4 note 2026-10-18); the built rule
+// identifier-break fails that break anywhere else.
 interface Props {
   value: string;
+  words?: boolean;
 }
 
 const NO_BREAK_SPACE = String.fromCharCode(0xa0);
-const { value } = Astro.props;
-const parts = value.split('.').map((part) => part.replaceAll(' ', NO_BREAK_SPACE));
+const { value, words = false } = Astro.props;
+const wordParts = words && !value.includes('.') ? value.split(/(?=[A-Z])/) : [];
+const byWords = wordParts.length > 1;
+const parts = byWords ? wordParts : value.split('.').map((part) => part.replaceAll(' ', NO_BREAK_SPACE));
+const joiner = byWords ? '' : '.';
 ---
-<code class="identifier" data-identifier>{parts.map((part, index) => (index < parts.length - 1 ? <Fragment><span>{part}.</span><wbr /></Fragment> : <span>{part}</span>))}</code>
+<code class="identifier" data-identifier data-identifier-words={byWords ? '' : undefined}>{parts.map((part, index) => (index < parts.length - 1 ? <Fragment><span>{part}{joiner}</span><wbr /></Fragment> : <span>{part}</span>))}</code>

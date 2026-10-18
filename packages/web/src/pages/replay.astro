@@ -37,17 +37,19 @@ const evidenceRows = view.schedule.rows.map((row) => ({
 
 // A row shows from the step that reaches it to the last, and carries its own step for the tint.
 const fromStep = (step: number): string => Array.from({ length: STEP_COUNT - step + 1 }, (_, index) => String(step + index)).join(' ');
-// The lane is a configuration set name and a detail's key=value is a message tag: both are
-// identifiers, so they render through the Identifier component and never break mid-name.
-const TAG_VALUE = /([A-Za-z_][\w-]*=[\w.-]*\w)/g;
-const markTagValues = (text: string): string => text.replace(TAG_VALUE, '`$1`');
+// The lane is a configuration set name; in a detail, a key=value is a message tag and capitalised
+// words run together are an API operation or field path. All are identifiers, so they render
+// through the Identifier component; the Detail column lets an API name break between its words.
+const DETAIL_IDENTIFIER = /([A-Za-z_][\w-]*=[\w.-]*\w|[A-Z][a-z]+(?:[A-Z][a-z]+)+(?:\.[A-Z][a-z]+(?:[A-Z][a-z]+)*)*)/g;
+const markIdentifiers = (text: string): string => text.replace(DETAIL_IDENTIFIER, '`$1`');
+const DETAIL_COLUMN = 3;
 const logRows = view.eventLog.rows.map((row) => ({
   header: row.time,
   attrs: { 'data-steps': fromStep(row.step), 'data-log-step': String(row.step) },
   cells: [
     { text: row.kind },
     { text: `\`${row.lane}\`` },
-    { text: [markTagValues(row.detail), row.smtpCode === '' ? '' : `\`${row.smtpCode}\``, row.receivingDomain].filter((part) => part !== '').join(', ') },
+    { text: [markIdentifiers(row.detail), row.smtpCode === '' ? '' : `\`${row.smtpCode}\``, row.receivingDomain].filter((part) => part !== '').join(', ') },
   ],
 }));
 ---
@@ -165,6 +167,7 @@ const logRows = view.eventLog.rows.map((row) => ({
         stack
         columns={['Time UTC', 'Kind', 'Lane', 'Detail']}
         monoColumns={[0, 2]}
+        wordColumns={[DETAIL_COLUMN]}
         rows={logRows}
         caption={`${view.eventLog.caption} ${view.eventLog.note}`}
         captionAttrs={{ 'data-provenance': provenance }}

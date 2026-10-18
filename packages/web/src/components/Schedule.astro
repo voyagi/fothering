@@ -35,9 +35,12 @@ interface Props {
   compact?: boolean;
   // One block per row at 960px and below, each cell under its column name.
   stack?: boolean;
+  // Column indexes whose API names may break between their capitalised words (the replay log's
+  // Detail column only, UI-SPEC line 208).
+  wordColumns?: readonly number[];
 }
 
-const { columns, rows, narrowHidden = [], monoColumns = [], caption, captionAttrs = {}, variant = 'schedule', compact = false, stack = false } = Astro.props;
+const { columns, rows, narrowHidden = [], monoColumns = [], caption, captionAttrs = {}, variant = 'schedule', compact = false, stack = false, wordColumns = [] } = Astro.props;
 const classes = (column: number): string | undefined =>
   [narrowHidden.includes(column) ? 'hide-narrow' : '', monoColumns.includes(column) ? 'mono' : ''].filter((name) => name !== '').join(' ') || undefined;
 // A column header is a label like its siblings; only the column's values are set in mono.
@@ -65,7 +68,7 @@ const spans = (text: string): string[] => text.split('`');
         </th>
         {row.cells.map((cell, index) => (
           <td class={classes(index + 1)} data-col={stack ? columns[index + 1] : undefined} role={role('cell')} {...cell.attrs}>
-            {cell.mark === undefined ? <span class="cell-text">{spans(cell.text).map((part, spanIndex) => (spanIndex % 2 === 1 ? <Identifier value={part} /> : part))}</span> : (
+            {cell.mark === undefined ? <span class="cell-text">{spans(cell.text).map((part, spanIndex) => (spanIndex % 2 === 1 ? <Identifier value={part} words={wordColumns.includes(index + 1)} /> : part))}</span> : (
               <span class="state">
                 <svg class={`state-mark state-mark-${cell.mark}`} viewBox="0 0 12 12" aria-hidden="true"><rect x="1" y="1" width="10" height="10" /></svg>
                 {cell.text}
