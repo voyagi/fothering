@@ -205,6 +205,26 @@ describe('startPreviewServer refuses what it does not implement', () => {
     await expect(startPreviewServer({ distDir: join(site.dist, 'missing'), wranglerConfigPath: site.config })).rejects.toThrow(/no built site folder/);
   });
 
+  // A Location that starts with // is protocol-relative: a browser would leave for the host named
+  // after the slashes. Each planted file makes its path reach a redirect branch without the refusal.
+  it('refuses a path that starts with // with 400 and never answers a protocol-relative Location', async () => {
+    const folders = plantSite('double-slash', { 'index.html': 'x', 'replay/index.html': 'r', 'deploy.html': 'd' });
+    const flat = plantSite('double-slash-flat', { 'replay.html': 'r' });
+    const cases: readonly (readonly [{ dist: string; config: string }, string])[] = [
+      [folders, '//replay'], [folders, '//index.html'], [flat, '//replay.html'], [folders, '//deploy/'],
+    ];
+    for (const [site, path] of cases) {
+      const running = await startPreviewServer({ distDir: site.dist, wranglerConfigPath: site.config });
+      try {
+        const reply = await get(running, path);
+        expect(String(reply.headers.location ?? ''), path).not.toMatch(/^\/\//);
+        expect(reply.status, path).toBe(400);
+      } finally {
+        await running.close();
+      }
+    }
+  });
+
   it('answers plain Not found with 404 when dist holds no 404.html, and serves with no _headers', async () => {
     const site = plantSite('bare-dist', { 'index.html': '<p>only</p>', 'page/index.html': 'p' });
     const bare = await startPreviewServer({ distDir: site.dist, wranglerConfigPath: site.config });
