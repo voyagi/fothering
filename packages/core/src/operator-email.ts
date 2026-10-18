@@ -258,7 +258,13 @@ function pauseFailedLines(closure: Closure): string[] {
   if (closure.readBack === true) {
     return [`Read back at ${timeOf(closure.readBackAtMs)}: SES answered SendingEnabled true for ${set}, so the pause did not take and ${set} is still sending.`];
   }
-  return [`SES did not accept the pause request, so the pause did not take and ${set} may still be sending.`];
+  // A put that throws (a timeout, a reset, a server error) can follow a change SES took, so this line
+  // claims neither outcome. The outcome stays pause-failed (AC-2), which the reopen command refuses, so
+  // the console is the place to undo a pause that did take.
+  return [
+    `SES answered the pause request with an error, so Fothering cannot confirm whether the pause took. Treat ${set} as still sending.`,
+    `If the SES console shows sending paused for ${set}, re-enable it there: Fothering does not reopen a pause it could not confirm.`,
+  ];
 }
 
 function notHoldingLines(closure: Closure): string[] {

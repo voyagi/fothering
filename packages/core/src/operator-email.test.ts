@@ -259,7 +259,16 @@ describe('a pause that is not confirmed renders the not-confirmed path (R9)', ()
 
   it('says the pause did not take for pause-failed', () => {
     expect(sectionText(render(PAUSE_FAILED), SECTION_HEADINGS.happened)).toContain('the pause did not take');
-    expect(sectionText(render(PUT_FAILED), SECTION_HEADINGS.happened)).toContain('the pause did not take');
+  });
+
+  // WR-05: a put that throws may still have been taken, so the body claims only what code saw.
+  it('says a put SES answered with an error is not confirmed either way, and where to check it', () => {
+    const happened = sectionText(render(PUT_FAILED), SECTION_HEADINGS.happened);
+
+    expect(happened).toContain('SES answered the pause request with an error, so Fothering cannot confirm whether the pause took');
+    expect(happened).toContain(`If the SES console shows sending paused for ${SET}, re-enable it there`);
+    expect(happened).not.toContain('did not accept');
+    expect(happened).not.toContain('did not take');
   });
 
   it('gives the reopen command and the incident limit once for not-holding and pause-unknown, and neither for pause-failed', () => {
