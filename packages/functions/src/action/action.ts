@@ -493,14 +493,11 @@ type EmailState = NonNullable<Closure['email']>;
 async function sendClaimed(run: Run, act: Pick<Act, 'incidentId' | 'version'>, claimed: EmailState, request: SendEmailRequest): Promise<void> {
   const { deps } = run;
   const { incidentId } = act;
+  let messageId: string;
   try {
     // SES may accept a message and still answer with a timeout or a server error, so a retried attempt
     // can deliver a second copy; one extra email is the accepted limit (03-RESEARCH Pitfall 15).
-    const { messageId } = await deps.ports.ses.sendEmail(request);
-    const storedId = SES_ID_PATTERN.test(messageId) ? messageId : null;
-    if (await updateClosure(run, act, { email: { ...claimed, sentAtMs: deps.now(), messageId: storedId } })) {
-      deps.log.info({ event: 'email-sent', incidentId, ...(storedId === null ? {} : { messageId: storedId }) });
-    }
+    ({ messageId } = await deps.ports.ses.sendEmail(request));
   } catch (error) {
     const errorName = error instanceof Error ? error.name : 'UnknownError';
     if (claimed.attempts >= EMAIL_SEND_ATTEMPTS) {
@@ -509,6 +506,13 @@ async function sendClaimed(run: Run, act: Pick<Act, 'incidentId' | 'version'>, c
     }
     await updateClosure(run, act, { email: { ...claimed, claimedAtMs: null } });
     deps.log.info({ event: 'email-attempt-failed', incidentId, attempt: claimed.attempts, errorName });
+    return;
+  }
+  // SES took the message, so a store fault recording it is not a failed send: it propagates with the
+  // claim still set, and the claim timeout, not an immediate retry, governs any further attempt.
+  const storedId = SES_ID_PATTERN.test(messageId) ? messageId : null;
+  if (await updateClosure(run, act, { email: { ...claimed, sentAtMs: deps.now(), messageId: storedId } })) {
+    deps.log.info({ event: 'email-sent', incidentId, ...(storedId === null ? {} : { messageId: storedId }) });
   }
 }
 

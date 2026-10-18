@@ -1588,6 +1588,40 @@ describe('each email attempt is claimed before the send and retried at most 3 ti
     expect((await storedClosure(deps, INCIDENT_ID, HOLD_CHECKED_AT_MS))?.email).toMatchObject({ attempts: 2, failed: false, messageId: 'fixture-message-1' });
   });
 
+  it.each([
+    { label: 'the first attempt', priorAttempts: 0 },
+    { label: 'the last attempt', priorAttempts: 2 },
+  ])('keeps the claim when recording $label as sent throws, so no copy goes out before the timeout and nothing is marked failed (WR-01)', async ({ priorAttempts }) => {
+    const { store, sesState } = await closedLaneScripted([]);
+    const quiet = buildTestActionRoot({ store, sesState, now: () => HOLD_CHECKED_AT_MS });
+    await runActionCycle(quiet.deps);
+    if (priorAttempts > 0) {
+      const closure = await storedClosure(quiet.deps, INCIDENT_ID, HOLD_CHECKED_AT_MS);
+      const spent = { kind: 'closed', attempts: priorAttempts, claimedAtMs: null, sentAtMs: null, messageId: null, failed: false };
+      await quiet.deps.ports.decisionStore.updateIfVersion(closureKey(INCIDENT_ID), closure?.version ?? -1, { email: spent }, HOLD_CHECKED_AT_MS);
+    }
+    const logLines: string[] = [];
+    const sendAtMs = HOLD_CHECKED_AT_MS + 60_000;
+    const { deps } = buildTestActionRoot({ store, sesState, now: () => sendAtMs, operator: OPERATOR, logSink: (line) => logLines.push(line) });
+    const decisionStore = deps.ports.decisionStore;
+    const failing = withStore(deps, {
+      updateIfVersion: async (key, expectedVersion, attributes, nowMs, expected) => {
+        const email = attributes.email as { sentAtMs?: unknown } | undefined;
+        if (typeof email?.sentAtMs === 'number') throw throttled();
+        return decisionStore.updateIfVersion(key, expectedVersion, attributes, nowMs, expected);
+      },
+    });
+
+    await runActionCycle(failing);
+    expect(sendsIssued(sesState)).toBe(1);
+    expect((await storedClosure(deps, INCIDENT_ID, sendAtMs))?.email).toMatchObject({ attempts: priorAttempts + 1, claimedAtMs: sendAtMs, sentAtMs: null, failed: false });
+    expect(loggedEvents(logLines, 'email-attempt-failed')).toEqual([]);
+    expect(loggedEvents(logLines, 'email-failed')).toEqual([]);
+
+    await runActionCycle(at(deps, sendAtMs + ACTION_FUNCTION_TIMEOUT_MS - 1));
+    expect(sendsIssued(sesState)).toBe(1);
+  });
+
   it('never sends one attempt twice from two runs reaching the closure together', async () => {
     const { store, sesState } = await closedLaneScripted([]);
     await runActionCycle(buildTestActionRoot({ store, sesState, now: () => HOLD_CHECKED_AT_MS }).deps);
