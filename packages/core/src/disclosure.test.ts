@@ -38,9 +38,11 @@ describe('disclosure constants', () => {
     }
   });
 
-  it('gives any machine-readable marker a header name SES accepts', () => {
-    const marker = (disclosure as Record<string, unknown>)['MODEL_TEXT_MARKER_HEADER'];
-    if (marker === undefined) return;
+  // docs/ai-act.md names this test as the one pinning the Article 50(2) header, so a missing export
+  // fails it rather than letting it pass with no assertion.
+  it('gives the machine-readable marker a header name SES accepts', () => {
+    const marker: unknown = (disclosure as Record<string, unknown>)['MODEL_TEXT_MARKER_HEADER'];
+    expect(marker).toEqual({ name: expect.any(String), value: expect.any(String) });
     const { name, value } = marker as { name: string; value: string };
     // SES MessageHeader: the name is printable ASCII 33 to 126 without a colon, at most 126 characters.
     expect(name).toMatch(/^[\x21-\x39\x3b-\x7e]{1,126}$/);
