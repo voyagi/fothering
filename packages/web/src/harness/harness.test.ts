@@ -2004,6 +2004,15 @@ describe('the built checks through the CLI and the e2e step (D-150, D-151)', () 
     ]);
   });
 
+  it('compareBuilds names a generated token sheet or _headers that differs or is missing', () => {
+    const first = plantSite({ 'index.html': 'a', 'tokens.css': ':root{--ground:#fff}', '_headers': '/*\n  X-A: one\n' });
+    const changed = plantSite({ 'index.html': 'a', 'tokens.css': ':root{--ground:#000}', '_headers': '/*\n  X-A: two\n' });
+    expect(compareBuilds(first.dist, changed.dist).sort()).toEqual([E2E_MESSAGES.buildDiffers('_headers'), E2E_MESSAGES.buildDiffers('tokens.css')].sort());
+    const bare = plantSite({ 'index.html': 'a' });
+    expect(compareBuilds(first.dist, bare.dist).sort()).toEqual([E2E_MESSAGES.buildMissing('_headers', bare.dist), E2E_MESSAGES.buildMissing('tokens.css', bare.dist)].sort());
+    expect(compareBuilds(first.dist, plantSite({ 'index.html': 'a', 'tokens.css': ':root{--ground:#fff}', '_headers': '/*\n  X-A: one\n' }).dist)).toEqual([]);
+  });
+
   it('runSiteE2e fails a dist over the file budget by name', async () => {
     const tree = plantSite({ 'index.html': page('<p>clean</p>') });
     const { code, lines } = await e2e(tree, { fileBudget: () => [{ kind: 'size', path: 'index.html', bytes: 26_214_400, limit: 26_214_400 }] });
