@@ -183,6 +183,23 @@ describe('loadReplayArtifact refusals', () => {
     expect(message).toMatch(/^packages\/web\/src\/fixtures\/capture-manifest\.json: not valid JSON/);
   });
 
+  it('stops the load on an artifact holding a real IPv4 or IPv6 address, naming the line and the kind', () => {
+    const text = readFileSync(join(FIXTURES, 'replay-incident.json'), 'utf8');
+    const plant = (name: string, address: string): string => {
+      const planted = text.replace('"Delivered, stream receipts"', `"Delivered, stream receipts, from ${address}"`);
+      expect(planted).not.toBe(text);
+      return loadError(plantProject(name, planted));
+    };
+    expect(plant('real-ipv4', '10.1.2.3')).toMatch(/^packages\/web\/src\/fixtures\/replay-incident\.json:\d+: an IP address outside 192\.0\.2\.0\/24/);
+    expect(plant('real-ipv6', '2a00:1450:4001:80b::200e')).toMatch(/^packages\/web\/src\/fixtures\/replay-incident\.json:\d+: an IPv6 address outside 2001:db8::\/32\./);
+  });
+
+  it('stops the load on a capture manifest holding a real address', () => {
+    const artifact = liveArtifact();
+    const manifest = { ...manifestFor(artifact), requestIds: ['from 10.1.2.3'] };
+    expect(loadError(plantProject('manifest-ipv4', JSON.stringify(artifact), JSON.stringify(manifest)))).toMatch(/^packages\/web\/src\/fixtures\/capture-manifest\.json:\d+: an IP address outside /);
+  });
+
   it('loads a live artifact whose complete manifest pins its hash', () => {
     const artifact = liveArtifact();
     const root = plantProject('live-complete', JSON.stringify(artifact), JSON.stringify(manifestFor(artifact)));
@@ -495,6 +512,17 @@ describe('fixtureFindings', () => {
   it('fails a copy holding an IP outside the documentation ranges', () => {
     const planted = shippedText.replace('"Delivered, stream receipts"', '"Delivered, stream receipts, from 10.1.2.3"');
     expect(fixtureFindings('replay-incident.json', planted)).toEqual([expect.stringMatching(/^replay-incident\.json:\d+: an IP address outside /)]);
+  });
+
+  it('fails a copy holding an IPv6 address outside the documentation range, and passes one inside it', () => {
+    for (const address of ['2a00:1450:4001:80b::200e', '2001:db9::1', '::1', 'fe80:0:0:0:0:0:0:1']) {
+      const planted = shippedText.replace('"Delivered, stream receipts"', `"Delivered, stream receipts, from ${address}"`);
+      expect(fixtureFindings('replay-incident.json', planted), address).toEqual([expect.stringMatching(/^replay-incident\.json:\d+: an IPv6 address outside 2001:db8::\/32$/)]);
+    }
+    for (const address of ['2001:db8::25', '2001:0DB8:85a3:0000:0000:8a2e:0370:7334', '2001:db8:ffff::']) {
+      const planted = shippedText.replace('"Delivered, stream receipts"', `"Delivered, stream receipts, from ${address}"`);
+      expect(fixtureFindings('replay-incident.json', planted), address).toEqual([]);
+    }
   });
 
   it('fails a copy holding a 12-digit number', () => {
