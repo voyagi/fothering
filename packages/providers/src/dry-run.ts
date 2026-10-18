@@ -53,12 +53,16 @@ const DEAD_LETTER_TARGET = new RegExp(`^${DEAD_LETTER_QUEUE_TARGET}$`);
 
 const recordKeySchema = z.object({ pk: z.string().regex(RECORD_PARTITION_KEY), sk: z.string().regex(RECORD_SORT_KEY) });
 const configurationSetSchema = z.string().regex(CONFIGURATION_SET_PATTERN);
+// A header name is held to the field-name letters RFC 5322 mail uses here, so no address or sentence can
+// ride along in one; a header value never reaches the line.
+const HEADER_NAME = /^[A-Za-z0-9-]{1,126}$/;
 const sendEmailSchema = z.object({
   from: z.string(),
   to: z.array(z.string()),
   subject: z.string(),
   text: z.string(),
   configurationSetName: configurationSetSchema.optional(),
+  headers: z.array(z.object({ name: z.string().regex(HEADER_NAME), value: z.string() })).optional(),
 });
 // Two integers and the model id, never a message: the request a model line records is built field by
 // field from counts, so no prompt or answer text can reach the line (T-02-10).
@@ -118,6 +122,7 @@ async function summarizeSend(request: unknown, context: SummaryContext): Promise
     recipients: email.to.map(pseudonym),
     subjectLength: email.subject.length,
     textLength: email.text.length,
+    ...(email.headers !== undefined ? { headers: email.headers.map((header) => header.name) } : {}),
   };
 }
 

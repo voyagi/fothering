@@ -1,7 +1,8 @@
+import { validateExplanation } from './agent-answer.js';
 import { ACTION_FUNCTION_TIMEOUT_MS, EMAIL_SEND_ATTEMPTS } from './close-values.js';
 import type { ActionRefusal, Closure, ClosureOutcome, EMAIL_KINDS, LANE_STATES, StoredDecision } from './closure.js';
 import type { ConfigurationRefusal } from './closeability.js';
-import { AUTOMATED_SENDER_FOOTER } from './disclosure.js';
+import { AUTOMATED_SENDER_FOOTER, MODEL_PARAGRAPH_LABEL, MODEL_TEXT_MARKER_HEADER } from './disclosure.js';
 import type { EvidenceRecord } from './evidence-record.js';
 import type { LaneMap } from './lanes.js';
 import { FIND_REOPEN_FUNCTION_COMMAND, REOPEN_FUNCTION_NAME_SLOT, incidentLimitSentence, reopenCommandFor, reputationResetSentence } from './reopen.js';
@@ -35,7 +36,7 @@ export const SECTION_HEADINGS = {
   happened: 'What happened',
   saw: 'What Fothering saw',
   found: 'What code found',
-  explanation: "The model's explanation",
+  explanation: MODEL_PARAGRAPH_LABEL,
   open: 'What stays open',
   app: 'What your app sees',
   reopen: 'How to reopen',
@@ -269,13 +270,19 @@ function notConfirmedHappened(closure: Closure): string[] {
   return [requested, ...(closure.outcome === 'pause-failed' ? pauseFailedLines(closure) : pauseUnknownLines(closure))];
 }
 
+// AC-20: the paragraph is a section of its own, so an email without it differs by that section alone.
+function explanationSection(paragraph: string | undefined): EmailSection[] {
+  return paragraph === undefined ? [] : [section(SECTION_HEADINGS.explanation, [paragraph])];
+}
+
 // A pause that did not take leaves the set sending, so there is nothing to reopen (D-111).
-function pausedSections(input: RenderInput, happened: readonly string[]): EmailSection[] {
+function pausedSections(input: RenderInput, happened: readonly string[], paragraph: string | undefined): EmailSection[] {
   const set = input.closure.configurationSet;
   const reopen = input.closure.outcome === 'pause-failed' ? [] : [section(SECTION_HEADINGS.reopen, reopenLines(set))];
   return [
     section(SECTION_HEADINGS.happened, happened),
     section(SECTION_HEADINGS.saw, sawLines(input.record)),
+    ...explanationSection(paragraph),
     section(SECTION_HEADINGS.open, openLines(input.closure, false)),
     section(SECTION_HEADINGS.app, [PAUSED_APP_SENTENCE]),
     ...reopen,
@@ -300,13 +307,14 @@ function foundLines(record: EvidenceRecord | undefined, configurationSet: string
   return lines.length > 0 ? lines : [`Lane: ${configurationSet}. Reason code: ${code}.`];
 }
 
-function unknownSections(input: RenderInput): EmailSection[] {
+function unknownSections(input: RenderInput, paragraph: string | undefined): EmailSection[] {
   const set = input.closure.configurationSet;
   const code = reasonCodeOf(input);
   return [
     section(SECTION_HEADINGS.happened, [`Fothering saw a spike on ${set}.`, 'Nothing was paused.', REASON_SENTENCES[code]]),
     section(SECTION_HEADINGS.saw, sawLines(input.record)),
     section(SECTION_HEADINGS.found, foundLines(input.record, set, code)),
+    ...explanationSection(paragraph),
     section(SECTION_HEADINGS.open, openLines(input.closure, true)),
     section(SECTION_HEADINGS.limits, [ACCOUNT_PAUSE_LIMIT_SENTENCE]),
     section(SECTION_HEADINGS.reference, referenceLines(input)),
@@ -318,9 +326,31 @@ function textOf(sections: readonly EmailSection[]): string {
   return `${body}\n\n${AUTOMATED_SENDER_FOOTER}\n`;
 }
 
-function sectionsOf(kind: EmailKind, input: RenderInput): EmailSection[] {
-  if (kind === 'unknown') return unknownSections(input);
-  return pausedSections(input, kind === 'closed' ? closedHappened(input.closure) : notConfirmedHappened(input.closure));
+function sectionsOf(kind: EmailKind, input: RenderInput, paragraph: string | undefined): EmailSection[] {
+  if (kind === 'unknown') return unknownSections(input, paragraph);
+  return pausedSections(input, kind === 'closed' ? closedHappened(input.closure) : notConfirmedHappened(input.closure), paragraph);
+}
+
+// U+2014 and U+2013, built from their numbers so this file holds only ASCII. A live answer can carry an
+// em dash the checks rightly let through, and the email prints it as a plain hyphen.
+const DASHES = new RegExp(`[${String.fromCodePoint(0x2014)}${String.fromCodePoint(0x2013)}]`, 'g');
+
+// R10 and AC-P6: an agent unknown keeps its paragraph, but a close the action refused does not, since the
+// paragraph explained a record that no longer drives the outcome, and a cap-reached DECISION has none.
+function mayShowModelText(input: RenderInput, kind: EmailKind): boolean {
+  if (kind !== 'unknown') return true;
+  const { closure, decision } = input;
+  return closure.reason === 'no-close' && decision?.outcome === 'unknown' && decision.reason !== 'cap-reached';
+}
+
+/** D-113: the stored explanation, only when it passes every check again against the record at render time. */
+export function modelParagraphOf(input: RenderInput): string | undefined {
+  const { record, decision } = input;
+  const kind = emailKindOf(input.closure.outcome);
+  if (record === undefined || decision?.explanation === undefined || kind === undefined || !mayShowModelText(input, kind)) return undefined;
+  const laneMapSets = input.laneMap.lanes.map((lane) => lane.configurationSet);
+  const verdict = validateExplanation(decision.explanation, { record, decision: decision.outcome, laneMapSets });
+  return verdict.ok ? decision.explanation.replace(DASHES, '-') : undefined;
 }
 
 function subjectTemplateOf(kind: EmailKind, outcome: ClosureOutcome): keyof typeof SUBJECTS {
@@ -333,11 +363,14 @@ export function renderOperatorEmail(input: RenderInput): RenderedEmail | undefin
   const { outcome } = input.closure;
   const kind = emailKindOf(outcome);
   if (kind === undefined || outcome === null) return undefined;
-  const sections = sectionsOf(kind, input);
-  return { kind, subject: subjectFor(subjectTemplateOf(kind, outcome), input.closure.configurationSet), text: textOf(sections), sections, headers: [] };
-}
-
-export function modelParagraphOf(input: RenderInput): string | undefined {
-  void input;
-  return undefined;
+  const paragraph = modelParagraphOf(input);
+  const sections = sectionsOf(kind, input, paragraph);
+  return {
+    kind,
+    subject: subjectFor(subjectTemplateOf(kind, outcome), input.closure.configurationSet),
+    text: textOf(sections),
+    sections,
+    // Article 50(2): the machine-readable mark rides only on an email that shows model text.
+    headers: paragraph === undefined ? [] : [MODEL_TEXT_MARKER_HEADER],
+  };
 }

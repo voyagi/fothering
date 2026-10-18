@@ -309,7 +309,8 @@ describe('an incident where nothing was paused renders the unknown path (R10)', 
 
   it('names the lane and the reason code when the record holds neither question nor fix, or is absent (AC-E30)', () => {
     for (const record of [RECORD, undefined]) {
-      const found = sectionText(render(refusedClosure('record-too-old'), CLOSE_DECISION, record), SECTION_HEADINGS.found);
+      const email = renderOperatorEmail({ closure: refusedClosure('record-too-old'), record, decision: CLOSE_DECISION, laneMap: LANE_MAP });
+      const found = sectionText(email, SECTION_HEADINGS.found);
       expect(found).toContain(SET);
       expect(found).toContain('record-too-old');
     }
@@ -690,7 +691,9 @@ describe('a close the action refused carries the template alone (AC-P6, R10)', (
   });
 
   it('shows no model text when the record is absent', () => {
-    expect(render(refusedClosure('no-close'), AGENT_UNKNOWN, undefined)?.text).not.toContain(MODEL_PARAGRAPH_LABEL);
+    const email = renderOperatorEmail({ closure: refusedClosure('no-close'), record: undefined, decision: AGENT_UNKNOWN, laneMap: LANE_MAP });
+    expect(email?.kind).toBe('unknown');
+    expect(email?.text).not.toContain(MODEL_PARAGRAPH_LABEL);
   });
 });
 

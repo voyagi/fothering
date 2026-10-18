@@ -37,13 +37,21 @@ export function createSesWrites(options: CreateSesWritesOptions): SesWritePort {
     },
     pauseConfigurationSet: (configurationSet) => putSending(configurationSet, false),
     reopenConfigurationSet: (configurationSet) => putSending(configurationSet, true),
-    // A plain text body and nothing else: no reply-to, headers, attachments, tenant or list options (D-114).
+    // A plain text body, plus the request's headers when it carries any, which is only ever the Article
+    // 50(2) marker: no reply-to, attachments, tenant or list options (D-114).
     async sendEmail(request) {
+      const headers = request.headers?.map(({ name, value }) => ({ Name: name, Value: value }));
       const response = await options.client().send(
         new SendEmailCommand({
           FromEmailAddress: request.from,
           Destination: { ToAddresses: request.to },
-          Content: { Simple: { Subject: { Data: request.subject }, Body: { Text: { Data: request.text, Charset: 'UTF-8' } } } },
+          Content: {
+            Simple: {
+              Subject: { Data: request.subject },
+              Body: { Text: { Data: request.text, Charset: 'UTF-8' } },
+              ...(headers === undefined ? {} : { Headers: headers }),
+            },
+          },
           ...(request.configurationSetName === undefined ? {} : { ConfigurationSetName: request.configurationSetName }),
         }),
       );

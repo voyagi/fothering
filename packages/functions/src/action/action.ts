@@ -519,6 +519,7 @@ async function sendOperatorEmail(run: Run, closure: Closure): Promise<void> {
     subject: rendered.subject,
     text: rendered.text,
     configurationSetName: addresses.configurationSet,
+    ...(rendered.headers.length === 0 ? {} : { headers: rendered.headers }),
   });
 }
 
