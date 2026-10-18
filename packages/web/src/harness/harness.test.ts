@@ -1133,6 +1133,7 @@ const healthyReplay =(width: number): ReplayReading => ({
   boxes: [controlBoxes(), controlBoxes(), controlBoxes(0.5), controlBoxes()],
   afterNext: [2, 3, 4],
   afterFourth: 4,
+  buttons: [1, 2, 3, 4],
   previousDisabledFirst: true,
   nextDisabledLast: true,
   deepLinks: [1, 2, 3, 4].map((step) => ({ hash: `#step-${String(step)}`, shown: step })),
@@ -1157,6 +1158,10 @@ describe('replayVerdict (AC-4, AC-6, AC-7, AC-10, AC-E5, AC-E6, AC-E30)', () => 
 
   it('fails three Next activations from step 1 that do not reach step 4', () => {
     expect(replayReason({ ...healthyReplay(320), afterNext: [2, 3, 3] })).toBe(E2E_MESSAGES.replayNext(320, [2, 3, 3]));
+  });
+
+  it('fails a step button that shows another step', () => {
+    expect(replayReason({ ...healthyReplay(320), buttons: [1, 2, 2, 4] })).toBe(E2E_MESSAGES.replayButtons(320, [1, 2, 2, 4]));
   });
 
   it('fails Previous enabled on step 1', () => {
@@ -1428,7 +1433,9 @@ describe('the built checks through the CLI and the e2e step (D-150, D-151)', () 
   // What a healthy site driver prints: a Dark stored on a light OS, Device following the OS with no
   // reload, Dark stored on a dark OS kept when the OS turns light, then the switch, fonts and
   // requests of every route and the storage keys left after using the switch.
-  function siteLines(overrides: SiteLines = {}, consoleErrors: readonly string[] = [], routeOverrides: RouteLines = {}, widthOverrides: WidthLines = {}): string[] {
+  const healthyReplayLines = (): string[] => [320, 1440].flatMap((width) => [`REPLAY ${JSON.stringify(healthyReplay(width))}`, `NOSCRIPT ${JSON.stringify(healthyNoScript(width))}`]);
+
+  function siteLines(overrides: SiteLines = {}, consoleErrors: readonly string[] = [], routeOverrides: RouteLines = {}, widthOverrides: WidthLines = {}, replayLines: readonly string[] = healthyReplayLines()): string[] {
     const checks: SiteLines = {
       THEME: DARK_PINNED,
       DEVICE: { dark: reading(null, DARK_GROUND), light: reading(null, LIGHT_GROUND) },
@@ -1444,6 +1451,7 @@ describe('the built checks through the CLI and the e2e step (D-150, D-151)', () 
       ...Object.entries(checks).flatMap(([check, value]) => printed(check, value)),
       ...Object.entries(perRoute).flatMap(([check, make]) => SITE_ROUTES.flatMap((route) => printed(check, make(route)))),
       ...Object.entries(perWidth).flatMap(([check, make]) => SITE_ROUTES.flatMap((route) => widthsOf(check).flatMap((width) => printed(check, make(route, width))))),
+      ...replayLines,
       ...consoleErrors.map((text) => `CONSOLE ${JSON.stringify({ type: 'error', text })}`),
     ];
   }
@@ -1451,6 +1459,7 @@ describe('the built checks through the CLI and the e2e step (D-150, D-151)', () 
   const passingSize = (): SizeRun => ({ status: 0, output: '  Size limit: 2 kB\n  Size:       688 B brotlied' });
   const REFUSED_ARTIFACT = "packages/web/src/fixtures/replay-incident.json: events[0].provenance: 'measured' is not one of doc-derived, simulator-captured, live, generated. Use one of those values.";
   const refusedCopy = (): CopyBuildRun => ({ status: 1, output: REFUSED_ARTIFACT, folder: join(PLANT, 'gone') });
+  const judgedCopy = (): CopyBuildRun => ({ status: 0, output: '', folder: join(PLANT, 'gone'), verdict: { ok: true } });
 
   // The rendered step needs a launcher, the Workers config and the driver template under the planted
   // root; the stand-in launcher only reads the job out of the written driver and prints the lines.
@@ -1465,7 +1474,7 @@ describe('the built checks through the CLI and the e2e step (D-150, D-151)', () 
   async function e2e(tree: ReturnType<typeof plantDist>, extra: Partial<SiteE2eOptions> = {}, site?: SiteScenario): Promise<{ code: number; lines: string[] }> {
     const lines: string[] = [];
     const globalModules = plantBrowser(tree, site);
-    const code = await runSiteE2e({ repoRoot: tree.root, globalModules, print: (line) => lines.push(line), clientSecretsScript: SECRETS_SCRIPT, secondBuild: copyDist(tree.dist), sizeLimit: passingSize, brokenArtifactBuild: refusedCopy, ...extra });
+    const code = await runSiteE2e({ repoRoot: tree.root, globalModules, print: (line) => lines.push(line), clientSecretsScript: SECRETS_SCRIPT, secondBuild: copyDist(tree.dist), sizeLimit: passingSize, brokenArtifactBuild: refusedCopy, provenanceCopyBuild: judgedCopy, causeCopyBuild: judgedCopy, ...extra });
     allOutput.push(...lines);
     return { code, lines };
   }
@@ -1483,8 +1492,8 @@ describe('the built checks through the CLI and the e2e step (D-150, D-151)', () 
     const { code, lines } = await e2e(tree);
     expect(code).toBe(0);
     const steps = lines.filter((line) => line.startsWith('[e2e] step '));
-    expect(steps).toEqual(['client-secrets', 'file-budget', 'size', 'built-checks', 'second-build', 'copy-build', 'rendered'].map((name) => E2E_MESSAGES.step(name)));
-    expect(lines.at(-1)).toBe(E2E_MESSAGES.pass(2, 7));
+    expect(steps).toEqual(['client-secrets', 'file-budget', 'size', 'built-checks', 'second-build', 'copy-build', 'copy-provenance', 'copy-cause', 'rendered'].map((name) => E2E_MESSAGES.step(name)));
+    expect(lines.at(-1)).toBe(E2E_MESSAGES.pass(2, 9));
     expect(existsSync(join(tree.root, 'dist', 'site-second-build'))).toBe(false);
   });
 
@@ -1528,6 +1537,30 @@ describe('the built checks through the CLI and the e2e step (D-150, D-151)', () 
     const unnamed = await e2e(renderedTree(), { brokenArtifactBuild: () => ({ status: 1, output: 'vite exploded', folder: join(PLANT, 'gone') }) });
     expect(unnamed.lines.at(-1)).toBe(E2E_MESSAGES.fail(E2E_MESSAGES.copyBuildUnnamed('vite exploded')));
     expect(unnamed.lines).not.toContain(E2E_MESSAGES.step('rendered'));
+  });
+
+  it('the provenance and cause copy steps fail a copy whose verdict fails, one nothing judged and one that did not build', async () => {
+    const failing = (): CopyBuildRun => ({ status: 0, output: '', folder: join(PLANT, 'gone'), verdict: { ok: false, reason: E2E_MESSAGES.copyStamp('/replay/', 'FIXTURE RUN', 'SIMULATOR RUN') } });
+    const stamp = await e2e(renderedTree(), { provenanceCopyBuild: failing });
+    expect(stamp.lines.at(-1)).toBe(E2E_MESSAGES.fail(E2E_MESSAGES.copyStamp('/replay/', 'FIXTURE RUN', 'SIMULATOR RUN')));
+    const unjudged = await e2e(renderedTree(), { causeCopyBuild: () => ({ status: 0, output: '', folder: join(PLANT, 'gone') }) });
+    expect(unjudged.lines.at(-1)).toBe(E2E_MESSAGES.fail(E2E_MESSAGES.copyVariantUnjudged('cause')));
+    const broken = await e2e(renderedTree(), { causeCopyBuild: () => ({ status: 1, output: 'astro said no', folder: join(PLANT, 'gone') }) });
+    expect(broken.lines.at(-1)).toBe(E2E_MESSAGES.fail(E2E_MESSAGES.copyVariantFailed('cause', 1, 'astro said no')));
+    expect(broken.lines).not.toContain(E2E_MESSAGES.step('rendered'));
+  });
+
+  it('the rendered step judges the replay and no-JavaScript lines at both widths, and fails a missing or failing one by name', async () => {
+    const healthy = await e2e(renderedTree());
+    expect(healthy.lines.find((line) => line.startsWith('[e2e] rendered REPLAY: ok, '))).toBeDefined();
+    expect(healthy.lines.find((line) => line.startsWith('[e2e] rendered NOSCRIPT: ok, '))).toContain('js class removed');
+    const missing = await e2e(renderedTree(), {}, { lines: siteLines({}, [], {}, {}, healthyReplayLines().filter((line) => !line.startsWith('REPLAY {"route":"/replay/","width":320'))) });
+    expect(missing.lines).toContain(E2E_MESSAGES.renderedFailed('REPLAY', E2E_MESSAGES.renderedMissingRoute('REPLAY', '/replay/ at 320 px')));
+    const moved = [320, 1440].flatMap((width) => [`REPLAY ${JSON.stringify({ ...healthyReplay(width), sameStepMutations: width === 1440 ? 2 : 0 })}`, `NOSCRIPT ${JSON.stringify({ ...healthyNoScript(width), controls: width === 320 ? 1 : 0 })}`]);
+    const failing = await e2e(renderedTree(), {}, { lines: siteLines({}, [], {}, {}, moved) });
+    expect(failing.code).toBe(1);
+    expect(failing.lines).toContain(E2E_MESSAGES.renderedFailed('REPLAY', `/replay/: ${E2E_MESSAGES.replaySameStep(1440, 2)}`));
+    expect(failing.lines).toContain(E2E_MESSAGES.renderedFailed('NOSCRIPT', `/replay/: ${E2E_MESSAGES.noScriptControls(320, 1)}`));
   });
 
   it('the copy-build step fails when the project copy folder is left behind', async () => {
@@ -1672,21 +1705,21 @@ describe('the built checks through the CLI and the e2e step (D-150, D-151)', () 
     const tree = renderedTree();
     const lines: string[] = [];
     const absent = join(tree.root, 'no-global');
-    expect(await runSiteE2e({ repoRoot: tree.root, globalModules: absent, print: (line) => lines.push(line), clientSecretsScript: SECRETS_SCRIPT, secondBuild: copyDist(tree.dist), sizeLimit: passingSize, brokenArtifactBuild: refusedCopy })).toBe(1);
+    expect(await runSiteE2e({ repoRoot: tree.root, globalModules: absent, print: (line) => lines.push(line), clientSecretsScript: SECRETS_SCRIPT, secondBuild: copyDist(tree.dist), sizeLimit: passingSize, brokenArtifactBuild: refusedCopy, provenanceCopyBuild: judgedCopy, causeCopyBuild: judgedCopy })).toBe(1);
     expect(lines.at(-1)).toBe(E2E_MESSAGES.fail(A11Y_MESSAGES.devBrowserMissing(join(absent, 'dev-browser'))));
     const globalModules = plantBrowser(tree);
     rmSync(join(tree.root, 'scripts', 'site.devbrowser.js'));
     lines.length = 0;
-    expect(await runSiteE2e({ repoRoot: tree.root, globalModules, print: (line) => lines.push(line), clientSecretsScript: SECRETS_SCRIPT, secondBuild: copyDist(tree.dist), sizeLimit: passingSize, brokenArtifactBuild: refusedCopy })).toBe(1);
+    expect(await runSiteE2e({ repoRoot: tree.root, globalModules, print: (line) => lines.push(line), clientSecretsScript: SECRETS_SCRIPT, secondBuild: copyDist(tree.dist), sizeLimit: passingSize, brokenArtifactBuild: refusedCopy, provenanceCopyBuild: judgedCopy, causeCopyBuild: judgedCopy })).toBe(1);
     expect(lines.at(-1)).toBe(E2E_MESSAGES.fail(A11Y_MESSAGES.templateMissing(join(tree.root, 'scripts', 'site.devbrowser.js'))));
     write(join(tree.root, 'scripts', 'site.devbrowser.js'), 'console.log("done");\n');
     lines.length = 0;
-    expect(await runSiteE2e({ repoRoot: tree.root, globalModules, print: (line) => lines.push(line), clientSecretsScript: SECRETS_SCRIPT, secondBuild: copyDist(tree.dist), sizeLimit: passingSize, brokenArtifactBuild: refusedCopy })).toBe(1);
+    expect(await runSiteE2e({ repoRoot: tree.root, globalModules, print: (line) => lines.push(line), clientSecretsScript: SECRETS_SCRIPT, secondBuild: copyDist(tree.dist), sizeLimit: passingSize, brokenArtifactBuild: refusedCopy, provenanceCopyBuild: judgedCopy, causeCopyBuild: judgedCopy })).toBe(1);
     expect(lines.at(-1)).toBe(E2E_MESSAGES.fail(A11Y_MESSAGES.templateTokens(join(tree.root, 'scripts', 'site.devbrowser.js'), 0)));
     plantBrowser(tree);
     write(join(tree.root, 'packages', 'web', 'wrangler.jsonc'), '{ "assets": { "html_handling": "none", "not_found_handling": "404-page" } }');
     lines.length = 0;
-    expect(await runSiteE2e({ repoRoot: tree.root, globalModules, print: (line) => lines.push(line), clientSecretsScript: SECRETS_SCRIPT, secondBuild: copyDist(tree.dist), sizeLimit: passingSize, brokenArtifactBuild: refusedCopy })).toBe(1);
+    expect(await runSiteE2e({ repoRoot: tree.root, globalModules, print: (line) => lines.push(line), clientSecretsScript: SECRETS_SCRIPT, secondBuild: copyDist(tree.dist), sizeLimit: passingSize, brokenArtifactBuild: refusedCopy, provenanceCopyBuild: judgedCopy, causeCopyBuild: judgedCopy })).toBe(1);
     expect(lines.at(-1)).toMatch(/^\[e2e\] FAIL: the preview server did not start: .*assets\.html_handling is "none"/);
     allOutput.push(...lines);
   });
@@ -1783,7 +1816,7 @@ describe('the built checks through the CLI and the e2e step (D-150, D-151)', () 
       flowNoControl: [320], flowControlWithoutMotion: [320], flowSmallControl: [320, 40, 40], flowStillRunning: [320, 1], flowLabel: [320, ['Stop flow']],
       flowReloadRuns: [320, 1], flowReduced: [320, 1], flowStoredRunning: [320], flowStoredStopped: [320, 1], flowTabUnreached: [320], flowTabLate: [320],
       copyBuildPassed: [], copyBuildUnnamed: ['x'], copyBuildLeft: ['d'], tagStuck: [1280, 5], tagMeetsValve: [1280], noHungTag: [],
-      replayNext: [320, [2, 3]], replayFourth: [320, 1], replayPreviousEnabled: [320], replayNextEnabled: [320], replayBoxesMissing: [320],
+      replayNext: [320, [2, 3]], replayFourth: [320, 1], replayButtons: [320, [1]], replayPreviousEnabled: [320], replayNextEnabled: [320], replayBoxesMissing: [320],
       replayBoxMoved: [320, 'Next', 2, 3], replayDeepLink: [320, '#step-2', 1], replayDeepLinkMissing: [320, '#step-2'], replayInvalidHash: [320, '#step-0', 2],
       replaySameStep: [320, 1], replayHistory: [320, 2, 3], replayArrow: [320, 1, 1], replayArrowRadio: [320, 2, 3], replayArrowModifier: [320, 'Alt', 2, 3],
       noScriptPanels: [320, ['1']], noScriptControls: [320, 1], noScriptBoard: [320, '3', false], noScriptNoBoard: [320], noScriptTag: [320],

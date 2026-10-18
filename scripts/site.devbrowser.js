@@ -340,6 +340,118 @@ for (const route of JOB.routes) {
   console.log('NARROW ' + JSON.stringify(await narrowRun(route)));
 }
 
+// The replay's stepping, read from the page itself: the step is the one panel the stylesheet shows,
+// and control boxes are read at the top of the page, where a narrow screen's sticky controls still
+// sit in the flow.
+const REPLAY_CONTROLS = ['[data-replay-previous]', '[data-replay-next]', '[data-replay-goto="1"]', '[data-replay-goto="2"]', '[data-replay-goto="3"]', '[data-replay-goto="4"]'];
+const shownStep = () => page.evaluate(() => {
+  const shown = Array.from(document.querySelectorAll('[data-wordcount="step"]')).filter((panel) => getComputedStyle(panel).display !== 'none');
+  return shown.length === 1 ? Number(shown[0].getAttribute('data-steps')) : 0;
+});
+const controlBoxes = () => page.evaluate((selectors) => {
+  window.scrollTo(0, 0);
+  return selectors.map((selector) => document.querySelector(selector)).filter((element) => element !== null).map((element) => {
+    const box = element.getBoundingClientRect();
+    return { left: box.left, top: box.top, right: box.right, bottom: box.bottom };
+  });
+}, REPLAY_CONTROLS);
+const isDisabled = (selector) => page.evaluate((target) => {
+  const element = document.querySelector(target);
+  return element !== null && element.disabled === true;
+}, selector);
+// A hash-only goto stays in the same document, so every load is followed by a reload.
+const loadReplay = async (width, hash) => {
+  await page.setViewportSize({ width, height: 900 });
+  await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'reduce' });
+  await page.goto(JOB.base + JOB.replayRoute + hash, { waitUntil: 'load' });
+  await page.reload({ waitUntil: 'load' });
+  await settle();
+};
+const pressMove = async (focusSelector, key) => {
+  const before = await shownStep();
+  await page.focus(focusSelector);
+  await page.keyboard.press(key);
+  await settle();
+  return { before, after: await shownStep() };
+};
+
+const replayRun = async (width) => {
+  await loadReplay(width, '');
+  const historyBefore = await page.evaluate(() => window.history.length);
+  const boxes = [await controlBoxes()];
+  const previousDisabledFirst = await isDisabled('[data-replay-previous]');
+  const afterNext = [];
+  for (let step = 0; step < 3; step += 1) {
+    await page.click('[data-replay-next]');
+    afterNext.push(await shownStep());
+    boxes.push(await controlBoxes());
+  }
+  const nextDisabledLast = await isDisabled('[data-replay-next]');
+  // A disabled button ignores a click, which is what a fourth activation must do.
+  await page.evaluate(() => document.querySelector('[data-replay-next]').click());
+  const afterFourth = await shownStep();
+  const buttons = [];
+  for (const step of [1, 2, 3, 4]) {
+    await page.click('[data-replay-goto="' + step + '"]');
+    buttons.push(await shownStep());
+  }
+  await page.click('[data-replay-previous]');
+  const historyAfter = await page.evaluate(() => window.history.length);
+  const deepLinks = [];
+  for (const step of [1, 2, 3, 4]) {
+    await loadReplay(width, '#step-' + step);
+    deepLinks.push({ hash: '#step-' + step, shown: await shownStep() });
+  }
+  const invalid = [];
+  for (const hash of JOB.invalidHashes) {
+    await loadReplay(width, hash);
+    invalid.push({ hash, shown: await shownStep() });
+  }
+  await loadReplay(width, '#step-2');
+  const sameStepMutations = await page.evaluate(() => new Promise((resolve) => {
+    let count = 0;
+    const observer = new window.MutationObserver((records) => { count += records.length; });
+    observer.observe(document.documentElement, { attributes: true, childList: true, characterData: true, subtree: true });
+    window.dispatchEvent(new window.HashChangeEvent('hashchange'));
+    window.requestAnimationFrame(() => window.requestAnimationFrame(() => {
+      observer.disconnect();
+      resolve(count);
+    }));
+  }));
+  await loadReplay(width, '');
+  const arrow = await pressMove('[data-replay-goto="1"]', 'ArrowRight');
+  const radio = await pressMove('input[name="theme"]:checked', 'ArrowRight');
+  const modifiers = [];
+  for (const modifier of ['Alt', 'Control', 'Meta', 'Shift']) {
+    modifiers.push({ modifier, ...(await pressMove('[data-replay-goto="2"]', modifier + '+ArrowRight')) });
+  }
+  return {
+    route: JOB.replayRoute, width, boxes, afterNext, afterFourth, buttons, previousDisabledFirst, nextDisabledLast,
+    deepLinks, invalid, sameStepMutations, historyBefore, historyAfter, arrow, radio, modifiers,
+  };
+};
+
+// The stylesheet reads only the root's js class, so removing it gives the no-JavaScript reading.
+const noScriptRun = async (width) => {
+  await loadReplay(width, '');
+  return page.evaluate((args) => {
+    document.documentElement.classList.remove('js');
+    const shown = (element) => element.getClientRects().length > 0 && getComputedStyle(element).visibility !== 'hidden';
+    const panels = Array.from(document.querySelectorAll('[data-wordcount="step"]')).filter(shown).map((panel) => panel.getAttribute('data-steps'));
+    const controls = args.selectors.map((selector) => document.querySelector(selector)).filter((element) => element !== null && shown(element)).length;
+    const boardParts = Array.from(document.querySelectorAll('svg[data-drawing="board"] [data-steps]')).map((part) => ({ steps: part.getAttribute('data-steps'), displayed: part.getClientRects().length > 0 }));
+    const tag = document.querySelector('[data-tag]');
+    return { route: args.route, width: args.width, panels, controls, boardParts, tagShown: tag !== null && shown(tag) };
+  }, { route: JOB.replayRoute, width, selectors: REPLAY_CONTROLS });
+};
+
+if (JOB.routes.includes(JOB.replayRoute)) {
+  for (const width of JOB.widths) {
+    console.log('REPLAY ' + JSON.stringify(await replayRun(width)));
+    console.log('NOSCRIPT ' + JSON.stringify(await noScriptRun(width)));
+  }
+}
+
 const storage = await page.evaluate(() => {
   const keysOf = (area) => {
     const keys = [];

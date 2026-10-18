@@ -12,9 +12,11 @@ import {
   type DriverRun,
 } from './dev-browser.js';
 import { startPreviewServer, type PreviewServer } from './preview-server.js';
-import { filesIn, loadBuiltSite, NoBuiltPagesError, routeOf, type BuiltSite } from '../checks/built-site.js';
+import { filesIn, loadBuiltSite, NoBuiltPagesError, routeOf, textOf, walk, type BuiltElement, type BuiltSite } from '../checks/built-site.js';
 import { checkFileBudget, isRegisteredRule, runBuiltChecks, type BudgetViolation, type CheckContext, type Finding } from '../checks/rules.js';
 import { BANNED_NAMES, CONSOLE_DELETE_PHRASES, REPLY_PROMISE_PHRASES, REPUTATION_PAGE_URL } from '../site/content.js';
+import type { Provenance } from '@fothering/core/records';
+import { PROVENANCE_LABELS } from '../site/labels.js';
 import { buildReplayView, loadReplayArtifact } from '../site/replay-view.js';
 import { ROUTES, SITE_ORIGIN, sitemapUrls } from '../site/route-list.js';
 import { HEAD_SCRIPT, themedValue, TOKENS } from '../theme/head-script.js';
@@ -511,6 +513,8 @@ export interface ReplayReading {
   readonly boxes: readonly (readonly Box[])[];
   readonly afterNext: readonly number[];
   readonly afterFourth: number;
+  // The step shown after activating each step button, 1 to 4.
+  readonly buttons: readonly number[];
   readonly previousDisabledFirst: boolean;
   readonly nextDisabledLast: boolean;
   readonly deepLinks: readonly { readonly hash: string; readonly shown: number }[];
@@ -523,8 +527,59 @@ export interface ReplayReading {
   readonly modifiers: readonly (StepMove & { readonly modifier: string })[];
 }
 
-export function replayVerdict(_reading: ReplayReading): Verdict {
-  return { ok: true };
+const BOX_TOLERANCE = 1;
+const STEP_COUNT = 4;
+const boxDelta = (first: Box, second: Box): number =>
+  Math.max(Math.abs(first.left - second.left), Math.abs(first.top - second.top), Math.abs(first.right - second.right), Math.abs(first.bottom - second.bottom));
+
+// AC-6: each control's box on steps 2 to 4 against its box on step 1.
+function boxReasons(reading: ReplayReading): string[] {
+  const { boxes, width } = reading;
+  if (boxes.length !== STEP_COUNT || boxes.some((step) => step.length !== REPLAY_CONTROLS.length)) return [E2E_MESSAGES.replayBoxesMissing(width)];
+  const [first = []] = boxes;
+  return boxes.slice(1).flatMap((step, offset) => step.flatMap((controlBox, index) => {
+    const reference = first[index];
+    const delta = reference === undefined ? 0 : boxDelta(reference, controlBox);
+    return delta > BOX_TOLERANCE ? [E2E_MESSAGES.replayBoxMoved(width, REPLAY_CONTROLS[index] ?? '', offset + 2, delta)] : [];
+  }));
+}
+
+function loadReasons(width: number, readings: ReplayReading['deepLinks'], expected: readonly (readonly [string, number])[], message: (hash: string, shown: number) => string): string[] {
+  const byHash = new Map(readings.map((item) => [item.hash, item.shown]));
+  return expected.flatMap(([hash, step]) => {
+    const shown = byHash.get(hash);
+    if (shown === undefined) return [E2E_MESSAGES.replayDeepLinkMissing(width, hash)];
+    return shown === step ? [] : [message(hash, shown)];
+  });
+}
+
+function keyReasons(reading: ReplayReading): string[] {
+  const { width, arrow, radio, modifiers } = reading;
+  return [
+    ...(arrow.after === arrow.before + 1 ? [] : [E2E_MESSAGES.replayArrow(width, arrow.before, arrow.after)]),
+    ...(radio.after === radio.before ? [] : [E2E_MESSAGES.replayArrowRadio(width, radio.before, radio.after)]),
+    ...modifiers.filter((item) => item.after !== item.before).map((item) => E2E_MESSAGES.replayArrowModifier(width, item.modifier, item.before, item.after)),
+  ];
+}
+
+const DEEP_LINKS: readonly (readonly [string, number])[] = [1, 2, 3, 4].map((step) => [`#step-${String(step)}`, step] as const);
+
+// AC-4, AC-6, AC-7, AC-10, AC-E5, AC-E6 and AC-E30, read from one real-browser run at one width.
+export function replayVerdict(reading: ReplayReading): Verdict {
+  const { width } = reading;
+  const reasons: string[] = [];
+  if (reading.afterNext.join(',') !== '2,3,4') reasons.push(E2E_MESSAGES.replayNext(width, reading.afterNext));
+  if (reading.afterFourth !== STEP_COUNT) reasons.push(E2E_MESSAGES.replayFourth(width, reading.afterFourth));
+  if (reading.buttons.join(',') !== '1,2,3,4') reasons.push(E2E_MESSAGES.replayButtons(width, reading.buttons));
+  if (!reading.previousDisabledFirst) reasons.push(E2E_MESSAGES.replayPreviousEnabled(width));
+  if (!reading.nextDisabledLast) reasons.push(E2E_MESSAGES.replayNextEnabled(width));
+  reasons.push(...boxReasons(reading));
+  reasons.push(...loadReasons(width, reading.deepLinks, DEEP_LINKS, (hash, shown) => E2E_MESSAGES.replayDeepLink(width, hash, shown)));
+  reasons.push(...loadReasons(width, reading.invalid, REPLAY_INVALID_HASHES.map((hash) => [hash, 1] as const), (hash, shown) => E2E_MESSAGES.replayInvalidHash(width, hash, shown)));
+  if (reading.sameStepMutations > 0) reasons.push(E2E_MESSAGES.replaySameStep(width, reading.sameStepMutations));
+  if (reading.historyAfter !== reading.historyBefore) reasons.push(E2E_MESSAGES.replayHistory(width, reading.historyBefore, reading.historyAfter));
+  reasons.push(...keyReasons(reading));
+  return verdictOf(reasons);
 }
 
 export interface NoScriptReading {
@@ -537,16 +592,59 @@ export interface NoScriptReading {
   readonly tagShown: boolean;
 }
 
-export function noScriptVerdict(_reading: NoScriptReading): Verdict {
-  return { ok: true };
+const PAUSED_STEP = '3';
+
+// AC-10 and AC-E7: with the js class gone the stylesheet alone shows every panel in order, hides
+// every step control, and holds the board at the paused step with its tag.
+export function noScriptVerdict(reading: NoScriptReading): Verdict {
+  const { width } = reading;
+  const reasons: string[] = [];
+  if (reading.panels.join(',') !== '1,2,3,4') reasons.push(E2E_MESSAGES.noScriptPanels(width, reading.panels));
+  if (reading.controls > 0) reasons.push(E2E_MESSAGES.noScriptControls(width, reading.controls));
+  if (reading.boardParts.length === 0) reasons.push(E2E_MESSAGES.noScriptNoBoard(width));
+  for (const part of reading.boardParts) {
+    if (part.displayed !== part.steps.split(' ').includes(PAUSED_STEP)) reasons.push(E2E_MESSAGES.noScriptBoard(width, part.steps, part.displayed));
+  }
+  if (!reading.tagShown) reasons.push(E2E_MESSAGES.noScriptTag(width));
+  return verdictOf(reasons);
 }
 
-export function provenanceCopyVerdict(_site: BuiltSite, _stamp: string): Verdict {
-  return { ok: true };
+const LANDING = '/';
+const REPLAY = '/replay/';
+const hasClass = (element: BuiltElement, name: string): boolean => (element.attrs.class ?? '').split(/\s+/).includes(name);
+
+function elementsWhere(root: BuiltElement, test: (element: BuiltElement) => boolean): BuiltElement[] {
+  const found: BuiltElement[] = [];
+  walk(root, (element) => {
+    if (test(element)) found.push(element);
+  });
+  return found;
 }
 
-export function causeCopyVerdict(_site: BuiltSite, _cause: { readonly oldValue: string; readonly newCause: string }): Verdict {
-  return { ok: true };
+// AC-14: the stamp on the landing tag and on the replay both follow the copy's provenance.
+export function provenanceCopyVerdict(site: BuiltSite, stamp: string): Verdict {
+  const reasons = [LANDING, REPLAY].flatMap((route) => {
+    const built = site.pages.find((candidate) => candidate.route === route);
+    const stamps = built === undefined ? [] : elementsWhere(built.root, (element) => hasClass(element, 'stamp')).map((element) => textOf(element));
+    if (stamps.length === 0) return [E2E_MESSAGES.copyStampMissing(route)];
+    return stamps.filter((text) => text !== stamp).map((text) => E2E_MESSAGES.copyStamp(route, text, stamp));
+  });
+  return verdictOf(reasons);
+}
+
+// AC-17: the copy's cause shows on the landing tag and in step 2, and the old value on no page.
+export function causeCopyVerdict(site: BuiltSite, cause: { readonly oldValue: string; readonly newCause: string }): Verdict {
+  const landing = site.pages.find((candidate) => candidate.route === LANDING);
+  const replay = site.pages.find((candidate) => candidate.route === REPLAY);
+  const tags = landing === undefined ? [] : elementsWhere(landing.root, (element) => element.attrs['data-tag'] !== undefined);
+  const stepTwo = replay === undefined ? [] : elementsWhere(replay.root, (element) => element.attrs['data-wordcount'] === 'step' && element.attrs['data-steps'] === '2');
+  const reasons: string[] = [];
+  if (!tags.some((tag) => textOf(tag).includes(cause.newCause))) reasons.push(E2E_MESSAGES.copyCauseMissing('the landing tag', cause.newCause));
+  if (!stepTwo.some((panel) => textOf(panel).includes(cause.newCause))) reasons.push(E2E_MESSAGES.copyCauseMissing(`${REPLAY} step 2`, cause.newCause));
+  for (const built of site.pages) {
+    if (built.text.includes(cause.oldValue)) reasons.push(E2E_MESSAGES.copyOldCause(built.route, cause.oldValue));
+  }
+  return verdictOf(reasons);
 }
 
 const NOT_FOUND_LOAD = /^Failed to load resource: the server responded with a status of 404\b/;
@@ -983,6 +1081,7 @@ export const E2E_MESSAGES = Object.freeze({
   noHungTag: () => 'no route hung a lockout tag from a closed valve, so the stem check measured nothing',
   replayNext: (width: number, shown: readonly number[]) => `at ${width} px three Next activations from step 1 showed ${shown.join(', ') || 'nothing'}; 2, 3, 4 expected`,
   replayFourth: (width: number, shown: number) => `at ${width} px a fourth Next activation from step 1 showed step ${shown}, 4 expected`,
+  replayButtons: (width: number, shown: readonly number[]) => `at ${width} px the four step buttons showed ${shown.join(', ') || 'nothing'}; 1, 2, 3, 4 expected`,
   replayPreviousEnabled: (width: number) => `at ${width} px Previous is enabled on step 1`,
   replayNextEnabled: (width: number) => `at ${width} px Next is enabled on step 4`,
   replayBoxesMissing: (width: number) => `at ${width} px the run did not measure all six control boxes on all four steps`,
@@ -1130,6 +1229,8 @@ export interface SiteE2eOptions {
   readonly secondBuild?: (outDir: string) => SecondBuildRun;
   readonly sizeLimit?: () => SizeRun;
   readonly brokenArtifactBuild?: () => CopyBuildRun;
+  readonly provenanceCopyBuild?: () => CopyBuildRun;
+  readonly causeCopyBuild?: () => CopyBuildRun;
 }
 
 export interface SizeRun {
@@ -1190,12 +1291,15 @@ export interface CopyBuildOptions {
   // A file inside the web project, by its path from packages/web, and the text it is replaced with.
   readonly swap: { readonly path: string; readonly text: string };
   readonly id?: string;
+  // Judges the copy's built site before the folder is removed.
+  readonly inspect?: (site: BuiltSite) => Verdict;
 }
 
 export interface CopyBuildRun {
   readonly status: number | null;
   readonly output: string;
   readonly folder: string;
+  readonly verdict?: Verdict;
 }
 
 // What a project copy needs to build. The copy sits in the git-ignored root dist folder, at the
@@ -1215,7 +1319,9 @@ export function copyBuild(options: CopyBuildOptions): CopyBuildRun {
       shell: false,
       maxBuffer: 64 * 1024 * 1024,
     });
-    return { status: run.status, output: `${run.stdout ?? ''}${run.stderr ?? ''}${run.error === undefined ? '' : run.error.message}`, folder };
+    const output = `${run.stdout ?? ''}${run.stderr ?? ''}${run.error === undefined ? '' : run.error.message}`;
+    const judged = run.status === 0 && options.inspect !== undefined ? { verdict: options.inspect(loadBuiltSite(join(folder, 'dist'))) } : {};
+    return { status: run.status, output, folder, ...judged };
   } finally {
     remove();
   }
@@ -1233,6 +1339,48 @@ function realBrokenArtifactBuild(repoRoot: string): () => CopyBuildRun {
     if (first !== undefined) first.provenance = 'measured';
     return copyBuild({ repoRoot, swap: { path: BROKEN_ARTIFACT, text: `${JSON.stringify(artifact, null, 2)}\n` }, id: 'broken-artifact' });
   };
+}
+
+interface ArtifactJson {
+  provenance: string;
+  events: { provenance: string }[];
+  cause: { key: string; value: string };
+}
+
+const readArtifactText = (repoRoot: string): string => readFileSync(join(repoRoot, 'packages', 'web', BROKEN_ARTIFACT), 'utf8');
+const SIMULATOR: Provenance = 'simulator-captured';
+// A cause value no fixture holds, so the old value can be looked for on every built page.
+const COPY_CAUSE_VALUE = 'import-2031-01-01-z';
+
+// AC-14: the artifact and every event relabelled simulator-captured.
+function realProvenanceCopy(repoRoot: string): () => CopyBuildRun {
+  return () => {
+    const artifact = JSON.parse(readArtifactText(repoRoot)) as ArtifactJson;
+    artifact.provenance = SIMULATOR;
+    for (const event of artifact.events) event.provenance = SIMULATOR;
+    const { stamp } = PROVENANCE_LABELS[SIMULATOR];
+    return copyBuild({ repoRoot, swap: { path: BROKEN_ARTIFACT, text: `${JSON.stringify(artifact, null, 2)}\n` }, id: 'provenance', inspect: (site) => provenanceCopyVerdict(site, stamp) });
+  };
+}
+
+// AC-17: every occurrence of the cause value replaced, so the cause, the evidence subject, the event
+// details and the agent paragraph stay one consistent incident.
+function realCauseCopy(repoRoot: string): () => CopyBuildRun {
+  return () => {
+    const text = readArtifactText(repoRoot);
+    const { cause } = JSON.parse(text) as ArtifactJson;
+    const swapped = text.split(cause.value).join(COPY_CAUSE_VALUE);
+    const newCause = `${cause.key}=${COPY_CAUSE_VALUE}`;
+    return copyBuild({ repoRoot, swap: { path: BROKEN_ARTIFACT, text: swapped }, id: 'cause', inspect: (site) => causeCopyVerdict(site, { oldValue: cause.value, newCause }) });
+  };
+}
+
+function copyVariantStep(id: string, build: () => CopyBuildRun): string | null {
+  const run = build();
+  if (existsSync(run.folder)) return E2E_MESSAGES.copyBuildLeft(run.folder);
+  if (run.status !== 0) return E2E_MESSAGES.copyVariantFailed(id, run.status, run.output.trim().slice(-OUTPUT_TAIL));
+  if (run.verdict === undefined) return E2E_MESSAGES.copyVariantUnjudged(id);
+  return run.verdict.ok ? null : run.verdict.reason;
 }
 
 function copyBuildStep(options: SiteE2eOptions, print: (line: string) => void): string | null {
@@ -1289,6 +1437,10 @@ const ROUTE_CHECKS = ['SWITCH', 'FONTS', 'REQUESTS'] as const;
 // Measured over every route: the flow and Tab walk at both widths, prose lines at 1440, the tag and
 // drawing labels at 320.
 const MEASURE_CHECKS = ['FLOW', 'TABFLOW', 'LINES', 'NARROW', 'HANG'] as const;
+const REPLAY_CHECKS = ['REPLAY', 'NOSCRIPT'] as const;
+// dev-browser 0.2.9's newPage takes no context options, so JavaScript cannot be turned off for one
+// page; the CSS reads only the root's js class, so removing it is the same reading (05-11 context).
+const NO_SCRIPT_METHOD = 'js class removed, the page API has no JavaScript switch';
 type RouteCheck = (typeof ROUTE_CHECKS)[number];
 
 const ROUTE_JUDGES: Readonly<Record<RouteCheck, (value: unknown) => Verdict | null>> = {
@@ -1411,7 +1563,7 @@ function judgeNarrow(lines: readonly string[], routes: readonly string[]): Check
 }
 
 function judgeByWidth<T extends { readonly route: string; readonly width: number }>(
-  check: 'FLOW' | 'TABFLOW' | 'HANG', lines: readonly string[], routes: readonly string[], accept: (value: unknown) => value is T, verdictFor: (value: T) => Verdict,
+  check: 'FLOW' | 'TABFLOW' | 'HANG' | 'REPLAY' | 'NOSCRIPT', lines: readonly string[], routes: readonly string[], accept: (value: unknown) => value is T, verdictFor: (value: T) => Verdict,
   widths: readonly number[] = AXE_CONFIG.widths,
 ): { verdict: Verdict; readings: T[] } {
   const { byKey, reasons } = readKeyed(check, lines, accept, (value) => widthKey(value.route, value.width));
@@ -1447,6 +1599,31 @@ function judgeHang(lines: readonly string[], routes: readonly string[]): CheckRe
   return { verdict, detail: hung.join(', ') };
 }
 
+const isMove = (value: unknown): value is StepMove => isObject(value) && isNumber(value.before) && isNumber(value.after);
+const isShownList = (value: unknown): boolean => Array.isArray(value) && value.every((item) => isObject(item) && typeof item.hash === 'string' && isNumber(item.shown));
+const isReplayReading = (value: unknown): value is ReplayReading => isObject(value) && typeof value.route === 'string' && isNumber(value.width)
+  && Array.isArray(value.boxes) && value.boxes.every((step) => Array.isArray(step) && step.every(isBox))
+  && Array.isArray(value.afterNext) && value.afterNext.every(isNumber) && isNumber(value.afterFourth)
+  && Array.isArray(value.buttons) && value.buttons.every(isNumber)
+  && typeof value.previousDisabledFirst === 'boolean' && typeof value.nextDisabledLast === 'boolean'
+  && isShownList(value.deepLinks) && isShownList(value.invalid) && isNumber(value.sameStepMutations)
+  && isNumber(value.historyBefore) && isNumber(value.historyAfter) && isMove(value.arrow) && isMove(value.radio)
+  && Array.isArray(value.modifiers) && value.modifiers.every((item) => isMove(item) && isObject(item) && typeof item.modifier === 'string');
+const isNoScriptReading = (value: unknown): value is NoScriptReading => isObject(value) && typeof value.route === 'string' && isNumber(value.width)
+  && isStringList(value.panels) && isNumber(value.controls) && typeof value.tagShown === 'boolean'
+  && Array.isArray(value.boardParts) && value.boardParts.every((part) => isObject(part) && typeof part.steps === 'string' && typeof part.displayed === 'boolean');
+
+// The replay checks run only where the build holds the replay; a replay route that printed no line
+// fails as missing, like every other check.
+function judgeReplayCheck<T extends { readonly route: string; readonly width: number }>(
+  check: 'REPLAY' | 'NOSCRIPT', lines: readonly string[], routes: readonly string[], accept: (value: unknown) => value is T, verdictFor: (value: T) => Verdict, detail: string,
+): CheckResult {
+  const replayRoutes = routes.filter((route) => route === REPLAY);
+  if (replayRoutes.length === 0) return { verdict: { ok: true }, detail: 'the build holds no replay page' };
+  const { verdict } = judgeByWidth(check, lines, replayRoutes, accept, verdictFor);
+  return { verdict, detail };
+}
+
 function judgeTabFlow(lines: readonly string[], routes: readonly string[]): CheckResult {
   const { verdict } = judgeByWidth('TABFLOW', lines, routes, isFlowTabReading, flowTabVerdict);
   return { verdict, detail: `every visible Stop flow control is reached by Tab before the next section on ${routes.join(', ')}` };
@@ -1463,7 +1640,7 @@ function judgeRendered(run: DriverRun, routes: readonly string[], print: (line: 
   const [stopped] = driverRunFailures(run, RENDERED_LABEL, printed);
   if (stopped !== undefined) return stopped;
   const records = new Map<string, string>();
-  const routeLines = new Map<string, string[]>([...ROUTE_CHECKS, ...MEASURE_CHECKS].map((check) => [check, []]));
+  const routeLines = new Map<string, string[]>([...ROUTE_CHECKS, ...MEASURE_CHECKS, ...REPLAY_CHECKS].map((check) => [check, []]));
   const consoleErrors: string[] = [];
   for (const text of printed) {
     const kind = text.split(' ', 1)[0] ?? '';
@@ -1483,6 +1660,10 @@ function judgeRendered(run: DriverRun, routes: readonly string[], print: (line: 
     ['LINES', judgeLines(measured('LINES'), routes)],
     ['NARROW', judgeNarrow(measured('NARROW'), routes)],
     ['HANG', judgeHang(measured('HANG'), routes)],
+    ['REPLAY', judgeReplayCheck('REPLAY', routeLines.get('REPLAY') ?? [], routes, isReplayReading, replayVerdict,
+      `Next, Previous, the step buttons, deep links, invalid hashes, keys and history held on ${REPLAY} at 320 and 1440 px`)],
+    ['NOSCRIPT', judgeReplayCheck('NOSCRIPT', routeLines.get('NOSCRIPT') ?? [], routes, isNoScriptReading, noScriptVerdict,
+      `with the js class removed every panel showed in order, no control showed and the board held the paused step at 320 and 1440 px (${NO_SCRIPT_METHOD})`)],
     ['STORAGE', judgeStorage(records.get('STORAGE'))],
     ['CONSOLE', { verdict: consoleVerdict(consoleErrors), detail: 'no console error, no Content Security Policy violation' }],
   ];
@@ -1508,7 +1689,7 @@ async function renderedStep(options: SiteE2eOptions, dist: string, print: (line:
   if (typeof driver === 'string') return driver;
   const routes = [...routesFromDist(dist), UNKNOWN_PATH];
   const served = await withPreview(options.repoRoot, 'fothering-e2e-', async (server, workDir) => {
-    const written = writeDriver(driver.templatePath, { base: server.url, route: '/', routes, widths: AXE_CONFIG.widths, hangWidths: HANG_WIDTHS, families: SITE_FAMILIES }, join(workDir, 'site.js'));
+    const written = writeDriver(driver.templatePath, { base: server.url, route: '/', routes, widths: AXE_CONFIG.widths, hangWidths: HANG_WIDTHS, families: SITE_FAMILIES, replayRoute: REPLAY, invalidHashes: REPLAY_INVALID_HASHES }, join(workDir, 'site.js'));
     if (!written.ok) return A11Y_MESSAGES.templateTokens(driver.templatePath, written.tokens);
     const run = await runDriver({ launcher: driver.launcher, driverPath: written.path, timeoutSeconds: DRIVER_TIMEOUT_SECONDS });
     return judgeRendered(run, routes, print);
@@ -1559,6 +1740,8 @@ export async function runSiteE2e(options: SiteE2eOptions): Promise<number> {
     ['built-checks', builtChecks],
     ['second-build', () => secondBuildStep(options, dist)],
     ['copy-build', () => copyBuildStep(options, print)],
+    ['copy-provenance', () => copyVariantStep('provenance', options.provenanceCopyBuild ?? realProvenanceCopy(options.repoRoot))],
+    ['copy-cause', () => copyVariantStep('cause', options.causeCopyBuild ?? realCauseCopy(options.repoRoot))],
     ['rendered', () => renderedStep(options, dist, print)],
   ];
   for (const [name, run] of steps) {
