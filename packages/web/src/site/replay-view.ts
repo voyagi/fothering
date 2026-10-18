@@ -372,7 +372,8 @@ export function buildReplayView(artifact: ReplayArtifact): ReplayView {
       modelRole: 'Code approved one lane. The agent confirmed that option.',
     },
     email: {
-      subject: `${held ? 'Closed' : 'Paused'}: ${artifact.closedLane}, one lane in ${artifact.region}`,
+      // The subject the email went out with, as recorded, never one rebuilt here (WR-05).
+      subject: artifact.email.subject,
       disclosure: "Fothering's AI agent wrote the Why paragraph. Code wrote the rest.",
       why: artifact.agent.paragraph,
       reopen: `Run the reopen command for ${artifact.closedLane}.`,
