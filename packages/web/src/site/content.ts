@@ -1,6 +1,8 @@
 // The committed copy lists the built-page rules read (D-150). Later plans add their own lists here,
 // so every word a page may not say sits in one module.
 
+import { ROUTES } from './route-list.js';
+
 export const REPUTATION_PAGE_URL = 'https://docs.aws.amazon.com/ses/latest/dg/reputationdashboardmessages.html';
 
 // A lane reopens only by the reopen command; no reply approves, closes, keeps or reopens one.
@@ -307,3 +309,50 @@ export function modelRecordRows(modelId: string, region: string): ModelRecordRow
     { label: 'Labelled output', text: 'Every operator email says at the top which paragraph the agent wrote.', attrs: { 'data-model-role': '' } },
   ];
 }
+
+export type HandCheckResult = 'not-yet-checked' | 'not-applicable' | 'passed' | 'failed';
+
+export const HAND_CHECK_RESULT_LABELS: Readonly<Record<HandCheckResult, string>> = Object.freeze({
+  'not-yet-checked': '',
+  'not-applicable': '',
+  'passed': '',
+  'failed': '',
+});
+
+export interface HandCheckCriterion {
+  readonly number: string;
+  readonly name: string;
+  readonly result: HandCheckResult;
+  // How the hand check decides it, or for a criterion the site cannot meet in use, why not.
+  readonly how: string;
+}
+
+export const HAND_CHECK_CRITERIA: readonly HandCheckCriterion[] = Object.freeze([]);
+
+export interface AccessibilityRecord {
+  readonly target: string;
+  readonly lastAutomatedAudit: string;
+  readonly axeVersion: string;
+  readonly tags: readonly string[];
+  readonly enabledRules: readonly string[];
+  readonly routes: readonly string[];
+  readonly widths: readonly number[];
+  readonly themes: readonly string[];
+  readonly limitations: readonly Statement[];
+  readonly contact: string;
+}
+
+export const ACCESSIBILITY_RECORD: AccessibilityRecord = Object.freeze({
+  target: '',
+  lastAutomatedAudit: '',
+  axeVersion: '',
+  tags: [],
+  enabledRules: [],
+  routes: ROUTES.filter(() => false).map((route) => route.path),
+  widths: [],
+  themes: [],
+  limitations: [],
+  contact: '',
+});
+
+export const accessibilityStatements = (record: AccessibilityRecord = ACCESSIBILITY_RECORD): Statement[] => (record.target === '' ? [] : []);

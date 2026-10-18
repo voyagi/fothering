@@ -3,8 +3,10 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, describe, expect, it } from 'vitest';
+import { AXE_CONFIG } from '../harness/gates.js';
 import { GET as robotsGet } from '../pages/robots.txt.js';
 import { GET as sitemapGet } from '../pages/sitemap.xml.js';
+import { ACCESSIBILITY_RECORD, accessibilityStatements, CONTROLLER, HAND_CHECK_CRITERIA, HAND_CHECK_RESULT_LABELS, type HandCheckResult } from './content.js';
 import { readRepoText, repoRoot } from './repo-facts.js';
 import { headMeta, NOT_FOUND_ROUTE, renderRobots, renderSitemap, routeFor, ROUTES, SITE_ORIGIN, sitemapUrls, type SiteRoute } from './route-list.js';
 
@@ -210,6 +212,87 @@ describe('headMeta', () => {
     expect(notFound.title).toBe(NOT_FOUND_ROUTE.title);
     expect(notFound.links).toEqual([]);
     expect(notFound.metas.map((meta) => meta.name ?? meta.property)).toEqual(['description', 'og:title', 'og:description', 'og:type', 'twitter:card']);
+  });
+});
+
+// 05-RESEARCH.md, "Derived list for the accessibility statement (D-156)": the WCAG 2.2 A and AA
+// criteria that no axe-core 4.14.0 rule maps to, read from the W3C criteria JSON and axe's rule table.
+const RESEARCH_CRITERIA = [
+  '1.2.3', '1.2.4', '1.2.5', '1.3.2', '1.3.3', '1.4.5', '1.4.10', '1.4.11', '1.4.13', '2.1.2', '2.1.4', '2.3.1', '2.4.3', '2.4.5', '2.4.6', '2.4.7',
+  '2.4.11', '2.5.1', '2.5.2', '2.5.4', '2.5.7', '3.2.1', '3.2.2', '3.2.3', '3.2.4', '3.2.6', '3.3.1', '3.3.3', '3.3.4', '3.3.7', '3.3.8', '4.1.3',
+];
+// The research's not-applicable notes (no media, forms, authentication, gestures, dragging or
+// flashing), less 2.5.2: Pointer Cancellation covers every single-pointer control, and the site has
+// buttons, links and radios.
+const NOT_APPLICABLE = ['1.2.3', '1.2.4', '1.2.5', '2.3.1', '2.5.1', '2.5.4', '2.5.7', '3.3.1', '3.3.3', '3.3.4', '3.3.7', '3.3.8'];
+const RESULTS: readonly HandCheckResult[] = ['not-yet-checked', 'not-applicable', 'passed', 'failed'];
+
+describe('the accessibility record (D-156, AC-53)', () => {
+  it('names axe-core 4.14.0 with the tags, enabled rules, widths and themes of the audit configuration', () => {
+    expect(ACCESSIBILITY_RECORD.axeVersion).toBe('4.14.0');
+    expect(ACCESSIBILITY_RECORD.axeVersion).toBe(AXE_CONFIG.version);
+    expect(ACCESSIBILITY_RECORD.tags).toEqual(AXE_CONFIG.tags);
+    expect(ACCESSIBILITY_RECORD.enabledRules).toEqual(AXE_CONFIG.enabledRules);
+    expect(ACCESSIBILITY_RECORD.widths).toEqual(AXE_CONFIG.widths);
+    expect(ACCESSIBILITY_RECORD.themes).toEqual(AXE_CONFIG.themes.map((theme) => theme.name));
+  });
+
+  it('covers every route the sitemap lists, the routes the audit visits', () => {
+    expect(ACCESSIBILITY_RECORD.routes).toEqual(ROUTES.filter((route) => route.indexable).map((route) => route.path));
+  });
+
+  it('targets WCAG 2.2 at level AA', () => {
+    expect(ACCESSIBILITY_RECORD.target).toBe('WCAG 2.2, level AA');
+  });
+
+  it('dates the last automated audit as a committed calendar date, never the build clock', () => {
+    expect(ACCESSIBILITY_RECORD.lastAutomatedAudit).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  });
+
+  it('gives the role-only contact route of the controller and names no person or address', () => {
+    expect(ACCESSIBILITY_RECORD.contact).toContain(CONTROLLER.contact);
+    expect(ACCESSIBILITY_RECORD.contact).not.toMatch(/@/);
+  });
+
+  it('lists the known limitations, the drawings among them', () => {
+    expect(ACCESSIBILITY_RECORD.limitations.map((limitation) => limitation.id)).toEqual(expect.arrayContaining(['drawings']));
+    for (const limitation of ACCESSIBILITY_RECORD.limitations) expect(limitation.text.length).toBeGreaterThan(0);
+  });
+
+  it('states the target, the audit date, the tool version, each limitation and the contact route', () => {
+    expect(accessibilityStatements().map((statement) => statement.text)).toEqual([
+      ACCESSIBILITY_RECORD.target,
+      ACCESSIBILITY_RECORD.lastAutomatedAudit,
+      `axe-core ${ACCESSIBILITY_RECORD.axeVersion}`,
+      ...ACCESSIBILITY_RECORD.limitations.map((limitation) => limitation.text),
+      ACCESSIBILITY_RECORD.contact,
+    ]);
+  });
+
+  it('holds, as a set, the 32 criteria of the research list, each once', () => {
+    const numbers = HAND_CHECK_CRITERIA.map((criterion) => criterion.number);
+    expect(numbers).toHaveLength(32);
+    expect(new Set(numbers).size).toBe(32);
+    expect([...numbers].sort()).toEqual([...RESEARCH_CRITERIA].sort());
+  });
+
+  it('gives each criterion a name, a known result with its label, and a how-checked note', () => {
+    for (const criterion of HAND_CHECK_CRITERIA) {
+      expect(criterion.name.length).toBeGreaterThan(0);
+      expect(RESULTS).toContain(criterion.result);
+      expect(HAND_CHECK_RESULT_LABELS[criterion.result].length).toBeGreaterThan(0);
+      expect(criterion.how.length).toBeGreaterThan(0);
+    }
+  });
+
+  it('marks not applicable exactly the criteria the research notes, less 2.5.2, each with its reason', () => {
+    const notApplicable = HAND_CHECK_CRITERIA.filter((criterion) => criterion.result === 'not-applicable');
+    expect(notApplicable.map((criterion) => criterion.number).sort()).toEqual([...NOT_APPLICABLE].sort());
+    for (const criterion of notApplicable) expect(criterion.how).toMatch(/^(?:The site has no|Nothing on the site)\b/);
+  });
+
+  it('labels the four results as the statement prints them', () => {
+    expect(HAND_CHECK_RESULT_LABELS).toEqual({ 'not-yet-checked': 'Not yet checked', 'not-applicable': 'Not applicable', 'passed': 'Passed', 'failed': 'Failed' });
   });
 });
 

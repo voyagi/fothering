@@ -5,7 +5,10 @@ import { NOT_FOUND_ROUTE, routeOf } from '../checks/built-site.js';
 import type { DeployFacts, PrivacyFacts } from '../checks/rules.js';
 import { loadPrivacyFacts } from '../harness/gates.js';
 import {
+  accessibilityStatements,
   FORGET_DOC,
+  HAND_CHECK_CRITERIA,
+  HAND_CHECK_RESULT_LABELS,
   LANDING_SECTIONS,
   LIMITS_FIXED_ROWS,
   LIMITS_REPLAY_ROW,
@@ -16,6 +19,7 @@ import {
   RESOURCE_COLUMNS,
   RESOURCE_REMOVAL,
   STORAGE_ENTRIES,
+  type HandCheckCriterion,
   type LandingSectionId,
   type Statement,
 } from '../site/content.js';
@@ -332,25 +336,44 @@ export function privacyBody(parts: PrivacyParts = {}, facts: PrivacyFacts = PRIV
     + `<h3>This website</h3>${website}${parts.rights ?? rightsSentence(facts.rights)}${storage}${ai}${model}${modelId}${parts.extra ?? ''}</main>`;
 }
 
+export function handCheckRow(criterion: HandCheckCriterion): string {
+  return `<tr data-criterion="${criterion.number}"><th>${criterion.number} ${escapeHtml(criterion.name)}</th>`
+    + `<td>${HAND_CHECK_RESULT_LABELS[criterion.result]}</td><td>${escapeHtml(criterion.how)}</td></tr>`;
+}
+
+export interface AccessibilityParts {
+  readonly statements?: string;
+  readonly criteria?: string;
+}
+
+// The accessibility statement every statement rule passes, with either part replaced.
+export function accessibilityBody(parts: AccessibilityParts = {}): string {
+  const statements = parts.statements ?? accessibilityStatements().map(statementParagraph).join('');
+  const criteria = parts.criteria ?? `<table>${HAND_CHECK_CRITERIA.map(handCheckRow).join('')}</table>`;
+  return `<main><h1>Accessibility statement</h1>${statements}${criteria}</main>`;
+}
+
 const REPLAY_FILE = 'replay/index.html';
 const DEPLOY_FILE = 'deploy/index.html';
 export const PRIVACY_FILE = 'privacy-and-ai/index.html';
+export const ACCESSIBILITY_FILE = 'accessibility/index.html';
 
 function leadOf(file: string): string {
   if (routeOf(file) === '/') return landingBody();
   if (file === REPLAY_FILE) return replayBody();
   if (file === PRIVACY_FILE) return privacyBody();
+  if (file === ACCESSIBILITY_FILE) return accessibilityBody();
   return file === DEPLOY_FILE ? deployBody() : '';
 }
 
-// A planted build every head, file, landing, replay, privacy and deploy rule passes, so a case can
-// plant one fault and see only the rule it aims at fire. It always holds the replay, privacy and
-// deploy pages, as the real build does.
+// A planted build every head, file, landing, replay, privacy, deploy and accessibility rule passes,
+// so a case can plant one fault and see only the rule it aims at fire. It always holds the replay,
+// privacy, deploy and accessibility pages, as the real build does.
 export function completeSite(bodies: Readonly<Record<string, string>>, heads: Readonly<Record<string, SheetHead>> = {}): Record<string, string> {
   const files: Record<string, string> = {};
   const paths: string[] = [];
   const withSheets: Record<string, string> = { ...bodies };
-  for (const sheet of [REPLAY_FILE, PRIVACY_FILE, DEPLOY_FILE]) {
+  for (const sheet of [REPLAY_FILE, PRIVACY_FILE, DEPLOY_FILE, ACCESSIBILITY_FILE]) {
     if (!(sheet in withSheets)) withSheets[sheet] = '';
   }
   for (const [file, body] of Object.entries(withSheets)) {

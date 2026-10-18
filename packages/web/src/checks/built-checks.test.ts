@@ -2,8 +2,10 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 import {
+  accessibilityBody,
   commandBlock,
   completeSite,
+  handCheckRow,
   DEPLOY_FACTS,
   deployBody,
   HEADERS_TEXT,
@@ -38,7 +40,18 @@ import {
 import type { ReplayView } from '../site/replay-view.js';
 import { loadCheckContext } from '../harness/gates.js';
 import { HEAD_SCRIPT, headScriptHash, renderTokensCss } from '../theme/head-script.js';
-import { BANNED_NAMES, CONSOLE_DELETE_PHRASES, LANDING_SECTIONS, LEDE_TERMS, LIMITS_FIXED_ROWS, REPLY_PROMISE_PHRASES, type Statement } from '../site/content.js';
+import {
+  accessibilityStatements,
+  BANNED_NAMES,
+  CONSOLE_DELETE_PHRASES,
+  HAND_CHECK_CRITERIA,
+  HAND_CHECK_RESULT_LABELS,
+  LANDING_SECTIONS,
+  LEDE_TERMS,
+  LIMITS_FIXED_ROWS,
+  REPLY_PROMISE_PHRASES,
+  type Statement,
+} from '../site/content.js';
 import { PROVENANCE_LABELS } from '../site/labels.js';
 import { PERMISSION_REASONS, permissionKey, permissionSchedules } from '../site/permissions-view.js';
 import { removedByText } from '../site/repo-facts.js';
@@ -46,6 +59,9 @@ import { resourceRows } from '../site/resources-view.js';
 import { renderRobots, renderSitemap, SITE_ORIGIN } from '../site/route-list.js';
 import { filesIn, loadBuiltSite, NOT_FOUND_ROUTE, NoBuiltPagesError, type BuiltSite } from './built-site.js';
 import {
+  ACCESSIBILITY_ROUTE,
+  accessibilityPageRule,
+  accessibilityStatementRule,
   bannedNameRule,
   checkFileBudget,
   consoleDeleteRule,
@@ -228,9 +244,9 @@ describe('runBuiltChecks', () => {
     expect([...rules].filter((rule) => ['page-metadata', 'sitemap', 'robots'].includes(rule)).sort()).toEqual(['page-metadata', 'robots', 'sitemap']);
   });
 
-  it('holds exactly the fifty-three rule ids the plans name', () => {
+  it('holds exactly the fifty-five rule ids the plans name', () => {
     expect([...RULE_IDS].sort()).toEqual([
-      'banned-name', 'command-pair', 'console-delete', 'dash', 'deploy-commands', 'deploy-deny', 'deploy-notice', 'deploy-page', 'deploy-permissions', 'deploy-resources',
+      'accessibility-page', 'accessibility-statement', 'banned-name', 'command-pair', 'console-delete', 'dash', 'deploy-commands', 'deploy-deny', 'deploy-notice', 'deploy-page', 'deploy-permissions', 'deploy-resources',
       'exact-30-days', 'forget-command', 'forms-cookies-analytics', 'head-script-order', 'identifier-break', 'landing-sections', 'lede', 'limits',
       'model-id', 'model-role-forbidden', 'model-role-present', 'model-role-required',
       'no-delete-control', 'no-ellipsis', 'no-inline-style', 'one-caller', 'page-metadata', 'pre-r6-words', 'privacy-page', 'privacy-statements', 'provenance-wording', 'provider-label', 'region-claim', 'replay-lanes',
@@ -583,24 +599,24 @@ describe('the sitemap rule (AC-50, AC-E38, AC-E39)', () => {
   });
 
   it('fails a sitemap listing a route the build lacks', () => {
-    expect(sitemapFindings(sitemapOf(['/', '/replay/', '/privacy-and-ai/', '/deploy/', '/ghost/'])).map((finding) => finding.text)).toEqual(['the sitemap lists /ghost/, which the build lacks']);
+    expect(sitemapFindings(sitemapOf(['/', '/replay/', '/privacy-and-ai/', '/deploy/', '/accessibility/', '/ghost/'])).map((finding) => finding.text)).toEqual(['the sitemap lists /ghost/, which the build lacks']);
   });
 
   it('fails a sitemap listing a built route twice', () => {
-    expect(sitemapFindings(sitemapOf(['/', '/replay/', '/privacy-and-ai/', '/deploy/', '/'])).map((finding) => finding.text)).toEqual(['the sitemap lists / 2 times']);
+    expect(sitemapFindings(sitemapOf(['/', '/replay/', '/privacy-and-ai/', '/deploy/', '/accessibility/', '/'])).map((finding) => finding.text)).toEqual(['the sitemap lists / 2 times']);
   });
 
   it('fails a sitemap listing the 404 page', () => {
-    expect(sitemapFindings(sitemapOf(['/', '/replay/', '/privacy-and-ai/', '/deploy/', '/404.html'])).map((finding) => finding.text)).toEqual(['the sitemap lists the 404 page at /404.html']);
+    expect(sitemapFindings(sitemapOf(['/', '/replay/', '/privacy-and-ai/', '/deploy/', '/accessibility/', '/404.html'])).map((finding) => finding.text)).toEqual(['the sitemap lists the 404 page at /404.html']);
   });
 
   it('fails a built route missing from the sitemap, at that route', () => {
-    expect(sitemapFindings(sitemapOf(['/', '/privacy-and-ai/', '/deploy/']))).toEqual([{ rule: 'sitemap', route: '/replay/', text: '/replay/ is a built route missing from the sitemap' }]);
+    expect(sitemapFindings(sitemapOf(['/', '/privacy-and-ai/', '/deploy/', '/accessibility/']))).toEqual([{ rule: 'sitemap', route: '/replay/', text: '/replay/ is a built route missing from the sitemap' }]);
   });
 
   it('fails a relative URL and a URL on another origin', () => {
     const xml = `<urlset><url><loc>/</loc></url><url><loc>https://elsewhere.example/replay/</loc></url><url><loc>${SITE_ORIGIN}/</loc></url><url><loc>${SITE_ORIGIN}/replay/</loc></url>`
-      + `<url><loc>${SITE_ORIGIN}/privacy-and-ai/</loc></url><url><loc>${SITE_ORIGIN}/deploy/</loc></url></urlset>`;
+      + `<url><loc>${SITE_ORIGIN}/privacy-and-ai/</loc></url><url><loc>${SITE_ORIGIN}/deploy/</loc></url><url><loc>${SITE_ORIGIN}/accessibility/</loc></url></urlset>`;
     expect(sitemapFindings(xml).map((finding) => finding.text)).toEqual([
       `/ is not an absolute URL on ${SITE_ORIGIN}`,
       `https://elsewhere.example/replay/ is not an absolute URL on ${SITE_ORIGIN}`,
@@ -608,7 +624,7 @@ describe('the sitemap rule (AC-50, AC-E38, AC-E39)', () => {
   });
 
   it('leaves out a built route the route list marks not indexable', () => {
-    const site = siteOf({ ...completeSite(TWO_SHEETS), 'sitemap.xml': sitemapOf(['/', '/privacy-and-ai/', '/deploy/']) });
+    const site = siteOf({ ...completeSite(TWO_SHEETS), 'sitemap.xml': sitemapOf(['/', '/privacy-and-ai/', '/deploy/', '/accessibility/']) });
     const draft = { path: '/replay/', sheet: 'FTH-002', label: 'Replay', title: 't', description: 'd', indexable: false };
     expect(sitemapRule(site, { ...context, routes: [draft] })).toEqual([]);
   });
@@ -754,7 +770,7 @@ describe('the script hash rule (D-149, C6, T-05-21, T-05-24)', () => {
   it('fails a build with no _headers and one whose _headers has no script-src', () => {
     expect(texts(scriptHashRule(siteOf(withFile('_headers', null)), context))).toEqual(['dist/_headers is missing']);
     const findings = scriptHashRule(siteOf(withFile('_headers', '/*\n  X-Frame-Options: DENY\n')), context);
-    expect(findings.map((finding) => finding.route)).toEqual(['/', DEPLOY_ROUTE, PRIVACY_ROUTE, REPLAY_ROUTE]);
+    expect(findings.map((finding) => finding.route)).toEqual(['/', ACCESSIBILITY_ROUTE, DEPLOY_ROUTE, PRIVACY_ROUTE, REPLAY_ROUTE]);
   });
 });
 
@@ -1644,6 +1660,84 @@ describe('the model-role rules (AC-24, AC-25, AC-E18 to AC-E20)', () => {
       `the AI section shows the model id eu.planted.other-model; the repository pins ${privacy.modelId}`,
     ]);
     expect(privacyTexts(modelIdRule, privacyBody({ modelId: '' }))).toEqual(['the AI section shows no model id (data-model-id)']);
+  });
+});
+
+const ACCESSIBILITY_RULES = ['accessibility-page', 'accessibility-statement'];
+const accessibilitySite = (body: string): BuiltSite => siteOf({ 'accessibility/index.html': page(body) });
+const accessibilityTexts = (rule: RuleFunction, body: string): string[] => {
+  const findings = rule(accessibilitySite(body), context);
+  expect(findings.every((finding) => finding.route === ACCESSIBILITY_ROUTE)).toBe(true);
+  return texts(findings);
+};
+const STATEMENTS = accessibilityStatements();
+const withoutStatement = (id: string): string => STATEMENTS.filter((statement) => statement.id !== id).map(statementParagraph).join('');
+const criteriaTable = (rows: readonly string[]): string => `<table>${rows.join('')}</table>`;
+const [FIRST_CRITERION] = HAND_CHECK_CRITERIA;
+
+describe('the accessibility page rule (D-156 tracer)', () => {
+  it('reports a build without /accessibility/ once, under accessibility-page, and no statement finding', () => {
+    const findings = runBuiltChecks(siteOf({ 'index.html': page('<p>landing</p>') }), context).filter((finding) => ACCESSIBILITY_RULES.includes(finding.rule));
+    expect(findings).toEqual([{ rule: 'accessibility-page', route: ACCESSIBILITY_ROUTE, text: 'the build has no accessibility statement at /accessibility/' }]);
+  });
+
+  it('passes a build that holds the statement', () => {
+    expect(accessibilityPageRule(accessibilitySite(accessibilityBody()), context)).toEqual([]);
+  });
+});
+
+describe('the accessibility statement rule (AC-53, UI-SPEC E13)', () => {
+  it('passes a statement naming the target, audit date, tool, limitations, contact route and every criterion with its result', () => {
+    expect(STATEMENTS.length).toBeGreaterThan(4);
+    expect(accessibilityTexts(accessibilityStatementRule, accessibilityBody())).toEqual([]);
+  });
+
+  it.each(['target', 'audit-date', 'tool', 'drawings', 'contact'])('fails a statement missing the %s item, naming it', (id) => {
+    const missing = STATEMENTS.find((statement) => statement.id === id);
+    expect(missing).toEqual(expect.objectContaining({ id, text: expect.any(String) }));
+    const text = missing?.text ?? '';
+    expect(accessibilityTexts(accessibilityStatementRule, accessibilityBody({ statements: withoutStatement(id) }))).toEqual([`the accessibility statement does not say "${text}"`]);
+  });
+
+  it('fails a hand-check schedule missing one criterion, naming it', () => {
+    const rows = HAND_CHECK_CRITERIA.slice(1).map(handCheckRow);
+    expect(accessibilityTexts(accessibilityStatementRule, accessibilityBody({ criteria: criteriaTable(rows) }))).toEqual([`the hand-check schedule has no row for ${FIRST_CRITERION?.number ?? ''}`]);
+  });
+
+  it('fails a criterion row that does not show its own result', () => {
+    const first = FIRST_CRITERION ?? HAND_CHECK_CRITERIA[0];
+    if (first === undefined) throw new Error('no criterion to plant');
+    const label = HAND_CHECK_RESULT_LABELS[first.result];
+    const other = label === 'Passed' ? 'Failed' : 'Passed';
+    const rows = [handCheckRow(first).replace(`<td>${label}</td>`, `<td>${other}</td>`), ...HAND_CHECK_CRITERIA.slice(1).map(handCheckRow)];
+    expect(accessibilityTexts(accessibilityStatementRule, accessibilityBody({ criteria: criteriaTable(rows) }))).toEqual([`the hand-check row ${first.number} does not show its result "${label}"`]);
+  });
+
+  it('fails a criterion row that leaves out its name or its how-checked note', () => {
+    const first = FIRST_CRITERION ?? HAND_CHECK_CRITERIA[0];
+    if (first === undefined) throw new Error('no criterion to plant');
+    const nameless = [`<tr data-criterion="${first.number}"><th>${first.number}</th><td>${HAND_CHECK_RESULT_LABELS[first.result]}</td><td></td></tr>`, ...HAND_CHECK_CRITERIA.slice(1).map(handCheckRow)];
+    expect(accessibilityTexts(accessibilityStatementRule, accessibilityBody({ criteria: criteriaTable(nameless) }))).toEqual([
+      `the hand-check row ${first.number} does not name "${first.name}"`,
+      `the hand-check row ${first.number} does not say how it is checked`,
+    ]);
+  });
+
+  it('fails a criterion shown twice and a row for a criterion axe can decide', () => {
+    const first = FIRST_CRITERION ?? HAND_CHECK_CRITERIA[0];
+    if (first === undefined) throw new Error('no criterion to plant');
+    const all = HAND_CHECK_CRITERIA.map(handCheckRow);
+    expect(accessibilityTexts(accessibilityStatementRule, accessibilityBody({ criteria: criteriaTable([handCheckRow(first), ...all]) }))).toEqual([`the hand-check schedule shows ${first.number} 2 times, once expected`]);
+    const decidable = '<tr data-criterion="1.4.3"><th>1.4.3 Contrast (Minimum)</th><td>Passed</td><td>axe-core</td></tr>';
+    expect(accessibilityTexts(accessibilityStatementRule, accessibilityBody({ criteria: criteriaTable([...all, decidable]) }))).toEqual([
+      'the hand-check schedule has a row for 1.4.3, which is not one of the criteria axe-core cannot decide',
+    ]);
+  });
+
+  it('judges each row by its own state, so a mix of checked and not yet checked rows passes as recorded', () => {
+    const states = new Set(HAND_CHECK_CRITERIA.map((criterion) => criterion.result));
+    expect(states.size).toBeGreaterThan(1);
+    expect(accessibilityTexts(accessibilityStatementRule, accessibilityBody())).toEqual([]);
   });
 });
 
