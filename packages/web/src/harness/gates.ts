@@ -666,6 +666,8 @@ export interface ReplayLayoutReading {
   // API operation names (two or more capitalised words run together) written in a log Detail cell
   // as plain text rather than as an identifier.
   readonly plainApiNames: readonly string[];
+  // The document's scroll width on steps 1 to 4.
+  readonly scrollWidths: readonly number[];
   // The computed type (weight, size, tracking, case) of each column header in the log, where it shows.
   readonly logHeaders: readonly { readonly text: string; readonly type: string }[];
 }
@@ -1233,6 +1235,7 @@ export const E2E_MESSAGES = Object.freeze({
   layoutBaseline: (width: number, header: string, baselines: readonly number[]) => `at ${width} px the log row ${header} sets its cells on baselines ${baselines.join(', ')}, one baseline within 1 px expected`,
   layoutIdentifiersMissing: (width: number) => `at ${width} px the run measured no identifier in the evidence schedule or the log`,
   layoutIdentifierWeight: (width: number, text: string, weight: string) => `at ${width} px the identifier ${text} computes weight ${weight}, 500 expected`,
+  layoutScroll: (width: number, step: number, scrollWidth: number) => `at ${width} px step ${step} scrolls sideways: the page is ${scrollWidth} px wide`,
   layoutPlainApiName: (width: number, text: string) => `at ${width} px the log names the API operation ${text} as plain text, not as a mono identifier`,
   layoutIdentifierFamily: (width: number, text: string, family: string) => `at ${width} px the identifier ${text} is set in ${family}, Red Hat Mono expected`,
   layoutHeaderType: (width: number, text: string, type: string, expected: string) => `at ${width} px the log header ${text} is set ${type}, where column headers are set ${expected}`,

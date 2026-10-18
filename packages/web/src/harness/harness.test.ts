@@ -1304,6 +1304,7 @@ const healthyLayout = (width: number): ReplayLayoutReading => ({
     { text: 'PutConfigurationSetSendingOptions', weight: '500', family: MONO, lines: ['PutConfigurationSet', 'SendingOptions'], parts: API_PARTS },
   ],
   plainApiNames: [],
+  scrollWidths: [width, width, width, width],
   logHeaders: width > 960 ? ['Time UTC', 'Kind', 'Lane', 'Detail'].map((text) => ({ text, type: HEADER_TYPE })) : [],
 });
 const layoutReason = (reading: ReplayLayoutReading): string => {
@@ -1376,6 +1377,10 @@ describe('replayLayoutVerdict (AC-6, UI-SPEC 6 and 10.3)', () => {
     const odd = '500 13px 0.65px uppercase';
     const logHeaders = ['Time UTC', 'Kind', 'Lane', 'Detail'].map((text, index) => ({ text, type: index % 2 === 0 ? odd : HEADER_TYPE }));
     expect(layoutReason({ ...healthyLayout(1440), logHeaders })).toBe([E2E_MESSAGES.layoutHeaderType(1440, 'Time UTC', odd, HEADER_TYPE), E2E_MESSAGES.layoutHeaderType(1440, 'Lane', odd, HEADER_TYPE)].join('; '));
+  });
+
+  it('fails a step on which the page scrolls sideways', () => {
+    expect(layoutReason({ ...healthyLayout(320), scrollWidths: [320, 320, 320, 342] })).toBe(E2E_MESSAGES.layoutScroll(320, 4, 342));
   });
 
   it('fails an API name in the log left as plain text', () => {
@@ -1976,7 +1981,7 @@ describe('the built checks through the CLI and the e2e step (D-150, D-151)', () 
       layoutStepsMissing: [320], layoutBoardHeight: [960, [638, 900]], layoutPhantomMissing: [960, 1], layoutPhantomShown: [1280, 2], layoutPhantomExposed: [960, 1],
       layoutEvidenceMissing: [961], layoutEvidenceSpill: [1280, 1220, 1201], layoutLogMissing: [1024], layoutBaseline: [1280, '14:01:07', [1498, 1500]],
       layoutIdentifiersMissing: [320], layoutIdentifierWeight: [1440, 'fothering-bulk', '600'], layoutIdentifierBreak: [960, 'a-b', ['a-', 'b']], layoutHeaderType: [1280, 'Time UTC', '500 13px', '600 12px'],
-      layoutPlainApiName: [320, 'GetConfigurationSet'], layoutIdentifierFamily: [1280, 'x', 'serif'],
+      layoutPlainApiName: [320, 'GetConfigurationSet'], layoutScroll: [320, 4, 342], layoutIdentifierFamily: [1280, 'x', 'serif'],
       copyStampMissing: ['/'], copyStamp: ['/', 'FIXTURE RUN', 'SIMULATOR RUN'], copyCauseMissing: ['/', 'batch=x'], copyOldCause: ['/', 'x'],
       copyVariantFailed: ['cause', 1, 'x'], copyVariantUnjudged: ['cause'],
     };
