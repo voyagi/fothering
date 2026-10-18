@@ -6,16 +6,18 @@ import { markerOf, openIncident, stateOf, storedStateOf, type IncidentStatus } f
 import { parseLaneMap, type LaneMap } from '@fothering/core/lanes';
 import type { LogSink } from '@fothering/core/log';
 import { PINNED_MODEL_VALUES } from '@fothering/core/model-values';
-import { HOLD_CHECK_DELAY_MS } from '@fothering/core/close-values';
+import { HOLD_CHECK_DELAY_MS, HOLD_MS } from '@fothering/core/close-values';
 import { expiresAtFor, recordKey, type EventRecord } from '@fothering/core/records';
 import { scenarioRecords, type LaneScenario } from '@fothering/core/test/event-arbitraries';
 import type { BucketWindow } from '@fothering/core/window-fold';
 import { TEST_ADDRESS_KEY_SET } from '@fothering/providers/fixtures/ingest-ports';
 import { createFixtureSesState } from '@fothering/providers/fixtures/later-ports';
-import type { DecisionStoreItem, DryRunSink, FixtureSesState, FixtureTableState, Recording } from '@fothering/providers/port-types';
-import { buildActionRoot, type ActionDeps } from '../action/root.js';
+import type { DecisionStoreItem, DecisionStorePort, DryRunSink, FixtureSesState, FixtureTableState, Recording } from '@fothering/providers/port-types';
+import { runActionCycle } from '../action/action.js';
+import { buildActionRoot, type ActionDeps, type BuildActionRootOptions } from '../action/root.js';
 import { runDetectionCycle, type DetectionCycleSummary } from '../detect/detect.js';
 import { buildDetectRoot, type DetectDeps } from '../detect/root.js';
+import { buildReopenRoot, type BuildReopenRootOptions, type ReopenDeps } from '../reopen/root.js';
 import lanesJson from '../../../../lanes.json' with { type: 'json' };
 import completeSesConfig from '../../../providers/src/fixtures/ses-config/complete.json' with { type: 'json' };
 
@@ -135,10 +137,10 @@ export interface TestActionRoot {
   waits: number[];
 }
 
-export function buildTestActionRoot(input: TestActionRootInput): TestActionRoot {
-  const sesState = input.sesState ?? createFixtureSesState();
-  const waits: number[] = [];
-  const deps = buildActionRoot({
+// The action and the reopen roots take the same test options, so both build them here: the two can
+// share one store and one fixture SES, as the deployed functions share one table and one account.
+function testRootOptions(input: TestActionRootInput, sesState: FixtureSesState, waits: number[]): BuildActionRootOptions & BuildReopenRootOptions {
+  return {
     runtimeContext: 'test',
     switchValue: undefined,
     fixtures: {
@@ -154,11 +156,51 @@ export function buildTestActionRoot(input: TestActionRootInput): TestActionRoot 
     ...(input.logSink === undefined ? {} : { logSink: input.logSink }),
     ...(input.dryRunSink === undefined ? {} : { dryRunSink: input.dryRunSink }),
     ...(input.laneMap === undefined ? {} : { laneMap: input.laneMap }),
-  });
-  return { deps, sesState, waits };
+  };
 }
 
-export async function storedClosure(deps: ActionDeps, incidentId: string, nowMs: number): Promise<Closure | undefined> {
+export function buildTestActionRoot(input: TestActionRootInput): TestActionRoot {
+  const sesState = input.sesState ?? createFixtureSesState();
+  const waits: number[] = [];
+  return { deps: buildActionRoot(testRootOptions(input, sesState, waits)), sesState, waits };
+}
+
+export interface TestReopenRoot {
+  deps: ReopenDeps;
+  sesState: FixtureSesState;
+  /** Every wait the command asked for, in order, in milliseconds. */
+  waits: number[];
+}
+
+export function buildTestReopenRoot(input: TestActionRootInput): TestReopenRoot {
+  const sesState = input.sesState ?? createFixtureSesState();
+  const waits: number[] = [];
+  return { deps: buildReopenRoot(testRootOptions(input, sesState, waits)), sesState, waits };
+}
+
+/** The time 03-01's tracer pauses the seeded bulk incident at (T). */
+export const PAUSED_AT_MS = NOW_MS + 60_000;
+/** The first run at which the pause's hold check is due. */
+export const HOLD_CHECKED_AT_MS = PAUSED_AT_MS + HOLD_MS + HOLD_CHECK_DELAY_MS;
+
+export interface SeededPause {
+  incidentId: string;
+  pausedAtMs: number;
+}
+
+/**
+ * Detection over BAD_BATCH, then the action run that pauses fothering-bulk at PAUSED_AT_MS and, unless
+ * through is paused, the run that hold-checks it closed at HOLD_CHECKED_AT_MS, all over one store and SES.
+ */
+export async function seedClosedLane(input: { store: FixtureTableState; sesState: FixtureSesState; through?: 'paused' | 'closed' }): Promise<SeededPause> {
+  await seedIncidents({ store: input.store, runtime: closeRuntime, scenarios: [BAD_BATCH], nowMs: NOW_MS });
+  const { deps } = buildTestActionRoot({ store: input.store, sesState: input.sesState, now: () => PAUSED_AT_MS });
+  await runActionCycle(deps);
+  if (input.through !== 'paused') await runActionCycle({ ...deps, now: () => HOLD_CHECKED_AT_MS });
+  return { incidentId: incidentIdOf(BULK, NOW_MS), pausedAtMs: PAUSED_AT_MS };
+}
+
+export async function storedClosure(deps: { ports: { decisionStore: DecisionStorePort } }, incidentId: string, nowMs: number): Promise<Closure | undefined> {
   return parseClosure(await deps.ports.decisionStore.getItem(closureKey(incidentId), nowMs));
 }
 

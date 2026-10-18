@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { readActionLiveConfig } from './action/root.js';
 import { readForgetLiveConfig } from './forget/root.js';
 import { readIngestLiveConfig } from './ingest/root.js';
+import { readReopenLiveConfig } from './reopen/root.js';
 
 const TABLE_KEY = 'FOTHERING_TABLE_NAME';
 const DLQ_KEY = 'FOTHERING_DLQ_URL';
@@ -62,6 +63,20 @@ describe('readActionLiveConfig', () => {
   it('leaves out the table name when its variable is unset', () => {
     unsetAll();
     const config = readActionLiveConfig();
+    expect(config).toEqual({});
+    expect(Object.keys(config)).toHaveLength(0);
+  });
+});
+
+describe('readReopenLiveConfig', () => {
+  it('reads the table name and nothing else', () => {
+    setAll();
+    expect(readReopenLiveConfig()).toEqual({ tableName: TABLE_NAME });
+  });
+
+  it('leaves out the table name when its variable is unset', () => {
+    unsetAll();
+    const config = readReopenLiveConfig();
     expect(config).toEqual({});
     expect(Object.keys(config)).toHaveLength(0);
   });
