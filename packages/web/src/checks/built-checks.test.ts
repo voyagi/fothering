@@ -1511,7 +1511,9 @@ describe('the privacy statements rule (AC-19, AC-E14)', () => {
 
   it.each(['event-region', 'model-requests', 'keyed-hash', 'retention', 'dead-letter', 'logs', 'forget', 'forget-reach', 'addresses', 'deployment-controller', 'tag-values'])('fails a section missing the %s statement, naming it', (id) => {
     const missing = statementById(privacy.required, id);
-    expect(privacyTexts(privacyStatementsRule, privacyBody({ statements: omitting(privacy.required, id) }))).toEqual([`the privacy section does not say "${missing.text}"`]);
+    // The keyed-hash statement is also the stored-field row of the hash, so it goes from the row too.
+    const body = privacyBody({ statements: omitting(privacy.required, id) }).replaceAll(missing.text, '');
+    expect(privacyTexts(privacyStatementsRule, body)).toEqual([`the privacy section does not say "${missing.text}"`]);
   });
 
   it('fails the Bedrock sentence without its AWS page link in the same element', () => {

@@ -594,6 +594,21 @@ if (JOB.routes.includes(JOB.replayRoute)) {
   for (const width of JOB.layoutWidths) console.log('LAYOUT ' + JSON.stringify(await layoutRun(width)));
 }
 
+// AC-22: before the keys are listed the run uses the theme switch and every visible flow control, on
+// the first route that shows one at 1440 with motion allowed, so each key the site can write is there.
+await page.setViewportSize({ width: 1440, height: 900 });
+await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'no-preference' });
+await page.goto(url, { waitUntil: 'load' });
+await choose('dark');
+for (const route of JOB.routes) {
+  await page.goto(JOB.base + route, { waitUntil: 'load' });
+  await settle();
+  const controls = await visibleFlowSwitches();
+  if (controls.length === 0) continue;
+  for (const control of controls) await page.locator(FLOW_SWITCHES).nth(control.index).click();
+  break;
+}
+
 const storage = await page.evaluate(() => {
   const keysOf = (area) => {
     const keys = [];

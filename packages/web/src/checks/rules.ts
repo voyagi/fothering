@@ -2,6 +2,7 @@ import type { Provenance } from '@fothering/core/records';
 import {
   ANALYTICS_PATTERNS,
   EXACT_30_DAY_PATTERNS,
+  FORGET_DOC,
   LANDING_SECTIONS,
   LEDE_TERMS,
   LIMITS_FIXED_ROWS,
@@ -1367,53 +1368,224 @@ export function oneCallerRule(site: BuiltSite, _context: CheckContext): Finding[
 }
 
 export const PRIVACY_ROUTE = '/privacy-and-ai/';
+const PRIVACY_ID = 'privacy';
+const AI_ID = 'ai';
 
-export function privacyPageRule(_site: BuiltSite, _context: CheckContext): Finding[] {
-  return [];
+interface PagePart {
+  readonly text: string;
+  readonly elements: readonly BuiltElement[];
 }
 
-export function privacyStatementsRule(_site: BuiltSite, _context: CheckContext): Finding[] {
-  return [];
+const holdsId = (element: BuiltElement, id: string): boolean => some(element, (node) => node.attrs.id === id);
+
+// Everything from the element with one id up to the element with the other, in document order, so a
+// part spans several rows whether the id sits on a heading or on a wrapper. Null when the start id is
+// absent. SVG text stays out, since a drawing's labels are not the page's statements.
+function pagePart(page: BuiltPage, startId: string, endId: string | null): PagePart | null {
+  const pieces: string[] = [];
+  const tops: BuiltElement[] = [];
+  let state: 'before' | 'in' | 'after' = 'before';
+  const visit = (node: BuiltElement): void => {
+    if (state === 'after') return;
+    if (state === 'in' && endId !== null && node.attrs.id === endId) {
+      state = 'after';
+      return;
+    }
+    if (state === 'before' && node.attrs.id === startId) state = 'in';
+    const holdsEnd = endId !== null && holdsId(node, endId);
+    if (state === 'in' && !holdsEnd) {
+      tops.push(node);
+      pieces.push(` ${textOf(node, (inner) => inner.tag === 'svg')} `);
+      return;
+    }
+    if (state === 'before' && !holdsId(node, startId)) return;
+    for (const child of node.children) {
+      if (typeof child !== 'string') visit(child);
+      else if (state === 'in') pieces.push(child);
+    }
+  };
+  visit(page.root);
+  if (tops.length === 0) return null;
+  const elements: BuiltElement[] = [];
+  for (const top of tops) walk(top, (element) => elements.push(element));
+  return { text: pieces.join('').replace(/\s+/g, ' ').trim(), elements };
 }
 
-export function storedFieldRowsRule(_site: BuiltSite, _context: CheckContext): Finding[] {
-  return [];
+const privacyPage = (site: BuiltSite): BuiltPage | undefined => site.pages.find((page) => page.route === PRIVACY_ROUTE);
+const privacyPart = (page: BuiltPage): PagePart | null => pagePart(page, PRIVACY_ID, AI_ID);
+const aiPart = (page: BuiltPage): PagePart | null => pagePart(page, AI_ID, null);
+
+// The privacy section's text as the page renders it, which the rendered storage check reads the keys
+// from; null when the build has no such section.
+export function privacySectionText(site: BuiltSite): string | null {
+  const page = privacyPage(site);
+  return page === undefined ? null : (privacyPart(page)?.text ?? null);
 }
 
-export function websiteFactsRule(_site: BuiltSite, _context: CheckContext): Finding[] {
-  return [];
+// As with the replay and the deploy page: while the page or its part is absent, the build reports one
+// finding, under privacy-page, rather than one per rule.
+function onPart(site: BuiltSite, rule: RuleId, partOf: (page: BuiltPage) => PagePart | null, findings: (part: PagePart) => string[]): Finding[] {
+  const page = privacyPage(site);
+  const part = page === undefined ? null : partOf(page);
+  return part === null ? [] : findings(part).map((text) => ({ rule, route: PRIVACY_ROUTE, text }));
 }
 
-export function sixRightsRule(_site: BuiltSite, _context: CheckContext): Finding[] {
-  return [];
+export function privacyPageRule(site: BuiltSite, _context: CheckContext): Finding[] {
+  const rule = 'privacy-page' as const;
+  const page = privacyPage(site);
+  if (page === undefined) return [{ rule, route: PRIVACY_ROUTE, text: `the build has no privacy and AI page at ${PRIVACY_ROUTE}` }];
+  return [PRIVACY_ID, AI_ID].filter((id) => !holdsId(page.root, id)).map((id) => ({ rule, route: PRIVACY_ROUTE, text: `the privacy and AI page has no element with id ${id}` }));
 }
 
-export function forgetCommandRule(_site: BuiltSite, _context: CheckContext): Finding[] {
-  return [];
+// A statement counts when the part's text holds it, and one with a link counts only where a block
+// element holding it also links to that page (AC-19's Bedrock sentence).
+function statementFindings(part: PagePart, statements: readonly Statement[], where: string): string[] {
+  return statements.flatMap((statement) => {
+    if (!part.text.includes(statement.text)) return [`${where} does not say "${statement.text}"`];
+    const { link } = statement;
+    if (link === undefined) return [];
+    const holders = part.elements.filter((element) => BLOCK_TAGS.has(element.tag) && textOf(element).includes(statement.text));
+    return holders.some((element) => linksTo(element, link)) ? [] : [`${where} says "${statement.text}" with no link to ${link} in the same element`];
+  });
 }
 
-export function noDeleteControlRule(_site: BuiltSite, _context: CheckContext): Finding[] {
-  return [];
+export function privacyStatementsRule(site: BuiltSite, context: CheckContext): Finding[] {
+  return onPart(site, 'privacy-statements', privacyPart, (part) => statementFindings(part, context.privacy.required, 'the privacy section'));
 }
 
-export function modelRolePresentRule(_site: BuiltSite, _context: CheckContext): Finding[] {
-  return [];
+const STORED_FIELD_MARK = 'data-stored-field';
+
+function storedFieldFindings(part: PagePart, fields: PrivacyFacts['storedFields']): string[] {
+  const rows = part.elements.filter((element) => element.attrs[STORED_FIELD_MARK] !== undefined);
+  const texts = countFindings(fields.map((field) => field.path), rows.map((row) => row.attrs[STORED_FIELD_MARK] ?? ''), {
+    missing: (path) => `the stored-field schedule has no row for ${path}`,
+    repeated: (path, seen, wanted) => `the stored-field schedule shows ${path} ${timesExpected(seen, wanted)}`,
+    unknown: (path) => `the stored-field schedule has a row for ${path}, which the stored-field map does not class as identifying a recipient or a sender`,
+  });
+  const byPath = new Map(fields.map((field) => [field.path, field]));
+  for (const row of rows) {
+    const field = byPath.get(row.attrs[STORED_FIELD_MARK] ?? '');
+    if (field === undefined) continue;
+    const text = textOf(row);
+    if (!text.includes(field.path)) texts.push(`the stored-field row ${field.path} does not name the field`);
+    if (!new RegExp(`\\b${field.identifies}\\b`).test(text)) texts.push(`the stored-field row ${field.path} does not say that it identifies a ${field.identifies}`);
+    if (!text.includes(field.row)) texts.push(`the stored-field row ${field.path} does not read "${clip(field.row)}"`);
+  }
+  return texts;
 }
 
-export function modelRoleRequiredRule(_site: BuiltSite, _context: CheckContext): Finding[] {
-  return [];
+// AC-20 and UI-SPEC E8: one row per field the map classes recipient or sender, each naming the field
+// and what it identifies, and none for a field the map leaves out.
+export function storedFieldRowsRule(site: BuiltSite, context: CheckContext): Finding[] {
+  return onPart(site, 'stored-field-rows', privacyPart, (part) => storedFieldFindings(part, context.privacy.storedFields));
 }
 
-export function modelRoleForbiddenRule(_site: BuiltSite, _context: CheckContext): Finding[] {
-  return [];
+// AC-21: the controller, the contact route, the legal basis, the complaint right, both DPA lines and
+// the no-cookie and no-analytics sentences.
+export function websiteFactsRule(site: BuiltSite, context: CheckContext): Finding[] {
+  return onPart(site, 'website-facts', privacyPart, (part) => statementFindings(part, context.privacy.website, 'the website part'));
 }
 
-export function modelIdRule(_site: BuiltSite, _context: CheckContext): Finding[] {
-  return [];
+const RIGHT_MARK = 'data-right';
+
+// AC-E16: the six rights as a set, each once, in any order.
+export function sixRightsRule(site: BuiltSite, context: CheckContext): Finding[] {
+  return onPart(site, 'six-rights', privacyPart, (part) => countFindings(context.privacy.rights, part.elements.filter((element) => element.attrs[RIGHT_MARK] !== undefined).map((element) => textOf(element)), {
+    missing: (right) => `the privacy section does not name the right of ${right}`,
+    repeated: (right, seen, wanted) => `the privacy section names the right of ${right} ${timesExpected(seen, wanted)}`,
+    unknown: (right) => `the privacy section marks "${right}" as a right, which is not one of the six`,
+  }));
 }
 
-export function privacySectionText(_site: BuiltSite): string | null {
-  return null;
+function forgetFindings(part: PagePart, forget: ForgetCommand): string[] {
+  const texts: string[] = [];
+  if (!part.text.includes(FORGET_DOC)) texts.push(`the privacy section does not name ${FORGET_DOC}`);
+  if (!part.text.includes(forget.command)) texts.push(`the privacy section does not name the command ${forget.command} from ${FORGET_DOC}`);
+  if (!part.text.includes(forget.output)) texts.push(`the privacy section does not name the stack output ${forget.output} that names the forget function`);
+  return texts;
+}
+
+// AC-23: deletion is the documented command, named on the privacy section as the doc writes it.
+export function forgetCommandRule(site: BuiltSite, context: CheckContext): Finding[] {
+  return onPart(site, 'forget-command', privacyPart, (part) => forgetFindings(part, context.privacy.forget));
+}
+
+const DELETES_RECIPIENT = /\b(?:delete|deletes|deleting|forget|forgets|forgetting|erase|erases|erasing|remove|removes|removing)\b[\s\S]{0,40}?\b(?:recipients?|address(?:es)?)\b/i;
+const CONTROL_LABEL_ATTRS = ['aria-label', 'title', 'value'] as const;
+
+function controlLabel(element: BuiltElement): string {
+  return [textOf(element), ...CONTROL_LABEL_ATTRS.map((name) => element.attrs[name] ?? '')].join(' ').replace(/\s+/g, ' ').trim();
+}
+
+const isControl = (element: BuiltElement): boolean =>
+  ['button', 'a', 'form'].includes(element.tag) || element.attrs.role === 'button' || (element.tag === 'input' && ['submit', 'button'].includes((element.attrs.type ?? '').toLowerCase()));
+
+// AC-23 and AC-P7: no built page offers a control whose text or accessible name deletes a recipient.
+export function noDeleteControlRule(site: BuiltSite, _context: CheckContext): Finding[] {
+  return site.pages.flatMap((page) => {
+    const findings: Finding[] = [];
+    walk(page.root, (element) => {
+      if (!isControl(element)) return;
+      const label = controlLabel(element);
+      if (DELETES_RECIPIENT.test(label)) findings.push({ rule: 'no-delete-control', route: page.route, text: `a ${element.tag} offers to delete a recipient: "${clip(label)}"` });
+    });
+    return findings;
+  });
+}
+
+const MODEL_ROLE = 'data-model-role';
+
+// A marked element inside another marked element is read once, with its outermost container.
+function modelRoleElements(page: BuiltPage): BuiltElement[] {
+  const found: BuiltElement[] = [];
+  const visit = (element: BuiltElement): void => {
+    if (element.attrs[MODEL_ROLE] !== undefined) {
+      found.push(element);
+      return;
+    }
+    for (const child of element.children) {
+      if (typeof child !== 'string') visit(child);
+    }
+  };
+  visit(page.root);
+  return found;
+}
+
+// AC-E19: a build where nothing is marked would pass the claims below vacuously, so it fails here.
+export function modelRolePresentRule(site: BuiltSite, _context: CheckContext): Finding[] {
+  const marked = site.pages.some((page) => modelRoleElements(page).length > 0);
+  return marked ? [] : [{ rule: 'model-role-present', route: PRIVACY_ROUTE, text: `no built page carries a ${MODEL_ROLE} element, so what the pages say about the model was not checked` }];
+}
+
+// AC-24 and AC-E20: each statement at least once across the marked elements of every page, as a set.
+export function modelRoleRequiredRule(site: BuiltSite, context: CheckContext): Finding[] {
+  const texts = site.pages.flatMap((page) => modelRoleElements(page).map((element) => outsideSvg(element)));
+  return context.privacy.modelRequired.filter((statement) => !texts.some((text) => text.includes(statement.text)))
+    .map((statement) => ({ rule: 'model-role-required' as const, route: PRIVACY_ROUTE, text: `no ${MODEL_ROLE} element says "${statement.text}"` }));
+}
+
+// AC-25: every marked element on every page, each hit named with its route and words.
+export function modelRoleForbiddenRule(site: BuiltSite, context: CheckContext): Finding[] {
+  return site.pages.flatMap((page) => modelRoleElements(page).flatMap((element) => {
+    const text = outsideSvg(element);
+    return context.privacy.modelForbidden.flatMap(({ claim, pattern }) => {
+      const match = new RegExp(pattern.source, pattern.flags.replace('g', '')).exec(text);
+      return match === null ? [] : [{ rule: 'model-role-forbidden' as const, route: page.route, text: `a ${MODEL_ROLE} element claims what only code does (${claim}): "${excerpt(text, match.index, match[0].length)}"` }];
+    });
+  }));
+}
+
+const MODEL_ID_MARK = 'data-model-id';
+
+function modelIdFindings(part: PagePart, modelId: string): string[] {
+  const shown = part.elements.filter((element) => element.attrs[MODEL_ID_MARK] !== undefined).map((element) => textOf(element));
+  if (shown.length === 0) return [`the AI section shows no model id (${MODEL_ID_MARK})`];
+  return shown.filter((id) => id !== modelId).map((id) => `the AI section shows the model id ${id}; the repository pins ${modelId}`);
+}
+
+// AC-26: the id the AI section shows is the one the repository pins at build time.
+export function modelIdRule(site: BuiltSite, context: CheckContext): Finding[] {
+  return onPart(site, 'model-id', aiPart, (part) => modelIdFindings(part, context.privacy.modelId));
 }
 
 // Workers limits: 20,000 files per version on the Free plan and 25 MiB per file (AC-62).

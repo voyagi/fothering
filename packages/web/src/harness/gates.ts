@@ -368,8 +368,14 @@ export function storageVerdict(reading: StorageReading): Verdict {
   return outside.length === 0 ? { ok: true } : { ok: false, reason: E2E_MESSAGES.storageKeys(outside) };
 }
 
-export function storageKeysVerdict(_reading: StorageReading, _privacyText: string | null): Verdict {
-  return { ok: true };
+// AC-22: every key the run wrote, after using the theme switch and the flow control, is named on the
+// privacy section. A run that wrote nothing named nothing, so it fails rather than passing empty.
+export function storageKeysVerdict(reading: StorageReading, privacyText: string | null): Verdict {
+  if (privacyText === null) return { ok: false, reason: E2E_MESSAGES.storageNoPrivacy() };
+  const written = [...reading.local, ...reading.session.map((key) => `session:${key}`)];
+  if (written.length === 0) return { ok: false, reason: E2E_MESSAGES.storageNothingWritten() };
+  const unnamed = written.filter((key) => !privacyText.includes(key.replace(/^session:/, '')));
+  return unnamed.length === 0 ? { ok: true } : { ok: false, reason: E2E_MESSAGES.storageUnnamed(unnamed) };
 }
 
 export interface LinesReading {
@@ -1715,12 +1721,18 @@ function judgeRouteCheck(check: RouteCheck, lines: readonly string[], routes: re
   return { verdict: verdictOf(reasons), detail: routeDetail(check, routes, requests) };
 }
 
-function judgeStorage(text: string | undefined): { verdict: Verdict; detail: string } {
+// The allow-list is judged first, so a key outside it is named as that; only then must every key the
+// run wrote be named on the privacy section.
+function judgeStorage(text: string | undefined, privacyText: string | null): { verdict: Verdict; detail: string } {
   if (text === undefined) return { verdict: { ok: false, reason: E2E_MESSAGES.renderedMissing('STORAGE') }, detail: '' };
   const value = parseJson(text.slice('STORAGE '.length));
   if (!isStorageReading(value)) return { verdict: { ok: false, reason: E2E_MESSAGES.renderedMalformed(text) }, detail: '' };
   const keys = [...value.local, ...value.session.map((key) => `session:${key}`)];
-  return { verdict: storageVerdict(value), detail: `keys after using the switch: ${keys.join(', ') || 'none'}` };
+  const allowed = storageVerdict(value);
+  return {
+    verdict: allowed.ok ? storageKeysVerdict(value, privacyText) : allowed,
+    detail: `keys after using the switch and the flow control: ${keys.join(', ') || 'none'}, each named on ${PRIVACY_ROUTE}`,
+  };
 }
 
 const isNumber = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value);
@@ -1882,7 +1894,7 @@ const consoleRecord = (text: string): { readonly text: string; readonly url: str
   return { text: parsed.text, url: typeof parsed.url === 'string' ? parsed.url : '' };
 };
 
-function judgeRendered(run: DriverRun, routes: readonly string[], print: (line: string) => void): string | null {
+function judgeRendered(run: DriverRun, routes: readonly string[], print: (line: string) => void, privacyText: string | null): string | null {
   const printed = printedLines(run);
   const [stopped] = driverRunFailures(run, RENDERED_LABEL, printed);
   if (stopped !== undefined) return stopped;
@@ -1914,7 +1926,7 @@ function judgeRendered(run: DriverRun, routes: readonly string[], print: (line: 
     ['LAYOUT', judgeReplayCheck('LAYOUT', routeLines.get('LAYOUT') ?? [], routes, isReplayLayoutReading, replayLayoutVerdict,
       `the stacked board held one height with the tag's place drawn, the step 2 schedule stayed inside its panel, log cells shared a baseline, log headers took the label style, every API name in the log was a mono identifier, no step scrolled sideways and identifiers computed 500 and broke only after a dot or between an API name's words on ${REPLAY} at ${REPLAY_LAYOUT_WIDTHS.join(', ')} px`,
       REPLAY_LAYOUT_WIDTHS)],
-    ['STORAGE', judgeStorage(records.get('STORAGE'))],
+    ['STORAGE', judgeStorage(records.get('STORAGE'), privacyText)],
     ['CONSOLE', { verdict: consoleVerdict(consoleErrors), detail: 'no console error, no Content Security Policy violation' }],
   ];
   const failed: string[] = [];
@@ -1941,11 +1953,12 @@ async function renderedStep(options: SiteE2eOptions, dist: string, print: (line:
   // The names and tag values the replay must render as identifiers, from the one artifact.
   const { names, values } = loadCheckContext(options.repoRoot).replay.identifierTerms;
   const identifierTerms = [...names, ...values];
+  const privacyText = privacySectionText(loadBuiltSite(dist));
   const served = await withPreview(options.repoRoot, 'fothering-e2e-', async (server, workDir) => {
     const written = writeDriver(driver.templatePath, { base: server.url, route: '/', routes, widths: AXE_CONFIG.widths, hangWidths: HANG_WIDTHS, families: SITE_FAMILIES, replayRoute: REPLAY, invalidHashes: REPLAY_INVALID_HASHES, layoutWidths: REPLAY_LAYOUT_WIDTHS, identifierTerms, apiNames: LOG_API_NAMES }, join(workDir, 'site.js'));
     if (!written.ok) return A11Y_MESSAGES.templateTokens(driver.templatePath, written.tokens);
     const run = await runDriver({ launcher: driver.launcher, driverPath: written.path, timeoutSeconds: DRIVER_TIMEOUT_SECONDS });
-    return judgeRendered(run, routes, print);
+    return judgeRendered(run, routes, print, privacyText);
   });
   return served.ok ? served.value : served.reason;
 }
