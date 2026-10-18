@@ -33,7 +33,8 @@ interface Props {
   variant?: 'schedule' | 'ruled';
   // The replay's evidence; where its panel is narrow each row's header spans the row.
   compact?: boolean;
-  // One block per row at 960px and below, each cell under its column name.
+  // One block per row where the table's container (.log) is narrower than the table needs, each
+  // cell under its column name.
   stack?: boolean;
   // Column indexes whose API names may break between their capitalised words (the replay log's
   // Detail column only, UI-SPEC line 208).

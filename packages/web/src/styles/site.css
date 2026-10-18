@@ -429,8 +429,12 @@ ol.steps { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); marg
   .board { position: static; border-right: 0; border-bottom: var(--w-rule) solid var(--rule); }
   :root.js:not([data-step="3"]) .tag-slot { display: block; visibility: hidden; }
   :root.js:not([data-step="3"]) .tag-phantom { display: block; visibility: visible; }
-  /* A stacking schedule holds identifiers in several columns (the log's lane and its tag values),
-     which never break, so it becomes one block per row from 960px rather than scroll sideways. */
+}
+/* A stacking schedule holds identifiers in several columns (the log's lane and its tag values),
+   which never break, so it becomes one block per row only where its own column is narrower than
+   the table needs (600px measured on the replay log, 2026-10-18), never by the viewport alone. */
+.log { container-type: inline-size; }
+@container (width < 604px) {
   table.schedule.stack, .schedule.stack thead, .schedule.stack tbody, .schedule.stack tr, .schedule.stack th, .schedule.stack td { display: block; width: auto; }
   .schedule.stack thead { display: none; }
   .schedule.stack caption { display: block; padding: 10px 14px; }
