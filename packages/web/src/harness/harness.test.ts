@@ -1522,7 +1522,7 @@ describe('the built checks through the CLI and the e2e step (D-150, D-151)', () 
   it('built-checks over a clean dist returns 0', async () => {
     const { code, out } = await builtChecks(clean.dist);
     expect(code).toBe(0);
-    expect(out.at(-1)).toBe(E2E_MESSAGES.checksPass(2));
+    expect(out.at(-1)).toBe(E2E_MESSAGES.checksPass(3));
   });
 
   it('runSiteE2e over a missing dist returns 1 with its catalogue message', async () => {
@@ -1576,9 +1576,9 @@ describe('the built checks through the CLI and the e2e step (D-150, D-151)', () 
   type SiteLines = Partial<Record<'THEME' | 'DEVICE' | 'PIN' | 'STORAGE', unknown>>;
   type RouteLines = Partial<Record<'SWITCH' | 'FONTS' | 'REQUESTS' | 'LINES' | 'NARROW', (route: string) => unknown>>;
   type WidthLines = Partial<Record<'FLOW' | 'TABFLOW' | 'HANG', (route: string, width: number) => unknown>>;
-  // The planted tree's landing and replay pages, then the unknown address that answers with the 404
-  // page.
-  const SITE_ROUTES = ['/', '/replay/', UNKNOWN_PATH];
+  // The planted tree's landing, deploy and replay pages, then the unknown address that answers with
+  // the 404 page.
+  const SITE_ROUTES = ['/', '/deploy/', '/replay/', UNKNOWN_PATH];
   const healthyLines = (route: string): LinesReading => ({ route, blocks: 1, lines: ['closed - one lane'] });
   // The landing carries the one drawing; its tag hangs clear of the drawing text.
   const healthyNarrow = (route: string): unknown => ({
@@ -1657,7 +1657,7 @@ describe('the built checks through the CLI and the e2e step (D-150, D-151)', () 
     expect(code).toBe(0);
     const steps = lines.filter((line) => line.startsWith('[e2e] step '));
     expect(steps).toEqual(['client-secrets', 'file-budget', 'size', 'built-checks', 'second-build', 'copy-build', 'copy-provenance', 'copy-cause', 'rendered'].map((name) => E2E_MESSAGES.step(name)));
-    expect(lines.at(-1)).toBe(E2E_MESSAGES.pass(2, 9));
+    expect(lines.at(-1)).toBe(E2E_MESSAGES.pass(3, 9));
     expect(existsSync(join(tree.root, 'dist', 'site-second-build'))).toBe(false);
   });
 
@@ -1755,7 +1755,7 @@ describe('the built checks through the CLI and the e2e step (D-150, D-151)', () 
     for (const route of SITE_ROUTES) {
       for (const width of [320, 1440]) expect(flow, `${route} ${width}`).toContain(`${route} at ${width} px movingOnLoad ${String(route === '/')}`);
     }
-    expect(lines).toContain(E2E_MESSAGES.renderedOk('LINES', '3 prose block(s) measured at 1440 px, the longest line 17 characters'));
+    expect(lines).toContain(E2E_MESSAGES.renderedOk('LINES', '4 prose block(s) measured at 1440 px, the longest line 17 characters'));
     expect(lines.find((line) => line.startsWith('[e2e] rendered NARROW: ok, '))).toContain('1 drawing text(s)');
     expect(lines.find((line) => line.startsWith('[e2e] rendered TABFLOW: ok, '))).toBeDefined();
   });
@@ -1962,7 +1962,7 @@ describe('the built checks through the CLI and the e2e step (D-150, D-151)', () 
   it('built-checks with --allow alone passes the allowed findings and prints the expected-red verdict', async () => {
     const { code, out } = await builtChecks(dashed.dist, '--allow', 'dash, ses-rate-wording');
     expect(code).toBe(0);
-    expect(out.at(-1)).toBe(E2E_MESSAGES.expectPass(2));
+    expect(out.at(-1)).toBe(E2E_MESSAGES.expectPass(3));
   });
 
   it('the CLI runs e2e only with the global npm folder, and reports its missing dist', async () => {

@@ -7,13 +7,20 @@ import {
   LIMITS_FIXED_ROWS,
   LIMITS_REPLAY_ROW,
   NO_MEASURED_NUMBER_SENTENCE,
+  NOT_YET_NOTICE,
+  ONE_CALLER_SENTENCE,
+  PERMISSION_COLUMNS,
   PRE_R6_PATTERNS,
   REGION_CLAIM_PATTERNS,
+  RESOURCE_COLUMNS,
+  RESOURCE_REMOVAL,
   THEME_RADIO_LIMIT,
 } from '../site/content.js';
 import { PROVENANCE_LABELS } from '../site/labels.js';
+import { hasPauseGrant, permissionKey, permissionSchedules } from '../site/permissions-view.js';
 import type { ReplayView } from '../site/replay-view.js';
-import type { DeployCommand } from '../site/repo-facts.js';
+import { isOfferedCommand, removedByText, type DeployCommand } from '../site/repo-facts.js';
+import { resourceRows } from '../site/resources-view.js';
 import { sitemapUrls, type SiteRoute } from '../site/route-list.js';
 import { scriptHash } from '../theme/head-script.js';
 import { NOT_FOUND_ROUTE as NOT_FOUND_PAGE, textOf, walk, type BuiltElement, type BuiltPage, type BuiltSite } from './built-site.js';
@@ -1036,32 +1043,245 @@ export function identifierBreakRule(site: BuiltSite, _context: CheckContext): Fi
 
 export const DEPLOY_ROUTE = '/deploy/';
 
-export function deployPageRule(_site: BuiltSite, _context: CheckContext): Finding[] {
-  return [];
+const deployPage = (site: BuiltSite): BuiltPage | undefined => site.pages.find((page) => page.route === DEPLOY_ROUTE);
+
+// As with the replay: while the page is absent the build reports one finding, under deploy-page.
+function onDeploy(site: BuiltSite, rule: RuleId, findings: (page: BuiltPage) => string[]): Finding[] {
+  const deploy = deployPage(site);
+  return deploy === undefined ? [] : findings(deploy).map((text) => ({ rule, route: DEPLOY_ROUTE, text }));
 }
 
-export function deployCommandsRule(_site: BuiltSite, _context: CheckContext): Finding[] {
-  return [];
+export function deployPageRule(site: BuiltSite, _context: CheckContext): Finding[] {
+  return deployPage(site) === undefined ? [{ rule: 'deploy-page', route: DEPLOY_ROUTE, text: `the build has no deploy page at ${DEPLOY_ROUTE}` }] : [];
 }
 
-export function deployPermissionsRule(_site: BuiltSite, _context: CheckContext): Finding[] {
-  return [];
+// The reader's text collapses line breaks, which a command block keeps as one command per line.
+function rawText(element: BuiltElement): string {
+  return element.children.map((child) => (typeof child === 'string' ? child : rawText(child))).join('');
 }
 
-export function deployResourcesRule(_site: BuiltSite, _context: CheckContext): Finding[] {
-  return [];
+// Every pre block, and every inline code element that starts with a command word the README uses,
+// so a command typed in running text is judged like one in a block.
+function commandBlocks(page: BuiltPage, words: ReadonlySet<string>): string[] {
+  const parents = parentsOf(page.root);
+  const blocks: string[] = [];
+  walk(page.root, (element) => {
+    if (element.tag === 'pre') blocks.push(rawText(element));
+    else if (element.tag === 'code' && ancestorWith(element, parents, (node) => node.tag === 'pre') === undefined) {
+      const text = textOf(element);
+      if (words.has(text.split(' ')[0] ?? '')) blocks.push(text);
+    }
+  });
+  return blocks;
 }
 
-export function deployDenyRule(_site: BuiltSite, _context: CheckContext): Finding[] {
-  return [];
+function commandFindings(page: BuiltPage, facts: DeployFacts): string[] {
+  const words = new Set(['npm', ...facts.commands.map(({ command }) => command.split(' ')[0] ?? '')]);
+  return commandBlocks(page, words)
+    .flatMap((block) => block.split('\n').map((line) => line.replace(/\s+/g, ' ').trim()))
+    .filter((line) => line !== '' && !isOfferedCommand(line, facts.commands, facts.scripts))
+    .map((line) => `the deploy page shows the command "${clip(line)}", which README's Deploy and remove section does not hold and which runs no package.json script`);
 }
 
-export function deployNoticeRule(_site: BuiltSite, _context: CheckContext): Finding[] {
-  return [];
+// AC-32: a command an operator copies is a README line or runs a package.json script.
+export function deployCommandsRule(site: BuiltSite, context: CheckContext): Finding[] {
+  return onDeploy(site, 'deploy-commands', (page) => commandFindings(page, context.deploy));
 }
 
-export function oneCallerRule(_site: BuiltSite, _context: CheckContext): Finding[] {
-  return [];
+const PERMISSION_MARK = 'data-permission';
+const ROLE_MARK = 'data-permission-role';
+const DENY_MARK = 'data-deny';
+const RESOURCE_MARK = 'data-resource';
+
+function cellText(row: BuiltElement, column: string): string {
+  const cell = row.children.find((child): child is BuiltElement => typeof child !== 'string' && (child.tag === 'th' || child.tag === 'td') && child.attrs['data-col'] === column);
+  return cell === undefined ? '' : textOf(cell);
+}
+
+interface PermissionReading {
+  readonly key: string;
+  readonly label: string;
+  readonly effect: string;
+  readonly why: string;
+}
+
+const permissionLabel = (key: string, resource: string, condition: string): string => `${key} on ${resource}${condition === '' ? '' : ` when ${condition}`}`;
+
+// What a marked row says, read from its cells; the marker gives only the stack and the role, which
+// sit in the section heading rather than in the row.
+function shownPermission(row: BuiltElement): PermissionReading {
+  const [kind, action, effect, resource, condition, why] = PERMISSION_COLUMNS.map((column) => cellText(row, column));
+  const [stack = '', role = ''] = (row.attrs[PERMISSION_MARK] ?? '').split('/');
+  const key = `${stack}/${role}/${kind ?? ''}/${effect ?? ''}/${action ?? ''}`;
+  return { key, label: permissionLabel(key, resource ?? '', condition ?? ''), effect: effect ?? '', why: why ?? '' };
+}
+
+function expectedPermissions(facts: DeployFacts): PermissionReading[] {
+  const rows = permissionSchedules(facts.permissions, facts.reasons).flatMap((schedule) => schedule.rows);
+  // Allow rows sit in their role's schedule and Deny rows in the Deny box after them.
+  return [...rows.filter((row) => row.effect !== 'Deny'), ...rows.filter((row) => row.effect === 'Deny')].map((row) => {
+    const key = permissionKey(row);
+    return { key, label: permissionLabel(key, row.resourceOrPrincipal, row.condition), effect: row.effect, why: row.reason };
+  });
+}
+
+function tally(labels: readonly string[]): Map<string, number> {
+  const counts = new Map<string, number>();
+  for (const label of labels) counts.set(label, (counts.get(label) ?? 0) + 1);
+  return counts;
+}
+
+interface CountWording {
+  readonly missing: (label: string) => string;
+  readonly repeated: (label: string, seen: number, wanted: number) => string;
+  readonly unknown: (label: string) => string;
+}
+
+const timesExpected = (seen: number, wanted: number): string => `${String(seen)} times, ${wanted === 1 ? 'once' : `${String(wanted)} times`} expected`;
+
+// Each source entry once on the page and no row beyond them, compared as multisets so two entries
+// that differ only in a cell the label carries still count as two.
+function countFindings(expected: readonly string[], shown: readonly string[], wording: CountWording): string[] {
+  const want = tally(expected);
+  const have = tally(shown);
+  const texts: string[] = [];
+  for (const [label, wanted] of want) {
+    const seen = have.get(label) ?? 0;
+    if (seen === 0) texts.push(wording.missing(label));
+    else if (seen !== wanted) texts.push(wording.repeated(label, seen, wanted));
+  }
+  for (const label of have.keys()) {
+    if (!want.has(label)) texts.push(wording.unknown(label));
+  }
+  return texts;
+}
+
+const PERMISSION_WORDING: CountWording = {
+  missing: (label) => `the deploy page has no row for ${label}`,
+  repeated: (label, seen, wanted) => `the deploy page shows ${label} ${timesExpected(seen, wanted)}`,
+  unknown: (label) => `the deploy page shows a row for ${label}, which matches no entry in packages/infra/permissions.json`,
+};
+
+const RESOURCE_WORDING: CountWording = {
+  missing: (id) => `the deploy page lists no row for ${id}`,
+  repeated: (id, seen, wanted) => `the deploy page lists ${id} ${timesExpected(seen, wanted)}`,
+  unknown: (id) => `the deploy page lists ${id}, which packages/infra/resources.json does not hold`,
+};
+
+function roleSectionFindings(page: BuiltPage): string[] {
+  const texts: string[] = [];
+  for (const section of page.markers.get(ROLE_MARK) ?? []) {
+    const id = section.attrs[ROLE_MARK] ?? '';
+    const [stack = '', role = ''] = id.split('/');
+    const heading = elementsIn(section, 'h3')[0];
+    const headed = heading === undefined ? '' : textOf(heading);
+    if (headed !== role) texts.push(`the role section ${id} is headed "${headed}", ${role} expected`);
+    if (!textOf(section).includes(stack)) texts.push(`the role section ${id} does not name its stack ${stack}`);
+    for (const row of markedIn(section, PERMISSION_MARK)) {
+      if (!(row.attrs[PERMISSION_MARK] ?? '').startsWith(`${id}/`)) texts.push(`the role section ${id} holds the row ${row.attrs[PERMISSION_MARK] ?? ''}`);
+    }
+  }
+  return texts;
+}
+
+function permissionFindings(page: BuiltPage, facts: DeployFacts): string[] {
+  const expected = expectedPermissions(facts);
+  const shown = markedIn(page.root, PERMISSION_MARK).map(shownPermission);
+  const texts = countFindings(expected.map((row) => row.label), shown.map((row) => row.label), PERMISSION_WORDING);
+  const reasons = new Map(expected.map((row) => [row.label, row.why]));
+  for (const row of shown) {
+    const reason = reasons.get(row.label);
+    if (reason !== undefined && row.why !== reason) texts.push(`the row ${row.label} reads "${clip(row.why)}"; the reasons map gives "${clip(reason)}"`);
+  }
+  if (texts.length === 0 && shown.map((row) => row.label).join('\n') !== expected.map((row) => row.label).join('\n')) {
+    texts.push("the permission rows do not follow the snapshot's order");
+  }
+  return [...texts, ...roleSectionFindings(page)];
+}
+
+// AC-33, AC-34, AC-E24 and AC-E26: every snapshot entry renders once, in the snapshot's order,
+// with the reason the committed map holds for its key, and no row stands for no entry.
+export function deployPermissionsRule(site: BuiltSite, context: CheckContext): Finding[] {
+  return onDeploy(site, 'deploy-permissions', (page) => permissionFindings(page, context.deploy));
+}
+
+interface ResourceReading {
+  readonly id: string;
+  readonly cells: readonly string[];
+}
+
+function resourceFindings(page: BuiltPage, facts: DeployFacts): string[] {
+  const removedBy = `${RESOURCE_REMOVAL.deleted} ${removedByText(facts.commands)}`;
+  const expected: ResourceReading[] = resourceRows(facts.resources).map((row) => ({
+    id: `${row.stack}/${row.logicalId}`,
+    cells: [row.logicalId, row.noun, row.stack, row.deletedOnRemoval ? removedBy : RESOURCE_REMOVAL.kept],
+  }));
+  const shown: ResourceReading[] = markedIn(page.root, RESOURCE_MARK).map((row) => ({ id: row.attrs[RESOURCE_MARK] ?? '', cells: RESOURCE_COLUMNS.map((column) => cellText(row, column)) }));
+  const texts = countFindings(expected.map((row) => row.id), shown.map((row) => row.id), RESOURCE_WORDING);
+  const wanted = new Map(expected.map((row) => [row.id, row.cells]));
+  for (const row of shown) {
+    const cells = wanted.get(row.id);
+    RESOURCE_COLUMNS.forEach((column, index) => {
+      const want = cells?.[index];
+      if (want !== undefined && row.cells[index] !== want) texts.push(`the resource row ${row.id} reads "${clip(row.cells[index] ?? '')}" under ${column}; "${want}" expected`);
+    });
+  }
+  if (texts.length === 0 && shown.map((row) => row.id).join('\n') !== expected.map((row) => row.id).join('\n')) {
+    texts.push("the resource rows do not follow the snapshot's order");
+  }
+  return texts;
+}
+
+// AC-35: every resource the synthesized templates hold, once, with what removal does to it.
+export function deployResourcesRule(site: BuiltSite, context: CheckContext): Finding[] {
+  return onDeploy(site, 'deploy-resources', (page) => resourceFindings(page, context.deploy));
+}
+
+function denyFindings(page: BuiltPage, facts: DeployFacts): string[] {
+  const expected = expectedPermissions(facts).filter((row) => row.effect === 'Deny');
+  const boxes = page.markers.get(DENY_MARK) ?? [];
+  const parents = parentsOf(page.root);
+  const rows = markedIn(page.root, PERMISSION_MARK).map((element) => ({ element, reading: shownPermission(element) }));
+  const inBox = (element: BuiltElement): boolean => ancestorWith(element, parents, (node) => node.attrs[DENY_MARK] !== undefined) !== undefined;
+  if (expected.length === 0) {
+    return [
+      ...(boxes.length > 0 ? ['the snapshot holds no Deny entry, and the deploy page shows a Deny box'] : []),
+      ...rows.filter((row) => row.reading.effect === 'Deny').map((row) => `the snapshot holds no Deny entry, and the deploy page shows the Deny row ${row.reading.label}`),
+    ];
+  }
+  const entries = `${String(expected.length)} Deny entr${expected.length === 1 ? 'y' : 'ies'}`;
+  if (boxes.length === 0) return [`the snapshot holds ${entries}, and the deploy page has no Deny box`];
+  const texts = boxes.length > 1 ? [`the deploy page shows ${String(boxes.length)} Deny boxes, 1 expected`] : [];
+  const boxed = new Set(rows.filter((row) => inBox(row.element) && row.reading.effect === 'Deny').map((row) => row.reading.label));
+  for (const row of expected) {
+    if (!boxed.has(row.label)) texts.push(`the Deny entry ${row.label} has no row in the Deny box`);
+  }
+  for (const row of rows) {
+    if (inBox(row.element) !== (row.reading.effect === 'Deny')) texts.push(`the ${row.reading.effect} row ${row.reading.label} sits ${inBox(row.element) ? 'in' : 'outside'} the Deny box`);
+  }
+  return texts;
+}
+
+// AC-37 and AC-E27: the Deny box and its rows come only from Deny entries in the snapshot.
+export function deployDenyRule(site: BuiltSite, context: CheckContext): Finding[] {
+  return onDeploy(site, 'deploy-deny', (page) => denyFindings(page, context.deploy));
+}
+
+function noticeFindings(page: BuiltPage, facts: DeployFacts): string[] {
+  const shown = (page.markers.get('data-notice') ?? []).some((element) => textOf(element).includes(NOT_YET_NOTICE.text));
+  if (hasPauseGrant(facts.permissions)) return shown ? ['the template holds a pause grant, and the deploy page still shows the NOT YET notice'] : [];
+  return shown ? [] : ['the template holds no ses:PutConfigurationSetSendingOptions grant, and the deploy page shows no NOT YET notice'];
+}
+
+// UI-SPEC Q16: the notice stands exactly while no role may pause a lane.
+export function deployNoticeRule(site: BuiltSite, context: CheckContext): Finding[] {
+  return onDeploy(site, 'deploy-notice', (page) => noticeFindings(page, context.deploy));
+}
+
+// AC-36: the one-caller-per-lane sentence and its reason, outside any drawing.
+export function oneCallerRule(site: BuiltSite, _context: CheckContext): Finding[] {
+  return onDeploy(site, 'one-caller', (page) =>
+    (page.textOutsideSvg.includes(ONE_CALLER_SENTENCE) ? [] : ['the deploy page does not say that each lane sends through its own IAM caller identity, and why']));
 }
 
 // Workers limits: 20,000 files per version on the Free plan and 25 MiB per file (AC-62).

@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
-import type { DeployCommandUse } from './content.js';
+import { DEPLOY_STEPS, REMOVAL_STEP_TEXTS, type DeployCommandUse } from './content.js';
 
 const REPO_PACKAGE_NAME = 'fothering';
 
@@ -156,24 +156,55 @@ export interface RemovalStep {
   commands: DeployCommand[];
 }
 
-export function commandsFor(_commands: readonly DeployCommand[], _use: DeployCommandUse): DeployCommand[] {
-  return [];
+// What a README line does, read from its CDK verb, so a step shows whichever line the README holds
+// for it (a later README that names the stacks instead of --all still lands on the same step).
+const COMMAND_USES: Readonly<Record<DeployCommandUse, RegExp>> = {
+  'build': /^npm run build$/,
+  'bootstrap': /^npx cdk bootstrap\b/,
+  'deploy': /^npx cdk deploy\b(?!.*\s(?:-c|--context)\s)/,
+  'go-live': /^npx cdk deploy\b.*\s(?:-c|--context)\s/,
+  'destroy': /^npx cdk destroy\b/,
+};
+
+function commandsFor(commands: readonly DeployCommand[], use: DeployCommandUse): DeployCommand[] {
+  const found = commands.filter(({ command }) => COMMAND_USES[use].test(command));
+  if (found.length === 0) throw new Error(`${README_PREFIX}: no ${use} command. Restore the ${use} line in its sh block.`);
+  return found;
 }
 
-export function deploySteps(_facts: { deployCommands: readonly DeployCommand[]; region: string }): DeployStep[] {
-  return [];
+export const fillRegion = (text: string, region: string): string => text.replaceAll('{region}', region);
+
+export function deploySteps(facts: { deployCommands: readonly DeployCommand[]; region: string }): DeployStep[] {
+  return DEPLOY_STEPS.map((step) => ({
+    title: step.title,
+    text: fillRegion(step.text, facts.region),
+    commands: step.uses.flatMap((use) => commandsFor(facts.deployCommands, use)),
+  }));
 }
 
-export function removalSteps(_facts: { deployCommands: readonly DeployCommand[] }): RemovalStep[] {
-  return [];
+// Pre-R6: delete the stacks, then the event destinations the operator added. Plan 05-15 puts the
+// reopen step in front of these once phase 3's command is on the branch.
+export function removalSteps(facts: { deployCommands: readonly DeployCommand[] }): RemovalStep[] {
+  return [
+    { text: REMOVAL_STEP_TEXTS.destroy, commands: commandsFor(facts.deployCommands, 'destroy') },
+    { text: REMOVAL_STEP_TEXTS.destinations, commands: [] },
+  ];
 }
 
-export function removedByText(_commands: readonly DeployCommand[]): string {
-  return '';
+export function removedByText(commands: readonly DeployCommand[]): string {
+  return commandsFor(commands, 'destroy').map(({ command }) => command).join(' and ');
 }
 
-export function readDeployRegion(_root: string): string {
-  return '';
+const CREATE_APP_PATH = 'packages/infra/src/create-app.ts';
+
+// The stacks pin one Region in their env; the deploy sheet names that one rather than a typed copy.
+export function readDeployRegion(root: string): string {
+  const regions = distinct([...readRepoText(CREATE_APP_PATH, root).matchAll(/\bregion\s*:\s*(['"])([a-z0-9-]+)\1/g)].map((match) => match[2] ?? ''));
+  const [region] = regions;
+  if (regions.length !== 1 || region === undefined) {
+    throw new Error(`${CREATE_APP_PATH}: found ${regions.length} Regions, expected exactly one. Pin the stacks' Region in one env.`);
+  }
+  return region;
 }
 
 export function loadRepoFacts(root: string): { deployCommands: DeployCommand[]; scripts: string[]; modelId: string } {
