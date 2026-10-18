@@ -160,6 +160,8 @@ code { font-size: var(--text-mono-value); font-weight: 500; }
 /* An identifier ends a line only at the <wbr> after a dot; nothing here may add another break. */
 .identifier { white-space: normal; overflow-wrap: normal; word-break: normal; hyphens: none; }
 .identifier > span { white-space: nowrap; }
+/* A value a reader may copy or cite whole, a date or a legal reference, keeps one line (UI-SPEC 208). */
+.keep-whole { white-space: nowrap; }
 .state { font: 600 var(--text-label)/1 var(--font-mono); letter-spacing: 0.06em; text-transform: uppercase; white-space: nowrap; }
 /* State marks are drawn, not bordered: a dashed CSS border on a 12px square renders as a solid line,
    so the not-yet mark keeps its dashes only as an SVG dash array. */

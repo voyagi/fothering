@@ -13,7 +13,8 @@ const { route } = Astro.props;
 const head = headMeta(route);
 
 // The revision is committed, never read from the build clock, so two builds of one commit match.
-const REVISION = 'Rev A, 2026-10-17';
+// The date is kept whole; the line may end after the mark.
+const REVISION = { mark: 'Rev A', date: '2026-10-17' };
 const ZONES = ['A', 'B', 'C', 'D', 'E', 'F'];
 const THEMES = [
   { value: 'device', label: 'Device' },
@@ -91,7 +92,7 @@ const currentMark = (path: string): 'page' | undefined => (path === route.path ?
         <div>
           <b>Drawing</b>
           <span class="mono">{drawing}</span><br />
-          <span class="mono">{REVISION}</span><br />
+          <span class="mono">{REVISION.mark}, <span class="keep-whole">{REVISION.date}</span></span><br />
           <span class="mono">Status: {status}</span>
         </div>
       </footer>
