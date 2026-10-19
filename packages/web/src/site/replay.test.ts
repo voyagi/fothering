@@ -438,7 +438,7 @@ describe('buildReplayView refuses an artifact the replay copy would misstate', (
   const at = (time: string): string => `2026-10-14T${time}Z`;
   const cases: [string, ReplayArtifact, RegExp][] = [
     ['a bounce on another lane', { ...artifact, events: [...artifact.events, otherLaneBounce] }, /: events: a bounce sits on fothering-transactional, and the replay heads step one "Hard bounces on one lane"\. Replay an incident whose bounces are all on the paused lane\.$/],
-    ['mixed SMTP codes on the closed lane', withEvent(secondBounce, { smtpCode: '552 5.2.2' }), /: events: the bounces on fothering-bulk carry 550 5\.1\.1 and 552 5\.2\.2, and step one says the bounces shown read one code\. /],
+    ['mixed SMTP codes on the closed lane', withEvent(secondBounce, { smtpCode: '552 5.2.2' }), /: events: the bounces on fothering-bulk carry 550 5\.1\.1 and 552 5\.2\.2, and step one says the bounces logged here read one code\. /],
     ['a closed-lane bounce with no receiving domain', withEvent(secondBounce, { receivingDomain: undefined }), /: events: a bounce on fothering-bulk has no receiving domain, so the domains the bounces came from cannot be counted\. /],
     ['a cause row that counts sends', withCause({ unit: 'sends' }), /: evidence\[0\]\.unit: is sends, and the step heading, the summary and the tag read the cause as hard bounces\. Replay an incident whose cause row counts hard bounces\.$/],
     ['more closed-lane bounces than the cause row counts', withCause({ count: 1 }), /: events: 2 bounces sit on fothering-bulk, more than the 1 the cause row counts, and the tag puts the replay's bounces among them\. Replay an incident whose cause row counts every bounce it logs\.$/],
