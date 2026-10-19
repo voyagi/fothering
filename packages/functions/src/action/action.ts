@@ -70,6 +70,9 @@ interface Readings {
 
 // A fact read that throws (throttling, a fault) is recorded as failed and never retried in the run:
 // readSesFacts throws rather than return partial facts, and no act may pause on facts it did not read.
+// The act is then refused, which ends that incident's close for good, and its email says the
+// configuration could not be read. A detection cycle reading facts at the same time can push the two
+// past SES's one read a second (T-02-35), so a throttle the client's own retries do not absorb ends here.
 function newRun(deps: ActionDeps): Run {
   let read: Promise<RunFacts> | undefined;
   const readOnce = async (): Promise<RunFacts> => {

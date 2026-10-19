@@ -50,8 +50,8 @@ It never holds the payload, an address or a hash.
 
 ## Results
 
-- `reopened`: SES accepted the change and the read-back shows sending enabled. Mail sent through
-  the set goes out again.
+- `reopened`: the read-back shows sending enabled, whether SES accepted the change or answered it
+  with an error. Mail sent through the set goes out again.
 - `reopen-failed`: the read-back still shows sending disabled, whether SES accepted the change or
   answered it with an error. The set stays paused; run the command again.
 - `reopen-unknown`: the read-back failed or came back without the sending setting, so the command
@@ -106,6 +106,9 @@ set starts again. The `note` field in `result.json` says this for the set you re
 - A lane reopened before its hold check. A few minutes after a pause, Fothering checks that SES
   accepted no more mail for the set once the pause took hold, and only then reports it by email. A pause reopened before that
   check gets no hold check and no email about it.
+- A set that was already paused before Fothering acted on it, by hand or by another tool. Fothering
+  does not read the setting before its own pause, so it records that pause as its own, its email
+  says Fothering paused the set, and this command will reopen it.
 - An incident whose lane moved on to a newer incident before any action run reached it. That older
   incident gets no pause and no email. With the action running every five minutes, this takes an
   outage of many hours.

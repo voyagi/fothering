@@ -13,8 +13,9 @@ export interface CreateSesWritesOptions {
 export type SesWritePort = Pick<SesPort, 'getConfigurationSetSending' | 'pauseConfigurationSet' | 'reopenConfigurationSet' | 'sendEmail'>;
 
 // SES API v2 only: the per-set sending switch and one simple text send. No error is mapped here: a
-// put that throws is the caller's pause-failed, a read-back that throws its pause-unknown, a send that
-// throws a spent attempt (03-RESEARCH Finding 2).
+// put that throws decides nothing, since the caller reads the set back after it (WR-05), a read-back
+// that throws is the caller's pause-unknown or reopen-unknown, a send that throws a spent attempt
+// (03-RESEARCH Finding 2).
 export function createSesWrites(options: CreateSesWritesOptions): SesWritePort {
   // SendingEnabled is optional on the wire, so both directions always send it rather than lean on a default.
   const putSending = async (configurationSet: string, sendingEnabled: boolean): Promise<void> => {
