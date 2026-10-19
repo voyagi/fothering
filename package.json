@@ -42,25 +42,25 @@
     "@types/node": "22.20.2",
     "@vitest/coverage-v8": "4.1.11",
     "@vitest/eslint-plugin": "1.6.27",
-    "aws-cdk": "2.1142.0",
-    "dependency-cruiser": "18.2.0",
+    "aws-cdk": "2.1145.0",
+    "dependency-cruiser": "18.6.0",
     "esbuild": "0.28.2",
-    "eslint": "10.10.0",
+    "eslint": "10.12.0",
     "eslint-plugin-compat": "7.0.2",
     "eslint-plugin-sonarjs": "4.2.0",
     "fast-check": "4.10.0",
-    "jscpd": "5.2.0",
-    "knip": "6.35.1",
-    "schema-dts": "2.0.0",
+    "jscpd": "5.4.1",
+    "knip": "6.41.0",
+    "schema-dts": "2.1.0",
     "size-limit": "13.1.1",
     "typescript": "6.0.3",
-    "typescript-eslint": "8.70.0",
+    "typescript-eslint": "8.71.2",
     "vitest": "4.1.11"
   },
   "overrides": {
     "typed-rest-client@2.3.1": {
       "qs": "6.16.0"
     },
-    "@aws-sdk/client-bedrock-agentcore": "3.1136.0"
+    "@aws-sdk/client-bedrock-agentcore": "3.1152.0"
   }
 }
