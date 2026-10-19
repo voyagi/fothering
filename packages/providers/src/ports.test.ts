@@ -1,9 +1,22 @@
 import { describe, expect, it, vi } from 'vitest';
+import { BedrockAgentCoreClient } from '@aws-sdk/client-bedrock-agentcore';
+import { Message, ModelThrottledError, TextBlock, type ContentBlock, type ModelStreamEvent } from '@strands-agents/sdk';
 import { pseudonymizeRecipient } from '@fothering/core/address';
+import { RECORD_BYTE_CEILING } from '@fothering/core/evidence-record';
+import { MODEL_VALUES, PINNED_MODEL_VALUES, TOKEN_RESERVATION_PER_INVOCATION } from '@fothering/core/model-values';
 import type { EventRecord, RecordKey } from '@fothering/core/records';
+import type { LaneFold } from '@fothering/core/window-fold';
 import { PORT_TABLE, resolvePortTable, type PortName, type PortRow, type ResolvedPorts } from './ports.js';
-import { NotBuiltError, brandPort, kindOf, type ResolvedKind, type SendEmailRequest } from './port-types.js';
-import { createDryRunLog, type DryRunLog } from './dry-run.js';
+import {
+  NotBuiltError,
+  brandPort,
+  kindOf,
+  type ReservationRequest,
+  type ResolvedKind,
+  type SendEmailRequest,
+  type UsageRecord,
+} from './port-types.js';
+import { createBedrockModelDryRun, createDryRunLog, type DryRunLog } from './dry-run.js';
 import {
   TEST_ADDRESS_KEY_SET,
   createFixtureAddressKey,
@@ -11,12 +24,45 @@ import {
   createFixtureEventStore,
 } from './fixtures/ingest-ports.js';
 import { createFixtureAgentCore, createFixtureBedrockModel, createFixtureReplyBucket, createFixtureSes } from './fixtures/later-ports.js';
+import {
+  STRUCTURED_OUTPUT_TOOL_NAME,
+  createFixtureModel,
+  plainTextTurn,
+  structuredAnswerTurn,
+  throttledTurn,
+} from './fixtures/fixture-model.js';
 import { FixtureMissError, canonicalJson, recordedPort } from './fixtures/recorded.js';
 import { assertRootMatrix, type RootMatrixOptions } from './test/root-matrix.js';
 
 const SWITCH_VALUES = [undefined, '', '   ', 'true', 'LIVE', ' live', 'live'];
 const RECORD_KEY = { pk: 'LANE#fothering-bulk', sk: 'B#0000000000000#Send#m1' };
 const NO_LINES = (): void => {};
+const RUNTIME_ARN = 'arn:aws:bedrock-agentcore:eu-central-1:000000000000:runtime/x';
+const USAGE = { inputTokens: 10, outputTokens: 2, totalTokens: 12 };
+const PLANTED_SENTENCE = 'Jane said the mailbox at her house is full';
+const INCIDENT_PK = `INCIDENT#${'a'.repeat(32)}`;
+const INCIDENT_STATE_KEY = { pk: INCIDENT_PK, sk: 'STATE' };
+const DAY_KEY = { pk: 'COUNTER_DAY#2026-10-11', sk: 'COUNTER' };
+const RESERVATION: ReservationRequest = {
+  incidentKey: { pk: INCIDENT_PK, sk: 'COUNTER' },
+  dayKey: DAY_KEY,
+  incidentCap: 3,
+  dayInvocationCap: 10,
+  dayTokenCap: 1_000,
+  tokenReservation: 100,
+  expiresAt: 1_800_000_000,
+};
+const TOKEN_USAGE: UsageRecord = { incidentKey: RESERVATION.incidentKey, dayKey: DAY_KEY, inputTokens: 1_200, outputTokens: 80, modelCalls: 2 };
+
+function userMessage(text: string): Message {
+  return new Message({ role: 'user', content: [new TextBlock(text)] });
+}
+
+async function drain<T>(iterable: AsyncIterable<T>): Promise<T[]> {
+  const items: T[] = [];
+  for await (const item of iterable) items.push(item);
+  return items;
+}
 
 // Classes on purpose: a class keeps its methods on the prototype, which is the shape a
 // copied-object port table loses.
@@ -40,6 +86,10 @@ class PlantedEventStore {
   async getRecord(): Promise<undefined> {
     this.calls.push('getRecord');
     return undefined;
+  }
+  async foldLane<S>(_configurationSet: string, _fromBucketMs: number, _toBucketMs: number, _nowMs: number, fold: LaneFold<S>): Promise<S> {
+    this.calls.push('foldLane');
+    return fold.initial;
   }
 }
 
@@ -216,16 +266,37 @@ describe('resolvePortTable with live adapters written as classes', () => {
 });
 
 describe('the real port table', () => {
-  it('names the seven rows', () => {
+  it('names the nine rows', () => {
     expect(Object.keys(PORT_TABLE).sort()).toEqual([
       'addressKey',
       'agentCore',
       'bedrockModel',
       'deadLetter',
+      'decisionStore',
+      'dns',
       'eventStore',
       'replyBucket',
       'ses',
     ]);
+  });
+
+  // D-58, R6: a lookup changes nothing and costs nothing, so no switch owns it and no recorder stands in for it.
+  it('gives the dns row two reads, neither mutating nor gated, with no dry-run recorder', () => {
+    const row: PortRow = PORT_TABLE.dns;
+    expect(row.operations.join(' ')).toBe('resolveMx resolveTxt');
+    expect(row.mutatingOperations.join(' ')).toBe('');
+    expect(row.gatedOperations.join(' ')).toBe('');
+    expect(row.dryRun).toBeUndefined();
+  });
+
+  // AC-P6, store half: the caps hold only if no process can take a counter back down, so the row
+  // offers no operation that could.
+  it('gives the decisionStore row exactly five operations, four mutating, none gated, none that deletes or lowers', () => {
+    const row = PORT_TABLE.decisionStore;
+    expect(row.operations.join(' ')).toBe('putIfAbsent getItem updateIfVersion reserveInvocation recordUsage');
+    expect(row.mutatingOperations.join(' ')).toBe('putIfAbsent updateIfVersion reserveInvocation recordUsage');
+    expect(row.gatedOperations.join(' ')).toBe('');
+    expect(row.operations.filter((operation) => /delete|remove|decrement|reset|subtract/i.test(operation)).join(' ')).toBe('');
   });
 
   // The type contract (D-05): a table missing a row is an error at gate:types, not a runtime surprise.
@@ -282,9 +353,9 @@ describe('the real port table', () => {
     expect(lines).toEqual([]);
   });
 
-  it.each(SWITCH_VALUES)('resolves all seven rows to fixture in test for switch %j', (switchValue) => {
+  it.each(SWITCH_VALUES)('resolves all nine rows to fixture in test for switch %j', (switchValue) => {
     const { kinds } = resolvePortTable({ runtimeContext: 'test', switchValue });
-    expect(Object.keys(kinds)).toHaveLength(7);
+    expect(Object.keys(kinds)).toHaveLength(9);
     for (const row of Object.values(kinds)) {
       for (const kind of Object.values(row)) expect(kind).toBe('fixture');
     }
@@ -294,11 +365,13 @@ describe('the real port table', () => {
   // is exactly live, and only then is it the not-built phase; an ungated one is live or not built.
   it.each<[string, string, ResolvedKind, ResolvedKind]>([
     ['ses', 'getEmailIdentity', 'live', 'live'],
+    ['dns', 'resolveMx', 'live', 'live'],
+    ['dns', 'resolveTxt', 'live', 'live'],
     ['ses', 'pauseConfigurationSet', 'dry-run', 'not-built-until-phase-3'],
     ['ses', 'reopenConfigurationSet', 'dry-run', 'not-built-until-phase-3'],
     ['ses', 'sendEmail', 'dry-run', 'not-built-until-phase-4'],
-    ['bedrockModel', 'converse', 'dry-run', 'not-built-until-phase-2'],
-    ['agentCore', 'invokeAgentRuntime', 'dry-run', 'not-built-until-phase-2'],
+    ['bedrockModel', 'stream', 'dry-run', 'live'],
+    ['agentCore', 'invokeAgentRuntime', 'dry-run', 'live'],
     ['replyBucket', 'getReplyObject', 'not-built-until-phase-4', 'not-built-until-phase-4'],
   ])('resolves %s.%s to %s without the switch and %s with it', (portName, operation, withoutSwitch, withSwitch) => {
     const unset = resolvePortTable({ runtimeContext: 'deployed', switchValue: undefined, dryRunSink: NO_LINES });
@@ -307,12 +380,12 @@ describe('the real port table', () => {
     expect(live.kinds[portName]?.[operation]).toBe(withSwitch);
   });
 
-  it('never reports phase 1 for any operation, in either context, for any switch value', () => {
+  it.each(['not-built-until-phase-1', 'not-built-until-phase-2'])('never reports %s for any operation, in either context, for any switch value', (phase) => {
     for (const runtimeContext of ['test', 'deployed'] as const) {
       for (const switchValue of SWITCH_VALUES) {
         const { kinds } = resolvePortTable({ runtimeContext, switchValue, dryRunSink: NO_LINES });
-        for (const row of Object.values(kinds)) {
-          for (const kind of Object.values(row)) expect(kind).not.toBe('not-built-until-phase-1');
+        for (const [portName, row] of Object.entries(kinds)) {
+          for (const [operation, kind] of Object.entries(row)) expect(`${portName}.${operation} ${kind}`).not.toBe(`${portName}.${operation} ${phase}`);
         }
       }
     }
@@ -322,8 +395,6 @@ describe('the real port table', () => {
     ['ses', 'pauseConfigurationSet', 'phase 3', ['fothering-bulk']],
     ['ses', 'reopenConfigurationSet', 'phase 3', ['fothering-bulk']],
     ['ses', 'sendEmail', 'phase 4', [{ from: 'ops@example.org', to: [], subject: 's', text: 't' }]],
-    ['bedrockModel', 'converse', 'phase 2', [{ modelId: 'model-1', prompt: 'p' }]],
-    ['agentCore', 'invokeAgentRuntime', 'phase 2', [{ runtimeArn: 'arn:aws:x', sessionId: 's', payload: {} }]],
     ['replyBucket', 'getReplyObject', 'phase 4', ['key']],
   ])('rejects %s.%s with a NotBuiltError naming %s once the switch is live', async (portName, operation, phase, args) => {
     const { ports } = resolvePortTable({ runtimeContext: 'deployed', switchValue: 'live', dryRunSink: NO_LINES });
@@ -372,6 +443,35 @@ describe('the expected-kind comparison against resolvePortTable directly', () =>
 
     expect(resolvePortTable({ runtimeContext: 'test', switchValue: undefined, table: planted }).kinds.eventStore?.queryLane).toBe('live');
     expect(compare(planted)).toThrow();
+  });
+});
+
+describe('the live agentCore row', () => {
+  interface CapturedClient {
+    config: { maxAttempts: () => Promise<number>; region: () => Promise<string> };
+  }
+
+  // The row's own client, caught at send: the replacement answers before any middleware runs, so
+  // nothing is signed or sent.
+  it('builds its client with one attempt, so the SDK never re-sends an invocation on one reservation', async () => {
+    const prototype = BedrockAgentCoreClient.prototype as unknown as Record<string, unknown>;
+    const ownSend = Object.getOwnPropertyDescriptor(prototype, 'send');
+    const clients: CapturedClient[] = [];
+    prototype.send = async function send(this: CapturedClient): Promise<unknown> {
+      clients.push(this);
+      return { contentType: 'application/json', response: { transformToString: async () => '{}' } };
+    };
+    try {
+      const port = PORT_TABLE.agentCore.live({ liveConfig: {}, liveClients: {}, now: Date.now });
+      await port.invokeAgentRuntime({ runtimeArn: RUNTIME_ARN, sessionId: `fothering-${'0'.repeat(32)}-a1`, payload: {} });
+    } finally {
+      if (ownSend === undefined) delete prototype.send;
+      else Object.defineProperty(prototype, 'send', ownSend);
+    }
+
+    expect(clients).toHaveLength(1);
+    await expect(clients[0]?.config.maxAttempts()).resolves.toBe(1);
+    await expect(clients[0]?.config.region()).resolves.toBe('eu-central-1');
   });
 });
 
@@ -459,6 +559,58 @@ describe('createDryRunLog targets (AC-P9)', () => {
   });
 });
 
+describe('decisionStore dry-run lines (D-66, AC-P9)', () => {
+  function decisionLines(): { log: DryRunLog; lines: string[] } {
+    const lines: string[] = [];
+    const log = createDryRunLog({ sink: (line) => lines.push(line), addressKey: createFixtureAddressKey(), now: () => 1_000 });
+    return { log, lines };
+  }
+
+  it('records a put under each of the three decision key prefixes with a key-only summary', async () => {
+    const { log, lines } = decisionLines();
+    await log.would('decisionStore.putIfAbsent', 'INCIDENT_LANE#fothering-bulk', { pk: 'INCIDENT_LANE#fothering-bulk', sk: 'MARKER', expiresAt: 1, note: PLANTED_SENTENCE });
+    await log.would('decisionStore.putIfAbsent', INCIDENT_PK, { ...INCIDENT_STATE_KEY, expiresAt: 1, version: 1 });
+    await log.would('decisionStore.putIfAbsent', 'COUNTER_DAY#2026-10-11', { ...DAY_KEY, expiresAt: 1 });
+    expect(lines.join('\n')).toBe(
+      [
+        '(dry-run) WOULD decisionStore.putIfAbsent INCIDENT_LANE#fothering-bulk {"pk":"INCIDENT_LANE#fothering-bulk","sk":"MARKER"}',
+        `(dry-run) WOULD decisionStore.putIfAbsent ${INCIDENT_PK} {"pk":"${INCIDENT_PK}","sk":"STATE"}`,
+        '(dry-run) WOULD decisionStore.putIfAbsent COUNTER_DAY#2026-10-11 {"pk":"COUNTER_DAY#2026-10-11","sk":"COUNTER"}',
+      ].join('\n'),
+    );
+  });
+
+  it('records a versioned update with its expected version, and the reservation and usage as integers only', async () => {
+    const { log, lines } = decisionLines();
+    await log.would('decisionStore.updateIfVersion', INCIDENT_PK, { ...INCIDENT_STATE_KEY, expectedVersion: 2 });
+    await log.would('decisionStore.reserveInvocation', INCIDENT_PK, RESERVATION);
+    await log.would('decisionStore.recordUsage', INCIDENT_PK, TOKEN_USAGE);
+    expect(lines.join('\n')).toBe(
+      [
+        `(dry-run) WOULD decisionStore.updateIfVersion ${INCIDENT_PK} {"expectedVersion":2,"pk":"${INCIDENT_PK}","sk":"STATE"}`,
+        `(dry-run) WOULD decisionStore.reserveInvocation ${INCIDENT_PK} {"dayInvocationCap":10,"dayTokenCap":1000,"expiresAt":1800000000,"incidentCap":3,"tokenReservation":100}`,
+        `(dry-run) WOULD decisionStore.recordUsage ${INCIDENT_PK} {"inputTokens":1200,"modelCalls":2,"outputTokens":80}`,
+      ].join('\n'),
+    );
+  });
+
+  it.each<[string, string, string, unknown]>([
+    ['an event record key as a put target', 'decisionStore.putIfAbsent', 'LANE#fothering-bulk', { pk: 'LANE#fothering-bulk', sk: 'STATE', expiresAt: 1 }],
+    ['an address as a put target', 'decisionStore.putIfAbsent', 'jane@example.com', INCIDENT_STATE_KEY],
+    ['a sentence as a sort key', 'decisionStore.putIfAbsent', INCIDENT_PK, { pk: INCIDENT_PK, sk: PLANTED_SENTENCE }],
+    ['an incident id that is not 32 hex characters', 'decisionStore.updateIfVersion', 'INCIDENT#jane', { pk: 'INCIDENT#jane', sk: 'STATE', expectedVersion: 1 }],
+    ['a day key as a reservation target', 'decisionStore.reserveInvocation', DAY_KEY.pk, RESERVATION],
+    ['a fractional usage amount', 'decisionStore.recordUsage', INCIDENT_PK, { ...TOKEN_USAGE, inputTokens: 0.5 }],
+  ])('refuses %s, writes no line and never echoes it', async (_label, operation, target, request) => {
+    const { log, lines } = decisionLines();
+    const refusal = await log.would(operation, target, request).catch((error: unknown) => error);
+    expect(refusal).toBeInstanceOf(TypeError);
+    expect((refusal as Error).message).toContain(`refusing to record ${operation}`);
+    for (const text of ['jane', 'mailbox']) expect((refusal as Error).message).not.toContain(text);
+    expect(lines).toEqual([]);
+  });
+});
+
 describe('a sendEmail dry-run line (AC-P9)', () => {
   const REQUEST: SendEmailRequest = {
     from: 'ops@example.org',
@@ -501,19 +653,37 @@ describe('a sendEmail dry-run line (AC-P9)', () => {
     );
   });
 
-  it('records model and runtime calls as the model id, the runtime ARN and prompt and payload lengths', async () => {
+  it('records model and runtime calls as the model id with two counts, and the runtime ARN with a payload length', async () => {
     const lines: string[] = [];
     const log = createDryRunLog({ sink: (line) => lines.push(line), addressKey: createFixtureAddressKey(), now: () => 1 });
-    await log.would('bedrockModel.converse', 'eu.anthropic.claude-sonnet-5', { modelId: 'eu.anthropic.claude-sonnet-5', prompt: 'Jane said hello' });
+    await log.would('bedrockModel.stream', 'eu.anthropic.claude-sonnet-4-6', {
+      modelId: 'eu.anthropic.claude-sonnet-4-6',
+      messageCount: 1,
+      promptBytes: 42,
+      prompt: 'Jane said hello',
+    });
     await log.would('agentCore.invokeAgentRuntime', 'arn:aws:bedrock-agentcore:eu-central-1:000000000000:runtime/fothering', {
       runtimeArn: 'arn:aws:bedrock-agentcore:eu-central-1:000000000000:runtime/fothering',
       sessionId: 'session-1',
       payload: { note: 'Jane said hello' },
     });
     expect(lines).toEqual([
-      '(dry-run) WOULD bedrockModel.converse eu.anthropic.claude-sonnet-5 {"modelId":"eu.anthropic.claude-sonnet-5","promptLength":15}',
+      '(dry-run) WOULD bedrockModel.stream eu.anthropic.claude-sonnet-4-6 {"messageCount":1,"modelId":"eu.anthropic.claude-sonnet-4-6","promptBytes":42}',
       '(dry-run) WOULD agentCore.invokeAgentRuntime arn:aws:bedrock-agentcore:eu-central-1:000000000000:runtime/fothering {"payloadLength":26,"runtimeArn":"arn:aws:bedrock-agentcore:eu-central-1:000000000000:runtime/fothering"}',
     ]);
+  });
+
+  it('refuses a model line whose counts are not integers, and names no request text', async () => {
+    const lines: string[] = [];
+    const log = createDryRunLog({ sink: (line) => lines.push(line), addressKey: createFixtureAddressKey(), now: () => 1 });
+    for (const request of [
+      { modelId: 'eu.anthropic.claude-sonnet-4-6', messageCount: 1.5, promptBytes: 42 },
+      { modelId: 'eu.anthropic.claude-sonnet-4-6', messageCount: 1, promptBytes: PLANTED_SENTENCE },
+    ]) {
+      const refusal = await log.would('bedrockModel.stream', 'eu.anthropic.claude-sonnet-4-6', request).catch((error: unknown) => error);
+      expect((refusal as Error).message).toBe('refusing to record bedrockModel.stream: the request does not have the shape its line records');
+    }
+    expect(lines).toEqual([]);
   });
 });
 
@@ -575,21 +745,24 @@ describe('the fixtures leave one dry-run line per mutating call (AC-4 dry-run ha
 const MUTATION_CALLS: Record<string, (ports: ResolvedPorts) => Promise<unknown>> = {
   'eventStore.putIfAbsent': (ports) => ports.eventStore.putIfAbsent({ ...RECORD_KEY, fields: {} } as unknown as EventRecord),
   'eventStore.deleteRecord': (ports) => ports.eventStore.deleteRecord(RECORD_KEY),
+  'decisionStore.putIfAbsent': (ports) => ports.decisionStore.putIfAbsent({ ...INCIDENT_STATE_KEY, expiresAt: 1, version: 1 }, 1_000),
+  'decisionStore.updateIfVersion': (ports) => ports.decisionStore.updateIfVersion(INCIDENT_STATE_KEY, 1, { state: 'closed' }, 1_000),
+  'decisionStore.reserveInvocation': (ports) => ports.decisionStore.reserveInvocation(RESERVATION),
+  'decisionStore.recordUsage': (ports) => ports.decisionStore.recordUsage(TOKEN_USAGE),
   'deadLetter.send': (ports) => ports.deadLetter.send([]),
   'ses.pauseConfigurationSet': (ports) => ports.ses.pauseConfigurationSet('fothering-bulk'),
   'ses.reopenConfigurationSet': (ports) => ports.ses.reopenConfigurationSet('fothering-bulk'),
   'ses.sendEmail': (ports) => ports.ses.sendEmail({ from: 'ops@example.org', to: ['jane@example.com'], subject: 's', text: 't' }),
-  'bedrockModel.converse': (ports) => ports.bedrockModel.converse({ modelId: 'model-1', prompt: 'p' }),
-  'agentCore.invokeAgentRuntime': (ports) =>
-    ports.agentCore.invokeAgentRuntime({ runtimeArn: 'arn:aws:bedrock-agentcore:eu-central-1:000000000000:runtime/x', sessionId: 's', payload: {} }),
+  // Iterated to the end: a stream that is only created, never iterated, runs none of its body (Pitfall 10).
+  'bedrockModel.stream': (ports) => drain(ports.bedrockModel.stream([userMessage('p')], { systemPrompt: 's' })),
+  'agentCore.invokeAgentRuntime': (ports) => ports.agentCore.invokeAgentRuntime({ runtimeArn: RUNTIME_ARN, sessionId: 's', payload: {} }),
 };
 
 const MUTATION_RECORDINGS = {
-  bedrockModel: [{ operation: 'bedrockModel.converse', request: { modelId: 'model-1', prompt: 'p' }, response: { text: 'ok' } }],
   agentCore: [
     {
       operation: 'agentCore.invokeAgentRuntime',
-      request: { runtimeArn: 'arn:aws:bedrock-agentcore:eu-central-1:000000000000:runtime/x', sessionId: 's', payload: {} },
+      request: { runtimeArn: RUNTIME_ARN, sessionId: 's', payload: {} },
       response: { ok: true },
     },
   ],
@@ -606,7 +779,7 @@ async function assertOneLinePerMutation(table: Record<PortName, PortRow>): Promi
       runtimeContext: 'test',
       switchValue: undefined,
       table,
-      fixtures: { recordings: MUTATION_RECORDINGS },
+      fixtures: { recordings: MUTATION_RECORDINGS, model: createFixtureModel([plainTextTurn('ok', USAGE)]) },
       dryRunSink: (line) => lines.push(line),
     });
     await MUTATION_CALLS[key]?.(ports);
@@ -670,14 +843,42 @@ describe('recorded fixtures (AC-E5)', () => {
     const dryRun = createDryRunLog({ sink: NO_LINES, addressKey: createFixtureAddressKey(), now: () => 1 });
     const ses = createFixtureSes({
       recordings: [
-        { operation: 'ses.getEmailIdentity', request: 'example.org', response: 'fothering-default' },
+        { operation: 'ses.getEmailIdentity', request: 'example.org', response: { defaultConfigurationSet: 'fothering-default' } },
         { operation: 'ses.getEmailIdentity', request: 'example.net', response: undefined },
       ],
       dryRun,
     });
-    await expect(ses.getEmailIdentity('example.org')).resolves.toBe('fothering-default');
+    await expect(ses.getEmailIdentity('example.org')).resolves.toEqual({ defaultConfigurationSet: 'fothering-default' });
     await expect(ses.getEmailIdentity('example.net')).resolves.toBeUndefined();
     await expect(ses.getEmailIdentity('example.com')).rejects.toThrow(FixtureMissError);
+  });
+
+  // D-26: the dns row answers in test only from recordings, so no test or CI run ever reaches DNS (R6).
+  it('answers the dns row in test from recordings under dns.resolveMx and dns.resolveTxt', async () => {
+    const { ports } = resolvePortTable({
+      runtimeContext: 'test',
+      switchValue: 'live',
+      fixtures: {
+        recordings: {
+          dns: [
+            { operation: 'dns.resolveMx', request: 'example.com', response: { kind: 'records', exchanges: ['mx.example.com'] } },
+            { operation: 'dns.resolveTxt', request: '_dmarc.example.com', response: { kind: 'missing' } },
+            { operation: 'dns.resolveTxt', request: 'example.com', response: { kind: 'unknown' } },
+          ],
+        },
+      },
+    });
+    await expect(ports.dns.resolveMx('example.com')).resolves.toEqual({ kind: 'records', exchanges: ['mx.example.com'] });
+    await expect(ports.dns.resolveTxt('_dmarc.example.com')).resolves.toEqual({ kind: 'missing' });
+    await expect(ports.dns.resolveTxt('example.com')).resolves.toEqual({ kind: 'unknown' });
+  });
+
+  it.each(['resolveMx', 'resolveTxt'] as const)('rejects dns.%s with FixtureMissError naming the operation for an unrecorded name', async (operation) => {
+    const { ports } = resolvePortTable({ runtimeContext: 'test', switchValue: undefined });
+    const refusal = await ports.dns[operation]('example.org').catch((error: unknown) => error);
+    expect(refusal).toBeInstanceOf(FixtureMissError);
+    expect((refusal as FixtureMissError).operation).toBe(`dns.${operation}`);
+    expect((refusal as FixtureMissError).message).not.toContain('example.org');
   });
 
   it('matches a request whatever order its properties were written in, and hands out copies', () => {
@@ -692,20 +893,223 @@ describe('recorded fixtures (AC-E5)', () => {
     expect(() => recordedPort([recording, { ...recording, response: 2 }])).toThrow('two recordings answer the same op request');
   });
 
-  it('records the model call and the runtime call before answering from a recording, and misses without one', async () => {
+  it('records the model call and the runtime call before answering, and misses with no fixture model or recording', async () => {
     const lines: string[] = [];
     const dryRun = createDryRunLog({ sink: (line) => lines.push(line), addressKey: createFixtureAddressKey(), now: () => 1 });
-    const model = createFixtureBedrockModel({ recordings: [], dryRun });
-    const runtime = createFixtureAgentCore({ recordings: [], dryRun });
-    await expect(model.converse({ modelId: 'model-1', prompt: 'p' })).rejects.toThrow('bedrockModel.converse');
-    await expect(
-      runtime.invokeAgentRuntime({ runtimeArn: 'arn:aws:bedrock-agentcore:eu-central-1:000000000000:runtime/x', sessionId: 's', payload: 1 }),
-    ).rejects.toThrow('agentCore.invokeAgentRuntime');
+    const model = createFixtureBedrockModel({ model: undefined, dryRun });
+    const runtime = createFixtureAgentCore({ recordings: [], agentRuntime: undefined, dryRun });
+    await expect(drain(model.stream([userMessage('p')]))).rejects.toThrow('bedrockModel.stream');
+    await expect(runtime.invokeAgentRuntime({ runtimeArn: RUNTIME_ARN, sessionId: 's', payload: 1 })).rejects.toThrow('agentCore.invokeAgentRuntime');
     expect(lines).toHaveLength(2);
   });
 
   it('canonicalJson sorts keys at every depth, keeps array order and writes undefined as null', () => {
     expect(canonicalJson({ b: [{ z: 1, y: 2 }, 3], a: undefined, c: new Date(0) })).toBe('{"b":[{"y":2,"z":1},3],"c":"1970-01-01T00:00:00.000Z"}');
     expect(canonicalJson(undefined)).toBe('null');
+  });
+});
+
+describe('the pinned model values (D-68, D-75, D-76)', () => {
+  it('reserves 64,512 tokens per invocation, so six reservations fit the day cap and a seventh does not', () => {
+    expect(TOKEN_RESERVATION_PER_INVOCATION).toBe(64_512);
+    expect(6 * TOKEN_RESERVATION_PER_INVOCATION).toBeLessThanOrEqual(MODEL_VALUES.perDayTokenReservations);
+    expect(7 * TOKEN_RESERVATION_PER_INVOCATION).toBeGreaterThan(MODEL_VALUES.perDayTokenReservations);
+  });
+
+  it('ends the runtime loop 10 seconds before detection stops waiting', () => {
+    expect(MODEL_VALUES.runtimeDeadlineMs).toBe(MODEL_VALUES.agentInvocationTimeoutMs - 10_000);
+  });
+
+  it('bounds one call by the record ceiling, the prompt and tool spec budget and 1,024 bytes of framing', () => {
+    expect(RECORD_BYTE_CEILING + MODEL_VALUES.promptAndToolSpecByteBudget + 1_024).toBe(MODEL_VALUES.inputTokenCeiling);
+    expect(MODEL_VALUES.systemPromptByteBudget).toBeLessThan(MODEL_VALUES.promptAndToolSpecByteBudget);
+  });
+
+  it('reports the model id, the profile id, the max tokens and the thinking setting as the pinned four', () => {
+    expect(PINNED_MODEL_VALUES).toEqual({
+      modelId: 'anthropic.claude-sonnet-4-6',
+      profileId: 'eu.anthropic.claude-sonnet-4-6',
+      maxTokens: 1_024,
+      thinking: 'disabled',
+    });
+  });
+});
+
+describe('the bedrockModel row streams Strands events (D-71)', () => {
+  it('declares stream as the row operation, mutating and gated, in place of converse', () => {
+    expect(PORT_TABLE.bedrockModel.operations.join(' ')).toBe('stream');
+    expect(PORT_TABLE.bedrockModel.mutatingOperations.join(' ')).toBe('stream');
+    expect(PORT_TABLE.bedrockModel.gatedOperations.join(' ')).toBe('stream');
+  });
+
+  it('writes one dry-run line before the first event in test, then yields the scripted turn', async () => {
+    const order: string[] = [];
+    const lines: string[] = [];
+    const { ports } = resolvePortTable({
+      runtimeContext: 'test',
+      switchValue: undefined,
+      fixtures: { model: createFixtureModel([plainTextTurn('the answer', USAGE)]) },
+      dryRunSink: (line) => {
+        lines.push(line);
+        order.push('line');
+      },
+    });
+
+    const events: ModelStreamEvent[] = [];
+    for await (const event of ports.bedrockModel.stream([userMessage('p')], { systemPrompt: 's' })) {
+      order.push(event.type);
+      events.push(event);
+    }
+    expect(lines).toHaveLength(1);
+    expect(lines[0]?.startsWith('(dry-run) WOULD bedrockModel.stream eu.anthropic.claude-sonnet-4-6 {')).toBe(true);
+    expect(order[0]).toBe('line');
+    expect(events).toEqual(plainTextTurn('the answer', USAGE).events);
+  });
+
+  it('rejects with FixtureMissError naming bedrockModel.stream on first iteration when no fixture model is set', async () => {
+    const { ports } = resolvePortTable({ runtimeContext: 'test', switchValue: undefined, dryRunSink: NO_LINES });
+    const stream = ports.bedrockModel.stream([userMessage('p')]);
+    const refusal = await drain(stream).catch((error: unknown) => error);
+    expect(refusal).toBeInstanceOf(FixtureMissError);
+    expect((refusal as Error).message).toBe('no recording answers bedrockModel.stream');
+  });
+
+  it('writes a line holding exactly the model id, the message count and the prompt bytes, and no message text', async () => {
+    const lines: string[] = [];
+    const log = createDryRunLog({ sink: (line) => lines.push(line), addressKey: createFixtureAddressKey(), now: () => 1 });
+    const messages = [userMessage(PLANTED_SENTENCE), new Message({ role: 'assistant', content: [new TextBlock('a reply about the mailbox')] })];
+    const stream = createBedrockModelDryRun(log).stream(messages, { systemPrompt: 'system words' });
+    expect(lines).toEqual([]);
+
+    expect(await drain(stream)).toEqual([]);
+    expect(lines).toHaveLength(1);
+    const [, summaryJson] = /^\(dry-run\) WOULD bedrockModel\.stream eu\.anthropic\.claude-sonnet-4-6 (\{.*\})$/.exec(lines[0] ?? '') ?? [];
+    const summary = JSON.parse(summaryJson ?? '{}') as Record<string, unknown>;
+    expect(Object.keys(summary).sort()).toEqual(['messageCount', 'modelId', 'promptBytes']);
+    expect(summary).toEqual({
+      modelId: MODEL_VALUES.inferenceProfileId,
+      messageCount: 2,
+      promptBytes: Buffer.byteLength(JSON.stringify({ messages, systemPrompt: 'system words' })),
+    });
+    for (const text of ['mailbox', 'Jane', 'system words', 'reply']) expect(lines[0]).not.toContain(text);
+  });
+});
+
+describe('createFixtureModel', () => {
+  it('replays one turn per call and records a JSON copy of each call input', async () => {
+    const model = createFixtureModel([plainTextTurn('one', USAGE), structuredAnswerTurn({ ok: true }, USAGE)]);
+    const message = userMessage('first');
+    const spec = { name: STRUCTURED_OUTPUT_TOOL_NAME, description: 'answer', inputSchema: { type: 'object' as const } };
+
+    expect(await drain(model.stream([message], { systemPrompt: 's', toolSpecs: [spec], toolChoice: { any: {} } }))).toEqual(
+      plainTextTurn('one', USAGE).events,
+    );
+    expect(await drain(model.stream([message]))).toEqual(structuredAnswerTurn({ ok: true }, USAGE).events);
+    (message.content as ContentBlock[]).push(new TextBlock('added after the call'));
+
+    expect(model.calls).toHaveLength(2);
+    expect(model.calls[0]).toEqual({
+      messages: [expect.objectContaining({ role: 'user', content: [{ text: 'first' }] })],
+      systemPrompt: 's',
+      toolSpecs: [spec],
+      toolChoice: { any: {} },
+    });
+    expect(model.calls[1]).toMatchObject({ systemPrompt: undefined, toolSpecs: undefined, toolChoice: undefined });
+  });
+
+  it('throws FixtureMissError on a call past the script', async () => {
+    const model = createFixtureModel([plainTextTurn('one', USAGE)]);
+    await drain(model.stream([userMessage('p')]));
+    await expect(drain(model.stream([userMessage('p')]))).rejects.toBeInstanceOf(FixtureMissError);
+  });
+
+  it('builds a structured answer as one strands_structured_output tool use, stopped on toolUse, with its usage', () => {
+    expect(structuredAnswerTurn({ verdict: 'unknown' }, USAGE).events).toEqual([
+      { type: 'modelMessageStartEvent', role: 'assistant' },
+      { type: 'modelContentBlockStartEvent', start: { type: 'toolUseStart', name: 'strands_structured_output', toolUseId: 'fixture-use-1' } },
+      { type: 'modelContentBlockDeltaEvent', delta: { type: 'toolUseInputDelta', input: '{"verdict":"unknown"}' } },
+      { type: 'modelContentBlockStopEvent' },
+      { type: 'modelMessageStopEvent', stopReason: 'toolUse' },
+      { type: 'modelMetadataEvent', usage: USAGE },
+    ]);
+  });
+
+  it('throws the SDK own throttling error for a throttled turn', async () => {
+    const model = createFixtureModel([throttledTurn()]);
+    await expect(drain(model.stream([userMessage('p')]))).rejects.toBeInstanceOf(ModelThrottledError);
+  });
+});
+
+describe('the agentCore fixture routes to an in-process handler (D-80)', () => {
+  it('hands the handler a JSON copy of the payload after its line, and returns a JSON copy of the answer', async () => {
+    const order: string[] = [];
+    const received: unknown[] = [];
+    const answer = { status: 'answered', nested: { calls: 1 } };
+    const payload = { record: { rows: [1, 2] } };
+    const { ports } = resolvePortTable({
+      runtimeContext: 'test',
+      switchValue: undefined,
+      fixtures: {
+        agentRuntime: async (handed) => {
+          order.push('handler');
+          received.push(handed);
+          return answer;
+        },
+      },
+      dryRunSink: (line) => order.push(line),
+    });
+
+    const result = await ports.agentCore.invokeAgentRuntime({ runtimeArn: RUNTIME_ARN, sessionId: 's', payload });
+    expect(received).toEqual([payload]);
+    expect(received[0]).not.toBe(payload);
+    expect(result).toEqual(answer);
+    expect(result).not.toBe(answer);
+    expect(order).toHaveLength(2);
+    expect(order[0]?.startsWith(`(dry-run) WOULD agentCore.invokeAgentRuntime ${RUNTIME_ARN} `)).toBe(true);
+    expect(order[1]).toBe('handler');
+  });
+
+  it('rejects with an AbortError and never runs the handler when the signal is already aborted', async () => {
+    let handled = 0;
+    const { ports } = resolvePortTable({
+      runtimeContext: 'test',
+      switchValue: undefined,
+      fixtures: {
+        agentRuntime: async () => {
+          handled += 1;
+          return {};
+        },
+      },
+      dryRunSink: NO_LINES,
+    });
+    const controller = new AbortController();
+    controller.abort();
+    await expect(
+      ports.agentCore.invokeAgentRuntime({ runtimeArn: RUNTIME_ARN, sessionId: 's', payload: {}, abortSignal: controller.signal }),
+    ).rejects.toMatchObject({ name: 'AbortError' });
+    expect(handled).toBe(0);
+  });
+
+  it('rejects with an AbortError when the signal aborts while the handler runs', async () => {
+    let started: () => void = () => {};
+    const handlerStarted = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    const { ports } = resolvePortTable({
+      runtimeContext: 'test',
+      switchValue: undefined,
+      fixtures: {
+        agentRuntime: async () => {
+          started();
+          return new Promise<never>(() => {});
+        },
+      },
+      dryRunSink: NO_LINES,
+    });
+    const controller = new AbortController();
+    const pending = ports.agentCore.invokeAgentRuntime({ runtimeArn: RUNTIME_ARN, sessionId: 's', payload: {}, abortSignal: controller.signal });
+    await handlerStarted;
+    controller.abort();
+    await expect(pending).rejects.toMatchObject({ name: 'AbortError' });
   });
 });

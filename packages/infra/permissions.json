@@ -1,5 +1,155 @@
 [
   {
+    "stack": "FotheringDetection",
+    "role": "DetectRoleDEDAD076",
+    "kind": "permission",
+    "effect": "Allow",
+    "action": "bedrock-agentcore:InvokeAgentRuntime",
+    "resource": "{\"Fn::ImportValue\":\"FotheringRuntime:ExportsOutputFnGetAttRuntime99E3DDFAAgentRuntimeArn83DF9A4C\"}",
+    "principal": null,
+    "condition": null
+  },
+  {
+    "stack": "FotheringDetection",
+    "role": "DetectRoleDEDAD076",
+    "kind": "permission",
+    "effect": "Allow",
+    "action": "bedrock-agentcore:InvokeAgentRuntime",
+    "resource": "{\"Fn::Join\":[\"\",[{\"Fn::ImportValue\":\"FotheringRuntime:ExportsOutputFnGetAttRuntime99E3DDFAAgentRuntimeArn83DF9A4C\"},\"/*\"]]}",
+    "principal": null,
+    "condition": null
+  },
+  {
+    "stack": "FotheringDetection",
+    "role": "DetectRoleDEDAD076",
+    "kind": "permission",
+    "effect": "Allow",
+    "action": "dynamodb:GetItem",
+    "resource": "{\"Fn::ImportValue\":\"FotheringIngest:ExportsOutputFnGetAttEventStore165FCE28Arn077E4AA7\"}",
+    "principal": null,
+    "condition": null
+  },
+  {
+    "stack": "FotheringDetection",
+    "role": "DetectRoleDEDAD076",
+    "kind": "permission",
+    "effect": "Allow",
+    "action": "dynamodb:PutItem",
+    "resource": "{\"Fn::ImportValue\":\"FotheringIngest:ExportsOutputFnGetAttEventStore165FCE28Arn077E4AA7\"}",
+    "principal": null,
+    "condition": null
+  },
+  {
+    "stack": "FotheringDetection",
+    "role": "DetectRoleDEDAD076",
+    "kind": "permission",
+    "effect": "Allow",
+    "action": "dynamodb:Query",
+    "resource": "{\"Fn::ImportValue\":\"FotheringIngest:ExportsOutputFnGetAttEventStore165FCE28Arn077E4AA7\"}",
+    "principal": null,
+    "condition": null
+  },
+  {
+    "stack": "FotheringDetection",
+    "role": "DetectRoleDEDAD076",
+    "kind": "permission",
+    "effect": "Allow",
+    "action": "dynamodb:UpdateItem",
+    "resource": "{\"Fn::ImportValue\":\"FotheringIngest:ExportsOutputFnGetAttEventStore165FCE28Arn077E4AA7\"}",
+    "principal": null,
+    "condition": null
+  },
+  {
+    "stack": "FotheringDetection",
+    "role": "DetectRoleDEDAD076",
+    "kind": "permission",
+    "effect": "Allow",
+    "action": "logs:CreateLogStream",
+    "resource": "{\"Fn::Join\":[\"\",[\"arn:aws:logs:eu-central-1:\",{\"Ref\":\"AWS::AccountId\"},\":log-group:\",{\"Ref\":\"DetectLogsE0BB1C87\"},\":log-stream:*\"]]}",
+    "principal": null,
+    "condition": null
+  },
+  {
+    "stack": "FotheringDetection",
+    "role": "DetectRoleDEDAD076",
+    "kind": "permission",
+    "effect": "Allow",
+    "action": "logs:PutLogEvents",
+    "resource": "{\"Fn::Join\":[\"\",[\"arn:aws:logs:eu-central-1:\",{\"Ref\":\"AWS::AccountId\"},\":log-group:\",{\"Ref\":\"DetectLogsE0BB1C87\"},\":log-stream:*\"]]}",
+    "principal": null,
+    "condition": null
+  },
+  {
+    "stack": "FotheringDetection",
+    "role": "DetectRoleDEDAD076",
+    "kind": "permission",
+    "effect": "Allow",
+    "action": "ses:GetConfigurationSetEventDestinations",
+    "resource": "{\"Fn::Join\":[\"\",[\"arn:aws:ses:eu-central-1:\",{\"Ref\":\"AWS::AccountId\"},\":configuration-set/fothering-alerts\"]]}",
+    "principal": null,
+    "condition": null
+  },
+  {
+    "stack": "FotheringDetection",
+    "role": "DetectRoleDEDAD076",
+    "kind": "permission",
+    "effect": "Allow",
+    "action": "ses:GetConfigurationSetEventDestinations",
+    "resource": "{\"Fn::Join\":[\"\",[\"arn:aws:ses:eu-central-1:\",{\"Ref\":\"AWS::AccountId\"},\":configuration-set/fothering-bulk\"]]}",
+    "principal": null,
+    "condition": null
+  },
+  {
+    "stack": "FotheringDetection",
+    "role": "DetectRoleDEDAD076",
+    "kind": "permission",
+    "effect": "Allow",
+    "action": "ses:GetConfigurationSetEventDestinations",
+    "resource": "{\"Fn::Join\":[\"\",[\"arn:aws:ses:eu-central-1:\",{\"Ref\":\"AWS::AccountId\"},\":configuration-set/fothering-transactional\"]]}",
+    "principal": null,
+    "condition": null
+  },
+  {
+    "stack": "FotheringDetection",
+    "role": "DetectRoleDEDAD076",
+    "kind": "permission",
+    "effect": "Allow",
+    "action": "ses:GetEmailIdentity",
+    "resource": "{\"Fn::Join\":[\"\",[\"arn:aws:ses:eu-central-1:\",{\"Ref\":\"AWS::AccountId\"},\":identity/*\"]]}",
+    "principal": null,
+    "condition": null
+  },
+  {
+    "stack": "FotheringDetection",
+    "role": "DetectRoleDEDAD076",
+    "kind": "permission",
+    "effect": "Allow",
+    "action": "ses:ListConfigurationSets",
+    "resource": "\"*\"",
+    "principal": null,
+    "condition": null
+  },
+  {
+    "stack": "FotheringDetection",
+    "role": "DetectRoleDEDAD076",
+    "kind": "permission",
+    "effect": "Allow",
+    "action": "ses:ListEmailIdentities",
+    "resource": "\"*\"",
+    "principal": null,
+    "condition": null
+  },
+  {
+    "stack": "FotheringDetection",
+    "role": "DetectRoleDEDAD076",
+    "kind": "trust",
+    "effect": "Allow",
+    "action": "sts:AssumeRole",
+    "resource": null,
+    "principal": "{\"Service\":\"lambda.amazonaws.com\"}",
+    "condition": null
+  },
+  {
     "stack": "FotheringIngest",
     "role": "ForgetRole9C1F5950",
     "kind": "permission",
@@ -117,6 +267,76 @@
     "action": "sts:AssumeRole",
     "resource": null,
     "principal": "{\"Service\":\"lambda.amazonaws.com\"}",
+    "condition": null
+  },
+  {
+    "stack": "FotheringRuntime",
+    "role": "RuntimeRoleFD8790A4",
+    "kind": "permission",
+    "effect": "Allow",
+    "action": "bedrock:InvokeModel",
+    "resource": "\"arn:aws:bedrock:eu-central-1::foundation-model/anthropic.claude-sonnet-4-6\"",
+    "principal": null,
+    "condition": "{\"StringEquals\":{\"bedrock:InferenceProfileArn\":{\"Fn::Join\":[\"\",[\"arn:aws:bedrock:eu-central-1:\",{\"Ref\":\"AWS::AccountId\"},\":inference-profile/eu.anthropic.claude-sonnet-4-6\"]]}}}"
+  },
+  {
+    "stack": "FotheringRuntime",
+    "role": "RuntimeRoleFD8790A4",
+    "kind": "permission",
+    "effect": "Allow",
+    "action": "bedrock:InvokeModel",
+    "resource": "\"arn:aws:bedrock:eu-north-1::foundation-model/anthropic.claude-sonnet-4-6\"",
+    "principal": null,
+    "condition": "{\"StringEquals\":{\"bedrock:InferenceProfileArn\":{\"Fn::Join\":[\"\",[\"arn:aws:bedrock:eu-central-1:\",{\"Ref\":\"AWS::AccountId\"},\":inference-profile/eu.anthropic.claude-sonnet-4-6\"]]}}}"
+  },
+  {
+    "stack": "FotheringRuntime",
+    "role": "RuntimeRoleFD8790A4",
+    "kind": "permission",
+    "effect": "Allow",
+    "action": "bedrock:InvokeModel",
+    "resource": "\"arn:aws:bedrock:eu-south-1::foundation-model/anthropic.claude-sonnet-4-6\"",
+    "principal": null,
+    "condition": "{\"StringEquals\":{\"bedrock:InferenceProfileArn\":{\"Fn::Join\":[\"\",[\"arn:aws:bedrock:eu-central-1:\",{\"Ref\":\"AWS::AccountId\"},\":inference-profile/eu.anthropic.claude-sonnet-4-6\"]]}}}"
+  },
+  {
+    "stack": "FotheringRuntime",
+    "role": "RuntimeRoleFD8790A4",
+    "kind": "permission",
+    "effect": "Allow",
+    "action": "bedrock:InvokeModel",
+    "resource": "\"arn:aws:bedrock:eu-south-2::foundation-model/anthropic.claude-sonnet-4-6\"",
+    "principal": null,
+    "condition": "{\"StringEquals\":{\"bedrock:InferenceProfileArn\":{\"Fn::Join\":[\"\",[\"arn:aws:bedrock:eu-central-1:\",{\"Ref\":\"AWS::AccountId\"},\":inference-profile/eu.anthropic.claude-sonnet-4-6\"]]}}}"
+  },
+  {
+    "stack": "FotheringRuntime",
+    "role": "RuntimeRoleFD8790A4",
+    "kind": "permission",
+    "effect": "Allow",
+    "action": "bedrock:InvokeModel",
+    "resource": "\"arn:aws:bedrock:eu-west-1::foundation-model/anthropic.claude-sonnet-4-6\"",
+    "principal": null,
+    "condition": "{\"StringEquals\":{\"bedrock:InferenceProfileArn\":{\"Fn::Join\":[\"\",[\"arn:aws:bedrock:eu-central-1:\",{\"Ref\":\"AWS::AccountId\"},\":inference-profile/eu.anthropic.claude-sonnet-4-6\"]]}}}"
+  },
+  {
+    "stack": "FotheringRuntime",
+    "role": "RuntimeRoleFD8790A4",
+    "kind": "permission",
+    "effect": "Allow",
+    "action": "bedrock:InvokeModel",
+    "resource": "\"arn:aws:bedrock:eu-west-3::foundation-model/anthropic.claude-sonnet-4-6\"",
+    "principal": null,
+    "condition": "{\"StringEquals\":{\"bedrock:InferenceProfileArn\":{\"Fn::Join\":[\"\",[\"arn:aws:bedrock:eu-central-1:\",{\"Ref\":\"AWS::AccountId\"},\":inference-profile/eu.anthropic.claude-sonnet-4-6\"]]}}}"
+  },
+  {
+    "stack": "FotheringRuntime",
+    "role": "RuntimeRoleFD8790A4",
+    "kind": "permission",
+    "effect": "Allow",
+    "action": "bedrock:InvokeModel",
+    "resource": "{\"Fn::Join\":[\"\",[\"arn:aws:bedrock:eu-central-1:\",{\"Ref\":\"AWS::AccountId\"},\":inference-profile/eu.anthropic.claude-sonnet-4-6\"]]}",
+    "principal": null,
     "condition": null
   },
   {

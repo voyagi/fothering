@@ -127,7 +127,7 @@ jobs:
           echo "packages listed: $scanned of $locked locked in package-lock.json"
           [ $((scanned * 10)) -ge $((locked * 9)) ] || { echo 'trivy listed too few of the locked packages - refusing to read that as clean. Causes seen so far: TRIVY_INCLUDE_DEV_DEPS missing from the scan step, or a trivy that cannot parse the lockfile (0.69.3 on a license list)'; exit 1; }
       - if: ${{ !cancelled() && github.event_name == 'push' }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: license-census
           path: trivy-licenses.json

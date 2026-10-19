@@ -1,0 +1,58 @@
+{
+  "id": "a08",
+  "incident": "A8 (AC-11): A1's one bad batch on the transactional lane fothering-transactional; unknown not-closeable, naming the lane and its refusal",
+  "now": "2026-10-11T12:02:00.000Z",
+  "scenarios": [
+    {
+      "configurationSet": "fothering-transactional",
+      "streamTag": "receipts",
+      "callerIdentity": "receipts-sender",
+      "fromDomain": "news.example.com",
+      "groups": [
+        { "bucketOffset": 0, "count": 40, "batch": "import-0915", "permanentBounces": 15 },
+        { "bucketOffset": 1, "count": 160, "batch": "import-0901" }
+      ]
+    }
+  ],
+  "ses": {
+    "identities": [
+      {
+        "identity": "example.com",
+        "dkimStatus": "SUCCESS",
+        "dkimSigningEnabled": true,
+        "mailFromDomain": "bounce.example.com",
+        "mailFromStatus": "SUCCESS"
+      }
+    ],
+    "destinations": "complete"
+  },
+  "dns": [
+    { "name": "_dmarc.news.example.com", "recordType": "TXT", "outcome": "missing" },
+    { "name": "_dmarc.example.com", "recordType": "TXT", "outcome": "records", "records": ["v=DMARC1; p=none"] },
+    { "name": "bounce.example.com", "recordType": "TXT", "outcome": "records", "records": ["v=spf1 include:amazonses.com ~all"] },
+    { "name": "example.com", "recordType": "MX", "outcome": "missing" }
+  ],
+  "labels": {
+    "fothering-transactional": {
+      "outcome": "unknown",
+      "reason": "not-closeable",
+      "names": ["fothering-transactional (not-closeable)", "closeability refusals: transactional"],
+      "fixKind": null,
+      "rule": "not-closeable"
+    }
+  },
+  "variants": [
+    {
+      "id": "base",
+      "response": { "label": "hand-authored" },
+      "turns": [
+        {
+          "kind": "answer",
+          "decision": "unknown",
+          "explanation": "This lane's hard-bounce ratio is 7.50% over 200 recipient-sends, and the import-0915 batch is the cause: 15 of its 40 sends bounced permanently. This lane carries receipts and password resets, so it is not one Fothering stops on its own; the decision is left to you."
+        }
+      ],
+      "expected": { "fothering-transactional": { "kind": "validated", "decision": "unknown" } }
+    }
+  ]
+}

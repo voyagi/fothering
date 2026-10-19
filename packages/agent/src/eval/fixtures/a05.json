@@ -1,0 +1,83 @@
+{
+  "id": "a05",
+  "incident": "A5: mail to gmail.com bouncing on fothering-bulk and on fothering-transactional; refused on both lanes with the shared-provider fix naming Google",
+  "now": "2026-10-11T12:02:00.000Z",
+  "scenarios": [
+    {
+      "configurationSet": "fothering-bulk",
+      "streamTag": "newsletter",
+      "callerIdentity": "bulk-sender",
+      "fromDomain": "news.example.com",
+      "groups": [
+        { "bucketOffset": 0, "count": 40, "receivingDomains": ["gmail.com"], "permanentBounces": 15 },
+        { "bucketOffset": 1, "count": 160 }
+      ]
+    },
+    {
+      "configurationSet": "fothering-transactional",
+      "streamTag": "receipts",
+      "callerIdentity": "receipts-sender",
+      "fromDomain": "news.example.com",
+      "groups": [
+        { "bucketOffset": 0, "count": 40, "receivingDomains": ["gmail.com"], "permanentBounces": 15 },
+        { "bucketOffset": 1, "count": 160 }
+      ]
+    }
+  ],
+  "ses": {
+    "identities": [
+      {
+        "identity": "example.com",
+        "dkimStatus": "SUCCESS",
+        "dkimSigningEnabled": true,
+        "mailFromDomain": "bounce.example.com",
+        "mailFromStatus": "SUCCESS"
+      }
+    ],
+    "destinations": "complete"
+  },
+  "dns": [
+    { "name": "_dmarc.news.example.com", "recordType": "TXT", "outcome": "missing" },
+    { "name": "_dmarc.example.com", "recordType": "TXT", "outcome": "records", "records": ["v=DMARC1; p=none"] },
+    { "name": "bounce.example.com", "recordType": "TXT", "outcome": "records", "records": ["v=spf1 include:amazonses.com ~all"] },
+    { "name": "example.com", "recordType": "MX", "outcome": "missing" }
+  ],
+  "labels": {
+    "fothering-bulk": {
+      "outcome": "refused",
+      "reason": "not-lane-scoped",
+      "names": ["Mail to Google", "fothering-bulk, fothering-transactional"],
+      "fixKind": "shared-provider",
+      "rule": "shared-cause"
+    },
+    "fothering-transactional": {
+      "outcome": "refused",
+      "reason": "not-lane-scoped",
+      "names": ["Mail to Google", "fothering-bulk, fothering-transactional"],
+      "fixKind": "shared-provider",
+      "rule": "shared-cause"
+    }
+  },
+  "variants": [
+    {
+      "id": "base",
+      "response": { "label": "hand-authored" },
+      "turns": [
+        {
+          "kind": "answer",
+          "decision": "unknown",
+          "explanation": "This lane's hard-bounce ratio is 7.50% over 200 recipient-sends, and mail to Google is the cause: 15 of its 40 sends bounced permanently. The other lane shows the same pattern for Google, so holding back one lane would not stop it. Check what Google reports about the sending domains first."
+        },
+        {
+          "kind": "answer",
+          "decision": "unknown",
+          "explanation": "This lane's hard-bounce ratio is 7.50% over 200 recipient-sends, and mail to Google is the cause: 15 of its 40 sends bounced permanently. The other lane shows the same pattern for Google, so holding back this lane alone would not stop it. Check what Google reports about the sending domains first."
+        }
+      ],
+      "expected": {
+        "fothering-bulk": { "kind": "validated", "decision": "unknown" },
+        "fothering-transactional": { "kind": "validated", "decision": "unknown" }
+      }
+    }
+  ]
+}

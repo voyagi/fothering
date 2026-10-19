@@ -1,0 +1,56 @@
+{
+  "id": "a07",
+  "incident": "A7 (AI-SPEC open item 5-4): fothering-bulk spikes over six batches of 18 recipient-sends each, every batch row not enough volume; unknown not-settled",
+  "now": "2026-10-11T12:02:00.000Z",
+  "scenarios": [
+    {
+      "configurationSet": "fothering-bulk",
+      "streamTag": "newsletter",
+      "callerIdentity": "bulk-sender",
+      "fromDomain": "news.example.com",
+      "groups": [
+        { "bucketOffset": 0, "count": 18, "batch": "import-0901", "permanentBounces": 2 },
+        { "bucketOffset": 1, "count": 18, "batch": "import-0902", "permanentBounces": 2 },
+        { "bucketOffset": 2, "count": 18, "batch": "import-0903", "permanentBounces": 2 },
+        { "bucketOffset": 3, "count": 18, "batch": "import-0904", "permanentBounces": 2 },
+        { "bucketOffset": 4, "count": 18, "batch": "import-0905", "permanentBounces": 2 },
+        { "bucketOffset": 5, "count": 18, "batch": "import-0906", "permanentBounces": 2 }
+      ]
+    }
+  ],
+  "ses": {
+    "identities": [
+      {
+        "identity": "example.com",
+        "dkimStatus": "SUCCESS",
+        "dkimSigningEnabled": true,
+        "mailFromDomain": "bounce.example.com",
+        "mailFromStatus": "SUCCESS"
+      }
+    ],
+    "destinations": "complete"
+  },
+  "dns": [
+    { "name": "_dmarc.news.example.com", "recordType": "TXT", "outcome": "missing" },
+    { "name": "_dmarc.example.com", "recordType": "TXT", "outcome": "records", "records": ["v=DMARC1; p=none"] },
+    { "name": "bounce.example.com", "recordType": "TXT", "outcome": "records", "records": ["v=spf1 include:amazonses.com ~all"] },
+    { "name": "example.com", "recordType": "MX", "outcome": "missing" }
+  ],
+  "labels": {
+    "fothering-bulk": { "outcome": "unknown", "reason": "not-settled", "names": ["fothering-bulk (not-settled)"], "fixKind": null, "rule": "not-settled" }
+  },
+  "variants": [
+    {
+      "id": "base",
+      "response": { "label": "hand-authored" },
+      "turns": [
+        {
+          "kind": "answer",
+          "decision": "unknown",
+          "explanation": "This lane's hard-bounce ratio is 11.11% over 108 recipient-sends, but no single cause was settled: the bounces are spread over six small batches, and each holds too few sends to judge on its own. The decision is left to you."
+        }
+      ],
+      "expected": { "fothering-bulk": { "kind": "validated", "decision": "unknown" } }
+    }
+  ]
+}

@@ -5,9 +5,11 @@
 //
 // WHY empty-import-meta IS AN ERROR. Bundled to CommonJS, esbuild rewrites every `import.meta` to
 // an empty object and only warns, so `import.meta.url` is undefined at run time while the build
-// still succeeds. The plugin below removes the one use bedrock-agentcore 0.4.4 has; raising the
-// warning to an error stops a new use, from an upgrade or any other dependency, from shipping a
-// bundle that dies on the first code path that touches it.
+// still succeeds. The plugin below removes the one use on the bedrock-agentcore 0.4.5 path the
+// agent bundles, in runtime/app.js. Its other use, in _utils/version.js, is reached only from the
+// web-search tool, which the agent never imports. Raising the warning to an error stops a new use,
+// from an upgrade or any other dependency, from shipping a bundle that dies on the first code path
+// that touches it.
 //
 // WHY THE createRequire PLUGIN. bedrock-agentcore's runtime/app.js builds a private `require`
 // through `createRequire(import.meta.url)` to load two Fastify plugins CommonJS-style. Bundled to

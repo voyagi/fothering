@@ -85,7 +85,7 @@ export interface CountLaneBucketsOptions {
   nowMs: number;
 }
 
-function emptyBucket(bucketStartMsValue: number, nowMs: number): BucketCount {
+export function emptyBucket(bucketStartMsValue: number, nowMs: number): BucketCount {
   return {
     bucketStartMs: bucketStartMsValue,
     complete: isBucketComplete(bucketStartMsValue, nowMs),
@@ -103,16 +103,34 @@ function emptyBucket(bucketStartMsValue: number, nowMs: number): BucketCount {
   };
 }
 
-function applyBounce(bucket: BucketCount, record: EventRecord): void {
+export type BounceClass = 'suppressed' | 'permanent' | 'transient' | 'undetermined';
+export type ComplaintClass = 'suppressed' | 'not-spam' | 'counted';
+
+/** The one place a Bounce record is split for the numerators; the window fold reads the same split. */
+export function bounceClass(record: EventRecord): BounceClass {
   const subtype = record.fields.bounceSubType;
-  if (subtype !== undefined && SUPPRESSION_BOUNCE_SUBTYPES.includes(subtype)) {
-    bucket.suppressedBounce += 1;
-    return;
-  }
+  if (subtype !== undefined && SUPPRESSION_BOUNCE_SUBTYPES.includes(subtype)) return 'suppressed';
   const bounceType = record.fields.bounceType;
-  if (bounceType === 'Permanent') bucket.permanentBounce += 1;
-  else if (bounceType === 'Transient') bucket.transientBounce += 1;
-  else bucket.undeterminedBounce += 1;
+  if (bounceType === 'Permanent') return 'permanent';
+  if (bounceType === 'Transient') return 'transient';
+  return 'undetermined';
+}
+
+function applyBounce(bucket: BucketCount, record: EventRecord): void {
+  switch (bounceClass(record)) {
+    case 'suppressed':
+      bucket.suppressedBounce += 1;
+      break;
+    case 'permanent':
+      bucket.permanentBounce += 1;
+      break;
+    case 'transient':
+      bucket.transientBounce += 1;
+      break;
+    case 'undetermined':
+      bucket.undeterminedBounce += 1;
+      break;
+  }
 }
 
 // Every complaintSubType AWS documents (the two suppression lists) marks a message SES accepted but
@@ -123,17 +141,27 @@ function isSuppressedComplaint(subtype: string | undefined): boolean {
   return subtype !== undefined && (subtype === UNCLASSIFIED || SUPPRESSION_COMPLAINT_SUBTYPES.includes(subtype));
 }
 
+export function complaintClass(record: EventRecord): ComplaintClass {
+  if (isSuppressedComplaint(record.fields.complaintSubType)) return 'suppressed';
+  if (record.fields.complaintFeedbackType === NOT_SPAM_FEEDBACK_TYPE) return 'not-spam';
+  return 'counted';
+}
+
 function applyComplaint(bucket: BucketCount, record: EventRecord): void {
-  if (isSuppressedComplaint(record.fields.complaintSubType)) {
-    bucket.suppressedComplaint += 1;
-  } else if (record.fields.complaintFeedbackType === NOT_SPAM_FEEDBACK_TYPE) {
-    bucket.notSpamComplaint += 1;
-  } else {
-    bucket.complaint += 1;
+  switch (complaintClass(record)) {
+    case 'suppressed':
+      bucket.suppressedComplaint += 1;
+      break;
+    case 'not-spam':
+      bucket.notSpamComplaint += 1;
+      break;
+    case 'counted':
+      bucket.complaint += 1;
+      break;
   }
 }
 
-function applyRecord(bucket: BucketCount, record: EventRecord): void {
+export function applyRecord(bucket: BucketCount, record: EventRecord): void {
   switch (record.eventType) {
     case 'Send':
       bucket.send += 1;
@@ -159,7 +187,7 @@ function applyRecord(bucket: BucketCount, record: EventRecord): void {
 // A bound off a bucket edge would build bucket keys no record carries, so every count would read 0
 // without an error, and a backwards range would return no bucket at all: both would make a lane
 // full of events look silent to the detector reading it. Either is refused instead.
-function assertBucketBounds(fromBucketMs: number, toBucketMs: number): void {
+export function assertBucketBounds(fromBucketMs: number, toBucketMs: number): void {
   for (const bound of [fromBucketMs, toBucketMs]) {
     if (!Number.isInteger(bound) || bucketStartMs(bound) !== bound) {
       throw new RangeError(`bucket bound ${String(bound)} is not a whole number on a ${BUCKET_MS} ms bucket edge`);

@@ -1,11 +1,26 @@
+import * as dnsPromises from 'node:dns/promises';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import fc from 'fast-check';
-import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
+import { BedrockAgentCoreClient } from '@aws-sdk/client-bedrock-agentcore';
+import {
+  Agent,
+  BedrockModel,
+  ConstantBackoff,
+  DefaultModelRetryStrategy,
+  Message,
+  ModelThrottledError,
+  TextBlock,
+  type BedrockModelOptions,
+  type ModelStreamEvent,
+} from '@strands-agents/sdk';
+import { MODEL_VALUES } from '@fothering/core/model-values';
+import { DynamoDBClient, TransactionCanceledException } from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocumentClient } from '@aws-sdk/lib-dynamodb';
 import { SecretsManagerClient } from '@aws-sdk/client-secrets-manager';
 import { SQSClient } from '@aws-sdk/client-sqs';
 import { NotFoundException, SESv2Client, TooManyRequestsException } from '@aws-sdk/client-sesv2';
 import {
+  RETENTION_SECONDS,
   SES_EVENT_TYPES,
   bucketSortKeyPrefix,
   isStorableBucketStart,
@@ -14,8 +29,21 @@ import {
   type RecordKey,
 } from '@fothering/core/records';
 import { selectKeyVersion } from '@fothering/core/address';
+import { BUCKET_MS, bucketStartMs } from '@fothering/core/buckets';
 import { propertySeed } from '@fothering/core/test/property-seed';
-import { findLane } from '@fothering/core/lanes';
+import { scenarioRecords } from '@fothering/core/test/event-arbitraries';
+import {
+  MAX_WINDOW_BUCKETS,
+  WindowTooLongError,
+  createWindowFold,
+  spikeWindowFor,
+  summarizeWindow,
+  type LaneFold,
+  type WindowFoldState,
+} from '@fothering/core/window-fold';
+import { findLane, parseLaneMap } from '@fothering/core/lanes';
+import lanesJson from '../../../../lanes.json' with { type: 'json' };
+import type { ReservationRequest, UsageRecord } from '../port-types.js';
 import { minimizeEvent } from '@fothering/core/minimize';
 import { parseSesEvent } from '@fothering/core/ses-events';
 import { resolvePortTable } from '../ports.js';
@@ -23,10 +51,22 @@ import { SES_READ_SPACING_MS } from '../ses-facts.js';
 import { TEST_ADDRESS_KEY_SET } from '../fixtures/ingest-ports.js';
 import { DOC_EXAMPLE_LANE_MAP, SES_EVENT_FIXTURE_NAMES, loadSesEventFixture } from '../fixtures/ses-events/index.js';
 import { lazyClient } from './lazy-client.js';
-import { createDynamoEventStore } from './event-store.js';
+import { createDynamoDecisionStore, createDynamoEventStore } from './event-store.js';
 import { AddressKeySecretError, createSecretsManagerAddressKey } from './address-key.js';
 import { createSqsDeadLetter } from './dead-letter.js';
 import { createSesReads } from './ses-reads.js';
+import { createLiveAgentCore, createLiveBedrockModel } from './agent-adapters.js';
+import { PortBackedModel } from '../port-backed-model.js';
+import { NetworkGuardError } from '../test/guards.js';
+import {
+  DNS_LOOKUP_TIMEOUT_MS,
+  DNS_LOOKUP_TRIES,
+  createLiveDns,
+  type DnsMxAnswer,
+  type DnsResolver,
+  type DnsResolverFactory,
+  type DnsResolverOptions,
+} from './dns.js';
 
 // Region is fixed for every live adapter (SPEC constraint); the static credentials keep client
 // construction from touching the real default provider chain (env, files, IMDS), which this
@@ -655,6 +695,378 @@ describe('an empty configuration value counts as missing', () => {
   });
 });
 
+const LANES = parseLaneMap(lanesJson);
+const BULK = 'fothering-bulk';
+const FOLD_NOW_MS = Date.UTC(2026, 9, 11, 12, 2, 0);
+
+function bulkSends(count: number): EventRecord[] {
+  const scenario = { configurationSet: BULK, streamTag: 'newsletter', callerIdentity: 'bulk-sender', fromDomain: 'news.example.com' };
+  return scenarioRecords({ ...scenario, groups: [{ bucketOffset: 0, count, deliverRest: false }] }, FOLD_NOW_MS, LANES, TEST_ADDRESS_KEY_SET);
+}
+
+function nthRecord(records: readonly EventRecord[], index: number): EventRecord {
+  const record = records[index];
+  if (record === undefined) throw new Error(`expected a record at ${index}`);
+  return record;
+}
+
+describe('createDynamoEventStore foldLane (R1 live half)', () => {
+  const window = spikeWindowFor(FOLD_NOW_MS);
+
+  it('sends one query per page and folds each page before asking for the next, across three pages (AC-1)', async () => {
+    const client = dynamoClient();
+    const records = bulkSends(3);
+    const pages = [
+      { Items: [nthRecord(records, 0)], LastEvaluatedKey: { pk: 'LANE#fothering-bulk', sk: 'page-1' } },
+      { Items: [], LastEvaluatedKey: { pk: 'LANE#fothering-bulk', sk: 'page-2' } },
+      { Items: [nthRecord(records, 1), nthRecord(records, 2)] },
+    ];
+    const order: string[] = [];
+    let queries = 0;
+    const calls = stubSend(client, (command) => {
+      if (command.name !== 'QueryCommand') throw new Error(`unexpected command ${command.name}`);
+      queries += 1;
+      order.push(`query ${queries}`);
+      return pages[queries - 1];
+    });
+    const base = createWindowFold({ lane: BULK, window, nowMs: FOLD_NOW_MS });
+    const fold: LaneFold<WindowFoldState> = {
+      initial: base.initial,
+      step: (state, page) => {
+        order.push(`step ${page.length}`);
+        return base.step(state, page);
+      },
+    };
+    const store = createDynamoEventStore({ tableName: 'events', client: () => client });
+
+    const state = await store.foldLane(BULK, window.fromBucketMs, window.toBucketMs, FOLD_NOW_MS, fold);
+
+    expect(order.join(', ')).toBe('query 1, step 1, query 2, step 0, query 3, step 2');
+    expect(summarizeWindow(state).totals.recipientSends).toBe(3);
+    expect(calls).toHaveLength(3);
+    for (const call of calls) {
+      expect(call.input).toMatchObject({
+        TableName: 'events',
+        KeyConditionExpression: 'pk = :pk AND sk BETWEEN :from AND :to',
+        FilterExpression: 'expiresAt > :now',
+        ExpressionAttributeValues: {
+          ':pk': 'LANE#fothering-bulk',
+          ':from': bucketSortKeyPrefix(window.fromBucketMs),
+          ':to': `${bucketSortKeyPrefix(window.toBucketMs)}￿`,
+          ':now': Math.floor(FOLD_NOW_MS / 1000),
+        },
+      });
+    }
+    const startKeys = calls.map((call) => (call.input as { ExclusiveStartKey?: { sk: string } }).ExclusiveStartKey?.sk ?? 'none');
+    expect(startKeys.join(' ')).toBe('none page-1 page-2');
+  });
+
+  it('counts nowhere an expired item a misbehaving client still returns, by the fold own check (AC-2)', async () => {
+    const client = dynamoClient();
+    const records = bulkSends(2);
+    const expired = { ...nthRecord(records, 1), expiresAt: Math.floor(FOLD_NOW_MS / 1000) };
+    stubSend(client, () => ({ Items: [nthRecord(records, 0), expired] }));
+    const store = createDynamoEventStore({ tableName: 'events', client: () => client });
+
+    const state = await store.foldLane(BULK, window.fromBucketMs, window.toBucketMs, FOLD_NOW_MS, createWindowFold({ lane: BULK, window, nowMs: FOLD_NOW_MS }));
+    expect(summarizeWindow(state).totals.recipientSends).toBe(1);
+  });
+
+  it('refuses a window one bucket past MAX_WINDOW_BUCKETS with WindowTooLongError before any QueryCommand (AC-E1)', async () => {
+    const client = dynamoClient();
+    const calls = stubSend(client, () => ({ Items: [] }));
+    const store = createDynamoEventStore({ tableName: 'events', client: () => client });
+    const toBucketMs = bucketStartMs(FOLD_NOW_MS);
+    const counting: LaneFold<number> = { initial: 0, step: (steps) => steps + 1 };
+
+    const refusal = await store.foldLane(BULK, toBucketMs - MAX_WINDOW_BUCKETS * BUCKET_MS, toBucketMs, FOLD_NOW_MS, counting).catch((error: unknown) => error);
+    expect(refusal).toBeInstanceOf(WindowTooLongError);
+    expect(calls).toHaveLength(0);
+    await expect(store.foldLane(BULK, toBucketMs - (MAX_WINDOW_BUCKETS - 1) * BUCKET_MS, toBucketMs, FOLD_NOW_MS, counting)).resolves.toBe(1);
+  });
+});
+
+const INCIDENT_PK = `INCIDENT#${'b'.repeat(32)}`;
+const STATE_ITEM_KEY = { pk: INCIDENT_PK, sk: 'STATE' };
+const DECISION_NOW_MS = 1_760_000_000_000;
+const LIVE_RESERVATION: ReservationRequest = {
+  incidentKey: { pk: INCIDENT_PK, sk: 'COUNTER' },
+  dayKey: { pk: 'COUNTER_DAY#2026-10-11', sk: 'COUNTER' },
+  incidentCap: 3,
+  dayInvocationCap: 10,
+  dayTokenCap: 1_000,
+  tokenReservation: 100,
+  expiresAt: 1_800_000_000,
+};
+const LIVE_USAGE: UsageRecord = {
+  incidentKey: LIVE_RESERVATION.incidentKey,
+  dayKey: LIVE_RESERVATION.dayKey,
+  inputTokens: 1_200,
+  outputTokens: 80,
+  modelCalls: 2,
+};
+
+function conditionalCheckFailed(): Error {
+  const error = new Error('The conditional request failed');
+  error.name = 'ConditionalCheckFailedException';
+  return error;
+}
+
+function cancelled(...codes: string[]): TransactionCanceledException {
+  return new TransactionCanceledException({
+    message: 'Transaction cancelled',
+    $metadata: {},
+    CancellationReasons: codes.map((Code) => ({ Code })),
+  });
+}
+
+function decisionStoreAnswering(handler: (command: RecordedCommand) => unknown): { store: ReturnType<typeof createDynamoDecisionStore>; calls: RecordedCommand[] } {
+  const client = dynamoClient();
+  const calls = stubSend(client, handler);
+  return { store: createDynamoDecisionStore({ tableName: 'events', client: () => client }), calls };
+}
+
+describe('createDynamoDecisionStore', () => {
+  it('puts only where no item is stored or the stored one has expired, and maps ConditionalCheckFailedException to duplicate (AC-E33)', async () => {
+    let puts = 0;
+    const item = { ...STATE_ITEM_KEY, expiresAt: 1_800_000_000, version: 1 };
+    const { store, calls } = decisionStoreAnswering((command) => {
+      puts += 1;
+      if (command.name !== 'PutCommand') throw new Error(`unexpected command ${command.name}`);
+      if (puts === 2) throw conditionalCheckFailed();
+      if (puts === 3) throw new Error('network blip');
+      return {};
+    });
+
+    await expect(store.putIfAbsent(item, DECISION_NOW_MS)).resolves.toBe('written');
+    await expect(store.putIfAbsent(item, DECISION_NOW_MS)).resolves.toBe('duplicate');
+    await expect(store.putIfAbsent(item, DECISION_NOW_MS + 1_999)).rejects.toThrow('network blip');
+    // The exact inverse of the read's unexpired test (expiresAt > floor(now / 1000)), so an item the
+    // read hides as expired never blocks the put, and one with no expiresAt always does.
+    expect(calls[0]?.input).toEqual({
+      TableName: 'events',
+      Item: item,
+      ConditionExpression: 'attribute_not_exists(pk) OR expiresAt <= :now',
+      ExpressionAttributeValues: { ':now': Math.floor(DECISION_NOW_MS / 1000) },
+    });
+    expect(calls[2]?.input).toMatchObject({ ExpressionAttributeValues: { ':now': Math.floor(DECISION_NOW_MS / 1000) + 1 } });
+  });
+
+  it('refuses an item under a LANE# key or a counter item before sending anything', async () => {
+    const { store, calls } = decisionStoreAnswering(() => ({}));
+    await expect(store.putIfAbsent({ pk: 'LANE#fothering-bulk', sk: 'STATE', expiresAt: 1 }, DECISION_NOW_MS)).rejects.toThrow(RangeError);
+    await expect(store.putIfAbsent({ ...LIVE_RESERVATION.dayKey, expiresAt: 1, invocations: -5 }, DECISION_NOW_MS)).rejects.toThrow(RangeError);
+    expect(calls).toHaveLength(0);
+  });
+
+  it('reads consistently and answers nothing for an item whose expiresAt is at or before now in seconds (Pitfall 4)', async () => {
+    const nowSeconds = Math.floor(DECISION_NOW_MS / 1000);
+    const answers = [{ Item: { ...STATE_ITEM_KEY, expiresAt: nowSeconds + 1 } }, { Item: { ...STATE_ITEM_KEY, expiresAt: nowSeconds } }, {}];
+    const { store, calls } = decisionStoreAnswering(() => answers.shift());
+
+    await expect(store.getItem(STATE_ITEM_KEY, DECISION_NOW_MS)).resolves.toEqual({ ...STATE_ITEM_KEY, expiresAt: nowSeconds + 1 });
+    await expect(store.getItem(STATE_ITEM_KEY, DECISION_NOW_MS)).resolves.toBeUndefined();
+    await expect(store.getItem(STATE_ITEM_KEY, DECISION_NOW_MS)).resolves.toBeUndefined();
+    expect(calls[0]?.name).toBe('GetCommand');
+    expect(calls[0]?.input).toEqual({ TableName: 'events', Key: STATE_ITEM_KEY, ConsistentRead: true });
+  });
+
+  it('updates under a version condition, naming each attribute by placeholder, with the next version and a fresh expiresAt', async () => {
+    const { store, calls } = decisionStoreAnswering(() => ({}));
+    await expect(store.updateIfVersion(STATE_ITEM_KEY, 1, { state: 'closed', closedAtMs: 5 }, DECISION_NOW_MS)).resolves.toBe('updated');
+    expect(calls[0]?.name).toBe('UpdateCommand');
+    expect(calls[0]?.input).toEqual({
+      TableName: 'events',
+      Key: STATE_ITEM_KEY,
+      UpdateExpression: 'SET #a0 = :a0, #a1 = :a1, version = :next, expiresAt = :expiresAt',
+      ConditionExpression: 'version = :expected',
+      ExpressionAttributeNames: { '#a0': 'state', '#a1': 'closedAtMs' },
+      ExpressionAttributeValues: {
+        ':a0': 'closed',
+        ':a1': 5,
+        ':expected': 1,
+        ':next': 2,
+        ':expiresAt': Math.floor(DECISION_NOW_MS / 1000) + RETENTION_SECONDS,
+      },
+    });
+  });
+
+  it('adds each expected attribute to the version condition by its own placeholder, with no attribute to set as well', async () => {
+    const { store, calls } = decisionStoreAnswering(() => ({}));
+    await expect(store.updateIfVersion(STATE_ITEM_KEY, 3, { status: 'closed' }, DECISION_NOW_MS, { incidentId: 'first' })).resolves.toBe('updated');
+    await expect(store.updateIfVersion(STATE_ITEM_KEY, 3, {}, DECISION_NOW_MS, { incidentId: 'first' })).resolves.toBe('updated');
+    expect(calls.map((call) => call.input)).toMatchObject([
+      {
+        UpdateExpression: 'SET #a0 = :a0, version = :next, expiresAt = :expiresAt',
+        ConditionExpression: 'version = :expected AND #e0 = :e0',
+        ExpressionAttributeNames: { '#a0': 'status', '#e0': 'incidentId' },
+        ExpressionAttributeValues: { ':a0': 'closed', ':e0': 'first', ':expected': 3, ':next': 4 },
+      },
+      {
+        UpdateExpression: 'SET version = :next, expiresAt = :expiresAt',
+        ConditionExpression: 'version = :expected AND #e0 = :e0',
+        ExpressionAttributeNames: { '#e0': 'incidentId' },
+        ExpressionAttributeValues: { ':e0': 'first', ':expected': 3, ':next': 4 },
+      },
+    ]);
+  });
+
+  it('maps a failed version condition to conflict, passes any other error on, and refuses a managed attribute unsent', async () => {
+    let updates = 0;
+    const { store, calls } = decisionStoreAnswering(() => {
+      updates += 1;
+      throw updates === 1 ? conditionalCheckFailed() : new Error('network blip');
+    });
+    await expect(store.updateIfVersion(STATE_ITEM_KEY, 1, { state: 'closed' }, DECISION_NOW_MS)).resolves.toBe('conflict');
+    await expect(store.updateIfVersion(STATE_ITEM_KEY, 1, { state: 'closed' }, DECISION_NOW_MS)).rejects.toThrow('network blip');
+    await expect(store.updateIfVersion(STATE_ITEM_KEY, 1, { version: 9 }, DECISION_NOW_MS)).rejects.toThrow(RangeError);
+    expect(calls).toHaveLength(2);
+  });
+
+  it('reserves through one TransactWriteCommand of two conditional updates (D-67)', async () => {
+    const { store, calls } = decisionStoreAnswering(() => ({}));
+    await expect(store.reserveInvocation(LIVE_RESERVATION)).resolves.toEqual({ ok: true });
+    expect(calls.map((call) => call.name).join(' ')).toBe('TransactWriteCommand');
+    expect(calls[0]?.input).toEqual({
+      TransactItems: [
+        {
+          Update: {
+            TableName: 'events',
+            Key: LIVE_RESERVATION.incidentKey,
+            UpdateExpression: 'ADD invocations :one SET expiresAt = if_not_exists(expiresAt, :exp)',
+            ConditionExpression: 'attribute_not_exists(invocations) OR invocations < :incidentCap',
+            ExpressionAttributeValues: { ':one': 1, ':incidentCap': 3, ':exp': 1_800_000_000 },
+          },
+        },
+        {
+          Update: {
+            TableName: 'events',
+            Key: LIVE_RESERVATION.dayKey,
+            UpdateExpression: 'ADD invocations :one, tokenReservations :tokens SET expiresAt = if_not_exists(expiresAt, :exp)',
+            ConditionExpression:
+              '(attribute_not_exists(invocations) OR invocations < :dayCap) AND (attribute_not_exists(tokenReservations) OR tokenReservations <= :tokenRoom)',
+            ExpressionAttributeValues: { ':one': 1, ':tokens': 100, ':dayCap': 10, ':tokenRoom': 900, ':exp': 1_800_000_000 },
+          },
+        },
+      ],
+    });
+  });
+
+  // Reasons arrive in the order of the requested items, and only a failed condition is a cap: a
+  // TransactionConflict is two writers racing, which a retry settles (AC-E45, Pitfall 6).
+  it.each<[string[], string]>([
+    [['ConditionalCheckFailed', 'None'], 'cap incident'],
+    [['None', 'ConditionalCheckFailed'], 'cap day'],
+    [['ConditionalCheckFailed', 'ConditionalCheckFailed'], 'cap incident day'],
+    [['ConditionalCheckFailed', 'TransactionConflict'], 'cap incident'],
+    [['TransactionConflict', 'None'], 'conflict'],
+    [['None', 'TransactionConflict'], 'conflict'],
+  ])('maps the cancellation reasons %j to %s', async (codes, outcome) => {
+    const { store } = decisionStoreAnswering(() => {
+      throw cancelled(...codes);
+    });
+    const result = await store.reserveInvocation(LIVE_RESERVATION);
+    expect(result.ok ? 'ok' : [result.reason, ...(result.reason === 'cap' ? result.items : [])].join(' ')).toBe(outcome);
+  });
+
+  it('passes on a cancellation holding neither a failed condition nor a conflict, and any other error', async () => {
+    const errors: unknown[] = [cancelled('ThrottlingError', 'None'), new Error('network blip')];
+    const { store } = decisionStoreAnswering(() => {
+      throw errors.shift();
+    });
+    await expect(store.reserveInvocation(LIVE_RESERVATION)).rejects.toBeInstanceOf(TransactionCanceledException);
+    await expect(store.reserveInvocation(LIVE_RESERVATION)).rejects.toThrow('network blip');
+  });
+
+  // A counter item without its reservation would carry no expiresAt and outlive the 30-day retention,
+  // so usage is added only to items that already exist, both or neither.
+  it('records usage with one TransactWriteCommand of two ADD-only updates on existing counters, after refusing a negative amount unsent', async () => {
+    const { store, calls } = decisionStoreAnswering(() => ({}));
+    await expect(store.recordUsage({ ...LIVE_USAGE, outputTokens: -1 })).rejects.toThrow(RangeError);
+    expect(calls).toHaveLength(0);
+
+    await expect(store.recordUsage(LIVE_USAGE)).resolves.toBe('recorded');
+    expect(calls.map((call) => call.name).join(' ')).toBe('TransactWriteCommand');
+    const items = (calls[0]?.input as { TransactItems: { Update: { Key: { pk: string } } }[] }).TransactItems;
+    expect(items.map((item) => item.Update.Key.pk).join(' ')).toBe(`${INCIDENT_PK} COUNTER_DAY#2026-10-11`);
+    for (const item of items) {
+      expect(item.Update).toEqual({
+        TableName: 'events',
+        Key: item.Update.Key,
+        UpdateExpression: 'ADD inputTokens :inputTokens, outputTokens :outputTokens, modelCalls :modelCalls',
+        ConditionExpression: 'attribute_exists(pk)',
+        ExpressionAttributeValues: { ':inputTokens': 1_200, ':outputTokens': 80, ':modelCalls': 2 },
+      });
+    }
+  });
+
+  it.each([
+    ['ConditionalCheckFailed', 'None'],
+    ['None', 'ConditionalCheckFailed'],
+    ['ConditionalCheckFailed', 'ConditionalCheckFailed'],
+  ])('answers not-reserved for usage on a counter no reservation created, cancellation reasons %s %s', async (...codes) => {
+    const { store } = decisionStoreAnswering(() => {
+      throw cancelled(...codes);
+    });
+    await expect(store.recordUsage(LIVE_USAGE)).resolves.toBe('not-reserved');
+  });
+
+  it('passes on a usage cancellation holding no failed condition, and any other error', async () => {
+    const errors: unknown[] = [cancelled('TransactionConflict', 'None'), new Error('network blip')];
+    const { store } = decisionStoreAnswering(() => {
+      throw errors.shift();
+    });
+    await expect(store.recordUsage(LIVE_USAGE)).rejects.toBeInstanceOf(TransactionCanceledException);
+    await expect(store.recordUsage(LIVE_USAGE)).rejects.toThrow('network blip');
+  });
+
+  it('builds no client and names FOTHERING_TABLE_NAME from every operation when the table name is unset', async () => {
+    let constructed = 0;
+    const store = createDynamoDecisionStore({
+      tableName: undefined,
+      client: () => {
+        constructed += 1;
+        return dynamoClient();
+      },
+    });
+    const operations = [
+      store.putIfAbsent({ ...STATE_ITEM_KEY, expiresAt: 1 }, DECISION_NOW_MS),
+      store.getItem(STATE_ITEM_KEY, DECISION_NOW_MS),
+      store.updateIfVersion(STATE_ITEM_KEY, 1, {}, DECISION_NOW_MS),
+      store.reserveInvocation(LIVE_RESERVATION),
+      store.recordUsage(LIVE_USAGE),
+    ];
+    for (const operation of operations) {
+      await expect(operation).rejects.toMatchObject({ name: 'LiveConfigMissingError', envVar: 'FOTHERING_TABLE_NAME' });
+    }
+    expect(constructed).toBe(0);
+  });
+
+  it('builds one client on the first decisionStore call through the port table, and none at resolution', async () => {
+    const client = dynamoClient();
+    stubSend(client, () => ({}));
+    let built = 0;
+    const { ports, kinds } = resolvePortTable({
+      runtimeContext: 'deployed',
+      switchValue: undefined,
+      liveConfig: { tableName: 'events' },
+      liveClients: {
+        dynamoDb: () => {
+          built += 1;
+          return client;
+        },
+      },
+      dryRunSink: () => {},
+    });
+
+    expect(Object.values(kinds.decisionStore ?? {}).join(' ')).toBe('live live live live live');
+    expect(built).toBe(0);
+    await ports.decisionStore.getItem(STATE_ITEM_KEY, DECISION_NOW_MS);
+    await ports.decisionStore.reserveInvocation(LIVE_RESERVATION);
+    expect(built).toBe(1);
+  });
+});
+
 describe('createSesReads', () => {
   function sesClient(): SESv2Client {
     return new SESv2Client({ region: REGION, credentials: FAKE_CREDENTIALS });
@@ -670,12 +1082,36 @@ describe('createSesReads', () => {
     vi.useRealTimers();
   });
 
-  it("getEmailIdentity returns the identity's ConfigurationSetName", async () => {
+  // D-59: one GetEmailIdentity read answers both the closeability check and the configuration rows.
+  it('getEmailIdentity returns the default set, the DKIM and MAIL FROM facts and the identity type from one read', async () => {
     const client = sesClient();
-    stubSend(client, () => ({ ConfigurationSetName: 'fothering-transactional' }));
+    const calls = stubSend(client, () => ({
+      ConfigurationSetName: 'fothering-transactional',
+      IdentityType: 'DOMAIN',
+      VerifiedForSendingStatus: true,
+      DkimAttributes: { Status: 'SUCCESS', SigningEnabled: true, Tokens: ['token1'] },
+      MailFromAttributes: { MailFromDomain: 'bounce.example.com', MailFromDomainStatus: 'PENDING', BehaviorOnMxFailure: 'USE_DEFAULT_VALUE' },
+      Tags: [{ Key: 'team', Value: 'ops' }],
+    }));
     const reads = createSesReads({ client: () => client });
 
-    await expect(reads.getEmailIdentity('sender@example.com')).resolves.toBe('fothering-transactional');
+    const facts = await reads.getEmailIdentity('example.com');
+    expect(JSON.stringify(facts)).toBe(
+      '{"defaultConfigurationSet":"fothering-transactional","dkimStatus":"SUCCESS","dkimSigningEnabled":true,"mailFromDomain":"bounce.example.com","mailFromStatus":"PENDING","identityType":"DOMAIN"}',
+    );
+    expect(calls.map((call) => call.name).join(' ')).toBe('GetEmailIdentityCommand');
+  });
+
+  // exactOptionalPropertyTypes: a fact SES did not return is an absent key, never a key holding undefined.
+  it('getEmailIdentity leaves out every key SES did not return', async () => {
+    const client = sesClient();
+    stubSend(client, (command) =>
+      (command.input as { EmailIdentity: string }).EmailIdentity === 'bare.example.com' ? {} : { DkimAttributes: { SigningEnabled: false } },
+    );
+    const reads = createSesReads({ client: () => client });
+
+    expect(JSON.stringify(await reads.getEmailIdentity('bare.example.com'))).toBe('{}');
+    expect(JSON.stringify(await reads.getEmailIdentity('partial.example.com'))).toBe('{"dkimSigningEnabled":false}');
   });
 
   // SES allows one request a second for every action but sending, so a second page waits a second
@@ -817,6 +1253,226 @@ describe('createSesReads', () => {
   });
 });
 
+interface StubDnsAnswers {
+  txt?: (name: string) => Promise<string[][]>;
+  mx?: (name: string) => Promise<DnsMxAnswer[]>;
+}
+
+interface StubDnsResolvers {
+  factory: DnsResolverFactory;
+  built: DnsResolverOptions[];
+  cancels: () => number;
+}
+
+function dnsError(code: unknown): Error {
+  return Object.assign(new Error('the lookup failed'), code === undefined ? {} : { code });
+}
+
+// Each resolver the factory builds behaves like node's own: cancel rejects only that resolver's
+// outstanding queries, with the ECANCELLED code. Every classification case runs through these stubs,
+// because the test guard refuses any real resolve call (research Pitfall 11).
+function stubDnsResolvers(answers: StubDnsAnswers): StubDnsResolvers {
+  const built: DnsResolverOptions[] = [];
+  let cancels = 0;
+  const factory = (options: DnsResolverOptions): DnsResolver => {
+    built.push(options);
+    const outstanding: ((error: Error) => void)[] = [];
+    function tracked<T>(answer: ((name: string) => Promise<T>) | undefined, name: string): Promise<T> {
+      return new Promise<T>((resolve, reject) => {
+        outstanding.push(reject);
+        (answer?.(name) ?? Promise.reject(new Error('no answer stubbed for this lookup'))).then(resolve, reject);
+      });
+    }
+    return {
+      resolveTxt: (name) => tracked(answers.txt, name),
+      resolveMx: (name) => tracked(answers.mx, name),
+      cancel: () => {
+        cancels += 1;
+        for (const reject of outstanding) reject(dnsError(dnsPromises.CANCELLED));
+      },
+    };
+  };
+  return { factory, built, cancels: () => cancels };
+}
+
+const NEVER_SETTLES = (): Promise<never> => new Promise<never>(() => {});
+
+describe('createLiveDns (D-58, AC-E26 adapter half)', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('builds no resolver before the first lookup, then one per lookup with timeout 2,000 and tries 1', async () => {
+    const stub = stubDnsResolvers({ txt: async () => [], mx: async () => [] });
+    const dns = createLiveDns({ resolverFactory: stub.factory });
+    expect(stub.built.length).toBe(0);
+
+    await dns.resolveTxt('example.com');
+    await dns.resolveMx('example.com');
+
+    expect(`${DNS_LOOKUP_TIMEOUT_MS} ${DNS_LOOKUP_TRIES}`).toBe('2000 1');
+    expect(JSON.stringify(stub.built)).toBe('[{"timeout":2000,"tries":1},{"timeout":2000,"tries":1}]');
+  });
+
+  it("joins each TXT record's chunks into one string per record", async () => {
+    const stub = stubDnsResolvers({ txt: async () => [['v=spf1 include:', '_spf.example.com ~all'], ['site-verification=abc']] });
+    const outcome = await createLiveDns({ resolverFactory: stub.factory }).resolveTxt('example.com');
+    expect(JSON.stringify(outcome)).toBe('{"kind":"records","records":["v=spf1 include:_spf.example.com ~all","site-verification=abc"]}');
+  });
+
+  it('returns each MX exchange lowercased with its trailing dot removed', async () => {
+    const stub = stubDnsResolvers({
+      mx: async () => [
+        { exchange: 'MX01.Mail.Example.COM.', priority: 10 },
+        { exchange: 'mx02.mail.example.com', priority: 20 },
+      ],
+    });
+    const outcome = await createLiveDns({ resolverFactory: stub.factory }).resolveMx('example.com');
+    expect(JSON.stringify(outcome)).toBe('{"kind":"records","exchanges":["mx01.mail.example.com","mx02.mail.example.com"]}');
+  });
+
+  it.each([
+    ['NODATA', dnsPromises.NODATA],
+    ['NOTFOUND', dnsPromises.NOTFOUND],
+  ])('reads missing for a %s error on TXT and on MX', async (_label, code) => {
+    const stub = stubDnsResolvers({ txt: async () => Promise.reject(dnsError(code)), mx: async () => Promise.reject(dnsError(code)) });
+    const dns = createLiveDns({ resolverFactory: stub.factory });
+    const txt = await dns.resolveTxt('_dmarc.example.com');
+    const mx = await dns.resolveMx('example.com');
+    expect(`${txt.kind} ${mx.kind}`).toBe('missing missing');
+  });
+
+  // AC-P11: a failed lookup is not a missing record, so everything but a definite no-record answer reads unknown.
+  it.each<[string, () => unknown]>([
+    ['TIMEOUT', () => dnsError(dnsPromises.TIMEOUT)],
+    ['SERVFAIL', () => dnsError(dnsPromises.SERVFAIL)],
+    ['REFUSED', () => dnsError(dnsPromises.REFUSED)],
+    ['CONNREFUSED', () => dnsError(dnsPromises.CONNREFUSED)],
+    ['BADRESP', () => dnsError(dnsPromises.BADRESP)],
+    ['FORMERR', () => dnsError(dnsPromises.FORMERR)],
+    ['CANCELLED', () => dnsError(dnsPromises.CANCELLED)],
+    ['a code node does not list', () => dnsError('EUNLISTED')],
+    ['a code that is not a string', () => dnsError(404)],
+    ['an error with no code', () => dnsError(undefined)],
+    ['a thrown value that is not an object', () => 'lookup failed'],
+  ])('reads unknown, never missing, for %s on TXT and on MX', async (_label, thrown) => {
+    const stub = stubDnsResolvers({ txt: async () => Promise.reject(thrown()), mx: async () => Promise.reject(thrown()) });
+    const dns = createLiveDns({ resolverFactory: stub.factory });
+    const txt = await dns.resolveTxt('_dmarc.example.com');
+    const mx = await dns.resolveMx('example.com');
+    expect(`${txt.kind} ${mx.kind}`).toBe('unknown unknown');
+  });
+
+  it('classifies a resolver that throws before it returns a promise the same as one that rejects', async () => {
+    const throwing: DnsResolverFactory = () => ({
+      resolveTxt: () => {
+        throw dnsError(dnsPromises.NOTFOUND);
+      },
+      resolveMx: () => {
+        throw dnsError(dnsPromises.NODATA);
+      },
+      cancel: () => {},
+    });
+    const dns = createLiveDns({ resolverFactory: throwing });
+    const txt = await dns.resolveTxt('example.com');
+    const mx = await dns.resolveMx('example.com');
+    expect(`${txt.kind} ${mx.kind}`).toBe('missing missing');
+  });
+
+  it.each(['resolveTxt', 'resolveMx'] as const)(
+    'gives unknown for a %s that outlives the 2,000 ms bound, and cancels its resolver at the bound',
+    async (operation) => {
+      vi.useFakeTimers();
+      const stub = stubDnsResolvers({ txt: NEVER_SETTLES, mx: NEVER_SETTLES });
+      const dns = createLiveDns({ resolverFactory: stub.factory });
+      let kind = 'pending';
+      const pending = dns[operation]('example.com').then((outcome) => {
+        kind = outcome.kind;
+      });
+
+      await vi.advanceTimersByTimeAsync(DNS_LOOKUP_TIMEOUT_MS - 1);
+      expect(`${kind} cancels ${stub.cancels()}`).toBe('pending cancels 0');
+      await vi.advanceTimersByTimeAsync(1);
+      await pending;
+      expect(`${kind} cancels ${stub.cancels()}`).toBe('unknown cancels 1');
+    },
+  );
+
+  it('leaves no timer behind once a lookup settles inside the bound', async () => {
+    vi.useFakeTimers();
+    const stub = stubDnsResolvers({ txt: async () => [['v=spf1 -all']] });
+    await createLiveDns({ resolverFactory: stub.factory }).resolveTxt('example.com');
+    expect(`timers ${vi.getTimerCount()} cancels ${stub.cancels()}`).toBe('timers 0 cancels 0');
+  });
+
+  // cancel() ends every outstanding query of a resolver, so a resolver shared by concurrent lookups
+  // would turn a slow neighbour's timeout into an unknown for an answer still on its way.
+  it('gives each lookup its own resolver, so a timed-out lookup never cancels a concurrent one', async () => {
+    vi.useFakeTimers();
+    const stub = stubDnsResolvers({
+      txt: (name) =>
+        name === 'slow.example.com'
+          ? NEVER_SETTLES()
+          : new Promise((resolve) => {
+              setTimeout(() => resolve([['v=spf1 -all']]), 1_500);
+            }),
+    });
+    const dns = createLiveDns({ resolverFactory: stub.factory });
+    const slow = dns.resolveTxt('slow.example.com');
+    await vi.advanceTimersByTimeAsync(1_000);
+    const fast = dns.resolveTxt('fast.example.com');
+    await vi.advanceTimersByTimeAsync(1_500);
+
+    const outcomes = await Promise.all([slow, fast]);
+    expect(`${outcomes.map((outcome) => outcome.kind).join(' ')} cancels ${stub.cancels()}`).toBe('unknown records cancels 1');
+  });
+
+  // The control for every case above: without an injected resolver the guard is what answers, and
+  // the adapter must read that refusal as unknown for the guard's own reason, not by accident.
+  it('reads unknown on a real Resolver under the test guard, and the error it caught is the guard refusal', async () => {
+    const caught: unknown[] = [];
+    const watched = async <T>(lookup: () => Promise<T>): Promise<T> => {
+      try {
+        return await lookup();
+      } catch (error) {
+        caught.push(error);
+        throw error;
+      }
+    };
+    const realResolvers: DnsResolverFactory = (options) => {
+      const real = new dnsPromises.Resolver(options);
+      return {
+        resolveTxt: (name) => watched(() => real.resolveTxt(name)),
+        resolveMx: (name) => watched(() => real.resolveMx(name)),
+        cancel: () => real.cancel(),
+      };
+    };
+    const dns = createLiveDns({ resolverFactory: realResolvers });
+
+    const txt = await dns.resolveTxt('example.com');
+    const mx = await dns.resolveMx('example.com');
+    expect(`${txt.kind} ${mx.kind}`).toBe('unknown unknown');
+    expect(caught.map((error) => (error as Error).name).join(' ')).toBe('NetworkGuardError NetworkGuardError');
+    expect(caught[0]).toBeInstanceOf(NetworkGuardError);
+    expect((await createLiveDns().resolveTxt('example.com')).kind).toBe('unknown');
+  });
+
+  it('resolves the dns row live in deployed whatever the switch, looking up through liveClients.dnsResolver', async () => {
+    for (const switchValue of [undefined, 'live']) {
+      const stub = stubDnsResolvers({ mx: async () => [{ exchange: 'MX.Example.com.', priority: 10 }] });
+      const { ports, kinds } = resolvePortTable({
+        runtimeContext: 'deployed',
+        switchValue,
+        liveClients: { dnsResolver: stub.factory },
+        dryRunSink: () => {},
+      });
+      expect(`${kinds.dns?.resolveMx} ${kinds.dns?.resolveTxt} built ${stub.built.length}`).toBe('live live built 0');
+      expect(JSON.stringify(await ports.dns.resolveMx('example.com'))).toBe('{"kind":"records","exchanges":["mx.example.com"]}');
+      expect(stub.built.length).toBe(1);
+    }
+  });
+});
+
 describe('resolving the real port table with counting client factories', () => {
   function countingFactory<T>(client: T): { factory: () => T; count: () => number } {
     let count = 0;
@@ -879,5 +1535,263 @@ describe('resolving the real port table with counting client factories', () => {
     // A second operation on an already-resolved port never rebuilds its client.
     await ports.eventStore.getRecord({ pk: 'LANE#x', sk: 'B#0000000000000#Send#m1' });
     expect(dynamo.count()).toBe(1);
+  });
+});
+
+const RUNTIME_ARN = 'arn:aws:bedrock-agentcore:eu-central-1:000000000000:runtime/fothering';
+const FORCED_TOOL = { name: 'strands_structured_output', description: 'answer', inputSchema: { type: 'object' as const } };
+// A Converse answer in the shape the API documents (API_runtime_Converse): one assistant text block,
+// the stop reason and the token usage.
+const CONVERSE_RESPONSE = {
+  output: { message: { role: 'assistant', content: [{ text: 'the explanation' }] } },
+  stopReason: 'end_turn',
+  usage: { inputTokens: 1_200, outputTokens: 80, totalTokens: 1_280 },
+};
+
+function userMessage(text: string): Message {
+  return new Message({ role: 'user', content: [new TextBlock(text)] });
+}
+
+async function drainEvents(iterable: AsyncIterable<ModelStreamEvent>): Promise<ModelStreamEvent[]> {
+  const events: ModelStreamEvent[] = [];
+  for await (const event of iterable) events.push(event);
+  return events;
+}
+
+interface CapturedBedrockSend {
+  name: string;
+  input: Record<string, unknown>;
+  client: { config: { region: () => Promise<string>; maxAttempts: () => Promise<number> } };
+}
+
+// BedrockModel builds its own runtime client and takes no prebuilt one (bedrock.d.ts 1.20.0), so the
+// capture replaces send on that client class's prototype, reached through a probe model's client
+// rather than an import of a package providers does not list. Nothing is signed or sent: the
+// replacement answers before any middleware runs. Each failure given is thrown by one send, in order,
+// before the sends that answer.
+function captureBedrockRuntimeSends(failures: readonly Error[] = []): { sends: CapturedBedrockSend[]; restore: () => void } {
+  const probe = new BedrockModel({ region: REGION, modelId: MODEL_VALUES.inferenceProfileId, clientConfig: { credentials: FAKE_CREDENTIALS } });
+  const prototype = Object.getPrototypeOf((probe as unknown as { _client: object })._client) as Record<string, unknown>;
+  const ownSend = Object.getOwnPropertyDescriptor(prototype, 'send');
+  const sends: CapturedBedrockSend[] = [];
+  const pending = [...failures];
+  prototype.send = async function send(
+    this: CapturedBedrockSend['client'],
+    command: { constructor: { name: string }; input: Record<string, unknown> },
+  ): Promise<unknown> {
+    sends.push({ name: command.constructor.name, input: command.input, client: this });
+    const failure = pending.shift();
+    if (failure !== undefined) throw failure;
+    return structuredClone(CONVERSE_RESPONSE);
+  };
+  return {
+    sends,
+    restore: () => {
+      if (ownSend === undefined) delete prototype.send;
+      else Object.defineProperty(prototype, 'send', ownSend);
+    },
+  };
+}
+
+describe('createLiveBedrockModel', () => {
+  let restoreSend: (() => void) | undefined;
+  afterEach(() => {
+    restoreSend?.();
+    restoreSend = undefined;
+  });
+
+  function capture(failures: readonly Error[] = []): CapturedBedrockSend[] {
+    const { sends, restore } = captureBedrockRuntimeSends(failures);
+    restoreSend = restore;
+    return sends;
+  }
+
+  // The shape the runtime client rejects with: an AWS service error carries its exception type as its name.
+  function awsServiceError(name: string): Error {
+    return Object.assign(new Error('the service refused the request'), { name, $fault: 'client' });
+  }
+
+  // Strands maps a throttle to its retry class only on a streamed response (bedrock.js 1.20.0 line
+  // 1401), so with stream off the adapter maps the client's ThrottlingException itself.
+  it('turns a throttled Converse into the SDK retry class, and passes every other error on unchanged', async () => {
+    const throttle = awsServiceError('ThrottlingException');
+    const unavailable = awsServiceError('ServiceUnavailableException');
+    capture([throttle, unavailable]);
+    const port = createLiveBedrockModel();
+
+    const throttled: unknown = await drainEvents(port.stream([userMessage('p')])).catch((error: unknown) => error);
+    expect(throttled).toBeInstanceOf(ModelThrottledError);
+    expect((throttled as Error).cause).toBe(throttle);
+    await expect(drainEvents(port.stream([userMessage('p')]))).rejects.toBe(unavailable);
+  });
+
+  // The same retry strategy the runtime handler builds, with no wait, over the live adapter: the
+  // throttled call is sent once more and the loop answers from the second.
+  it('lets the agent loop retry one throttled call through the live adapter', async () => {
+    const sends = capture([awsServiceError('ThrottlingException')]);
+    const model = new PortBackedModel({
+      port: createLiveBedrockModel(),
+      config: { modelId: MODEL_VALUES.inferenceProfileId, maxTokens: MODEL_VALUES.maxTokens },
+      ceiling: MODEL_VALUES.modelCallCeiling,
+      inputByteCeiling: MODEL_VALUES.inputTokenCeiling,
+    });
+    const agent = new Agent({
+      model,
+      tools: [],
+      printer: false,
+      retryStrategy: new DefaultModelRetryStrategy({ maxAttempts: MODEL_VALUES.throttleAttempts, backoff: new ConstantBackoff({ delayMs: 0 }) }),
+    });
+
+    await agent.invoke('p');
+    expect(sends.map((send) => send.name)).toEqual(['ConverseCommand', 'ConverseCommand']);
+    expect(model.calls).toBe(2);
+  });
+
+  it('builds one BedrockModel on the first stream call, every option read from MODEL_VALUES', async () => {
+    const sends = capture();
+    const built: BedrockModelOptions[] = [];
+    const port = createLiveBedrockModel((options) => {
+      built.push(options);
+      return new BedrockModel(options);
+    });
+    expect(built).toHaveLength(0);
+
+    await drainEvents(port.stream([userMessage('first')]));
+    await drainEvents(port.stream([userMessage('second')]));
+
+    expect(built).toHaveLength(1);
+    expect(built[0]).toEqual({
+      region: 'eu-central-1',
+      modelId: 'eu.anthropic.claude-sonnet-4-6',
+      maxTokens: 1_024,
+      stream: false,
+      additionalArgs: { additionalModelRequestFields: { thinking: { type: 'disabled' } } },
+      clientConfig: { maxAttempts: 1 },
+      requestTimeout: 60_000,
+    });
+    expect(sends).toHaveLength(2);
+    expect(sends[1]?.client).toBe(sends[0]?.client);
+    await expect(sends[0]?.client.config.region()).resolves.toBe('eu-central-1');
+    await expect(sends[0]?.client.config.maxAttempts()).resolves.toBe(1);
+  });
+
+  it('sends Converse with maxTokens alone in inferenceConfig and thinking disabled, on a forced tool call too', async () => {
+    const sends = capture();
+    const port = createLiveBedrockModel();
+
+    const events = await drainEvents(port.stream([userMessage('p')], { systemPrompt: 's' }));
+    await drainEvents(port.stream([userMessage('p')], { systemPrompt: 's', toolSpecs: [FORCED_TOOL], toolChoice: { tool: { name: FORCED_TOOL.name } } }));
+
+    expect(sends.map((send) => send.name)).toEqual(['ConverseCommand', 'ConverseCommand']);
+    for (const send of sends) {
+      expect(send.input.modelId).toBe('eu.anthropic.claude-sonnet-4-6');
+      expect(send.input.inferenceConfig).toEqual({ maxTokens: 1_024 });
+      expect(send.input.additionalModelRequestFields).toEqual({ thinking: { type: 'disabled' } });
+      expect(JSON.stringify(send.input)).not.toMatch(/temperature|topP|topK|top_p|top_k/);
+    }
+    expect(sends[1]?.input.toolConfig).toMatchObject({ toolChoice: { tool: { name: FORCED_TOOL.name } } });
+    expect(events.at(-1)).toMatchObject({ type: 'modelMetadataEvent', usage: { inputTokens: 1_200, outputTokens: 80, totalTokens: 1_280 } });
+  });
+
+  // The control for the case above: the SDK's own request-fields route loses thinking on a forced
+  // tool call (Pitfall 1), so the capture can see the drop the additionalArgs route prevents.
+  it('drops thinking on a forced tool call when it is sent through additionalRequestFields instead', async () => {
+    const sends = capture();
+    const model = new BedrockModel({
+      region: REGION,
+      modelId: MODEL_VALUES.inferenceProfileId,
+      stream: false,
+      additionalRequestFields: { thinking: { type: 'disabled' } },
+      clientConfig: { credentials: FAKE_CREDENTIALS },
+    });
+
+    await drainEvents(model.stream([userMessage('p')], { toolSpecs: [FORCED_TOOL], toolChoice: { tool: { name: FORCED_TOOL.name } } }));
+    expect(sends[0]?.input.additionalModelRequestFields).toBeUndefined();
+  });
+});
+
+interface CapturedAgentCoreSend {
+  name: string;
+  input: { payload?: unknown } & Record<string, unknown>;
+  options: unknown;
+}
+
+function stubAgentCoreSend(client: BedrockAgentCoreClient, body: string | undefined): CapturedAgentCoreSend[] {
+  const calls: CapturedAgentCoreSend[] = [];
+  (client as unknown as { send: unknown }).send = async (
+    command: { constructor: { name: string }; input: CapturedAgentCoreSend['input'] },
+    options?: unknown,
+  ): Promise<unknown> => {
+    calls.push({ name: command.constructor.name, input: command.input, options });
+    return {
+      contentType: 'application/json',
+      response: body === undefined ? undefined : { transformToString: async () => body },
+    };
+  };
+  return calls;
+}
+
+function agentCoreClient(): BedrockAgentCoreClient {
+  return new BedrockAgentCoreClient({ region: REGION, credentials: FAKE_CREDENTIALS });
+}
+
+describe('createLiveAgentCore', () => {
+  it('sends InvokeAgentRuntimeCommand with the ARN, the session, JSON content types and payload bytes, and parses the body', async () => {
+    const client = agentCoreClient();
+    const calls = stubAgentCoreSend(client, '{"status":"answered","modelCalls":1}');
+    const controller = new AbortController();
+    const payload = { record: { rows: [1, 2] }, note: 'café' };
+
+    const answer = await createLiveAgentCore({ client: () => client }).invokeAgentRuntime({
+      runtimeArn: RUNTIME_ARN,
+      sessionId: 'fothering-incident-a1',
+      payload,
+      abortSignal: controller.signal,
+    });
+
+    expect(answer).toEqual({ status: 'answered', modelCalls: 1 });
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.name).toBe('InvokeAgentRuntimeCommand');
+    expect(calls[0]?.input).toMatchObject({
+      agentRuntimeArn: RUNTIME_ARN,
+      runtimeSessionId: 'fothering-incident-a1',
+      contentType: 'application/json',
+      accept: 'application/json',
+    });
+    expect(calls[0]?.input.payload).toBeInstanceOf(Uint8Array);
+    expect(Buffer.from(calls[0]?.input.payload as Uint8Array).toString('utf8')).toBe(JSON.stringify(payload));
+    expect((calls[0]?.options as { abortSignal?: unknown } | undefined)?.abortSignal).toBe(controller.signal);
+  });
+
+  it('refuses a response with no body, naming nothing of the payload', async () => {
+    const client = agentCoreClient();
+    stubAgentCoreSend(client, undefined);
+    const refusal = await createLiveAgentCore({ client: () => client })
+      .invokeAgentRuntime({ runtimeArn: RUNTIME_ARN, sessionId: 's', payload: { note: 'Jane' } })
+      .catch((error: unknown) => error);
+    expect((refusal as Error).message).toBe('the agent runtime returned no response body');
+  });
+
+  it('builds no client before the first call through the port table, and one after two calls', async () => {
+    const client = agentCoreClient();
+    stubAgentCoreSend(client, '{}');
+    let built = 0;
+    const { ports, kinds } = resolvePortTable({
+      runtimeContext: 'deployed',
+      switchValue: 'live',
+      liveClients: {
+        bedrockAgentCore: () => {
+          built += 1;
+          return client;
+        },
+      },
+      dryRunSink: () => {},
+    });
+
+    expect(kinds.agentCore?.invokeAgentRuntime).toBe('live');
+    expect(built).toBe(0);
+    await ports.agentCore.invokeAgentRuntime({ runtimeArn: RUNTIME_ARN, sessionId: 's', payload: {} });
+    await ports.agentCore.invokeAgentRuntime({ runtimeArn: RUNTIME_ARN, sessionId: 's', payload: {} });
+    expect(built).toBe(1);
   });
 });

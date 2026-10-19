@@ -71,8 +71,6 @@ function customTagValue(tags: MailTags, key: string): string | undefined {
 // field entirely, never unclassified (SPEC requirement 5).
 function commonFields(tags: MailTags, lane: LaneEntry): EventFields {
   const fields: EventFields = {};
-  const sourceIp = firstTagValue(tags, 'ses:source-ip');
-  if (sourceIp !== undefined) fields.sourceIp = validIp(sourceIp);
   const fromDomain = firstTagValue(tags, 'ses:from-domain');
   if (fromDomain !== undefined) fields.fromDomain = validHostname(fromDomain);
   const caller = firstTagValue(tags, 'ses:caller-identity');

@@ -1,7 +1,7 @@
 {
   "provenance": "doc-derived",
   "source": "https://docs.aws.amazon.com/ses/latest/APIReference-V2/API_GetEmailIdentity.html, https://docs.aws.amazon.com/ses/latest/APIReference-V2/API_ListConfigurationSets.html and https://docs.aws.amazon.com/ses/latest/APIReference-V2/API_GetConfigurationSetEventDestinations.html",
-  "note": "Port-level answers: the Region's configuration set names, an identity's default configuration set name (absent when it has none) and each set's destinations reduced to name, enabled, eventBridge and matchingEventTypes. The set list names the three lane-map sets, no identity defaults to a lane-map set, and fothering-bulk has one enabled EventBridge destination that covers all six event types.",
+  "note": "Port-level answers: the Region's configuration set names, each identity's GetEmailIdentity facts (default configuration set, DKIM status and signing, MAIL FROM domain and status, identity type, each key absent when SES returns none) and each set's destinations reduced to name, enabled, eventBridge and matchingEventTypes. The set list names the three lane-map sets, no identity defaults to a lane-map set, both identities sign with DKIM, and fothering-bulk has one enabled EventBridge destination that covers all six event types.",
   "recordings": [
     {
       "operation": "ses.listEmailIdentities",
@@ -16,11 +16,23 @@
     {
       "operation": "ses.getEmailIdentity",
       "request": "example.com",
-      "response": "fothering-default"
+      "response": {
+        "defaultConfigurationSet": "fothering-default",
+        "dkimStatus": "SUCCESS",
+        "dkimSigningEnabled": true,
+        "mailFromDomain": "bounce.example.com",
+        "mailFromStatus": "SUCCESS",
+        "identityType": "DOMAIN"
+      }
     },
     {
       "operation": "ses.getEmailIdentity",
-      "request": "example.org"
+      "request": "example.org",
+      "response": {
+        "dkimStatus": "SUCCESS",
+        "dkimSigningEnabled": true,
+        "identityType": "DOMAIN"
+      }
     },
     {
       "operation": "ses.getConfigurationSetEventDestinations",

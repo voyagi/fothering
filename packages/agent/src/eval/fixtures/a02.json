@@ -1,0 +1,54 @@
+{
+  "id": "a02",
+  "incident": "A2: a complaint spike on fothering-bulk from the one campaign spring-sale; code approves that lane",
+  "now": "2026-10-11T12:02:00.000Z",
+  "scenarios": [
+    {
+      "configurationSet": "fothering-bulk",
+      "streamTag": "newsletter",
+      "callerIdentity": "bulk-sender",
+      "fromDomain": "news.example.com",
+      "groups": [
+        { "bucketOffset": 0, "count": 600, "campaign": "spring-sale", "complaints": 5 },
+        { "bucketOffset": 1, "count": 1200 },
+        { "bucketOffset": 2, "count": 1200 }
+      ]
+    }
+  ],
+  "ses": {
+    "identities": [
+      {
+        "identity": "example.com",
+        "dkimStatus": "SUCCESS",
+        "dkimSigningEnabled": true,
+        "mailFromDomain": "bounce.example.com",
+        "mailFromStatus": "SUCCESS"
+      }
+    ],
+    "destinations": "complete"
+  },
+  "dns": [
+    { "name": "_dmarc.news.example.com", "recordType": "TXT", "outcome": "missing" },
+    { "name": "_dmarc.example.com", "recordType": "TXT", "outcome": "records", "records": ["v=DMARC1; p=none"] },
+    { "name": "bounce.example.com", "recordType": "TXT", "outcome": "records", "records": ["v=spf1 include:amazonses.com ~all"] },
+    { "name": "example.com", "recordType": "MX", "outcome": "missing" }
+  ],
+  "labels": {
+    "fothering-bulk": { "outcome": "approved", "reason": "approved", "names": [], "fixKind": null, "rule": "approved" }
+  },
+  "variants": [
+    {
+      "id": "base",
+      "response": { "label": "hand-authored" },
+      "turns": [
+        {
+          "kind": "answer",
+          "decision": "close",
+          "optionId": { "from": "approved" },
+          "explanation": "This lane's complaint ratio is 0.17%, 5 complaints over 3,000 recipient-sends. The spring-sale campaign is the cause: all 5 complaints came from its 600 sends, and the rest of the lane drew none. Pausing this lane stops that campaign while the other lanes keep sending."
+        }
+      ],
+      "expected": { "fothering-bulk": { "kind": "validated", "decision": "close" } }
+    }
+  ]
+}

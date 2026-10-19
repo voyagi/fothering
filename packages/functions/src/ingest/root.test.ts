@@ -39,7 +39,14 @@ function secretsManagerStub(): ReturnType<typeof stubClient> {
 
 function sesStub(): ReturnType<typeof stubClient> {
   return stubClient((command) => {
-    if (command.name === 'GetEmailIdentityCommand') return { ConfigurationSetName: 'fothering-default' };
+    if (command.name === 'GetEmailIdentityCommand') {
+      return {
+        ConfigurationSetName: 'fothering-default',
+        IdentityType: 'DOMAIN',
+        DkimAttributes: { Status: 'SUCCESS', SigningEnabled: true },
+        MailFromAttributes: { MailFromDomain: 'bounce.example.com', MailFromDomainStatus: 'SUCCESS' },
+      };
+    }
     throw new Error(`unexpected SES command ${command.name}`);
   });
 }
@@ -114,7 +121,14 @@ describe('the ingest root in deployed with the switch unset', () => {
       dryRunSink: (line) => lines.push(line),
     });
 
-    await expect(deps.ports.ses.getEmailIdentity('example.com')).resolves.toBe('fothering-default');
+    await expect(deps.ports.ses.getEmailIdentity('example.com')).resolves.toEqual({
+      defaultConfigurationSet: 'fothering-default',
+      dkimStatus: 'SUCCESS',
+      dkimSigningEnabled: true,
+      mailFromDomain: 'bounce.example.com',
+      mailFromStatus: 'SUCCESS',
+      identityType: 'DOMAIN',
+    });
     await deps.ports.ses.pauseConfigurationSet('fothering-bulk');
 
     expect(lines).toEqual(['(dry-run) WOULD ses.pauseConfigurationSet fothering-bulk {"configurationSet":"fothering-bulk"}']);

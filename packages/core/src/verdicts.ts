@@ -1,0 +1,125 @@
+// Every value below is Fothering's own, declared once with its reason (D-48 to D-52). Phase 6's
+// measurement protocol may change any of them before the first live run, in a reviewed commit and
+// in this module only.
+
+/** A threshold as a fraction of integers, so a compare is a cross-multiplication and never a float. */
+export interface Rational {
+  readonly numerator: number;
+  readonly denominator: number;
+}
+
+// D-48: equal to the levels the SES reputation metrics page names for placing an account under
+// review ("If your bounce rate is 5% or greater, we automatically place your account under review",
+// "If your complaint rate is 0.1% or greater, we automatically place your account under review",
+// https://docs.aws.amazon.com/ses/latest/dg/reputationdashboardmessages.html), so one lane at this
+// ratio would alone bring a one-lane account to review. They are Fothering lane thresholds, not
+// SES's figure: SES computes its rates over a "representative volume" and leaves out mailbox
+// simulator mail and bounces to verified addresses, both of which a lane ratio counts. A Permanent
+// bounce of subtype Suppressed (the global suppression list) also counts in the lane numerator, so
+// the lane ratio does not reproduce SES's method and no label may say it does.
+export const HARD_BOUNCE_THRESHOLD: Rational = { numerator: 5, denominator: 100 };
+export const COMPLAINT_THRESHOLD: Rational = { numerator: 1, denominator: 1000 };
+
+// D-49: at the lane minimum of 100 sends one complaint already reads 1 percent, ten times the
+// complaint threshold, and one report is not evidence that a stream went wrong.
+export const MIN_RATIO_EVENTS = 3;
+
+// D-50: at 100 sends the hard-bounce ratio moves in 1-point steps, so five permanent bounces are
+// needed to reach 5 percent. A row under 20 sends cannot carry a cause, while one import batch of a
+// small team can be a few dozen addresses.
+export const LANE_MIN_RECIPIENT_SENDS = 100;
+export const ROW_MIN_RECIPIENT_SENDS = 20;
+
+// D-51: SES delivers events to EventBridge best effort, so a working destination covers nearly
+// every recipient-send once the lateness horizon has passed, while a destination missing an event
+// type (Delivery off) covers only its bounces, far below 90 percent.
+export const COVERAGE_THRESHOLD: Rational = { numerator: 9, denominator: 10 };
+
+export const COVERAGE_VERDICTS = ['data', 'no-data', 'not-judged'] as const;
+export type CoverageVerdict = (typeof COVERAGE_VERDICTS)[number];
+
+export interface CoverageInput {
+  coverage: { recipientSends: number; covered: number };
+  orderBroken: boolean;
+}
+
+/** D-51 over complete buckets only. A fold that saw records out of store order cannot vouch for
+ * its per-bucket keys, so it reads NO DATA, the reading that never lets a lane look healthy. */
+export function coverageVerdict(input: CoverageInput): CoverageVerdict {
+  if (input.orderBroken) return 'no-data';
+  const { recipientSends, covered } = input.coverage;
+  if (recipientSends === 0) return 'not-judged';
+  return covered * COVERAGE_THRESHOLD.denominator >= COVERAGE_THRESHOLD.numerator * recipientSends ? 'data' : 'no-data';
+}
+
+export const LANE_TRIGGERS = ['hard-bounce', 'complaint'] as const;
+export type LaneTrigger = (typeof LANE_TRIGGERS)[number];
+
+export const THRESHOLD_BY_TRIGGER: Readonly<Record<LaneTrigger, Rational>> = {
+  'hard-bounce': HARD_BOUNCE_THRESHOLD,
+  complaint: COMPLAINT_THRESHOLD,
+};
+
+export const LANE_RATIO_LABELS = {
+  hardBounce: 'Fothering lane hard-bounce ratio (permanent bounces over recipient-sends)',
+  complaint: 'Fothering lane complaint ratio (complaints over recipient-sends)',
+} as const;
+
+export const LANE_SHARE_LABEL = 'share of the countable events Fothering stores for its lane-map sets';
+
+export function ratioAtOrAbove(count: number, sends: number, threshold: Rational, minEvents: number = MIN_RATIO_EVENTS): boolean {
+  return sends > 0 && count >= minEvents && count * threshold.denominator >= threshold.numerator * sends;
+}
+
+/** Hundredths of a percent, rounded half up from integers (D-56): 15 of 200 is "7.50%". */
+export function renderPercent(count: number, sends: number): string | null {
+  if (sends === 0) return null;
+  const hundredths = Math.floor((count * 20_000 + sends) / (2 * sends));
+  return `${Math.floor(hundredths / 100)}.${String(hundredths % 100).padStart(2, '0')}%`;
+}
+
+export const LANE_VERDICTS = ['spike', 'no-spike', 'not-enough-volume'] as const;
+export type LaneVerdict = (typeof LANE_VERDICTS)[number];
+
+export interface LaneTotals {
+  recipientSends: number;
+  permanentBounces: number;
+  complaints: number;
+}
+
+export interface LaneSpikeVerdict {
+  verdict: LaneVerdict;
+  triggers: readonly LaneTrigger[];
+  hardBounceRatio: string | null;
+  complaintRatio: string | null;
+}
+
+export interface VerdictRules {
+  hardBounce: Rational;
+  complaint: Rational;
+  minRatioEvents: number;
+  minRecipientSends: number;
+}
+
+// The only rules a production caller passes; the parameter exists so a test can remove one floor
+// and show that the verdict turns, which is what proves each floor is load-bearing.
+export const LANE_RULES: Readonly<VerdictRules> = {
+  hardBounce: HARD_BOUNCE_THRESHOLD,
+  complaint: COMPLAINT_THRESHOLD,
+  minRatioEvents: MIN_RATIO_EVENTS,
+  minRecipientSends: LANE_MIN_RECIPIENT_SENDS,
+};
+
+export function laneSpikeVerdict(totals: LaneTotals, rules: Readonly<VerdictRules> = LANE_RULES): LaneSpikeVerdict {
+  const ratios = {
+    hardBounceRatio: renderPercent(totals.permanentBounces, totals.recipientSends),
+    complaintRatio: renderPercent(totals.complaints, totals.recipientSends),
+  };
+  if (totals.recipientSends < rules.minRecipientSends) return { verdict: 'not-enough-volume', triggers: [], ...ratios };
+  const triggers: LaneTrigger[] = [];
+  // The complaint total already leaves out suppressed complaints and not-spam reports, the split
+  // countLaneBuckets and the window fold share (bounceClass and complaintClass in buckets.ts).
+  if (ratioAtOrAbove(totals.permanentBounces, totals.recipientSends, rules.hardBounce, rules.minRatioEvents)) triggers.push('hard-bounce');
+  if (ratioAtOrAbove(totals.complaints, totals.recipientSends, rules.complaint, rules.minRatioEvents)) triggers.push('complaint');
+  return { verdict: triggers.length > 0 ? 'spike' : 'no-spike', triggers, ...ratios };
+}

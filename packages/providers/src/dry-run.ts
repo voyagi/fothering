@@ -1,6 +1,7 @@
 import * as z from 'zod';
 import { normalizeAddress, pseudonymizeRecipient, type AddressKeySet } from '@fothering/core/address';
 import { CONFIGURATION_SET_PATTERN } from '@fothering/core/lanes';
+import { MODEL_VALUES } from '@fothering/core/model-values';
 import type {
   AddressKeyPort,
   AgentCorePort,
@@ -9,7 +10,7 @@ import type {
   SendEmailRequest,
   SesPort,
 } from './port-types.js';
-import { canonicalJson } from './fixtures/recorded.js';
+import { INCIDENT_PARTS, canonicalJson } from '@fothering/core/evidence-record';
 
 export interface DryRunLog {
   would(operation: string, target: string, request: unknown): Promise<void>;
@@ -33,6 +34,13 @@ const RECORD_PARTITION_KEY = new RegExp(`^LANE#${CONFIGURATION_SET_PATTERN.sourc
 // recordKey's sort key: B#, a 13-digit bucket start, then the event type and an identity made of
 // SES ids, HMAC hex and a timestamp, joined by #. A key built any other way is refused, not printed.
 const RECORD_SORT_KEY = /^B#\d{13}#[A-Za-z0-9._#-]{1,1024}$/;
+// The decision store's three partition key shapes (D-65): the incident marker under a configuration
+// set, an incident by its 32-hex id, and a UTC day counter. Its sort keys are a closed set of words.
+const INCIDENT_LANE_PARTITION_KEY = new RegExp(`^INCIDENT_LANE#${CONFIGURATION_SET_PATTERN.source.replace(/^\^/, '')}`);
+const INCIDENT_PARTITION_KEY = /^INCIDENT#[0-9a-f]{32}$/;
+const COUNTER_DAY_PARTITION_KEY = /^COUNTER_DAY#\d{4}-\d{2}-\d{2}$/;
+const DECISION_PARTITION_KEYS = [INCIDENT_LANE_PARTITION_KEY, INCIDENT_PARTITION_KEY, COUNTER_DAY_PARTITION_KEY];
+const DECISION_SORT_KEY = new RegExp(`^(?:MARKER|${INCIDENT_PARTS.join('|')})$`);
 const MODEL_ID = /^[A-Za-z0-9._:-]{1,256}$/;
 const RUNTIME_ARN = /^arn:[A-Za-z0-9:/_.-]{1,512}$/;
 const DEAD_LETTER_TARGET = new RegExp(`^${DEAD_LETTER_QUEUE_TARGET}$`);
@@ -46,8 +54,33 @@ const sendEmailSchema = z.object({
   text: z.string(),
   configurationSetName: configurationSetSchema.optional(),
 });
-const converseSchema = z.object({ modelId: z.string(), prompt: z.string() });
+// Two integers and the model id, never a message: the request a model line records is built field by
+// field from counts, so no prompt or answer text can reach the line (T-02-10).
+const streamSchema = z.object({
+  modelId: z.string().regex(MODEL_ID),
+  messageCount: z.int().nonnegative(),
+  promptBytes: z.int().nonnegative(),
+});
 const invokeSchema = z.object({ runtimeArn: z.string(), payload: z.unknown() });
+const decisionKeySchema = z.object({
+  pk: z.string().refine((pk) => DECISION_PARTITION_KEYS.some((pattern) => pattern.test(pk))),
+  sk: z.string().regex(DECISION_SORT_KEY),
+});
+const counterKeysSchema = { incidentKey: decisionKeySchema, dayKey: decisionKeySchema };
+const reservationSchema = z.object({
+  ...counterKeysSchema,
+  incidentCap: z.int().nonnegative(),
+  dayInvocationCap: z.int().nonnegative(),
+  dayTokenCap: z.int().nonnegative(),
+  tokenReservation: z.int().nonnegative(),
+  expiresAt: z.int().nonnegative(),
+});
+const usageSchema = z.object({
+  ...counterKeysSchema,
+  inputTokens: z.int().nonnegative(),
+  outputTokens: z.int().nonnegative(),
+  modelCalls: z.int().nonnegative(),
+});
 
 type Summary = Record<string, unknown>;
 
@@ -88,20 +121,42 @@ const CONFIGURATION_SET_SHAPE: DryRunShape = {
   summarize: (request) => ({ configurationSet: configurationSetSchema.parse(request) }),
 };
 
+// A reservation or a usage line holds its integers alone: the keys are checked, never printed, since
+// the target already names the incident.
+function summarizeReservation(request: unknown): Summary {
+  const { incidentCap, dayInvocationCap, dayTokenCap, tokenReservation, expiresAt } = reservationSchema.parse(request);
+  return { incidentCap, dayInvocationCap, dayTokenCap, tokenReservation, expiresAt };
+}
+
+function summarizeUsage(request: unknown): Summary {
+  const { inputTokens, outputTokens, modelCalls } = usageSchema.parse(request);
+  return { inputTokens, outputTokens, modelCalls };
+}
+
 const SHAPES = new Map<string, DryRunShape>([
   ['eventStore.putIfAbsent', RECORD_KEY_SHAPE],
   ['eventStore.deleteRecord', RECORD_KEY_SHAPE],
+  ['decisionStore.putIfAbsent', { targets: DECISION_PARTITION_KEYS, summarize: (request) => decisionKeySchema.parse(request) }],
+  [
+    'decisionStore.updateIfVersion',
+    {
+      targets: DECISION_PARTITION_KEYS,
+      summarize: (request) => decisionKeySchema.extend({ expectedVersion: z.int().nonnegative() }).parse(request),
+    },
+  ],
+  ['decisionStore.reserveInvocation', { targets: [INCIDENT_PARTITION_KEY], summarize: summarizeReservation }],
+  ['decisionStore.recordUsage', { targets: [INCIDENT_PARTITION_KEY], summarize: summarizeUsage }],
   ['deadLetter.send', { targets: [DEAD_LETTER_TARGET], summarize: summarizeDeadLetter }],
   ['ses.pauseConfigurationSet', CONFIGURATION_SET_SHAPE],
   ['ses.reopenConfigurationSet', CONFIGURATION_SET_SHAPE],
   ['ses.sendEmail', { targets: [CONFIGURATION_SET_PATTERN, RECEIVING_DOMAIN], summarize: summarizeSend }],
   [
-    'bedrockModel.converse',
+    'bedrockModel.stream',
     {
       targets: [MODEL_ID],
       summarize: (request) => {
-        const { modelId, prompt } = converseSchema.parse(request);
-        return { modelId, promptLength: prompt.length };
+        const { modelId, messageCount, promptBytes } = streamSchema.parse(request);
+        return { modelId, messageCount, promptBytes };
       },
     },
   ],
@@ -166,12 +221,16 @@ export function createSesDryRun(log: DryRunLog): Pick<SesPort, 'pauseConfigurati
   };
 }
 
-// A dry-run model call answers with no text: nothing was asked of the model, so nothing came back.
+// A dry-run model call yields no event: nothing was asked of the model, so nothing came back. The
+// line is written when the stream is first iterated, as a real call would only start then.
 export function createBedrockModelDryRun(log: DryRunLog): BedrockModelPort {
   return {
-    async converse(request) {
-      await log.would('bedrockModel.converse', request.modelId, request);
-      return { text: '' };
+    async *stream(messages, options) {
+      await log.would('bedrockModel.stream', MODEL_VALUES.inferenceProfileId, {
+        modelId: MODEL_VALUES.inferenceProfileId,
+        messageCount: messages.length,
+        promptBytes: Buffer.byteLength(JSON.stringify({ messages, systemPrompt: options?.systemPrompt })),
+      });
     },
   };
 }

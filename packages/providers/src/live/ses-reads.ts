@@ -3,9 +3,10 @@ import {
   GetEmailIdentityCommand,
   paginateListConfigurationSets,
   paginateListEmailIdentities,
+  type GetEmailIdentityResponse,
   type SESv2Client,
 } from '@aws-sdk/client-sesv2';
-import type { EventDestinationFact, SesReadPort } from '../port-types.js';
+import type { EmailIdentityFacts, EventDestinationFact, SesReadPort } from '../port-types.js';
 import { SES_READ_SPACING_MS, sleep } from '../ses-facts.js';
 import { hasErrorName } from './error-name.js';
 
@@ -40,6 +41,20 @@ function isNotFound(error: unknown): boolean {
   return hasErrorName(error, NOT_FOUND);
 }
 
+// exactOptionalPropertyTypes: a fact SES left out stays an absent key, so a reader never sees a key
+// holding undefined that it would have to tell apart from a value.
+function emailIdentityFacts(response: GetEmailIdentityResponse): EmailIdentityFacts {
+  const facts = {
+    defaultConfigurationSet: response.ConfigurationSetName,
+    dkimStatus: response.DkimAttributes?.Status,
+    dkimSigningEnabled: response.DkimAttributes?.SigningEnabled,
+    mailFromDomain: response.MailFromAttributes?.MailFromDomain,
+    mailFromStatus: response.MailFromAttributes?.MailFromDomainStatus,
+    identityType: response.IdentityType,
+  };
+  return Object.fromEntries(Object.entries(facts).filter(([, value]) => value !== undefined)) as EmailIdentityFacts;
+}
+
 export interface CreateSesReadsOptions {
   client: () => SESv2Client;
   /** The pause between the pages of a list; a real one-second timer when left out. */
@@ -47,7 +62,8 @@ export interface CreateSesReadsOptions {
 }
 
 // The closeability check's only four reads (D-06, Item 7): the identity's default configuration
-// set, the full identity list, the full configuration set list, and one set's event destinations.
+// set with its DKIM and MAIL FROM facts (D-59), the full identity list, the full configuration set
+// list, and one set's event destinations.
 // No SES write ever goes through this adapter; plan 01-15 builds the full SesPort on top of it.
 export function createSesReads(options: CreateSesReadsOptions): SesReadPort {
   const wait = options.wait ?? sleep;
@@ -57,7 +73,7 @@ export function createSesReads(options: CreateSesReadsOptions): SesReadPort {
     async getEmailIdentity(emailIdentity) {
       try {
         const response = await options.client().send(new GetEmailIdentityCommand({ EmailIdentity: emailIdentity }));
-        return response.ConfigurationSetName;
+        return emailIdentityFacts(response);
       } catch (error) {
         if (isNotFound(error)) return undefined;
         throw error;

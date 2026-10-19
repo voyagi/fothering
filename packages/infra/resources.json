@@ -1,5 +1,65 @@
 [
   {
+    "stack": "FotheringDetection",
+    "logicalId": "DetectErrorLines0FA41FBA",
+    "type": "AWS::Logs::MetricFilter",
+    "deletionPolicy": "Delete"
+  },
+  {
+    "stack": "FotheringDetection",
+    "logicalId": "DetectErrorLinesAlarm54A6EF5E",
+    "type": "AWS::CloudWatch::Alarm",
+    "deletionPolicy": "Delete"
+  },
+  {
+    "stack": "FotheringDetection",
+    "logicalId": "DetectErrorsAlarm2DB462A6",
+    "type": "AWS::CloudWatch::Alarm",
+    "deletionPolicy": "Delete"
+  },
+  {
+    "stack": "FotheringDetection",
+    "logicalId": "DetectFunctionEACAD5CE",
+    "type": "AWS::Lambda::Function",
+    "deletionPolicy": "Delete"
+  },
+  {
+    "stack": "FotheringDetection",
+    "logicalId": "DetectFunctionEventInvokeConfig35524D56",
+    "type": "AWS::Lambda::EventInvokeConfig",
+    "deletionPolicy": "Delete"
+  },
+  {
+    "stack": "FotheringDetection",
+    "logicalId": "DetectLogsE0BB1C87",
+    "type": "AWS::Logs::LogGroup",
+    "deletionPolicy": "Delete"
+  },
+  {
+    "stack": "FotheringDetection",
+    "logicalId": "DetectRoleDEDAD076",
+    "type": "AWS::IAM::Role",
+    "deletionPolicy": "Delete"
+  },
+  {
+    "stack": "FotheringDetection",
+    "logicalId": "DetectRoleDefaultPolicy279642E2",
+    "type": "AWS::IAM::Policy",
+    "deletionPolicy": "Delete"
+  },
+  {
+    "stack": "FotheringDetection",
+    "logicalId": "DetectScheduleAllowEventRuleFotheringDetectionDetectFunction98484C3F2507029D",
+    "type": "AWS::Lambda::Permission",
+    "deletionPolicy": "Delete"
+  },
+  {
+    "stack": "FotheringDetection",
+    "logicalId": "DetectScheduleE265CAD4",
+    "type": "AWS::Events::Rule",
+    "deletionPolicy": "Delete"
+  },
+  {
     "stack": "FotheringIngest",
     "logicalId": "AddressKey1F8FD90D",
     "type": "AWS::SecretsManager::Secret",
@@ -129,6 +189,12 @@
     "stack": "FotheringRuntime",
     "logicalId": "RuntimeLogs92941AA6",
     "type": "AWS::Logs::LogGroup",
+    "deletionPolicy": "Delete"
+  },
+  {
+    "stack": "FotheringRuntime",
+    "logicalId": "RuntimeModelPolicy072EAF77",
+    "type": "AWS::IAM::Policy",
     "deletionPolicy": "Delete"
   },
   {

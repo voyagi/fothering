@@ -1,3 +1,4 @@
+import { BedrockAgentCoreClient } from '@aws-sdk/client-bedrock-agentcore';
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocumentClient } from '@aws-sdk/lib-dynamodb';
 import { SecretsManagerClient } from '@aws-sdk/client-secrets-manager';
@@ -9,6 +10,8 @@ import type {
   AgentCorePort,
   BedrockModelPort,
   DeadLetterPort,
+  DecisionStorePort,
+  DnsPort,
   EventStorePort,
   FixtureOptions,
   ReplyBucketPort,
@@ -23,10 +26,23 @@ import {
   createSesDryRun,
   type DryRunLog,
 } from './dry-run.js';
-import { createFixtureAddressKey, createFixtureDeadLetter, createFixtureEventStore } from './fixtures/ingest-ports.js';
-import { createFixtureAgentCore, createFixtureBedrockModel, createFixtureReplyBucket, createFixtureSes } from './fixtures/later-ports.js';
+import {
+  createFixtureAddressKey,
+  createFixtureDeadLetter,
+  createFixtureDecisionStore,
+  createFixtureEventStore,
+} from './fixtures/ingest-ports.js';
+import {
+  createFixtureAgentCore,
+  createFixtureBedrockModel,
+  createFixtureDns,
+  createFixtureReplyBucket,
+  createFixtureSes,
+} from './fixtures/later-ports.js';
 import { lazyClient } from './live/lazy-client.js';
-import { createDynamoEventStore } from './live/event-store.js';
+import { createLiveAgentCore, createLiveBedrockModel } from './live/agent-adapters.js';
+import { createLiveDns, type DnsResolverFactory } from './live/dns.js';
+import { createDynamoDecisionStore, createDynamoEventStore } from './live/event-store.js';
 import { createSecretsManagerAddressKey } from './live/address-key.js';
 import { createSqsDeadLetter } from './live/dead-letter.js';
 import { createSesReads } from './live/ses-reads.js';
@@ -44,7 +60,16 @@ function resolveLiveClient<T>(provided: unknown, construct: () => T): () => T {
   });
 }
 
-export type PortName = 'eventStore' | 'addressKey' | 'deadLetter' | 'ses' | 'bedrockModel' | 'agentCore' | 'replyBucket';
+export type PortName =
+  | 'eventStore'
+  | 'decisionStore'
+  | 'addressKey'
+  | 'deadLetter'
+  | 'ses'
+  | 'dns'
+  | 'bedrockModel'
+  | 'agentCore'
+  | 'replyBucket';
 
 interface LivePortContext {
   liveConfig: LiveConfig;
@@ -84,9 +109,11 @@ export interface PortRow {
 
 export interface ResolvedPorts {
   eventStore: EventStorePort;
+  decisionStore: DecisionStorePort;
   addressKey: AddressKeyPort;
   deadLetter: DeadLetterPort;
   ses: SesPort;
+  dns: DnsPort;
   bedrockModel: BedrockModelPort;
   agentCore: AgentCorePort;
   replyBucket: ReplyBucketPort;
@@ -97,13 +124,29 @@ export interface ResolvedPorts {
 // a runtime surprise the first time a caller asks for the missing one (D-05).
 export const PORT_TABLE = {
   eventStore: {
-    operations: ['putIfAbsent', 'queryLane', 'queryByRecipient', 'deleteRecord', 'getRecord'],
+    operations: ['putIfAbsent', 'queryLane', 'queryByRecipient', 'deleteRecord', 'getRecord', 'foldLane'],
     mutatingOperations: ['putIfAbsent', 'deleteRecord'],
     gatedOperations: [],
     fixture: (fixtures: FixtureOptions, dryRun: DryRunLog) => createFixtureEventStore(fixtures, dryRun),
     live: ({ liveConfig, liveClients }) =>
       brandPort(
         createDynamoEventStore({
+          tableName: liveConfig.tableName,
+          client: resolveLiveClient(liveClients.dynamoDb, () => DynamoDBDocumentClient.from(new DynamoDBClient({ region: LIVE_REGION }))),
+        }),
+        'live',
+      ),
+  },
+  // Incident, evidence, decision and counter items in the event table (D-65, D-66). Like the event
+  // store, Fothering's own table: its writes mutate but never wait for the switch.
+  decisionStore: {
+    operations: ['putIfAbsent', 'getItem', 'updateIfVersion', 'reserveInvocation', 'recordUsage'],
+    mutatingOperations: ['putIfAbsent', 'updateIfVersion', 'reserveInvocation', 'recordUsage'],
+    gatedOperations: [],
+    fixture: (fixtures: FixtureOptions, dryRun: DryRunLog) => createFixtureDecisionStore(fixtures, dryRun),
+    live: ({ liveConfig, liveClients }) =>
+      brandPort(
+        createDynamoDecisionStore({
           tableName: liveConfig.tableName,
           client: resolveLiveClient(liveClients.dynamoDb, () => DynamoDBDocumentClient.from(new DynamoDBClient({ region: LIVE_REGION }))),
         }),
@@ -158,13 +201,23 @@ export const PORT_TABLE = {
     notBuiltOperations: { pauseConfigurationSet: 3, reopenConfigurationSet: 3, sendEmail: 4 },
     dryRun: (log: DryRunLog) => createSesDryRun(log),
   },
+  // R6 reads the ROADMAP's "DNS behind the dry-run gate" as DNS behind this table: recorded answers in
+  // 'test', so no test or CI run ever queries DNS, and live in 'deployed' whatever the switch, the
+  // treatment SAFE-01 gives the SES reads, since a lookup changes nothing and costs nothing.
+  dns: {
+    operations: ['resolveMx', 'resolveTxt'],
+    mutatingOperations: [],
+    gatedOperations: [],
+    fixture: (fixtures: FixtureOptions) => createFixtureDns({ recordings: fixtures.recordings?.dns ?? [] }),
+    live: ({ liveClients }) =>
+      brandPort(createLiveDns({ resolverFactory: liveClients.dnsResolver as DnsResolverFactory | undefined }), 'live'),
+  },
   bedrockModel: {
-    operations: ['converse'],
-    mutatingOperations: ['converse'],
-    gatedOperations: ['converse'],
-    fixture: (fixtures: FixtureOptions, dryRun: DryRunLog) =>
-      createFixtureBedrockModel({ recordings: fixtures.recordings?.bedrockModel ?? [], dryRun }),
-    live: { notBuiltUntil: 2 },
+    operations: ['stream'],
+    mutatingOperations: ['stream'],
+    gatedOperations: ['stream'],
+    fixture: (fixtures: FixtureOptions, dryRun: DryRunLog) => createFixtureBedrockModel({ model: fixtures.model, dryRun }),
+    live: () => brandPort(createLiveBedrockModel(), 'live'),
     dryRun: (log: DryRunLog) => createBedrockModelDryRun(log),
   },
   agentCore: {
@@ -172,8 +225,16 @@ export const PORT_TABLE = {
     mutatingOperations: ['invokeAgentRuntime'],
     gatedOperations: ['invokeAgentRuntime'],
     fixture: (fixtures: FixtureOptions, dryRun: DryRunLog) =>
-      createFixtureAgentCore({ recordings: fixtures.recordings?.agentCore ?? [], dryRun }),
-    live: { notBuiltUntil: 2 },
+      createFixtureAgentCore({ recordings: fixtures.recordings?.agentCore ?? [], agentRuntime: fixtures.agentRuntime, dryRun }),
+    live: ({ liveClients }) =>
+      brandPort(
+        createLiveAgentCore({
+          // One attempt: an SDK retry re-sends InvokeAgentRuntime, which runs the agent again on the one
+          // reservation detection made. The SDK's default is three (standard retry mode).
+          client: resolveLiveClient(liveClients.bedrockAgentCore, () => new BedrockAgentCoreClient({ region: LIVE_REGION, maxAttempts: 1 })),
+        }),
+        'live',
+      ),
     dryRun: (log: DryRunLog) => createAgentCoreDryRun(log),
   },
   replyBucket: {
