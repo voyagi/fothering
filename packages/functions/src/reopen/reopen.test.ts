@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { closureKey, parseClosure, type Closure } from '@fothering/core/closure';
 import { reserveLaneAttempt } from '@fothering/core/counters';
-import { counterLaneHourKey } from '@fothering/core/evidence-record';
+import { counterLaneHourKey, incidentPauseKey } from '@fothering/core/evidence-record';
+import { expiresAtFor } from '@fothering/core/records';
 import { REOPEN_USAGE, ReopenUsageError, incidentLimitSentence, reputationResetSentence } from '@fothering/core/reopen';
 import { createFixtureTableState } from '@fothering/providers/fixtures/ingest-ports';
 import { createFixtureSesState } from '@fothering/providers/fixtures/later-ports';
@@ -24,6 +25,7 @@ import type { ReopenReport } from './reopen.js';
 
 const BULK_PAYLOAD = { configurationSet: BULK };
 const ALERTS = 'fothering-alerts';
+const TRANSACTIONAL = 'fothering-transactional';
 
 function putsOf(state: FixtureSesState): string[] {
   return state.calls.filter((call) => call.startsWith('put-issued'));
@@ -222,6 +224,16 @@ describe('the reopen command refuses every set Fothering did not pause, with no 
     expect(sesState.sendingEnabled.get(BULK)).toBe(false);
   });
 
+  it('refuses a set whose pointer names a closure Fothering holds on another set, as no-fothering-pause', async () => {
+    const lane = await closedLane();
+    const { deps } = lane.reopenRoot();
+    const pointer = { ...incidentPauseKey(TRANSACTIONAL), incidentId: lane.incidentId, version: 0, expiresAt: expiresAtFor(lane.reopenAtMs) };
+    expect(await deps.ports.decisionStore.putIfAbsent(pointer, lane.reopenAtMs)).toBe('written');
+
+    expect((await refusedWithNoSesCall(lane, { configurationSet: TRANSACTIONAL })).reason).toBe('no-fothering-pause');
+    expect((await storedClosure(deps, lane.incidentId, lane.reopenAtMs))?.reopen).toBeNull();
+  });
+
   it.each(['refused', 'dry-run', 'pause-failed'] as const)('refuses a closure whose pause outcome is %s as not-reopenable', async (outcome) => {
     const lane = await closedLane();
     await rewriteClosure(lane.reopenRoot().deps, lane.incidentId, { outcome }, lane.reopenAtMs);
@@ -341,7 +353,37 @@ describe('two reopen commands run together make one reopen (AC-E22)', () => {
     expect((await storedClosure(lane.reopenRoot().deps, lane.incidentId, lane.reopenAtMs))?.reopen).toMatchObject({ attempts: 1, outcome: 'reopened' });
   });
 
-  // Control for the case above: the two roots do interleave, so a store whose versioned updates skip
+  // Two claims made in the same millisecond are equal field by field, so the case above cannot show a
+  // claim written over another; here the other command's claim is older and lands just before this one's.
+  it('refuses reopen-in-progress and writes nothing over a claim another command made just before its own', async () => {
+    const lane = await closedLane();
+    const { deps } = lane.reopenRoot();
+    const other = { attempts: 1, claimedAtMs: lane.reopenAtMs - 1_000, requestedAtMs: null, readBackAtMs: null, outcome: null };
+    const real = deps.ports.decisionStore;
+    let planted = false;
+    const decisionStore: DecisionStorePort = {
+      putIfAbsent: (item, nowMs) => real.putIfAbsent(item, nowMs),
+      getItem: (key, nowMs) => real.getItem(key, nowMs),
+      updateIfVersion: async (key, expectedVersion, attributes, nowMs, expected) => {
+        if (!planted && Object.hasOwn(attributes, 'reopen')) {
+          planted = true;
+          await rewriteClosure(deps, lane.incidentId, { reopen: other }, nowMs);
+        }
+        return real.updateIfVersion(key, expectedVersion, attributes, nowMs, expected);
+      },
+      reserveInvocation: (request) => real.reserveInvocation(request),
+      recordUsage: (usage) => real.recordUsage(usage),
+      reserveLaneAttempt: (request) => real.reserveLaneAttempt(request),
+    };
+
+    const report = await reopenFromPayload(BULK_PAYLOAD, { ...deps, ports: { ...deps.ports, decisionStore } });
+
+    expect(report).toMatchObject({ result: 'refused', reason: 'reopen-in-progress' });
+    expect(putsOf(lane.sesState).filter((call) => call.endsWith(':true'))).toEqual([]);
+    expect((await storedClosure(deps, lane.incidentId, lane.reopenAtMs))?.reopen).toEqual(other);
+  });
+
+  // Control for the first case: the two roots do interleave, so a store whose versioned updates skip
   // their condition lets both claim and both reach the put.
   it('is shown red by a planted store whose versioned updates skip their condition', async () => {
     const lane = await closedLane();

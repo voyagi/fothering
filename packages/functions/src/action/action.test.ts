@@ -26,7 +26,7 @@ import {
   renderOperatorEmail,
   type RenderedEmail,
 } from '@fothering/core/operator-email';
-import { RETENTION_SECONDS } from '@fothering/core/records';
+import { RETENTION_SECONDS, expiresAtFor } from '@fothering/core/records';
 import { incidentLimitSentence, reopenCommandFor, reputationResetSentence } from '@fothering/core/reopen';
 import { propertySeed } from '@fothering/core/test/property-seed';
 import { spikeWindowFor, type BucketWindow, type LaneFold } from '@fothering/core/window-fold';
@@ -269,9 +269,10 @@ describe('a claim another run left behind is taken over, finished or left alone 
     const claim = closureClaimItem({ incidentId: INCIDENT_ID, configurationSet: BULK, decisionOutcome: 'close', nowMs: staleClaimMs });
     await plantClosure(deps, { ...claim, pauseRequestedAtMs: staleClaimMs + 2_000 }, staleClaimMs);
 
-    await runActionCycle(deps);
+    const summary = await runActionCycle(deps);
 
     expect(await storedClosure(deps, INCIDENT_ID, ACT_MS)).toMatchObject({ outcome: 'pause-unknown', readBack: null });
+    expect(summary.acted).toEqual([{ incidentId: INCIDENT_ID, outcome: 'pause-unknown' }]);
     expect(sesState.calls).toEqual([]);
   });
 
@@ -1468,6 +1469,7 @@ describe('a closed lane becomes one closed-path email sent once through fotherin
 
     expect(dryRunLines.filter((line) => line.includes('ses.sendEmail'))).toEqual([]);
     expect(loggedEvents(logLines, 'email-refused')).toEqual([{ event: 'email-refused', level: 'error', incidentId: RECEIPT_INCIDENT_ID, reason: 'operator-alert-lane-count' }]);
+    expect(loggedEvents(logLines, 'email-step-failed')).toEqual([]);
   });
 
   it('sends nothing and logs operator-config-missing, naming no address, when the operator address is unset', async () => {
@@ -1480,6 +1482,7 @@ describe('a closed lane becomes one closed-path email sent once through fotherin
 
     expect(dryRunLines.filter((line) => line.includes('ses.sendEmail'))).toEqual([]);
     expect(loggedEvents(logLines, 'email-refused')).toEqual([{ event: 'email-refused', level: 'error', incidentId: RECEIPT_INCIDENT_ID, reason: 'operator-config-missing' }]);
+    expect(loggedEvents(logLines, 'email-step-failed')).toEqual([]);
     expect(logLines.filter((line) => line.includes('@'))).toEqual([]);
   });
 });
@@ -1980,5 +1983,172 @@ describe('one failing unit leaves the rest of the run going (WR-06)', () => {
 
     await runActionCycle(at(deps, HOLD_CHECKED_AT_MS + 60_000));
     expect(sendsIssued(sesState)).toBe(1);
+  });
+});
+
+// Planted straight through the port, so each item passes the key checks a real write does while holding
+// a shape no writer produces.
+async function plantRaw(deps: ActionDeps, item: DecisionStoreItem, nowMs: number): Promise<void> {
+  if ((await deps.ports.decisionStore.putIfAbsent(item, nowMs)) !== 'written') throw new Error(`an item is already stored at ${item.pk} / ${item.sk}`);
+}
+
+function errorLines(lines: readonly string[]): Record<string, unknown>[] {
+  return lines.map((line) => JSON.parse(line) as Record<string, unknown>).filter((entry) => entry.level === 'error');
+}
+
+// As tamperEvidenceHash: an EVIDENCE item carries no version, so only the fixture table can swap it.
+function replaceEvidence(store: FixtureTableState, incidentId: string, record: EvidenceRecord): void {
+  const evidence = [...store.items.values()].find(
+    (item): item is DecisionStoreItem => (item as DecisionStoreItem).pk === `INCIDENT#${incidentId}` && (item as DecisionStoreItem).sk === 'EVIDENCE',
+  );
+  if (evidence === undefined) throw new Error('no EVIDENCE item was seeded');
+  evidence.record = record;
+}
+
+const UNTRUSTED_RECORD_LINE = 'The evidence record could not be read or did not match its hash, so no counts are shown.';
+
+describe('the email prints no count from a record the gate refused as untrusted (T-03-02, email half)', () => {
+  it.each([
+    { label: 'a record whose hash no longer matches', reason: 'hash-mismatch', swap: async (store: FixtureTableState) => tamperEvidenceHash(store, INCIDENT_ID) },
+    {
+      label: 'an honest record of another incident',
+      reason: 'incident-mismatch',
+      swap: async (store: FixtureTableState, deps: ActionDeps) => {
+        const other = buildEvidenceRecord({ ...recordInputOf(await storedRecord(deps, INCIDENT_ID, NOW_MS)), incidentId: NEXT_BULK_INCIDENT_ID });
+        replaceEvidence(store, INCIDENT_ID, other);
+      },
+    },
+  ])('renders $label as unreadable, with no lane total and no hash', async ({ reason, swap }) => {
+    const { store } = await seeded();
+    const run = emailRoot({ store, now: () => ACT_MS });
+    await swap(store, run.deps);
+
+    await runActionCycle(run.deps);
+
+    expect(await storedClosure(run.deps, INCIDENT_ID, ACT_MS)).toMatchObject({ outcome: 'refused', reason });
+    expect(run.requests).toHaveLength(1);
+    const text = run.requests[0]?.text ?? '';
+    expect(text).toContain(UNTRUSTED_RECORD_LINE);
+    expect(text).toContain('Evidence record hash: not available');
+    expect(text).not.toContain('Permanent bounces:');
+    expect(text).not.toContain('Evidence window:');
+  });
+});
+
+describe('another lane the act cannot read, or reads closed, is judged by what it holds (AC-E10)', () => {
+  const expiresAt = expiresAtFor(NOW_MS);
+
+  it.each([
+    {
+      label: 'a marker that does not parse',
+      plant: (deps: ActionDeps) => plantRaw(deps, { ...incidentLaneKey(TRANSACTIONAL), incidentId: LATER_RECEIPT_INCIDENT_ID, status: 'reopened', version: 1, expiresAt }, NOW_MS),
+    },
+    {
+      label: 'an open marker with no STATE',
+      plant: (deps: ActionDeps) => plantIncident(deps, { configurationSet: TRANSACTIONAL, incidentId: LATER_RECEIPT_INCIDENT_ID, openingWindow: spikeWindowFor(LATER_MS), nowMs: NOW_MS, omit: ['STATE'] }),
+    },
+    {
+      label: 'an open marker whose STATE holds no opening window',
+      plant: async (deps: ActionDeps) => {
+        await plantIncident(deps, { configurationSet: TRANSACTIONAL, incidentId: LATER_RECEIPT_INCIDENT_ID, openingWindow: spikeWindowFor(LATER_MS), nowMs: NOW_MS, omit: ['STATE'] });
+        const state = { incidentId: LATER_RECEIPT_INCIDENT_ID, configurationSet: TRANSACTIONAL, status: 'open', openingWindow: null };
+        await plantRaw(deps, { ...incidentItemKey(LATER_RECEIPT_INCIDENT_ID, 'STATE'), version: 1, expiresAt, state }, NOW_MS);
+      },
+    },
+  ])('refuses newer-incident-elsewhere for $label, with no SES mutation', async ({ plant }) => {
+    const { root } = await seeded();
+    const logLines: string[] = [];
+    const { deps, sesState } = root({ logSink: (line) => logLines.push(line) });
+    await plant(deps);
+
+    await runActionCycle(deps);
+
+    expect(await storedClosure(deps, INCIDENT_ID, ACT_MS)).toMatchObject({ outcome: 'refused', reason: 'newer-incident-elsewhere' });
+    expect(mutationsOf(sesState)).toEqual([]);
+    expect(loggedEvents(logLines, 'act-failed')).toEqual([]);
+  });
+
+  it('pauses beside another lane whose newer incident reads closed on its marker and STATE', async () => {
+    const { root } = await seeded();
+    const { deps, sesState } = root();
+    await plantIncident(deps, {
+      configurationSet: TRANSACTIONAL,
+      incidentId: LATER_RECEIPT_INCIDENT_ID,
+      openingWindow: spikeWindowFor(LATER_MS),
+      markerStatus: 'closed',
+      stateStatus: 'closed',
+      nowMs: NOW_MS,
+    });
+
+    await runActionCycle(deps);
+
+    expect((await storedClosure(deps, INCIDENT_ID, ACT_MS))?.outcome).toBe('paused');
+    expect(putsOf(sesState)).toEqual(['put-issued:fothering-bulk:false']);
+  });
+});
+
+describe('a pause pointer the act cannot read holds the lane, and its own pointer does not (D-95, D-91)', () => {
+  it.each([
+    { label: 'a pointer read that throws', wrap: (deps: ActionDeps) => getItemThrowsOnce(deps, incidentPauseKey(BULK), true), plant: async () => {} },
+    {
+      label: 'a pointer that does not parse',
+      wrap: (deps: ActionDeps) => deps,
+      plant: (deps: ActionDeps) => plantRaw(deps, { ...incidentPauseKey(BULK), incidentId: 'not-an-incident-id', version: 0, expiresAt: expiresAtFor(NOW_MS) }, NOW_MS),
+    },
+  ])('refuses lane-already-paused on $label, with no put and no lane-hour attempt', async ({ wrap, plant }) => {
+    const { root } = await seeded();
+    const { deps, sesState } = root();
+    await plant(deps);
+
+    await runActionCycle(wrap(deps));
+
+    const closure = await storedClosure(deps, INCIDENT_ID, ACT_MS);
+    expect(closure).toMatchObject({ outcome: 'refused', reason: 'lane-already-paused' });
+    expect(laneOf(closure, BULK)?.state).toBe('paused-by-fothering');
+    expect(putsOf(sesState)).toEqual([]);
+    expect(await laneHourItem(deps, ACT_MS)).toBeUndefined();
+  });
+
+  it('pauses a stale claim whose stopped run already moved the pointer to it, and leaves that pointer as it was', async () => {
+    const { root } = await seeded();
+    const { deps, sesState } = root();
+    const staleClaimMs = ACT_MS - ACTION_FUNCTION_TIMEOUT_MS;
+    await plantClosure(deps, closureClaimItem({ incidentId: INCIDENT_ID, configurationSet: BULK, decisionOutcome: 'close', nowMs: staleClaimMs }), staleClaimMs);
+    await plantRaw(deps, { ...incidentPauseKey(BULK), incidentId: INCIDENT_ID, version: 0, expiresAt: expiresAtFor(staleClaimMs) }, staleClaimMs);
+
+    await runActionCycle(deps);
+
+    expect((await storedClosure(deps, INCIDENT_ID, ACT_MS))?.outcome).toBe('paused');
+    expect(putsOf(sesState)).toEqual(['put-issued:fothering-bulk:false']);
+    expect(await deps.ports.decisionStore.getItem(incidentPauseKey(BULK), ACT_MS)).toMatchObject({ incidentId: INCIDENT_ID, version: 0 });
+  });
+});
+
+describe('the worklist reaches every closure it owes a step, and nothing else (D-88)', () => {
+  it('hold-checks and mails a pause whose marker moved on to an incident with no DECISION, through the pointer alone, with no error line', async () => {
+    const lane = await pausedAtT();
+    await moveMarker(lane.deps, BULK, NEXT_BULK_INCIDENT_ID, T);
+    const logLines: string[] = [];
+    const { deps } = lane.root({ sesState: lane.sesState, now: () => HOLD_CHECK_MS, operator: OPERATOR, logSink: (line) => logLines.push(line) });
+
+    const summary = await runActionCycle(deps);
+
+    expect(summary.acted).toEqual([{ incidentId: INCIDENT_ID, outcome: 'closed' }]);
+    expect(sendsIssued(lane.sesState)).toBe(1);
+    expect(await storedClosure(deps, NEXT_BULK_INCIDENT_ID, HOLD_CHECK_MS)).toBeUndefined();
+    expect(errorLines(logLines)).toEqual([]);
+  });
+
+  it('logs one closure-unreadable line for a closure item that does not parse, and calls SES for nothing', async () => {
+    const { root } = await seeded();
+    const logLines: string[] = [];
+    const { deps, sesState } = root({ logSink: (line) => logLines.push(line) });
+    await plantRaw(deps, { ...closureKey(INCIDENT_ID), incidentId: INCIDENT_ID, outcome: 'half-written', version: 0, expiresAt: expiresAtFor(NOW_MS) }, NOW_MS);
+
+    const summary = await runActionCycle(deps);
+
+    expect(summary.acted).toEqual([]);
+    expect(sesState.calls).toEqual([]);
+    expect(errorLines(logLines)).toEqual([{ event: 'closure-unreadable', level: 'error', incidentId: INCIDENT_ID }]);
   });
 });
