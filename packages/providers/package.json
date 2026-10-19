@@ -15,7 +15,7 @@
     "@aws-sdk/lib-dynamodb": "3.1136.0",
     "@fothering/core": "0.0.0",
     "@strands-agents/sdk": "1.20.0",
-    "bedrock-agentcore": "0.4.5",
-    "zod": "4.6.7"
+    "bedrock-agentcore": "0.4.4",
+    "zod": "4.6.5"
   }
 }
