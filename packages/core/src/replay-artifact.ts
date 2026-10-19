@@ -187,8 +187,9 @@ export function reportIssue(issue: z.core.$ZodIssue): IssueReport {
 }
 
 // Canonical JSON for the capture manifest's hash: keys sorted by UTF-16 code unit at every depth,
-// arrays kept in order, integers only. Plan 05-15 swaps this for phase 2's canonicalJson once that
-// is on the branch, so one implementation remains.
+// arrays kept in order, integers only. canonicalJson in evidence-record.ts orders and hashes the same
+// way but refuses a float with a TypeError, and a float here is refused as a RangeError, so the
+// artifact keeps its own until the two refusals agree.
 function canonicalText(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(canonicalText).join(',')}]`;
   if (typeof value === 'object' && value !== null) {
