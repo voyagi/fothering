@@ -213,7 +213,7 @@ function assertBounceClaims(artifact: ReplayArtifact): void {
   }
   const codes = [...new Set(bounces.map((event) => event.smtpCode ?? 'no code'))];
   if (codes.length > 1) {
-    refuse('events', `the bounces on ${artifact.closedLane} carry ${codes.join(' and ')}, and step one says the bounces shown read one code`, 'Replay an incident whose bounces on the paused lane share one SMTP code');
+    refuse('events', `the bounces on ${artifact.closedLane} carry ${codes.join(' and ')}, and step one says the bounces logged here read one code`, 'Replay an incident whose bounces on the paused lane share one SMTP code');
   }
   if (bounces.some((event) => event.receivingDomain === undefined)) {
     refuse('events', `a bounce on ${artifact.closedLane} has no receiving domain, so the domains the bounces came from cannot be counted`, 'Add the receiving domain to every bounce on the paused lane');
