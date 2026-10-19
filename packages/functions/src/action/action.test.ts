@@ -1996,6 +1996,15 @@ function errorLines(lines: readonly string[]): Record<string, unknown>[] {
   return lines.map((line) => JSON.parse(line) as Record<string, unknown>).filter((entry) => entry.level === 'error');
 }
 
+// A stored item left unparseable in place, as a hand edit or a faulty writer would leave it.
+function spoilStored(store: FixtureTableState, key: { pk: string; sk: string }, attributes: Readonly<Record<string, unknown>>): void {
+  const item = [...store.items.values()].find(
+    (stored): stored is DecisionStoreItem => (stored as DecisionStoreItem).pk === key.pk && (stored as DecisionStoreItem).sk === key.sk,
+  );
+  if (item === undefined) throw new Error(`no item is stored at ${key.pk} / ${key.sk}`);
+  Object.assign(item, attributes);
+}
+
 // As tamperEvidenceHash: an EVIDENCE item carries no version, so only the fixture table can swap it.
 function replaceEvidence(store: FixtureTableState, incidentId: string, record: EvidenceRecord): void {
   const evidence = [...store.items.values()].find(
@@ -2150,5 +2159,33 @@ describe('the worklist reaches every closure it owes a step, and nothing else (D
     expect(summary.acted).toEqual([]);
     expect(sesState.calls).toEqual([]);
     expect(errorLines(logLines)).toEqual([{ event: 'closure-unreadable', level: 'error', incidentId: INCIDENT_ID }]);
+  });
+
+  it('logs one marker-unreadable line for a lane marker that does not parse, and claims nothing', async () => {
+    const { store, root } = await seeded();
+    const logLines: string[] = [];
+    const { deps, sesState } = root({ logSink: (line) => logLines.push(line) });
+    spoilStored(store, incidentLaneKey(BULK), { status: 'half-written' });
+
+    const summary = await runActionCycle(deps);
+
+    expect(summary.acted).toEqual([]);
+    expect(sesState.calls).toEqual([]);
+    expect(await storedClosure(deps, INCIDENT_ID, ACT_MS)).toBeUndefined();
+    expect(errorLines(logLines)).toEqual([{ event: 'marker-unreadable', level: 'error', configurationSet: BULK }]);
+  });
+
+  it('logs one decision-unreadable line for a DECISION that does not parse, and claims nothing', async () => {
+    const { store, root } = await seeded();
+    const logLines: string[] = [];
+    const { deps, sesState } = root({ logSink: (line) => logLines.push(line) });
+    spoilStored(store, incidentItemKey(INCIDENT_ID, 'DECISION'), { outcome: 'half-written' });
+
+    const summary = await runActionCycle(deps);
+
+    expect(summary.acted).toEqual([]);
+    expect(sesState.calls).toEqual([]);
+    expect(await storedClosure(deps, INCIDENT_ID, ACT_MS)).toBeUndefined();
+    expect(errorLines(logLines)).toEqual([{ event: 'decision-unreadable', level: 'error', incidentId: INCIDENT_ID }]);
   });
 });

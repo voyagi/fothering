@@ -185,8 +185,13 @@ async function foldLanes(deps: DetectDeps, nowMs: number): Promise<FoldedLane[]>
   return folded;
 }
 
+// A stored marker that does not parse reads as none, and the claim then loses to the item every cycle,
+// so the lane opens no incident while it stays: the error line is the only sign of it.
 async function readMarker(deps: DetectDeps, configurationSet: string, nowMs: number): Promise<Marker | undefined> {
-  return markerOf(await deps.ports.decisionStore.getItem(incidentLaneKey(configurationSet), nowMs));
+  const item = await deps.ports.decisionStore.getItem(incidentLaneKey(configurationSet), nowMs);
+  const marker = markerOf(item);
+  if (item !== undefined && marker === undefined) deps.log.error({ event: 'marker-unreadable', configurationSet });
+  return marker;
 }
 
 async function finalVerdictsOf(deps: DetectDeps, state: IncidentState, nowMs: number): Promise<FinalVerdict[]> {

@@ -380,16 +380,27 @@ async function takeOver(run: Run, closure: Closure, decision: StoredDecision): P
 // D-88 source (a): the incident a lane's marker names, whatever the marker's status, once it has a
 // DECISION item and no closure another run holds or finished. Known limit: an incident whose marker
 // moved on to a newer incident before any action run reached it gets no closure and no email; with a
-// five-minute schedule that takes an action outage of many hours.
+// five-minute schedule that takes an action outage of many hours. Detection writes every marker and
+// DECISION whole, so one stored that does not parse is a fault, logged as closure-unreadable is.
 async function workItem(run: Run, configurationSet: string, reached: Set<string>): Promise<WorkItem | undefined> {
   const { deps } = run;
   const store = deps.ports.decisionStore;
-  const marker = markerOf(await store.getItem(incidentLaneKey(configurationSet), deps.now()));
-  if (marker === undefined) return undefined;
+  const markerItem = await store.getItem(incidentLaneKey(configurationSet), deps.now());
+  if (markerItem === undefined) return undefined;
+  const marker = markerOf(markerItem);
+  if (marker === undefined) {
+    deps.log.error({ event: 'marker-unreadable', configurationSet });
+    return undefined;
+  }
   const { incidentId } = marker;
   reached.add(incidentId);
-  const decision = decisionOf(await store.getItem(incidentItemKey(incidentId, 'DECISION'), deps.now()));
-  if (decision === undefined) return undefined;
+  const decisionItem = await store.getItem(incidentItemKey(incidentId, 'DECISION'), deps.now());
+  if (decisionItem === undefined) return undefined;
+  const decision = decisionOf(decisionItem);
+  if (decision === undefined) {
+    deps.log.error({ event: 'decision-unreadable', incidentId });
+    return undefined;
+  }
   const stored = await store.getItem(closureKey(incidentId), deps.now());
   if (stored === undefined) return claim(run, incidentId, configurationSet, decision);
   const closure = parseClosure(stored);

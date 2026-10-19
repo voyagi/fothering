@@ -86,6 +86,10 @@ It never holds the payload, an address or a hash.
 usage: pass a JSON payload holding one "configurationSet" field naming one configuration set from lanes.json, and nothing else
 ```
 
+Any other `FunctionError` means the command stopped part way: a call to Fothering's table or to SES
+failed, or the run hit its 30-second limit. Wait 30 seconds, then run the command again. A run inside
+those 30 seconds can answer `reopen-in-progress` for the stopped one.
+
 ## The attempt cap
 
 Pauses and reopens share one cap: at most 4 attempts per configuration set per UTC clock hour,
@@ -105,7 +109,9 @@ set starts again. The `note` field in `result.json` says this for the set you re
 
 - A lane reopened before its hold check. A few minutes after a pause, Fothering checks that SES
   accepted no more mail for the set once the pause took hold, and only then reports it by email. A pause reopened before that
-  check gets no hold check and no email about it.
+  check gets no hold check and no email about it. That needs a `reopened` result: after
+  `reopen-unknown` the check still runs when it is due, and if the set was in fact sending again,
+  its email counts the mail your reopen let through as mail the pause did not stop.
 - A set that was already paused before Fothering acted on it, by hand or by another tool. Fothering
   does not read the setting before its own pause, so it records that pause as its own, its email
   says Fothering paused the set, and this command will reopen it.
