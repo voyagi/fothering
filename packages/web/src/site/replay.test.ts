@@ -259,7 +259,7 @@ describe('buildReplayView step contents', () => {
   it('reads "Open: <lane>" with one other lane', () => {
     const view = buildReplayView({ ...shippedArtifact(), lanes: ['fothering-transactional', 'fothering-bulk'] });
     expect(view.lanesLines.paused).toBe('Closed: fothering-bulk. Open: fothering-transactional.');
-    expect(view.boardDescriptions[2]).toContain('fothering-transactional keeps flowing.');
+    expect(view.boardDescriptions[2]).toContain('fothering-transactional stays open.');
   });
 
   it('says closed, LANE CLOSED and the hold check with a passing hold check', () => {
@@ -321,16 +321,16 @@ describe('buildReplayView step contents', () => {
     expect(view.reopenCommand).toContain('--configuration-set-name fothering-bulk --sending-enabled');
     expect(view.steps[3]?.paragraphs).toEqual(['`GetConfigurationSet` then read `SendingEnabled` as true.']);
     expect(view.tag).toMatchObject({
-      evidence: 'All 31 hard bounces in the window carry that tag. The two in the replay read `550 5.1.1`.',
+      evidence: 'All 31 hard bounces in the window carry that tag. The 2 in the replay read `550 5.1.1`.',
       readBack: 'SendingOptions.SendingEnabled: false, 14:03 UTC',
       replayReadBack: 'SendingEnabled: false, 14:03 UTC',
       number: 'TAG 001',
     });
     expect(view.boardDescriptions).toEqual([
-      'Mail flows on all 3 lanes. Bounce marks appear on fothering-bulk.',
-      'Mail still flows on all 3 lanes, with bounce marks on fothering-bulk. Detection code has approved one lane.',
-      'fothering-bulk is stopped at a filled valve with a lockout tag, and its outlet is dotted. fothering-transactional, fothering-alerts keep flowing.',
-      'fothering-bulk flows again and the tag is off the valve. All 3 lanes flow.',
+      'All 3 lanes are open. Bounce marks appear on fothering-bulk.',
+      'All 3 lanes are still open, with bounce marks on fothering-bulk. Detection code has approved one lane.',
+      'fothering-bulk is stopped at a filled valve with a lockout tag, and its outlet is dotted. fothering-transactional, fothering-alerts stay open.',
+      'fothering-bulk is open again and the tag is off the valve. All 3 lanes are open.',
     ]);
     expect(view.landing.drawingTitle).toBe('Flow drawing of one SES account with 3 sending lanes');
   });
@@ -361,7 +361,7 @@ describe('buildReplayView event log', () => {
   it('words the tag evidence as a share when not every bounce carries the cause', () => {
     const artifact = shippedArtifact();
     const evidence = artifact.evidence.map((row) => (row.verdict === 'cause' ? { ...row, count: 29 } : row));
-    expect(buildReplayView({ ...artifact, evidence }).tag.evidence).toBe('29 of 31 hard bounces in the window carry that tag. The two in the replay read `550 5.1.1`.');
+    expect(buildReplayView({ ...artifact, evidence }).tag.evidence).toBe('29 of 31 hard bounces in the window carry that tag. The 2 in the replay read `550 5.1.1`.');
   });
 
   it('names no open lane and no flowing lane when the artifact has one lane', () => {
@@ -372,9 +372,9 @@ describe('buildReplayView event log', () => {
     expect(view.landing.drawingDescription).toBe('fothering-bulk, the only lane from the SES account, is stopped at a closed valve that carries a lockout tag, with a read-back instrument at 14:03 UTC.');
   });
 
-  it('names the open lanes the landing drawing shows flowing', () => {
+  it('names the open lanes the landing drawing shows', () => {
     expect(buildReplayView(shippedArtifact()).landing.drawingDescription).toBe(
-      'Mail flows from the SES account through fothering-transactional, fothering-alerts. fothering-bulk is stopped at a closed valve that carries a lockout tag, with a read-back instrument at 14:03 UTC.',
+      'The SES account feeds fothering-transactional, fothering-alerts, which are open. fothering-bulk is stopped at a closed valve that carries a lockout tag, with a read-back instrument at 14:03 UTC.',
     );
   });
 
@@ -463,7 +463,7 @@ describe('buildReplayView refuses an artifact the replay copy would misstate', (
     const bounceTimes = (candidate: ReplayArtifact): string[] => buildReplayView(candidate).eventLog.rows.filter((row) => row.kind === 'Bounce, Permanent').map((row) => row.time);
     expect(bounceTimes(withEvent(secondBounce, { atUtc: artifact.window.endUtc }))).toEqual(['14:01:07', '14:01:30']);
     expect(bounceTimes(withEvent(secondBounce, { atUtc: artifact.window.startUtc }))).toEqual(['13:01:30', '14:01:07']);
-    expect(buildReplayView(withCause({ count: 2 })).tag.evidence).toBe('2 of 31 hard bounces in the window carry that tag. The two in the replay read `550 5.1.1`.');
+    expect(buildReplayView(withCause({ count: 2 })).tag.evidence).toBe('2 of 31 hard bounces in the window carry that tag. The 2 in the replay read `550 5.1.1`.');
   });
 
   it.each(cases)('throws by name for %s', (_name, candidate, pattern) => {
@@ -509,7 +509,7 @@ describe('the domain figure counts the receiving domains of the closed lane boun
 });
 
 // Step one, the tag and the log note count the bounces the replay logs, never the cause row's window
-// count, and every count under ten is a word, the way the log note writes it (IN-21, IN-24).
+// count. In step one and the log note every count under ten is a word (IN-21, IN-24).
 describe('step one, the tag and the log note count the closed lane bounces the replay logs', () => {
   const artifact = shippedArtifact();
   const closedBounces = artifact.events.filter((event) => event.kind === 'bounce' && event.lane === artifact.closedLane);
@@ -525,21 +525,29 @@ describe('step one, the tag and the log note count the closed lane bounces the r
   it('renders the shipped sentences exactly', () => {
     const shipped = buildReplayView(artifact);
     expect(shipped.steps[0]?.paragraphs).toEqual(['Permanent bounces arrive on fothering-bulk. The two logged here read `550 5.1.1` and came from two domains. The other lanes keep delivering.']);
-    expect(shipped.tag.evidence).toBe('All 31 hard bounces in the window carry that tag. The two in the replay read `550 5.1.1`.');
+    expect(shipped.tag.evidence).toBe('All 31 hard bounces in the window carry that tag. The 2 in the replay read `550 5.1.1`.');
     expect(shipped.eventLog.note).toBe('Showing the first two hard bounces and every decision, call and email.');
   });
 
   it('counts three bounces from two receiving domains as three logged, from two domains', () => {
     const three = view([...artifact.events, { ...firstBounce, atUtc: '2026-10-14T14:01:10Z' }]);
     expect(three.steps[0]?.paragraphs[0]).toBe('Permanent bounces arrive on fothering-bulk. The three logged here read `550 5.1.1` and came from two domains. The other lanes keep delivering.');
-    expect(three.tag.evidence).toBe('All 31 hard bounces in the window carry that tag. The three in the replay read `550 5.1.1`.');
+    expect(three.tag.evidence).toBe('All 31 hard bounces in the window carry that tag. The 3 in the replay read `550 5.1.1`.');
     expect(three.eventLog.note).toBe('Showing the first three hard bounces and every decision, call and email.');
+  });
+
+  // The tag's figures are data, like the schedule's, so both counts stay digits; the replay's prose
+  // keeps words under ten (IN-26).
+  it('writes the tag counts as digits for a 3 of 3 share', () => {
+    const events = [...artifact.events, { ...firstBounce, atUtc: '2026-10-14T14:01:10Z' }];
+    const evidence = artifact.evidence.map((row) => (row.verdict === 'cause' ? { ...row, count: 3, denominator: 3 } : row));
+    expect(buildReplayView({ ...artifact, events, evidence }).tag.evidence).toBe('All 3 hard bounces in the window carry that tag. The 3 in the replay read `550 5.1.1`.');
   });
 
   it('words one bounce in the singular in step one, on the tag and in the log note', () => {
     const one = view(artifact.events.filter((event) => event.kind !== 'bounce' || event === firstBounce));
     expect(one.steps[0]?.paragraphs[0]).toBe('Permanent bounces arrive on fothering-bulk. The one logged here reads `550 5.1.1` and came from one domain. The other lanes keep delivering.');
-    expect(one.tag.evidence).toBe('All 31 hard bounces in the window carry that tag. The one in the replay reads `550 5.1.1`.');
+    expect(one.tag.evidence).toBe('All 31 hard bounces in the window carry that tag. The 1 in the replay reads `550 5.1.1`.');
     expect(one.eventLog.note).toBe('Showing the first hard bounce and every decision, call and email.');
   });
 
@@ -558,7 +566,8 @@ describe('step one, the tag and the log note count the closed lane bounces the r
 });
 
 // "The other lanes keep delivering" is derived from the artifact: it is printed only when every open
-// lane has a delivery event, and an artifact without one still builds, with no such sentence (WR-11).
+// lane has a step 1 delivery event, the step that says it, and an artifact without one still builds,
+// with no such sentence (WR-11, IN-27).
 describe('the delivery sentence follows the delivery events', () => {
   const artifact = shippedArtifact();
   const domainSentence = 'Permanent bounces arrive on fothering-bulk. The two logged here read `550 5.1.1` and came from two domains.';
@@ -583,6 +592,68 @@ describe('the delivery sentence follows the delivery events', () => {
 
   it('prints no delivery sentence with no open lane', () => {
     expect(stepOne({ ...artifact, lanes: ['fothering-bulk'] })).toBe(domainSentence);
+  });
+
+  // The alerts lane's only delivery, moved to a later step at a time inside that step.
+  const alertsDeliveryIn = (step: 1 | 3 | 4, atUtc: string): ReplayArtifact => ({
+    ...artifact,
+    events: artifact.events.map((event) => (event.kind === 'delivery' && event.lane === 'fothering-alerts' ? { ...event, step, atUtc } : event)),
+  });
+
+  it('prints no delivery sentence when an open lane delivered only in step 3', () => {
+    expect(stepOne(alertsDeliveryIn(3, '2026-10-14T14:03:30Z'))).toBe(domainSentence);
+  });
+
+  it('prints no delivery sentence when an open lane delivered only in step 4', () => {
+    expect(stepOne(alertsDeliveryIn(4, '2026-10-14T14:04:10Z'))).toBe(domainSentence);
+  });
+
+  it('counts a step 1 delivery', () => {
+    expect(stepOne(alertsDeliveryIn(1, '2026-10-14T14:01:25Z'))).toBe(`${domainSentence} The other lanes keep delivering.`);
+  });
+});
+
+// The board and the landing drawing describe the lanes' state, which their lines and valves stand
+// for, never traffic: a capture that sent only on the paused lane still builds (WR-13).
+describe('the board and drawing descriptions name lane state, not traffic', () => {
+  const artifact = shippedArtifact();
+
+  it('describes three lanes, two of them open', () => {
+    const view = buildReplayView(artifact);
+    expect(view.boardDescriptions).toEqual([
+      'All 3 lanes are open. Bounce marks appear on fothering-bulk.',
+      'All 3 lanes are still open, with bounce marks on fothering-bulk. Detection code has approved one lane.',
+      'fothering-bulk is stopped at a filled valve with a lockout tag, and its outlet is dotted. fothering-transactional, fothering-alerts stay open.',
+      'fothering-bulk is open again and the tag is off the valve. All 3 lanes are open.',
+    ]);
+    expect(view.landing.drawingDescription).toBe('The SES account feeds fothering-transactional, fothering-alerts, which are open. fothering-bulk is stopped at a closed valve that carries a lockout tag, with a read-back instrument at 14:03 UTC.');
+  });
+
+  it('describes one open lane in the singular', () => {
+    const view = buildReplayView({ ...artifact, lanes: ['fothering-transactional', 'fothering-bulk'] });
+    expect(view.boardDescriptions).toEqual([
+      'All 2 lanes are open. Bounce marks appear on fothering-bulk.',
+      'All 2 lanes are still open, with bounce marks on fothering-bulk. Detection code has approved one lane.',
+      'fothering-bulk is stopped at a filled valve with a lockout tag, and its outlet is dotted. fothering-transactional stays open.',
+      'fothering-bulk is open again and the tag is off the valve. All 2 lanes are open.',
+    ]);
+    expect(view.landing.drawingDescription).toBe('The SES account feeds fothering-transactional, which is open. fothering-bulk is stopped at a closed valve that carries a lockout tag, with a read-back instrument at 14:03 UTC.');
+  });
+
+  it('describes a single lane with no open lane', () => {
+    const view = buildReplayView({ ...artifact, lanes: ['fothering-bulk'] });
+    expect(view.boardDescriptions).toEqual([
+      'The only lane is open. Bounce marks appear on fothering-bulk.',
+      'The only lane is still open, with bounce marks on fothering-bulk. Detection code has approved one lane.',
+      'fothering-bulk is stopped at a filled valve with a lockout tag, and its outlet is dotted.',
+      'fothering-bulk is open again and the tag is off the valve. The only lane is open.',
+    ]);
+    expect(view.landing.drawingDescription).toBe('fothering-bulk, the only lane from the SES account, is stopped at a closed valve that carries a lockout tag, with a read-back instrument at 14:03 UTC.');
+  });
+
+  it('says nothing flows for a capture with no delivery on any lane', () => {
+    const view = buildReplayView({ ...artifact, events: artifact.events.filter((event) => event.kind !== 'delivery') });
+    expect([...view.boardDescriptions, view.landing.drawingDescription].join(' ')).not.toMatch(/\bflow/i);
   });
 });
 
