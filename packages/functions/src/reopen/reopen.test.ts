@@ -150,17 +150,36 @@ describe('the reopen command re-enables a lane Fothering paused, after a read-ba
     expect((await storedClosure(deps, incidentId, reopenAtMs))?.reopen?.outcome).toBe('reopen-unknown');
   });
 
-  it('records reopen-failed with no read-back when the put throws (AC-14)', async () => {
+  // A put that throws can follow a change SES took, so the spaced read-back still runs and decides (R7).
+  it('reads back after a put that throws and records reopen-failed while the set still reads paused (AC-14)', async () => {
     const { incidentId, reopenAtMs, sesState, reopenRoot } = await closedLane();
     sesState.putFaults.set(BULK, 'throw');
-    const { deps } = reopenRoot();
+    const deps = waitsRecorded(reopenRoot().deps, sesState.calls);
     const callsBefore = sesState.calls.length;
 
     const report = await reopenFromPayload(BULK_PAYLOAD, deps);
 
     expect(report.result).toBe('reopen-failed');
-    expect(sesState.calls.slice(callsBefore)).toEqual(['put-issued:fothering-bulk:true']);
-    expect((await storedClosure(deps, incidentId, reopenAtMs))?.reopen).toMatchObject({ outcome: 'reopen-failed', readBackAtMs: null });
+    expect(sesState.calls.slice(callsBefore)).toEqual([
+      `wait:${SES_READ_SPACING_MS}`,
+      'put-issued:fothering-bulk:true',
+      `wait:${SES_READ_SPACING_MS}`,
+      'get-issued:fothering-bulk',
+      'get-resolved:fothering-bulk',
+    ]);
+    expect((await storedClosure(deps, incidentId, reopenAtMs))?.reopen).toMatchObject({ outcome: 'reopen-failed', readBackAtMs: reopenAtMs });
+  });
+
+  it('records reopened when the put throws but the read-back shows sending enabled (R7)', async () => {
+    const { incidentId, reopenAtMs, sesState, reopenRoot } = await closedLane();
+    sesState.putFaults.set(BULK, 'throw');
+    sesState.getAnswers.set(BULK, true);
+    const { deps } = reopenRoot();
+
+    const report = await reopenFromPayload(BULK_PAYLOAD, deps);
+
+    expect(report.result).toBe('reopened');
+    expect((await storedClosure(deps, incidentId, reopenAtMs))?.reopen).toMatchObject({ outcome: 'reopened', readBackAtMs: reopenAtMs });
   });
 
   it('reaches SES through exactly the reopen and the read-back', () => {

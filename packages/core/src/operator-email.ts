@@ -253,17 +253,25 @@ function pauseUnknownLines(closure: Closure): string[] {
   return ['The run that requested it stopped before reading the set back, so Fothering cannot confirm the pause took.'];
 }
 
+// The reopen command refuses pause-failed, so the console is the only way back for a set that is paused
+// after all: a read-back of true right after an accepted put may be stale (action.ts pause, UNVERIFIED).
+function consoleReopenLine(set: string): string {
+  return `If the SES console shows sending paused for ${set}, re-enable it there: Fothering does not reopen a pause it could not confirm.`;
+}
+
 function pauseFailedLines(closure: Closure): string[] {
   const set = closure.configurationSet;
   if (closure.readBack === true) {
-    return [`Read back at ${timeOf(closure.readBackAtMs)}: SES answered SendingEnabled true for ${set}, so the pause did not take and ${set} is still sending.`];
+    return [
+      `Read back at ${timeOf(closure.readBackAtMs)}: SES answered SendingEnabled true for ${set}, so the pause did not take and ${set} is still sending.`,
+      consoleReopenLine(set),
+    ];
   }
   // The action reads back after every put, a put that threw included, so it writes pause-failed only with a
-  // read-back of true. A schema-valid closure holding pause-failed with no read-back claims neither outcome
-  // here, and since the reopen command refuses pause-failed, the console is where a pause that took is undone.
+  // read-back of true. A schema-valid closure holding pause-failed with no read-back claims neither outcome.
   return [
     `SES answered the pause request with an error, so Fothering cannot confirm whether the pause took. Treat ${set} as still sending.`,
-    `If the SES console shows sending paused for ${set}, re-enable it there: Fothering does not reopen a pause it could not confirm.`,
+    consoleReopenLine(set),
   ];
 }
 

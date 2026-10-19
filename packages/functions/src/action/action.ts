@@ -333,6 +333,8 @@ async function actOn(run: Run, act: Act): Promise<ClosureOutcome | undefined> {
     (await freshnessOf(deps, { incidentId: act.incidentId, configurationSet, record, markers })) ??
     actionCloseabilityRefusal(record.decision.closeability.state, readings.lanes.find((lane) => lane.configurationSet === configurationSet));
   if (refusal !== undefined) return refuse(run, act, refusal, readings);
+  // Read again rather than taken from the lane block: the block is what the email shows of the lanes,
+  // and this read, made after the gate and freshness reads, is the one the pointer decision acts on.
   const pointer = await readPointer(deps, configurationSet);
   if (heldByAnother(pointer, act.incidentId)) return refuse(run, act, 'lane-already-paused', readings);
   if (deps.kinds.ses?.pauseConfigurationSet === 'dry-run') return dryRunPause(run, act, configurationSet, readings);

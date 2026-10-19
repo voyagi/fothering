@@ -52,8 +52,8 @@ It never holds the payload, an address or a hash.
 
 - `reopened`: SES accepted the change and the read-back shows sending enabled. Mail sent through
   the set goes out again.
-- `reopen-failed`: SES refused the change, or the read-back still shows sending disabled. The set
-  stays paused; run the command again.
+- `reopen-failed`: the read-back still shows sending disabled, whether SES accepted the change or
+  answered it with an error. The set stays paused; run the command again.
 - `reopen-unknown`: the read-back failed or came back without the sending setting, so the command
   cannot say whether the set is sending. Check the set in the SES console, or run the command again.
   The same result comes back when the command could not record what it read on the pause, which

@@ -86,7 +86,9 @@ holds the reopen function, which turns sending back on for a set Fothering pause
 run it by hand; [docs/reopen-a-lane.md](docs/reopen-a-lane.md) has the command.
 
 Run from the owner's account, in `eu-central-1`. Deploy the first three stacks, check them in the
-CloudFormation console, then deploy `FotheringAction` last. Remove it first:
+CloudFormation console, then deploy `FotheringAction` last. Remove it first, after reopening any set
+it paused: the reopen function goes with the stack, and a set left paused stays paused in SES until
+you re-enable it in the SES console.
 
 ```sh
 npm run build

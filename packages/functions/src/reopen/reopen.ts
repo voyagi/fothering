@@ -79,13 +79,15 @@ async function writeOwnReopen(deps: ReopenDeps, target: Target, expected: Reopen
   return writeReopen(deps, target, reopen);
 }
 
-// A put that throws is reopen-failed with no read-back; only a read of true is a reopen (T-03-18).
-async function putAndReadBack(deps: ReopenDeps, configurationSet: string): Promise<{ outcome: ReopenOutcome; readBackAtMs: number | null }> {
+// Only a read of true is a reopen (R7, T-03-18). A put that throws (a timeout, a reset, a server error)
+// can follow a change SES took, so it decides nothing and the read-back after it does, as the pause's
+// does (WR-05): reporting reopen-failed for a set that is sending again would tell the operator it stays paused.
+async function putAndReadBack(deps: ReopenDeps, configurationSet: string): Promise<{ outcome: ReopenOutcome; readBackAtMs: number }> {
   await deps.wait(SES_READ_SPACING_MS);
   try {
     await deps.ports.ses.reopenConfigurationSet(configurationSet);
-  } catch {
-    return { outcome: 'reopen-failed', readBackAtMs: null };
+  } catch (error) {
+    deps.log.info({ event: 'reopen-put-threw', configurationSet, errorName: error instanceof Error ? error.name : 'UnknownError' });
   }
   await deps.wait(SES_READ_SPACING_MS);
   let outcome: ReopenOutcome;
@@ -122,7 +124,7 @@ async function reopenClaimed(deps: ReopenDeps, target: Target, previous: ReopenR
   deps.log.info({ event: 'reopen-requested', configurationSet, incidentId });
 
   const { outcome, readBackAtMs } = await putAndReadBack(deps, configurationSet);
-  const times = { requestedAtMs, ...(readBackAtMs === null ? {} : { readBackAtMs }) };
+  const times = { requestedAtMs, readBackAtMs };
   // A reopen the closure does not record leaves the lane held for later incidents, so the operator is
   // told to run the command again rather than shown a result the record contradicts.
   if (!(await writeOwnReopen(deps, target, requested, { ...requested, readBackAtMs, outcome }))) {

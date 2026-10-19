@@ -261,6 +261,12 @@ describe('a pause that is not confirmed renders the not-confirmed path (R9)', ()
     expect(sectionText(render(PAUSE_FAILED), SECTION_HEADINGS.happened)).toContain('the pause did not take');
   });
 
+  // A read-back of true may be stale, and the reopen command refuses pause-failed, so the console line is
+  // the operator's only way back if the set turns out paused after all.
+  it('tells where to re-enable the set when the read-back said sending', () => {
+    expect(sectionText(render(PAUSE_FAILED), SECTION_HEADINGS.happened)).toContain(`If the SES console shows sending paused for ${SET}, re-enable it there`);
+  });
+
   // WR-05: a put that throws may still have been taken, so the body claims only what code saw.
   it('says a put SES answered with an error is not confirmed either way, and where to check it', () => {
     const happened = sectionText(render(PUT_FAILED), SECTION_HEADINGS.happened);
@@ -473,6 +479,7 @@ describe('each kind has a fixed section order (AC-E28)', () => {
       "What happened
       Fothering requested a pause of fothering-bulk at 2026-10-11T12:03:00.000Z.
       Read back at 2026-10-11T12:03:02.000Z: SES answered SendingEnabled true for fothering-bulk, so the pause did not take and fothering-bulk is still sending.
+      If the SES console shows sending paused for fothering-bulk, re-enable it there: Fothering does not reopen a pause it could not confirm.
 
       What Fothering saw
       Evidence window: 2026-10-11T11:05:00.000Z to 2026-10-11T12:00:00.000Z.
