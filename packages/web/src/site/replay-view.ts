@@ -165,7 +165,13 @@ const KIND_LABELS: Record<ReplayEvent['kind'], string> = {
   'email-sent': 'Email sent',
   'reopen-command': 'Reopen command',
 };
-const COUNT_WORDS = ['no', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine'];
+const COUNT_WORDS = ['one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine'];
+const STEP_ONE_HEADING = 'Hard bounces on one lane';
+
+// Counts under ten as words, 10 and up as digits, the same on every line of the page (IN-24).
+function countWord(count: number): string {
+  return COUNT_WORDS[count - 1] ?? String(count);
+}
 
 // The only replay is a confirmed closure: an artifact that cannot show one is refused at build time
 // rather than played back as something it is not (UI-SPEC section 8.2).
@@ -187,16 +193,19 @@ function assertReplayable(artifact: ReplayArtifact): void {
   }
   assertBounceClaims(artifact);
   assertTimeOrder(artifact);
+  // After the time order, so a window that starts after it ends is refused by that claim first.
+  assertBouncesInWindow(artifact);
 }
 
-// The page calls the bounces hard and puts them on the paused lane alone, and step one gives the
-// one SMTP code they read and the providers their receiving domains name. Each claim is checked
-// against the events, so a capture where one is false stops the build instead of printing it (WR-03).
+// The page heads step one "Hard bounces on one lane", step one gives the one SMTP code the logged
+// bounces read and the receiving domains they came from, and the tag counts them among the cause
+// row's hard bounces. Each claim is checked against the artifact, so a capture where one is false
+// stops the build instead of printing it (WR-03, WR-12).
 function assertBounceClaims(artifact: ReplayArtifact): void {
   const bounces = artifact.events.filter((event) => event.kind === 'bounce');
   const elsewhere = bounces.find((event) => event.lane !== artifact.closedLane);
   if (elsewhere !== undefined) {
-    refuse('events', `a bounce sits on ${elsewhere.lane}, and the replay says the bounces are on ${artifact.closedLane} alone`, 'Replay an incident whose bounces are all on the paused lane');
+    refuse('events', `a bounce sits on ${elsewhere.lane}, and the replay heads step one "${STEP_ONE_HEADING}"`, 'Replay an incident whose bounces are all on the paused lane');
   }
   const soft = bounces.find((event) => event.bounceType !== 'Permanent');
   if (soft !== undefined) {
@@ -207,7 +216,24 @@ function assertBounceClaims(artifact: ReplayArtifact): void {
     refuse('events', `the bounces on ${artifact.closedLane} carry ${codes.join(' and ')}, and step one says the bounces shown read one code`, 'Replay an incident whose bounces on the paused lane share one SMTP code');
   }
   if (bounces.some((event) => event.receivingDomain === undefined)) {
-    refuse('events', `a bounce on ${artifact.closedLane} has no receiving domain, so the providers it came from cannot be counted`, 'Add the receiving domain to every bounce on the paused lane');
+    refuse('events', `a bounce on ${artifact.closedLane} has no receiving domain, so the domains the bounces came from cannot be counted`, 'Add the receiving domain to every bounce on the paused lane');
+  }
+  const row = causeRow(artifact);
+  if (row.unit !== 'hard bounces') {
+    refuse(`evidence[${String(artifact.evidence.indexOf(row))}].unit`, `is ${row.unit}, and the step heading, the summary and the tag read the cause as hard bounces`, 'Replay an incident whose cause row counts hard bounces');
+  }
+  if (bounces.length > row.count) {
+    refuse('events', `${String(bounces.length)} bounces sit on ${artifact.closedLane}, more than the ${String(row.count)} the cause row counts, and the tag puts the replay's bounces among them`, 'Replay an incident whose cause row counts every bounce it logs');
+  }
+}
+
+// The tag counts the cause row's bounces "in the window", so every logged bounce falls inside it;
+// a bounce exactly at either end is inside.
+function assertBouncesInWindow(artifact: ReplayArtifact): void {
+  const { startUtc, endUtc } = artifact.window;
+  const outside = artifact.events.find((event) => event.kind === 'bounce' && (Date.parse(event.atUtc) < Date.parse(startUtc) || Date.parse(event.atUtc) > Date.parse(endUtc)));
+  if (outside !== undefined) {
+    refuse('events', `a bounce on ${artifact.closedLane} at ${outside.atUtc} is outside the window ${startUtc} to ${endUtc}, and the tag counts the bounces in the window`, 'Correct the bounce times or the window so every bounce falls inside it');
   }
 }
 
@@ -313,28 +339,35 @@ function firstEventTime(events: readonly ReplayEvent[], step: number): string {
   return event === undefined ? '' : clockTime(event.atUtc);
 }
 
-// The bounces the replay shows on the paused lane. Step one and the tag both count these, never the
-// cause row's window count: the artifact holds an event for only a few of those bounces.
+// The bounces the replay logs on the paused lane. Step one, the tag and the log note all count these,
+// never the cause row's window count: the artifact holds an event for only a few of those bounces.
 function closedLaneBounces(artifact: ReplayArtifact): ReplayEvent[] {
   return artifact.events.filter((event) => event.kind === 'bounce' && event.lane === artifact.closedLane);
 }
 
-// "The 1 ... reads" or "The 2 ... read", with the count taken from the events.
-function shownCount(shown: number, after: string): string {
-  return `The ${String(shown)} ${after} ${shown === 1 ? 'reads' : 'read'}`;
+// "The one ... reads" or "The two ... read", with the count taken from the events.
+function loggedCount(logged: number, after: string): string {
+  return `The ${countWord(logged)} ${after} ${logged === 1 ? 'reads' : 'read'}`;
 }
 
-// The providers the bounces came from: the distinct receiving domains of the paused lane's bounces,
-// never the window-wide figure, which counts where every send went.
-function bounceProviders(bounces: readonly ReplayEvent[]): string {
-  const domains = new Set(bounces.map((event) => event.receivingDomain));
-  return `${String(domains.size)} ${domains.size === 1 ? 'provider' : 'providers'}`;
+// The distinct receiving domains of the paused lane's bounces, case folded. A domain is not a
+// provider (web.de and gmx.net are one provider group), and the window-wide figure counts where
+// every send went, so neither is used here.
+function bounceDomains(bounces: readonly ReplayEvent[]): string {
+  const domains = new Set(bounces.map((event) => event.receivingDomain?.toLowerCase()));
+  return `${countWord(domains.size)} ${domains.size === 1 ? 'domain' : 'domains'}`;
 }
 
-function stepOneText(artifact: ReplayArtifact, bounce: ReplayEvent & { smtpCode: string }, openLanes: readonly string[]): string {
-  const others = openLanes.length === 0 ? '' : openLanes.length === 1 ? ' The other lane keeps delivering.' : ' The other lanes keep delivering.';
-  const bounces = closedLaneBounces(artifact);
-  return `${String(bounce.bounceType)} bounces arrive on ${artifact.closedLane}. ${shownCount(bounces.length, 'shown here')} \`${bounce.smtpCode}\` and came from ${bounceProviders(bounces)}.${others}`;
+// The other lanes are said to keep delivering only when every one of them has a delivery event. A
+// capture that sent only on the paused lane still builds, without the sentence.
+function deliverySentence(artifact: ReplayArtifact, openLanes: readonly string[]): string {
+  const delivered = openLanes.every((lane) => artifact.events.some((event) => event.kind === 'delivery' && event.lane === lane));
+  if (openLanes.length === 0 || !delivered) return '';
+  return openLanes.length === 1 ? ' The other lane keeps delivering.' : ' The other lanes keep delivering.';
+}
+
+function stepOneText(artifact: ReplayArtifact, bounce: ReplayEvent & { smtpCode: string }, bounces: readonly ReplayEvent[], openLanes: readonly string[]): string {
+  return `${String(bounce.bounceType)} bounces arrive on ${artifact.closedLane}. ${loggedCount(bounces.length, 'logged here')} \`${bounce.smtpCode}\` and came from ${bounceDomains(bounces)}.${deliverySentence(artifact, openLanes)}`;
 }
 
 function stepThreeText(artifact: ReplayArtifact, held: boolean): string {
@@ -347,16 +380,16 @@ function fieldName(path: string): string {
   return path.slice(path.lastIndexOf('.') + 1);
 }
 
+// At least one bounce: closedLaneBounce refuses a lane with none carrying a code.
 function logNote(hardBounces: number): string {
-  if (hardBounces === 0) return 'Showing every decision, call and email.';
   if (hardBounces === 1) return 'Showing the first hard bounce and every decision, call and email.';
-  return `Showing the first ${COUNT_WORDS[hardBounces] ?? String(hardBounces)} hard bounces and every decision, call and email.`;
+  return `Showing the first ${countWord(hardBounces)} hard bounces and every decision, call and email.`;
 }
 
-function tagEvidence(row: EvidenceRow, smtpCode: string, shown: number): string {
+function tagEvidence(row: EvidenceRow, smtpCode: string, logged: number): string {
   const share = row.count === row.denominator ? `All ${String(row.count)}` : `${String(row.count)} of ${String(row.denominator)}`;
   // The code ends the sentence, so no figure is set against the mono code.
-  return `${share} ${row.unit} in the window carry that tag. ${shownCount(shown, 'in the replay')} \`${smtpCode}\`.`;
+  return `${share} ${row.unit} in the window carry that tag. ${loggedCount(logged, 'in the replay')} \`${smtpCode}\`.`;
 }
 
 export function buildReplayView(artifact: ReplayArtifact): ReplayView {
@@ -365,18 +398,18 @@ export function buildReplayView(artifact: ReplayArtifact): ReplayView {
   const held = artifact.holdCheck?.result === 'passed';
   const events = orderedEvents(artifact.events);
   const bounce = closedLaneBounce(artifact, events);
+  const bounces = closedLaneBounces(artifact);
   const cause = `${artifact.cause.key}=${artifact.cause.value}`;
   const openLanes = artifact.lanes.filter((lane) => lane !== artifact.closedLane);
   const pausedAt = clockTime(artifact.pause.readBack.atUtc);
   const times = [firstEventTime(events, 1), firstEventTime(events, 2), pausedAt, clockTime(artifact.reopen.readBack.atUtc)];
   const paragraphs = [
-    [stepOneText(artifact, bounce, openLanes)],
+    [stepOneText(artifact, bounce, bounces, openLanes)],
     [],
     [stepThreeText(artifact, held)],
     [`\`${artifact.pause.readBack.operation}\` then read \`${fieldName(artifact.pause.readBack.field)}\` as ${artifact.reopen.readBack.value}.`],
   ];
-  const headings = ['Hard bounces on one lane', 'The cause, and the counts', held ? 'Paused, read back, then held' : 'Paused, then read back', 'The email, then the reopen'];
-  const permanentBounces = events.filter((event) => event.kind === 'bounce' && event.bounceType === 'Permanent').length;
+  const headings = [STEP_ONE_HEADING, 'The cause, and the counts', held ? 'Paused, read back, then held' : 'Paused, then read back', 'The email, then the reopen'];
   return {
     h1: `Replay: the ${artifact.closedLane} incident`,
     intro: `One incident, four steps. ${label.timeWording}`,
@@ -415,7 +448,7 @@ export function buildReplayView(artifact: ReplayArtifact): ReplayView {
       lane: artifact.closedLane,
       stamp: label.stamp,
       cause,
-      evidence: tagEvidence(causeRow(artifact), bounce.smtpCode, closedLaneBounces(artifact).length),
+      evidence: tagEvidence(causeRow(artifact), bounce.smtpCode, bounces.length),
       readBack: `${artifact.pause.readBack.field}: ${artifact.pause.readBack.value}, ${pausedAt} UTC`,
       replayReadBack: `${fieldName(artifact.pause.readBack.field)}: ${artifact.pause.readBack.value}, ${pausedAt} UTC`,
       reopens: 'Run the reopen command',
@@ -427,7 +460,7 @@ export function buildReplayView(artifact: ReplayArtifact): ReplayView {
     },
     eventLog: {
       caption: label.caption,
-      note: logNote(permanentBounces),
+      note: logNote(bounces.length),
       rows: events.map(logRow),
     },
     identifierTerms: {
