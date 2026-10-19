@@ -44,16 +44,18 @@ rule's permission to invoke the ingest function, is pinned by the ingest stack's
   run at all when it reads `live`.
 - A deployed stack with `FOTHERING_LIVE` unset: the product's own table, the address key secret
   and the queue are live, while every SES pause, reopen and send, every model call and every
-  InvokeAgentRuntime becomes one dry-run line instead of a real call. The four SES reads the
-  closeability check needs resolve live too, and the detection function makes them. Only the
-  detection role holds SES permissions, and only those four reads (`ses:ListEmailIdentities`,
+  InvokeAgentRuntime becomes one dry-run line instead of a real call. The SES reads change nothing,
+  so they resolve live too: the four the closeability check needs (`ses:ListEmailIdentities`,
   `ses:ListConfigurationSets`, `ses:GetEmailIdentity` and
-  `ses:GetConfigurationSetEventDestinations`); only the runtime role may invoke the model. Every
-  other permission arrives with the phase that first makes its call.
-- A deployed stack with `FOTHERING_LIVE` set to the exact word `live`: those mutations go live as
-  later phases build them. Until a phase builds an operation, a call to it fails with a
-  `not built until phase N` error instead of writing a dry-run line, so going live before phases
-  2 to 4 have landed stops those calls rather than recording them.
+  `ses:GetConfigurationSetEventDestinations`), which the detection and action functions make, and
+  the read of one set's sending setting that follows a live pause or reopen. Only the detection and
+  action roles hold the four reads, only the action and reopen roles hold the pause, the reopen and
+  that one read, on the sets `lanes.json` lets the action close, and only the action role holds the
+  send (Deploy and remove has the detail). Only the runtime role may invoke the model.
+- A deployed stack with `FOTHERING_LIVE` set to the exact word `live`: those mutations go live. A
+  result the action reached with the switch off stays as it was: turning the switch on pauses
+  nothing for an incident it already met, and an operator email that was only a dry-run line is
+  sent on the first live run while its lane's marker still names that incident.
 
 A deployed stack never takes the switch from a shell variable. It reaches a deployed function or
 the runtime only through the CDK context key `fothering:live`, and only when that key is exactly
