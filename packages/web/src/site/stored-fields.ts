@@ -26,7 +26,6 @@ export const STORED_FIELDS = {
     identifies: 'Recipient',
     row: "The record's key within its lane. On a record about one recipient it ends in that recipient's HMAC, so it is pseudonymised personal data in the same way.",
   },
-  'fields.sourceIp': { class: 'sender', identifies: 'Sender', row: 'The IP address the sending application called SES from.' },
   'fields.fromDomain': { class: 'sender', identifies: 'Sender', row: 'The domain of the From address.' },
   'fields.callerIdentity': {
     class: 'sender',

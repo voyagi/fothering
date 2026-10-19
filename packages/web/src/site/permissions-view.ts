@@ -37,6 +37,24 @@ const LAMBDA_TRUST = 'Only the Lambda service may take on this role, to run the 
 // One reason per `<stack>/<role without its 8-hex CDK suffix>/<kind>/<effect>/<action>`, so a
 // logical id that changes its hash keeps its reason, and a new grant fails the tests until it has one.
 export const PERMISSION_REASONS: Reasons = {
+  'FotheringDetection/DetectRole/permission/Allow/bedrock-agentcore:InvokeAgentRuntime':
+    'Invokes the agent runtime for an incident the stored events opened, within the per-incident and per-day caps; it may invoke this runtime and its endpoints only.',
+  'FotheringDetection/DetectRole/permission/Allow/dynamodb:GetItem': 'Reads one incident, evidence, decision or counter item by its key.',
+  'FotheringDetection/DetectRole/permission/Allow/dynamodb:PutItem': 'Writes a new incident, evidence or decision item to the table.',
+  'FotheringDetection/DetectRole/permission/Allow/dynamodb:Query': "Reads a lane's stored events to fold the detection window.",
+  'FotheringDetection/DetectRole/permission/Allow/dynamodb:UpdateItem':
+    "Moves a lane's incident marker and an incident's state on, and reserves the per-incident and per-day invocation counters before the runtime is invoked.",
+  'FotheringDetection/DetectRole/permission/Allow/logs:CreateLogStream': "Opens a log stream in the detection function's own log group.",
+  'FotheringDetection/DetectRole/permission/Allow/logs:PutLogEvents': "Writes the detection function's log lines to its own log group.",
+  'FotheringDetection/DetectRole/permission/Allow/ses:GetConfigurationSetEventDestinations':
+    'Reads where a configuration set publishes its events, for the closeability check; granted only on the sets the lane map names.',
+  'FotheringDetection/DetectRole/permission/Allow/ses:GetEmailIdentity':
+    "Reads a sending identity's verification, DKIM and MAIL FROM settings, for the closeability check.",
+  'FotheringDetection/DetectRole/permission/Allow/ses:ListConfigurationSets':
+    "Lists the account's configuration sets, for the closeability check. The action has no resource type, so it can only be granted on every resource.",
+  'FotheringDetection/DetectRole/permission/Allow/ses:ListEmailIdentities':
+    "Lists the account's sending identities, for the closeability check. The action has no resource type, so it can only be granted on every resource.",
+  'FotheringDetection/DetectRole/trust/Allow/sts:AssumeRole': LAMBDA_TRUST,
   'FotheringIngest/ForgetRole/permission/Allow/dynamodb:DeleteItem': 'Deletes the stored events that the recipient index query found for the recipient being forgotten.',
   'FotheringIngest/ForgetRole/permission/Allow/dynamodb:Query':
     'Finds the events of the recipient being forgotten through the recipient index; it may query that index only, never the table itself.',
@@ -52,6 +70,8 @@ export const PERMISSION_REASONS: Reasons = {
     'Reads the address key that turns each recipient address into a keyed hash before anything is stored.',
   'FotheringIngest/IngestRole/permission/Allow/sqs:SendMessage': 'Puts an event it could not write to the table on the dead-letter queue, so it is not lost.',
   'FotheringIngest/IngestRole/trust/Allow/sts:AssumeRole': LAMBDA_TRUST,
+  'FotheringRuntime/RuntimeRole/permission/Allow/bedrock:InvokeModel':
+    'Calls the pinned model through its EU inference profile. The model grants in the EU Regions the profile routes to hold only for a call made through that profile.',
   'FotheringRuntime/RuntimeRole/permission/Allow/logs:CreateLogStream': "Opens a log stream in the agent runtime's own log group.",
   'FotheringRuntime/RuntimeRole/permission/Allow/logs:DescribeLogGroups':
     "Lets AgentCore find the runtime's log group among the account's log groups; it returns names and settings, never log lines.",

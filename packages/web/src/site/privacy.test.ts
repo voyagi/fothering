@@ -70,7 +70,6 @@ describe('the stored-field map', () => {
         identifies: 'Recipient',
         row: "The record's key within its lane. On a record about one recipient it ends in that recipient's HMAC, so it is pseudonymised personal data in the same way.",
       },
-      { path: 'fields.sourceIp', identifies: 'Sender', row: 'The IP address the sending application called SES from.' },
       { path: 'fields.fromDomain', identifies: 'Sender', row: 'The domain of the From address.' },
       { path: 'fields.callerIdentity', identifies: 'Sender', row: 'The IAM identity that called SES to send. It can name a person when a user, not a role, sends.' },
     ]);

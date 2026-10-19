@@ -25,8 +25,8 @@ export const RESOURCE_NOUNS = {
 
 export const NOT_LISTED = {
   'AWS::IAM::Policy': 'A policy attached to a role; the permissions table lists every grant it holds.',
-  'AWS::Lambda::EventInvokeConfig': "The ingest function's retry and failure-destination setting; it is removed with the function it configures.",
-  'AWS::Lambda::Permission': 'The grant that lets the event rule invoke the ingest function; the rule and the function are both listed.',
+  'AWS::Lambda::EventInvokeConfig': "A function's retry setting for the events that invoke it; it is removed with the function it configures.",
+  'AWS::Lambda::Permission': 'The grant that lets an event rule invoke its function; the rule and the function are both listed.',
 } as const satisfies Record<string, string>;
 
 type ResourceNoun = (typeof RESOURCE_NOUNS)[keyof typeof RESOURCE_NOUNS];
