@@ -305,7 +305,7 @@ describe('buildReplayView step contents', () => {
       ['Reopened by command', '15:20'],
     ]);
     expect(view.steps[0]?.paragraphs).toEqual([
-      'Permanent bounces arrive on fothering-bulk only, each `550 5.1.1`, from 2 providers. The other lanes keep delivering.',
+      'Permanent bounces arrive on fothering-bulk. The 2 shown here read `550 5.1.1` and came from 2 providers. The other lanes keep delivering.',
     ]);
     expect(view.schedule.caption).toBe('fothering-bulk, 13:01 to 14:01 UTC, 412 sends.');
     expect(view.schedule.modelRole).toBe('Code approved one lane. The agent confirmed that option.');
@@ -321,7 +321,7 @@ describe('buildReplayView step contents', () => {
     expect(view.reopenCommand).toContain('--configuration-set-name fothering-bulk --sending-enabled');
     expect(view.steps[3]?.paragraphs).toEqual(['`GetConfigurationSet` then read `SendingEnabled` as true.']);
     expect(view.tag).toMatchObject({
-      evidence: 'All 31 hard bounces in the window carry that tag, from 2 providers: `550 5.1.1`.',
+      evidence: 'All 31 hard bounces in the window carry that tag. The 2 in the replay read `550 5.1.1`.',
       readBack: 'SendingOptions.SendingEnabled: false, 14:03 UTC',
       replayReadBack: 'SendingEnabled: false, 14:03 UTC',
       number: 'TAG 001',
@@ -356,16 +356,12 @@ describe('buildReplayView event log', () => {
     expect(eventLog.note).toBe('Showing the first two hard bounces and every decision, call and email.');
     const oneBounce = artifact.events.filter((event, index) => event.kind !== 'bounce' || index === 0);
     expect(buildReplayView({ ...artifact, events: oneBounce }).eventLog.note).toBe('Showing the first hard bounce and every decision, call and email.');
-    const transient = artifact.events.map((event) => (event.kind === 'bounce' ? { ...event, bounceType: 'Transient' as const } : event));
-    const view = buildReplayView({ ...artifact, events: transient });
-    expect(view.eventLog.note).toBe('Showing every decision, call and email.');
-    expect(view.eventLog.rows[0]?.kind).toBe('Bounce, Transient');
   });
 
   it('words the tag evidence as a share when not every bounce carries the cause', () => {
     const artifact = shippedArtifact();
     const evidence = artifact.evidence.map((row) => (row.verdict === 'cause' ? { ...row, count: 29 } : row));
-    expect(buildReplayView({ ...artifact, evidence }).tag.evidence).toBe('29 of 31 hard bounces in the window carry that tag, from 2 providers: `550 5.1.1`.');
+    expect(buildReplayView({ ...artifact, evidence }).tag.evidence).toBe('29 of 31 hard bounces in the window carry that tag. The 2 in the replay read `550 5.1.1`.');
   });
 
   it('names no open lane and no flowing lane when the artifact has one lane', () => {
@@ -408,9 +404,9 @@ describe('buildReplayView refusals', () => {
   });
 });
 
-// Step one says the bounces arrive on the paused lane "only", "each" with one SMTP code, from the
-// providers their receiving domains name; the summary and steps read in time order. An artifact
-// where any of that is false is refused by the claim it would break (WR-03).
+// The page calls the bounces hard and puts them on the paused lane alone, and step one gives the one
+// SMTP code they read and the providers their receiving domains name; the summary and steps read in
+// time order. An artifact where any of that is false is refused by the claim it would break (WR-03).
 describe('buildReplayView refuses an artifact the replay copy would misstate', () => {
   const artifact = shippedArtifact();
   const bounceIndexes = artifact.events.flatMap((event, index) => (event.kind === 'bounce' ? [index] : []));
@@ -418,6 +414,10 @@ describe('buildReplayView refuses an artifact the replay copy would misstate', (
   const withEvent = (index: number, change: Partial<ReplayArtifact['events'][number]>): ReplayArtifact => ({
     ...artifact,
     events: artifact.events.map((event, at) => (at === index ? { ...event, ...change } : event)),
+  });
+  const withBounceType = (bounceType: 'Transient' | 'Undetermined'): ReplayArtifact => ({
+    ...artifact,
+    events: artifact.events.map((event) => (event.kind === 'bounce' ? { ...event, bounceType } : event)),
   });
   const otherLaneBounce = {
     step: 1 as const,
@@ -435,6 +435,9 @@ describe('buildReplayView refuses an artifact the replay copy would misstate', (
     ['a bounce on another lane ("only")', { ...artifact, events: [...artifact.events, otherLaneBounce] }, /: events: a bounce sits on fothering-transactional, and step one says bounces arrive on fothering-bulk only\. /],
     ['mixed SMTP codes on the closed lane ("each")', withEvent(secondBounce, { smtpCode: '552 5.2.2' }), /: events: the bounces on fothering-bulk carry 550 5\.1\.1 and 552 5\.2\.2, and step one says each carries one code\. /],
     ['a closed-lane bounce with no receiving domain', withEvent(secondBounce, { receivingDomain: undefined }), /: events: a bounce on fothering-bulk has no receiving domain, so the providers it came from cannot be counted\. /],
+    ['a Permanent and a Transient bounce on the closed lane', withEvent(secondBounce, { bounceType: 'Transient' }), /: events: a bounce on fothering-bulk is Transient, and the replay calls the bounces on fothering-bulk hard\. Replay an incident whose bounces on the paused lane are all Permanent\.$/],
+    ['only Transient bounces on the closed lane', withBounceType('Transient'), /: events: a bounce on fothering-bulk is Transient, and the replay calls the bounces on fothering-bulk hard\. Replay an incident whose bounces on the paused lane are all Permanent\.$/],
+    ['only Undetermined bounces on the closed lane', withBounceType('Undetermined'), /: events: a bounce on fothering-bulk is Undetermined, and the replay calls the bounces on fothering-bulk hard\. /],
     ['a window that starts after it ends', { ...artifact, window: { ...artifact.window, startUtc: at('14:02:00') } }, /: window\.startUtc: 2026-10-14T14:02:00Z is after window\.endUtc 2026-10-14T14:01:30Z\. /],
     ['a pause read-back before the pause', { ...artifact, pause: { ...artifact.pause, readBack: { ...artifact.pause.readBack, atUtc: at('14:02:59') } } }, /: pause\.readBack\.atUtc: 2026-10-14T14:02:59Z is before pause\.atUtc 2026-10-14T14:03:00Z\. /],
     ['a reopen before the pause read-back', { ...artifact, reopen: { ...artifact.reopen, atUtc: at('14:03:01'), readBack: { ...artifact.reopen.readBack, atUtc: at('14:03:01') } } }, /: reopen\.atUtc: 2026-10-14T14:03:01Z is before pause\.readBack\.atUtc 2026-10-14T14:03:02Z\. /],
@@ -459,31 +462,59 @@ describe('the provider figure counts the receiving domains of the closed lane bo
   const domains = new Set(closedBounces.map((event) => event.receivingDomain));
   const extra = (receivingDomain: string): ReplayArtifact['events'][number] => ({ ...(closedBounces[0] ?? artifact.events[0]), atUtc: '2026-10-14T14:01:10Z', receivingDomain } as ReplayArtifact['events'][number]);
 
-  it('names that count in step one and on the tag', () => {
-    const count = String(domains.size);
+  const stepOne = (events: ReplayArtifact['events']): string => buildReplayView({ ...artifact, events }).steps[0]?.paragraphs[0] ?? '';
+
+  it('names that count in step one and leaves it off the tag', () => {
     const view = buildReplayView(artifact);
-    expect(view.steps[0]?.paragraphs[0]).toContain(`, from ${count} providers.`);
-    expect(view.tag.evidence).toContain(`, from ${count} providers: `);
+    expect(view.steps[0]?.paragraphs[0]).toContain(` and came from ${String(domains.size)} providers.`);
+    expect(view.tag.evidence).not.toMatch(/provider/);
   });
 
   it('adds one for a new domain and nothing for a repeated one', () => {
-    const more = String(domains.size + 1);
-    const view = buildReplayView({ ...artifact, events: [...artifact.events, extra('t-online.de')] });
-    expect(view.steps[0]?.paragraphs[0]).toContain(`, from ${more} providers.`);
-    const repeated = buildReplayView({ ...artifact, events: [...artifact.events, extra(closedBounces[0]?.receivingDomain ?? '')] });
-    expect(repeated.steps[0]?.paragraphs[0]).toContain(`, from ${String(domains.size)} providers.`);
+    expect(stepOne([...artifact.events, extra('t-online.de')])).toContain(` and came from ${String(domains.size + 1)} providers.`);
+    expect(stepOne([...artifact.events, extra(closedBounces[0]?.receivingDomain ?? '')])).toContain(` and came from ${String(domains.size)} providers.`);
   });
 
-  it('says one provider, singular, for bounces from one domain', () => {
+  it('says one provider, singular, for two bounces from one domain', () => {
     const oneDomain = artifact.events.map((event) => (event.kind === 'bounce' ? { ...event, receivingDomain: 'web.de' } : event));
-    const view = buildReplayView({ ...artifact, events: oneDomain });
-    expect(view.steps[0]?.paragraphs[0]).toContain(', from 1 provider.');
-    expect(view.tag.evidence).toContain(', from 1 provider: ');
+    expect(stepOne(oneDomain)).toBe('Permanent bounces arrive on fothering-bulk. The 2 shown here read `550 5.1.1` and came from 1 provider. The other lanes keep delivering.');
   });
 
   it('never takes the window-wide provider count', () => {
     const view = buildReplayView({ ...artifact, window: { ...artifact.window, receivingProviders: 40 } });
     expect(JSON.stringify(view)).not.toContain('40 providers');
+  });
+});
+
+// Step one and the tag count the bounces the replay shows, never the cause row's window count, and
+// one helper counts them for both.
+describe('step one and the tag count the closed lane bounces the replay shows', () => {
+  const artifact = shippedArtifact();
+  const closedBounces = artifact.events.filter((event) => event.kind === 'bounce' && event.lane === artifact.closedLane);
+  const firstBounce = closedBounces[0];
+  if (firstBounce === undefined) throw new Error('the shipped artifact has no bounce on its closed lane');
+  const view = (events: ReplayArtifact['events']): ReturnType<typeof buildReplayView> => buildReplayView({ ...artifact, events });
+
+  it('renders the shipped sentences exactly', () => {
+    const shipped = buildReplayView(artifact);
+    expect(shipped.steps[0]?.paragraphs).toEqual(['Permanent bounces arrive on fothering-bulk. The 2 shown here read `550 5.1.1` and came from 2 providers. The other lanes keep delivering.']);
+    expect(shipped.tag.evidence).toBe('All 31 hard bounces in the window carry that tag. The 2 in the replay read `550 5.1.1`.');
+  });
+
+  it('counts three bounces from two receiving domains as three shown, from two providers', () => {
+    const three = view([...artifact.events, { ...firstBounce, atUtc: '2026-10-14T14:01:10Z' }]);
+    expect(three.steps[0]?.paragraphs[0]).toBe('Permanent bounces arrive on fothering-bulk. The 3 shown here read `550 5.1.1` and came from 2 providers. The other lanes keep delivering.');
+    expect(three.tag.evidence).toBe('All 31 hard bounces in the window carry that tag. The 3 in the replay read `550 5.1.1`.');
+  });
+
+  it('words one bounce in the singular in step one and on the tag', () => {
+    const one = view(artifact.events.filter((event) => event.kind !== 'bounce' || event === firstBounce));
+    expect(one.steps[0]?.paragraphs[0]).toBe('Permanent bounces arrive on fothering-bulk. The 1 shown here reads `550 5.1.1` and came from 1 provider. The other lanes keep delivering.');
+    expect(one.tag.evidence).toBe('All 31 hard bounces in the window carry that tag. The 1 in the replay reads `550 5.1.1`.');
+  });
+
+  it('drops "only" and "each" from step one', () => {
+    expect(buildReplayView(artifact).steps[0]?.paragraphs[0]).not.toMatch(/\bonly\b|\beach\b/);
   });
 });
 
