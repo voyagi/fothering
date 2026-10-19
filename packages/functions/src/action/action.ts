@@ -101,14 +101,17 @@ function logUnitFailure(deps: ActionDeps, event: UnitFailureEvent, unit: { confi
   deps.log.error({ event, ...unit, errorName: error instanceof Error ? error.name : 'UnknownError' });
 }
 
-async function updateClosure(run: Run, act: Pick<Act, 'incidentId' | 'version'>, attributes: Readonly<Record<string, unknown>>): Promise<boolean> {
+async function tryUpdate(run: Run, act: Pick<Act, 'incidentId' | 'version'>, attributes: Readonly<Record<string, unknown>>): Promise<boolean> {
   const { deps } = run;
   const result = await deps.ports.decisionStore.updateIfVersion(closureKey(act.incidentId), act.version, attributes, deps.now());
-  if (result === 'updated') {
-    act.version += 1;
-    return true;
-  }
-  deps.log.info({ event: 'closure-claim-lost', incidentId: act.incidentId });
+  if (result !== 'updated') return false;
+  act.version += 1;
+  return true;
+}
+
+async function updateClosure(run: Run, act: Pick<Act, 'incidentId' | 'version'>, attributes: Readonly<Record<string, unknown>>): Promise<boolean> {
+  if (await tryUpdate(run, act, attributes)) return true;
+  run.deps.log.info({ event: 'closure-claim-lost', incidentId: act.incidentId });
   return false;
 }
 
@@ -497,6 +500,33 @@ async function renderFor(deps: ActionDeps, closure: Closure): Promise<RenderedEm
 
 type EmailState = NonNullable<Closure['email']>;
 
+function sameEmail(stored: EmailState | null, expected: EmailState): boolean {
+  return (
+    stored !== null &&
+    stored.kind === expected.kind &&
+    stored.attempts === expected.attempts &&
+    stored.claimedAtMs === expected.claimedAtMs &&
+    stored.sentAtMs === expected.sentAtMs &&
+    stored.messageId === expected.messageId &&
+    stored.failed === expected.failed
+  );
+}
+
+// The reopen command moves the same closure's version with its reopen writes, but never its email
+// sub-record, which only a run holding the claim writes. So a lost version whose email is still this
+// run's claim was moved by a reopen, and the write is tried once more from the fresh version, as the
+// reopen's own writeOwnReopen does for this run's writes: a send recorded nowhere goes out again.
+async function writeOwnEmail(run: Run, act: Pick<Act, 'incidentId' | 'version'>, claimed: EmailState, email: EmailState): Promise<boolean> {
+  if (await tryUpdate(run, act, { email })) return true;
+  const fresh = parseClosure(await run.deps.ports.decisionStore.getItem(closureKey(act.incidentId), run.deps.now()));
+  if (fresh === undefined || !sameEmail(fresh.email, claimed)) {
+    run.deps.log.info({ event: 'closure-claim-lost', incidentId: act.incidentId });
+    return false;
+  }
+  act.version = fresh.version;
+  return updateClosure(run, act, { email });
+}
+
 async function sendClaimed(run: Run, act: Pick<Act, 'incidentId' | 'version'>, claimed: EmailState, request: SendEmailRequest): Promise<void> {
   const { deps } = run;
   const { incidentId } = act;
@@ -508,17 +538,17 @@ async function sendClaimed(run: Run, act: Pick<Act, 'incidentId' | 'version'>, c
   } catch (error) {
     const errorName = error instanceof Error ? error.name : 'UnknownError';
     if (claimed.attempts >= EMAIL_SEND_ATTEMPTS) {
-      if (await updateClosure(run, act, { email: { ...claimed, failed: true } })) deps.log.error({ event: 'email-failed', incidentId, errorName });
+      if (await writeOwnEmail(run, act, claimed, { ...claimed, failed: true })) deps.log.error({ event: 'email-failed', incidentId, errorName });
       return;
     }
-    await updateClosure(run, act, { email: { ...claimed, claimedAtMs: null } });
+    await writeOwnEmail(run, act, claimed, { ...claimed, claimedAtMs: null });
     deps.log.info({ event: 'email-attempt-failed', incidentId, attempt: claimed.attempts, errorName });
     return;
   }
   // SES took the message, so a store fault recording it is not a failed send: it propagates with the
   // claim still set, and the claim timeout, not an immediate retry, governs any further attempt.
   const storedId = SES_ID_PATTERN.test(messageId) ? messageId : null;
-  if (await updateClosure(run, act, { email: { ...claimed, sentAtMs: deps.now(), messageId: storedId } })) {
+  if (await writeOwnEmail(run, act, claimed, { ...claimed, sentAtMs: deps.now(), messageId: storedId })) {
     deps.log.info({ event: 'email-sent', incidentId, ...(storedId === null ? {} : { messageId: storedId }) });
   }
 }

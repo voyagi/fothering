@@ -1647,6 +1647,48 @@ describe('each email attempt is claimed before the send and retried at most 3 ti
     expect(sendsIssued(sesState)).toBe(1);
   });
 
+  // The reopen command writes only its own sub-record, so a version it moved between the send and the
+  // record of it leaves this run's claim standing, and the record is written from the fresh version.
+  it.each([
+    { label: 'a reopen claim', change: { reopen: { attempts: 1, claimedAtMs: HOLD_CHECKED_AT_MS + 60_000, requestedAtMs: null, readBackAtMs: null, outcome: null } }, recorded: true },
+    {
+      label: 'another run claiming the email',
+      change: { email: { kind: 'closed', attempts: 2, claimedAtMs: HOLD_CHECKED_AT_MS + 60_000, sentAtMs: null, messageId: null, failed: false } },
+      recorded: false,
+    },
+  ])('after $label moves the version between the send and its record, records the send only while the email is still its claim', async ({ change, recorded }) => {
+    const { store, sesState } = await closedLaneScripted([]);
+    await runActionCycle(buildTestActionRoot({ store, sesState, now: () => HOLD_CHECKED_AT_MS }).deps);
+    const sendAtMs = HOLD_CHECKED_AT_MS + 60_000;
+    const { deps } = buildTestActionRoot({ store, sesState, now: () => sendAtMs, operator: OPERATOR });
+    const decisionStore = deps.ports.decisionStore;
+    let moved = false;
+    const racing = withStore(deps, {
+      updateIfVersion: async (key, expectedVersion, attributes, nowMs, expected) => {
+        const email = attributes.email as { sentAtMs?: unknown } | undefined;
+        if (typeof email?.sentAtMs === 'number' && !moved) {
+          moved = true;
+          if ((await decisionStore.updateIfVersion(key, expectedVersion, change, nowMs)) !== 'updated') throw new Error('the planted change did not land');
+        }
+        return decisionStore.updateIfVersion(key, expectedVersion, attributes, nowMs, expected);
+      },
+    });
+
+    await runActionCycle(racing);
+
+    expect(moved).toBe(true);
+    expect(sendsIssued(sesState)).toBe(1);
+    const closure = await storedClosure(deps, INCIDENT_ID, sendAtMs);
+    if (recorded) {
+      expect(closure?.email).toMatchObject({ attempts: 1, sentAtMs: sendAtMs, failed: false });
+      expect(closure?.reopen).toEqual(change.reopen);
+      await runActionCycle(at(deps, sendAtMs + ACTION_FUNCTION_TIMEOUT_MS));
+      expect(sendsIssued(sesState)).toBe(1);
+    } else {
+      expect(closure?.email).toEqual(change.email);
+    }
+  });
+
   it('marks the email failed with one email-failed line once a claim on the last attempt outlives the timeout with no send (WR-03)', async () => {
     const { store, sesState } = await closedLaneScripted([]);
     const { deps } = buildTestActionRoot({ store, sesState, now: () => HOLD_CHECKED_AT_MS });
