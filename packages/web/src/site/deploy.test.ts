@@ -1,5 +1,6 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { MODEL_VALUES } from '@fothering/core/model-values';
 import { afterAll, describe, expect, it } from 'vitest';
 import {
   denyRows,
@@ -155,7 +156,7 @@ describe('the permissions schedules', () => {
     for (const schedule of schedules) {
       for (const row of schedule.rows) expect(`${row.stack}/${row.role}`).toBe(`${schedule.stack}/${schedule.role}`);
     }
-    expect(schedules.map((schedule) => schedule.role)).toEqual(['ForgetRole9C1F5950', 'IngestRoleAF8AE6D8', 'RuntimeRoleFD8790A4']);
+    expect(schedules.map((schedule) => schedule.role)).toEqual(['DetectRoleDEDAD076', 'ForgetRole9C1F5950', 'IngestRoleAF8AE6D8', 'RuntimeRoleFD8790A4']);
   });
 
   it('gives a trust row its principal and an empty condition cell where the entry has none', () => {
@@ -262,12 +263,18 @@ describe('the pause grant and runtime role predicates', () => {
   });
 });
 
-const SEVEN_COMMANDS = [
+const README_COMMANDS = [
   { command: 'npm run build', note: null },
   { command: 'npx cdk bootstrap', note: 'once, before the first deploy' },
   { command: 'npx cdk deploy --all', note: null },
   { command: 'npx cdk destroy --all', note: null },
   { command: 'npx cdk deploy --all -c fothering:live=live', note: null },
+  { command: 'npx cdk deploy FotheringRuntime -c fothering:live=live', note: null },
+  {
+    command:
+      'aws bedrock-agentcore invoke-agent-runtime --region eu-central-1 --agent-runtime-arn <runtime arn> --runtime-session-id fothering-trial-0000000000000000000001 --payload fileb://record.json --cli-read-timeout 120 response.json',
+    note: null,
+  },
   { command: 'aws events test-event-pattern --event-pattern file://rule-pattern.json --event file://sample-event.json', note: null },
   { command: 'aws sesv2 get-configuration-set --region eu-central-1 --configuration-set-name <a set from lanes.json>', note: null },
 ];
@@ -275,8 +282,20 @@ const SEVEN_COMMANDS = [
 describe('the README deploy commands', () => {
   const readme = readRepoText('README.md', ROOT);
 
-  it('returns the seven command lines of Deploy and remove in order, with the bootstrap note', () => {
-    expect(readDeployCommands(readme)).toEqual(SEVEN_COMMANDS);
+  it('returns the command lines of Deploy and remove in order, with the bootstrap note', () => {
+    expect(readDeployCommands(readme)).toEqual(README_COMMANDS);
+  });
+
+  it('reads a command continued over several lines with backslashes as one command', () => {
+    const section = '## Deploy and remove\n\n```sh\naws planted run \\\n  --flag value \\\n  out.json\nnpm run build\n```\n';
+    expect(readDeployCommands(section)).toEqual([
+      { command: 'aws planted run --flag value out.json', note: null },
+      { command: 'npm run build', note: null },
+    ]);
+  });
+
+  it('throws on a block whose last command still ends in a backslash', () => {
+    expect(() => readDeployCommands('## Deploy and remove\n\n```sh\naws planted run \\\n```\n')).toThrow(/ends in a backslash/);
   });
 
   it('throws when the Deploy and remove section is missing', () => {
@@ -293,7 +312,7 @@ describe('the README deploy commands', () => {
   });
 
   it('reads CRLF line endings the same as LF', () => {
-    expect(readDeployCommands(readme.replace(/\r?\n/g, '\r\n'))).toEqual(SEVEN_COMMANDS);
+    expect(readDeployCommands(readme.replace(/\r?\n/g, '\r\n'))).toEqual(README_COMMANDS);
   });
 });
 
@@ -302,7 +321,7 @@ describe('isOfferedCommand', () => {
   const scripts = Object.keys((JSON.parse(readRepoText('package.json', ROOT)) as { scripts: Record<string, string> }).scripts);
 
   it('accepts each README command line', () => {
-    for (const { command } of SEVEN_COMMANDS) expect(isOfferedCommand(command, commands, scripts), command).toBe(true);
+    for (const { command } of README_COMMANDS) expect(isOfferedCommand(command, commands, scripts), command).toBe(true);
   });
 
   it('accepts npm run for a script package.json defines', () => {
@@ -328,7 +347,7 @@ describe('resolveModelId', () => {
   const adrText = readRepoText('docs/adr/0001-stack.md', ROOT);
 
   it('reads the Model row of the committed ADR when model-values.ts is absent', () => {
-    expect(resolveModelId({ adrText })).toBe('eu.anthropic.claude-sonnet-5');
+    expect(resolveModelId({ adrText })).toBe('eu.anthropic.claude-sonnet-4-6');
   });
 
   it('reads inferenceProfileId from model-values.ts text when it is given', () => {
@@ -412,6 +431,24 @@ describe('the deploy steps', () => {
     expect(steps[4]?.commands.map(({ command }) => command)).toEqual([lineOf(4)]);
   });
 
+  // The README's model trial deploys one stack with the switch on; it is not the step that turns
+  // the switch on for the app.
+  it('leaves a cdk line naming fewer stacks off its step, whether the wider line says --all or names every stack', () => {
+    const lines = (commands: readonly string[]) => commands.map((command) => ({ command, note: null }));
+    const base = ['npm run build', 'npx cdk bootstrap'];
+    const withAll = deploySteps({
+      deployCommands: lines([...base, 'npx cdk deploy --all', 'npx cdk deploy --all -c fothering:live=live', 'npx cdk deploy B -c fothering:live=live']),
+      region: 'xx-planted-9',
+    });
+    expect(withAll[4]?.commands.map(({ command }) => command)).toEqual(['npx cdk deploy --all -c fothering:live=live']);
+    const named = deploySteps({
+      deployCommands: lines([...base, 'npx cdk deploy A B C', 'npx cdk deploy B', 'npx cdk deploy A B C --context fothering:live=live', 'npx cdk deploy B -c fothering:live=live']),
+      region: 'xx-planted-9',
+    });
+    expect(named[3]?.commands.map(({ command }) => command)).toEqual(['npx cdk bootstrap', 'npx cdk deploy A B C']);
+    expect(named[4]?.commands.map(({ command }) => command)).toEqual(['npx cdk deploy A B C --context fothering:live=live']);
+  });
+
   it('shows only commands the README or package.json offers', () => {
     for (const step of steps) {
       for (const { command } of step.commands) expect(isOfferedCommand(command, facts.deployCommands, facts.scripts), command).toBe(true);
@@ -446,10 +483,10 @@ describe('the deploy Region', () => {
 describe('loadRepoFacts', () => {
   it('reads the commands, the script names and the model id from the real repository', () => {
     const facts = loadRepoFacts(ROOT);
-    expect(facts.deployCommands).toEqual(SEVEN_COMMANDS);
+    expect(facts.deployCommands).toEqual(README_COMMANDS);
     expect(facts.scripts).toContain('build');
     expect(facts.scripts).not.toContain('deploy');
-    expect(facts.modelId).toBe('eu.anthropic.claude-sonnet-5');
+    expect(facts.modelId).toBe(MODEL_VALUES.inferenceProfileId);
   });
 
   it('takes the model id from model-values.ts when the file exists', () => {

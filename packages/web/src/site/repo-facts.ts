@@ -91,10 +91,25 @@ function shBlockLines(lines: readonly string[]): { lines: string[]; open: boolea
   return { lines: inside, open };
 }
 
+// A line ending in a backslash continues on the next, as the shell reads it, so a long command the
+// README wraps is one command here and never a run of fragments.
+function joinContinuations(lines: readonly string[]): string[] {
+  const joined: string[] = [];
+  let pending: string | undefined;
+  for (const line of lines) {
+    const text = pending === undefined ? line : `${pending} ${line.trim()}`;
+    const continued = /\s*\\$/.exec(text);
+    pending = continued ? text.slice(0, continued.index) : undefined;
+    if (!continued) joined.push(text);
+  }
+  if (pending !== undefined) throw new Error(`${README_PREFIX}: a command ends in a backslash with no line after it. Finish the command or drop the backslash.`);
+  return joined;
+}
+
 export function readDeployCommands(readmeText: string): DeployCommand[] {
   const block = shBlockLines(deploySectionLines(readmeText));
   if (block.open) throw new Error(`${README_PREFIX}: a sh block is not closed. Close it with a line holding three backticks.`);
-  const commands = block.lines.map(commandOf).filter((command): command is DeployCommand => command !== undefined);
+  const commands = joinContinuations(block.lines).map(commandOf).filter((command): command is DeployCommand => command !== undefined);
   if (commands.length === 0) throw new Error(`${README_PREFIX}: no fenced sh block with a command. Put the deploy commands in sh blocks.`);
   return commands;
 }
@@ -170,10 +185,33 @@ const COMMAND_USES: Readonly<Record<DeployCommandUse, RegExp>> = {
   'destroy': /^npx cdk destroy\b/,
 };
 
+const STACK_USES: ReadonlySet<DeployCommandUse> = new Set(['deploy', 'go-live', 'destroy']);
+
+// How many stacks a cdk line selects: --all selects every one, otherwise each word that is neither
+// an option nor a context value names one.
+function stackScope(command: string): number {
+  const words = command.split(/\s+/).slice(3);
+  if (words.includes('--all')) return Number.POSITIVE_INFINITY;
+  let named = 0;
+  for (let index = 0; index < words.length; index += 1) {
+    const word = words[index] ?? '';
+    if (word === '-c' || word === '--context') index += 1;
+    else if (!word.startsWith('-')) named += 1;
+  }
+  return named;
+}
+
+// A cdk line that selects fewer stacks than another for the same use belongs to a narrower
+// procedure (the README's model trial deploys the runtime alone), not to the deploy sheet's step.
+function widestScope(found: readonly DeployCommand[]): DeployCommand[] {
+  const widest = Math.max(...found.map(({ command }) => stackScope(command)));
+  return found.filter(({ command }) => stackScope(command) === widest);
+}
+
 function commandsFor(commands: readonly DeployCommand[], use: DeployCommandUse): DeployCommand[] {
   const found = commands.filter(({ command }) => COMMAND_USES[use].test(command));
   if (found.length === 0) throw new Error(`${README_PREFIX}: no ${use} command. Restore the ${use} line in its sh block.`);
-  return found;
+  return STACK_USES.has(use) ? widestScope(found) : found;
 }
 
 export const fillRegion = (text: string, region: string): string => text.replaceAll('{region}', region);
