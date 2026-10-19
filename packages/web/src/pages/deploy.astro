@@ -31,6 +31,9 @@ const permissionCells = (row: PermissionRow) => [
   { text: row.condition, long: true },
   { text: row.reason },
 ];
+// The longest IAM actions have no dot and outrun a stacked cell at 320, so the Action column may
+// break after the colon and between words (UI-SPEC section 17 item 2).
+const ACTION_COLUMN = PERMISSION_COLUMNS.indexOf('Action');
 // Deny rows sit in the Deny box alone, so every snapshot entry renders exactly once (AC-33).
 const roles = permissionSchedules(snapshot).flatMap((schedule) => {
   const allowed = schedule.rows.filter((row) => row.effect !== 'Deny');
@@ -108,7 +111,7 @@ const intro = textSegments(fillRegion(DEPLOY_COPY.intro, region), NO_TERMS);
               <h3 id={`role-${role.name}`}>{role.name}</h3>
               <p class="role-stack"><span>Stack</span> <Identifier value={role.stack} /></p>
             </div>
-            <Schedule fit columns={PERMISSION_COLUMNS} rows={role.rows} caption={DEPLOY_COPY.permissionsCaption} />
+            <Schedule fit columns={PERMISSION_COLUMNS} rows={role.rows} wordColumns={[ACTION_COLUMN]} caption={DEPLOY_COPY.permissionsCaption} />
           </section>
         ))}
       </div>
@@ -119,7 +122,7 @@ const intro = textSegments(fillRegion(DEPLOY_COPY.intro, region), NO_TERMS);
       {denied.length > 0 && (
         <div class="deny" data-deny>
           <h3>{DEPLOY_COPY.denyHeading}</h3>
-          <Schedule fit columns={['Role', ...PERMISSION_COLUMNS]} rows={denied} caption={DEPLOY_COPY.permissionsCaption} />
+          <Schedule fit columns={['Role', ...PERMISSION_COLUMNS]} rows={denied} wordColumns={[ACTION_COLUMN + 1]} caption={DEPLOY_COPY.permissionsCaption} />
         </div>
       )}
     </section>

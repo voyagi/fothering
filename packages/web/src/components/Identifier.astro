@@ -4,9 +4,10 @@
 // value such as batch=2026-10-14-b; the <wbr> after each dot is the only break, and a space inside
 // a part (an SMTP code) is made non-breaking.
 // With `words`, an API operation name with no dot (PutConfigurationSetSendingOptions) may also end
-// a line between its capitalised words, each word one unbreakable run with no hyphen added. Only the
-// replay log's Detail cells pass it (UI-SPEC line 208, S4 note 2026-10-18); the built rule
-// identifier-break fails that break anywhere else.
+// a line between its capitalised words, each word one unbreakable run with no hyphen added, and an
+// IAM action after its colon too (ses: then GetConfigurationSetEventDestinations). Only the replay
+// log's Detail cells (UI-SPEC line 208) and the permission schedules' Action cells (section 17
+// item 2) pass it; the built rule identifier-break fails that break anywhere else.
 // With face="inherit" the identifier keeps the face of the text around it, as the comp sets a
 // configuration set name in running text, and only never breaks mid-name.
 interface Props {

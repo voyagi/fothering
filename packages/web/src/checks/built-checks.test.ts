@@ -293,12 +293,27 @@ describe('the identifier break rule (AC-65, AC-E55, UI-SPEC line 208)', () => {
 
   // Each finding as one line, so a failing case reads as one string.
   const named = (findings: readonly Finding[]): string => findings.map((finding) => `${finding.route} ${finding.text}`).join(' | ');
-  const OUTSIDE = 'the identifier PutConfigurationSet may break after "Put", and outside a replay log Detail cell only a dot may end an identifier\'s line';
+  const OUTSIDE =
+    'the identifier PutConfigurationSet may break after "Put", and outside a replay log Detail cell or a permission Action cell only a dot may end an identifier\'s line';
+  const permissionCell = (inner: string, column = 'Action', row = ' data-permission="FotheringIngest/IngestRole/permission/Allow/ses:PutConfigurationSet"'): string =>
+    `<table><tbody><tr${row}><td data-col="${column}">${inner}</td></tr></tbody></table>`;
 
-  it('fails the same word-boundary break outside a replay log Detail cell', () => {
-    const findings = identifierBreakRule(casesSite([`<p>${WORD_MODE}</p>`, logCell(WORD_MODE, 'Lane'), logCell(WORD_MODE, 'Detail', '')]), context);
-    expect(named(findings.filter((finding) => finding.text.includes('"Put"')))).toBe(['/case-0/', '/case-1/', '/case-2/'].map((route) => `${route} ${OUTSIDE}`).join(' | '));
+  it('fails the same word-boundary break outside a replay log Detail cell or a permission Action cell', () => {
+    const findings = identifierBreakRule(
+      casesSite([`<p>${WORD_MODE}</p>`, logCell(WORD_MODE, 'Lane'), logCell(WORD_MODE, 'Detail', ''), permissionCell(WORD_MODE, 'Resource or principal'), permissionCell(WORD_MODE, 'Action', '')]),
+      context,
+    );
+    expect(named(findings.filter((finding) => finding.text.includes('"Put"')))).toBe(
+      ['/case-0/', '/case-1/', '/case-2/', '/case-3/', '/case-4/'].map((route) => `${route} ${OUTSIDE}`).join(' | '),
+    );
     expect(findings.every((finding) => finding.rule === 'identifier-break')).toBe(true);
+  });
+
+  // UI-SPEC section 17 item 2: an IAM action may end a line after its colon or between its
+  // capitalised words, in a permission schedule's Action cell only.
+  it('passes a word-boundary break inside a permission Action cell, the colon included', () => {
+    const action = '<code class="identifier" data-identifier data-identifier-words><span>ses:</span><wbr><span>Get</span><wbr><span>Configuration</span></code>';
+    expect(identifierBreakRule(casesSite([permissionCell(action)]), context)).toEqual([]);
   });
 
   it('fails a break after a part with no dot in an identifier not in word mode, even in a log Detail cell', () => {

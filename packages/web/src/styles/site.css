@@ -469,7 +469,8 @@ ol.steps { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); marg
 p.command-note { margin: var(--space-sm) 0 0; font: 500 var(--text-label)/1.4 var(--font-mono); color: var(--label); }
 .command-inline > span { display: inline-block; }
 /* A resource expression or a principal is a long value: it ends a line at its <wbr>s, after a slash,
-   a colon or a comma, and breaks inside a part only if that part alone is wider than the cell.
+   a colon or a comma or before a capital inside a CDK export name, and breaks inside a part only if
+   that part alone is wider than the cell.
    break-word, unlike anywhere, leaves the column's min-content at its longest part. */
 .long-value { font-family: var(--font-mono); font-feature-settings: "tnum" 1; font-size: var(--text-mono-value); font-weight: 500; overflow-wrap: break-word; }
 .roles { display: grid; gap: var(--space-2xl); }
@@ -499,9 +500,11 @@ ol.removal { counter-reset: removal; max-inline-size: 80ch; margin: 0; padding: 
    matches these minimums' specificity and, later in the file, wins over them (here and below). */
 .fit td[data-col="Why"] .cell-text { min-inline-size: 12em; }
 .fit td[data-col="On removal"] .cell-text { min-inline-size: 12em; }
-/* Measured 2026-10-18 on the rendered tables with the minimums above: the resource table needs
-   761px and the widest role table 1030px; a later snapshot that widens either moves its threshold. */
-@container resources (width < 764px) {
+/* Measured 2026-10-20 on the rendered tables with the minimums above, after the phase 2 merge: the
+   resource table needs 777px and the widest role table, the runtime role's, 937px (a long value
+   now breaks inside a CDK export name, and an action between its words); a later snapshot that
+   widens either moves its threshold. */
+@container resources (width < 780px) {
   .fit-resources .fit, .fit-resources .fit :is(thead, tbody, tr, th, td) { display: block; width: auto; }
   .fit-resources .fit :is(thead, td[data-empty]) { display: none; }
   .fit-resources .fit tbody tr { padding: var(--space-xs) 0 var(--space-sm); }
@@ -517,7 +520,7 @@ ol.removal { counter-reset: removal; max-inline-size: 80ch; margin: 0; padding: 
 @container resources (width < 286px) {
   .fit-resources .fit code { font-size: var(--text-label); }
 }
-@container permissions (width < 1032px) {
+@container permissions (width < 940px) {
   .fit-permissions .fit, .fit-permissions .fit :is(thead, tbody, tr, th, td) { display: block; width: auto; }
   .fit-permissions .fit :is(thead, td[data-empty]) { display: none; }
   .fit-permissions .fit tbody tr { padding: var(--space-xs) 0 var(--space-sm); }
