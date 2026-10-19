@@ -432,8 +432,8 @@ describe('buildReplayView refuses an artifact the replay copy would misstate', (
   };
   const at = (time: string): string => `2026-10-14T${time}Z`;
   const cases: [string, ReplayArtifact, RegExp][] = [
-    ['a bounce on another lane ("only")', { ...artifact, events: [...artifact.events, otherLaneBounce] }, /: events: a bounce sits on fothering-transactional, and step one says bounces arrive on fothering-bulk only\. /],
-    ['mixed SMTP codes on the closed lane ("each")', withEvent(secondBounce, { smtpCode: '552 5.2.2' }), /: events: the bounces on fothering-bulk carry 550 5\.1\.1 and 552 5\.2\.2, and step one says each carries one code\. /],
+    ['a bounce on another lane', { ...artifact, events: [...artifact.events, otherLaneBounce] }, /: events: a bounce sits on fothering-transactional, and the replay says the bounces are on fothering-bulk alone\. /],
+    ['mixed SMTP codes on the closed lane', withEvent(secondBounce, { smtpCode: '552 5.2.2' }), /: events: the bounces on fothering-bulk carry 550 5\.1\.1 and 552 5\.2\.2, and step one says the bounces shown read one code\. /],
     ['a closed-lane bounce with no receiving domain', withEvent(secondBounce, { receivingDomain: undefined }), /: events: a bounce on fothering-bulk has no receiving domain, so the providers it came from cannot be counted\. /],
     ['a Permanent and a Transient bounce on the closed lane', withEvent(secondBounce, { bounceType: 'Transient' }), /: events: a bounce on fothering-bulk is Transient, and the replay calls the bounces on fothering-bulk hard\. Replay an incident whose bounces on the paused lane are all Permanent\.$/],
     ['only Transient bounces on the closed lane', withBounceType('Transient'), /: events: a bounce on fothering-bulk is Transient, and the replay calls the bounces on fothering-bulk hard\. Replay an incident whose bounces on the paused lane are all Permanent\.$/],
