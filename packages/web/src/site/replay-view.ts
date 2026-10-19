@@ -316,22 +316,24 @@ function lanesLines(closedLane: string, openLanes: readonly string[], held: bool
   };
 }
 
+// The board and the drawing describe the lanes' state, which their lines and valves stand for, never
+// traffic: an artifact can log no delivery on an open lane and still build (WR-13).
 function boardDescriptions(closedLane: string, lanes: readonly string[], openLanes: readonly string[]): string[] {
-  const all = String(lanes.length);
-  const keepFlowing = openLanes.length === 0 ? '' : ` ${openLanes.join(', ')} ${openLanes.length === 1 ? 'keeps' : 'keep'} flowing.`;
+  const allLanes = lanes.length === 1 ? 'The only lane is' : `All ${String(lanes.length)} lanes are`;
+  const stayOpen = openLanes.length === 0 ? '' : ` ${openLanes.join(', ')} ${openLanes.length === 1 ? 'stays' : 'stay'} open.`;
   return [
-    `Mail flows on all ${all} lanes. Bounce marks appear on ${closedLane}.`,
-    `Mail still flows on all ${all} lanes, with bounce marks on ${closedLane}. Detection code has approved one lane.`,
-    `${closedLane} is stopped at a filled valve with a lockout tag, and its outlet is dotted.${keepFlowing}`,
-    `${closedLane} flows again and the tag is off the valve. All ${all} lanes flow.`,
+    `${allLanes} open. Bounce marks appear on ${closedLane}.`,
+    `${allLanes} still open, with bounce marks on ${closedLane}. Detection code has approved one lane.`,
+    `${closedLane} is stopped at a filled valve with a lockout tag, and its outlet is dotted.${stayOpen}`,
+    `${closedLane} is open again and the tag is off the valve. ${allLanes} open.`,
   ];
 }
 
-// With one lane nothing else flows, so the description names the paused lane as the only one.
+// With one lane no other lane is open, so the description names the paused lane as the only one.
 function drawingDescription(closedLane: string, openLanes: readonly string[], held: boolean, pausedAt: string): string {
   const stopped = `is stopped at a ${held ? 'closed' : 'filled'} valve that carries a lockout tag, with a read-back instrument at ${pausedAt} UTC.`;
   if (openLanes.length === 0) return `${closedLane}, the only lane from the SES account, ${stopped}`;
-  return `Mail flows from the SES account through ${openLanes.join(', ')}. ${closedLane} ${stopped}`;
+  return `The SES account feeds ${openLanes.join(', ')}, which ${openLanes.length === 1 ? 'is' : 'are'} open. ${closedLane} ${stopped}`;
 }
 
 function firstEventTime(events: readonly ReplayEvent[], step: number): string {
@@ -345,9 +347,10 @@ function closedLaneBounces(artifact: ReplayArtifact): ReplayEvent[] {
   return artifact.events.filter((event) => event.kind === 'bounce' && event.lane === artifact.closedLane);
 }
 
-// "The one ... reads" or "The two ... read", with the count taken from the events.
-function loggedCount(logged: number, after: string): string {
-  return `The ${countWord(logged)} ${after} ${logged === 1 ? 'reads' : 'read'}`;
+// "The one ... reads" or "The 2 ... read", with the count taken from the events and written as the
+// caller's figure: a word in the replay's prose, a digit on the tag, whose figures are data.
+function loggedCount(logged: number, figure: string, after: string): string {
+  return `The ${figure} ${after} ${logged === 1 ? 'reads' : 'read'}`;
 }
 
 // The distinct receiving domains of the paused lane's bounces, case folded. A domain is not a
@@ -358,16 +361,17 @@ function bounceDomains(bounces: readonly ReplayEvent[]): string {
   return `${countWord(domains.size)} ${domains.size === 1 ? 'domain' : 'domains'}`;
 }
 
-// The other lanes are said to keep delivering only when every one of them has a delivery event. A
-// capture that sent only on the paused lane still builds, without the sentence.
+// The other lanes are said to keep delivering only when every one of them has a delivery event in
+// step 1, the step that says it. A capture that sent only on the paused lane still builds, without
+// the sentence (IN-27).
 function deliverySentence(artifact: ReplayArtifact, openLanes: readonly string[]): string {
-  const delivered = openLanes.every((lane) => artifact.events.some((event) => event.kind === 'delivery' && event.lane === lane));
+  const delivered = openLanes.every((lane) => artifact.events.some((event) => event.step === 1 && event.kind === 'delivery' && event.lane === lane));
   if (openLanes.length === 0 || !delivered) return '';
   return openLanes.length === 1 ? ' The other lane keeps delivering.' : ' The other lanes keep delivering.';
 }
 
 function stepOneText(artifact: ReplayArtifact, bounce: ReplayEvent & { smtpCode: string }, bounces: readonly ReplayEvent[], openLanes: readonly string[]): string {
-  return `${String(bounce.bounceType)} bounces arrive on ${artifact.closedLane}. ${loggedCount(bounces.length, 'logged here')} \`${bounce.smtpCode}\` and came from ${bounceDomains(bounces)}.${deliverySentence(artifact, openLanes)}`;
+  return `${String(bounce.bounceType)} bounces arrive on ${artifact.closedLane}. ${loggedCount(bounces.length, countWord(bounces.length), 'logged here')} \`${bounce.smtpCode}\` and came from ${bounceDomains(bounces)}.${deliverySentence(artifact, openLanes)}`;
 }
 
 function stepThreeText(artifact: ReplayArtifact, held: boolean): string {
@@ -389,7 +393,7 @@ function logNote(hardBounces: number): string {
 function tagEvidence(row: EvidenceRow, smtpCode: string, logged: number): string {
   const share = row.count === row.denominator ? `All ${String(row.count)}` : `${String(row.count)} of ${String(row.denominator)}`;
   // The code ends the sentence, so no figure is set against the mono code.
-  return `${share} ${row.unit} in the window carry that tag. ${loggedCount(logged, 'in the replay')} \`${smtpCode}\`.`;
+  return `${share} ${row.unit} in the window carry that tag. ${loggedCount(logged, String(logged), 'in the replay')} \`${smtpCode}\`.`;
 }
 
 export function buildReplayView(artifact: ReplayArtifact): ReplayView {
