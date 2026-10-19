@@ -39,27 +39,27 @@
     "@size-limit/file": "13.1.1",
     "@stryker-mutator/core": "10.0.0",
     "@stryker-mutator/vitest-runner": "10.0.0",
-    "@types/node": "22.20.5",
-    "@vitest/coverage-v8": "4.1.12",
+    "@types/node": "22.20.2",
+    "@vitest/coverage-v8": "4.1.11",
     "@vitest/eslint-plugin": "1.6.27",
     "aws-cdk": "2.1142.0",
     "dependency-cruiser": "18.2.0",
     "esbuild": "0.28.2",
     "eslint": "10.10.0",
     "eslint-plugin-compat": "7.0.2",
-    "eslint-plugin-sonarjs": "4.2.2",
-    "fast-check": "4.10.2",
+    "eslint-plugin-sonarjs": "4.2.0",
+    "fast-check": "4.10.0",
     "jscpd": "5.2.0",
     "knip": "6.35.1",
     "schema-dts": "2.0.0",
     "size-limit": "13.1.1",
     "typescript": "6.0.3",
     "typescript-eslint": "8.70.0",
-    "vitest": "4.1.12"
+    "vitest": "4.1.11"
   },
   "overrides": {
     "typed-rest-client@2.3.1": {
-      "qs": "6.16.1"
+      "qs": "6.16.0"
     },
     "@aws-sdk/client-bedrock-agentcore": "3.1136.0"
   }
