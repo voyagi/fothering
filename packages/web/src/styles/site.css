@@ -107,7 +107,7 @@ code { font-size: var(--text-mono-value); font-weight: 500; }
 .skip:focus { top: var(--space-12); }
 
 /* Silkscreen: what the chassis prints beside its controls. Saira caps, a little condensed, spaced. */
-.silk, .state, .schedule .note, .readout dt, .readout-head, .role-stack > span, .decode .k {
+.silk, .state, .schedule .note, .readout dt, .findings dt, .readout-head, .role-stack > span, .decode .k {
   font: 600 var(--text-silk)/1.3 var(--font-silk);
   font-stretch: 85%;
   letter-spacing: 0.14em;
@@ -210,7 +210,6 @@ code { font-size: var(--text-mono-value); font-weight: 500; }
 .readout dl { margin: 0; }
 .readout dl > div { display: grid; grid-template-columns: 88px minmax(0, 1fr); gap: var(--space-12); align-items: baseline; padding: var(--space-sm) 0; border-top: var(--w-rule) solid var(--ink); }
 .readout dd { margin: 0; max-inline-size: none; font-size: var(--text-small); line-height: 1.45; color: var(--ink-2); }
-.readout dd ul { display: flex; flex-wrap: wrap; gap: var(--space-xs) var(--space-md); margin: 0; padding: 0; list-style: none; }
 .readout .legend { margin-left: var(--space-sm); font: 700 var(--text-silk-small)/1 var(--font-silk); font-stretch: 85%; letter-spacing: 0.14em; color: var(--ink); }
 .readout .lamp { margin-right: var(--space-sm); vertical-align: 1px; }
 .stamp { justify-self: start; align-self: flex-start; margin: 0; padding: var(--space-xs) var(--space-sm); border: 2px solid currentColor; border-radius: 3px; font: 700 var(--text-silk-small)/1 var(--font-silk); font-stretch: 85%; letter-spacing: 0.14em; text-transform: uppercase; }
@@ -230,7 +229,7 @@ code { font-size: var(--text-mono-value); font-weight: 500; }
 .track-head .pads > span { display: grid; gap: 2px; align-self: end; text-align: center; font: 600 var(--text-silk-small)/1.2 var(--font-silk); font-stretch: 85%; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-2); }
 .track-head .pads time { font: 500 var(--text-silk-small)/1.2 var(--font-mono); letter-spacing: 0; text-transform: none; color: var(--label); }
 .track-head > .silk { align-self: end; }
-.lane-name { display: grid; gap: 2px; min-inline-size: 0; font-size: var(--text-small); line-height: 1.3; color: var(--label); }
+.lane-name { display: grid; gap: 2px; min-inline-size: 0; margin: 0; font-size: var(--text-small); line-height: 1.3; color: var(--label); }
 .lane-name code { color: var(--ink); }
 .pad { position: relative; block-size: var(--pad-h); border: var(--w-rule) solid var(--key-edge); border-radius: 4px; background: var(--bank); }
 .pad.muted { background: var(--key-muted); }
@@ -245,11 +244,21 @@ code { font-size: var(--text-mono-value); font-weight: 500; }
 /* The one key lit at full strength: the muted track's. */
 .mute.on { border-color: var(--key-red); background: var(--key-red); color: var(--key-ink); }
 .mute.on .lamp { background: var(--led); outline: 2px solid var(--key-ink); }
-.track-banks .pads > span { position: relative; padding-top: var(--space-xs); border-top: 2px solid var(--ink); white-space: nowrap; font: 600 var(--text-silk-small)/1.3 var(--font-silk); font-stretch: 85%; letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink-2); }
-/* A bank's rule runs on across the gap to the next pad of the same bank. */
-.track-banks .pads > span:not(.bank-end) { margin-right: calc(var(--space-sm) * -1); }
-.track-banks time { margin-left: var(--space-sm); font: 500 var(--text-silk-small)/1.3 var(--font-mono); letter-spacing: 0; color: var(--label); }
+/* Each bank's label spans its pads under one rule, and wraps inside that width. */
+.track-banks .pads > span { display: flex; flex-wrap: wrap; align-content: start; gap: 0 var(--space-sm); padding-top: var(--space-xs); border-top: 2px solid var(--ink); font: 600 var(--text-silk-small)/1.3 var(--font-silk); font-stretch: 85%; letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink-2); }
+.cols-1 { grid-column: span 1; } .cols-2 { grid-column: span 2; } .cols-3 { grid-column: span 3; } .cols-4 { grid-column: span 4; }
+.cols-5 { grid-column: span 5; } .cols-6 { grid-column: span 6; } .cols-7 { grid-column: span 7; } .cols-8 { grid-column: span 8; }
+.cols-9 { grid-column: span 9; } .cols-10 { grid-column: span 10; } .cols-11 { grid-column: span 11; } .cols-12 { grid-column: span 12; }
+.cols-13 { grid-column: span 13; } .cols-14 { grid-column: span 14; } .cols-15 { grid-column: span 15; } .cols-16 { grid-column: span 16; }
+.track-banks time { font: 500 var(--text-silk-small)/1.3 var(--font-mono); letter-spacing: 0; color: var(--label); }
 .pattern figcaption { margin-top: var(--space-md); font: 400 var(--text-silk)/1.4 var(--font-text); color: var(--ink-2); }
+
+/* The readout's detail, under the pattern: what the cause rests on, what was ruled out, and what
+   reopens the lane. */
+.findings { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(16rem, 100%), 1fr)); gap: var(--space-lg) var(--space-40); margin: 0; padding: 0 var(--gutter) var(--space-2xl); }
+.findings > div { display: grid; gap: var(--space-sm); align-content: start; padding-top: var(--space-12); border-top: 2px solid var(--ink); }
+.findings dd { margin: 0; color: var(--ink-2); }
+.findings dd ul { display: grid; gap: var(--space-xs); margin: 0; padding: 0; list-style: none; }
 
 /* The motion grammar: on first view the playhead runs once across the pattern, each event's lamp
    lighting in turn, and each muted pad drops to grey as the playhead passes it; the mute key lights
@@ -361,7 +370,7 @@ table.schedule, table.ruled { width: 100%; border-collapse: collapse; font: 400 
 
 /* The index at the foot of every page: the project line, every page and where the replay's data
    comes from. */
-.index { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 4fr) minmax(0, 3fr); gap: var(--space-lg) var(--space-40); align-items: start; padding: var(--space-40) var(--gutter) var(--space-2xl); border-top: 2px solid var(--ink); font-size: var(--text-small); }
+.index { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: var(--space-lg) var(--space-40); align-items: start; padding: var(--space-40) var(--gutter) var(--space-2xl); border-top: 2px solid var(--ink); font-size: var(--text-small); }
 .index p { margin: 0; }
 .index .project { font: 800 var(--text-title)/1.3 var(--font-silk); font-stretch: 75%; letter-spacing: 0.02em; text-transform: uppercase; }
 .index .status { padding-block: var(--space-12); color: var(--ink-2); }
@@ -677,7 +686,7 @@ ul.site { display: grid; gap: var(--space-12); margin: 0; padding-left: var(--sp
   .index .project { grid-column: 1 / -1; }
 }
 /* Under about 720px the column heads give way: each track's name and mute key sit above its pads,
-   and the bank labels under the pattern keep the step times. */
+   and the bank labels under the pattern keep each step's name and time. */
 @media (max-width: 720px) {
   .tracks { --pad-h: 40px; }
   .track { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "name mute" "pads pads"; gap: var(--space-sm) var(--space-md); }
@@ -688,9 +697,6 @@ ul.site { display: grid; gap: var(--space-12); margin: 0; padding-left: var(--sp
   .track-banks { grid-template-areas: "pads pads"; }
   .track-banks > :not(.pads) { display: none; }
   .pads { gap: var(--space-xs); }
-  .track-banks .pads > span:not(.bank-end) { margin-right: calc(var(--space-xs) * -1); }
-  .track-banks .step-name { display: none; }
-  .track-banks time { margin-left: 0; }
   .pad::before { inline-size: 12px; block-size: 8px; }
   .pad.bounce::before { border-width: 2px; }
 }

@@ -42,8 +42,15 @@ const pausedAt = `${held ? 'Closed' : 'Paused'} at ${clock(artifact.pause.atUtc)
 const at = (index: number): string => `at-${String(Math.min(Math.max(index, 0), 15))}`;
 const padClass = (key: TrackKey, step: number, index: number): string =>
   ['pad', `bank-${String(step)}`, key.lamp === 'event' ? 'lit' : key.lamp === 'bounce' ? 'bounce' : '', key.muted ? 'muted' : '', at(index)].filter((part) => part !== '').join(' ');
-const bankEnds = new Set(grid.banks.map((bank) => bank.first + bank.columns - 1));
-const bankStarts = new Map(grid.banks.map((bank) => [bank.first, view.steps[bank.step - 1]]));
+// A bank's label spans the bank's pads, so it wraps inside its own bank and never runs into the
+// next one. The stylesheet carries span classes up to sixteen columns; a longer bank continues in
+// single cells, which keeps every later bank under its own pads.
+const MAX_SPAN = 16;
+const bankCells = grid.banks.flatMap((bank) => {
+  const span = Math.min(bank.columns, MAX_SPAN);
+  const rest = Array.from({ length: bank.columns - span }, () => ({ span: 1, step: undefined }));
+  return [{ span, step: view.steps[bank.step - 1] }, ...rest];
+});
 
 const steps = [
   { title: 'Watch every event', text: 'Sends, deliveries, bounces, complaints, rejects and delays arrive through EventBridge, grouped by configuration set and by your message tags.' },
@@ -108,32 +115,12 @@ const limitsRows = [
           <dd><svg class="sq sq-solid" viewBox="0 0 12 12" aria-hidden="true"><rect x="1" y="1" width="10" height="10" /></svg><Identifier value={view.tag.cause} /></dd>
         </div>
         <div>
-          <dt>Evidence</dt>
-          <dd>{textSegments(view.tag.evidence, terms).map((segment) => (segment.kind === 'text' ? segment.text : <Identifier value={segment.text} face={faceOf(segment)} />))}</dd>
-        </div>
-        {ruledOut.length > 0 && (
-          <div>
-            <dt>Ruled out</dt>
-            <dd>
-              <ul>
-                {ruledOut.map((row) => (
-                  <li><svg class="sq" viewBox="0 0 12 12" aria-hidden="true"><rect x="1" y="1" width="10" height="10" /></svg>{textSegments(row.label, terms).map((segment) => (segment.kind === 'text' ? segment.text : <Identifier value={segment.text} face={faceOf(segment)} />))}</li>
-                ))}
-              </ul>
-            </dd>
-          </div>
-        )}
-        <div>
           <dt>Muted</dt>
           <dd><span class="lamp on" aria-hidden="true"></span><Identifier value={view.tag.lane} /><span class="legend">{view.tag.legend}</span></dd>
         </div>
         <div>
           <dt>Read back</dt>
           <dd><Identifier value={readBackField} />{readBackRest}</dd>
-        </div>
-        <div>
-          <dt>Reopens</dt>
-          <dd>{view.tag.reopens}</dd>
         </div>
       </dl>
       <p class="stamp" data-provenance={artifact.provenance}>{view.tag.stamp}</p>
@@ -158,18 +145,38 @@ const limitsRows = [
       <div class="track track-banks">
         <span></span>
         <div class="pads">
-          {grid.columns.map((_column, index) => {
-            const step = bankStarts.get(index);
-            return (
-              <span class={bankEnds.has(index) ? 'bank-end' : undefined}>{step !== undefined && <Fragment><span class="step-name">{step.label}</span><time>{step.time}</time></Fragment>}</span>
-            );
-          })}
+          {bankCells.map((cell) => (
+            <span class={`cols-${String(cell.span)}`}>{cell.step !== undefined && <Fragment><span class="step-name">{cell.step.label}</span><time>{cell.step.time}</time></Fragment>}</span>
+          ))}
         </div>
         <span></span>
       </div>
     </div>
     <figcaption data-provenance={artifact.provenance}>{view.caption}{view.captionLinkHref !== undefined && <Fragment> <a href={view.captionLinkHref}>How SES counts reputation</a></Fragment>}</figcaption>
   </figure>
+
+  <dl class="findings" data-provenance={artifact.provenance}>
+    <div>
+      <dt>Evidence</dt>
+      <dd>{textSegments(view.tag.evidence, terms).map((segment) => (segment.kind === 'text' ? segment.text : <Identifier value={segment.text} face={faceOf(segment)} />))}</dd>
+    </div>
+    {ruledOut.length > 0 && (
+      <div>
+        <dt>Ruled out</dt>
+        <dd>
+          <ul>
+            {ruledOut.map((row) => (
+              <li><svg class="sq" viewBox="0 0 12 12" aria-hidden="true"><rect x="1" y="1" width="10" height="10" /></svg>{textSegments(row.label, terms).map((segment) => (segment.kind === 'text' ? segment.text : <Identifier value={segment.text} face={faceOf(segment)} />))}</li>
+            ))}
+          </ul>
+        </dd>
+      </div>
+    )}
+    <div>
+      <dt>Reopens</dt>
+      <dd>{view.tag.reopens}</dd>
+    </div>
+  </dl>
 
   <section class="band" aria-labelledby="procedure-title">
     <div class="band-head">
