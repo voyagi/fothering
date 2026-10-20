@@ -154,7 +154,7 @@ const STEP_NUMBERS = [1, 2, 3, 4] as const;
 const STEP_LABELS = ['Bounces arrive', 'Cause named', 'Paused, read back', 'Reopened by command'] as const;
 const DIMENSION_LABELS: Record<EvidenceRow['dimension'], string> = { tag: 'Tag', provider: 'Provider', configuration: 'Configuration' };
 const VERDICT_LABELS: Record<EvidenceRow['verdict'], string> = { cause: 'Cause', clean: 'Clean', 'ruled-out': 'Ruled out' };
-const KIND_LABELS: Record<ReplayEvent['kind'], string> = {
+export const KIND_LABELS: Record<ReplayEvent['kind'], string> = {
   bounce: 'Bounce',
   delivery: 'Delivery',
   'evidence-record': 'Evidence record',
@@ -261,8 +261,9 @@ function assertTimeOrder(artifact: ReplayArtifact): void {
   });
 }
 
-// Step first, then time; the index breaks ties so equal times keep the artifact's order.
-function orderedEvents(events: readonly ReplayEvent[]): ReplayEvent[] {
+// Step first, then time; the index breaks ties so equal times keep the artifact's order. The step
+// grid reads the events in this order too, so its columns and the log's rows agree.
+export function orderedEvents(events: readonly ReplayEvent[]): ReplayEvent[] {
   return events
     .map((event, index) => ({ event, index, at: Date.parse(event.atUtc) }))
     .sort((a, b) => a.event.step - b.event.step || a.at - b.at || a.index - b.index)
@@ -316,25 +317,26 @@ function lanesLines(closedLane: string, openLanes: readonly string[], held: bool
   };
 }
 
-// The board and the landing's signal column describe the lanes' state, which their flags stand for,
-// never traffic: an artifact can log no delivery on an open lane and still build (WR-13).
+// The board and the landing's step grid describe the lanes' state, which the tracks and their mute
+// keys stand for, never traffic: an artifact can log no delivery on an open lane and still build
+// (WR-13).
 function boardDescriptions(closedLane: string, lanes: readonly string[], openLanes: readonly string[]): string[] {
   const allLanes = lanes.length === 1 ? 'The only lane is' : `All ${String(lanes.length)} lanes are`;
   const stayOpen = openLanes.length === 0 ? '' : ` ${openLanes.join(', ')} ${openLanes.length === 1 ? 'stays' : 'stay'} open.`;
   return [
-    `${allLanes} open and no signal flies. Bounces arrive on ${closedLane}.`,
-    `${allLanes} still open. Detection code has approved one lane, and the answering pennant is at the dip.`,
-    `Flag L flies on ${closedLane}, and the answering pennant is close up after the read-back.${stayOpen}`,
-    `Flag L is hauled down and ${closedLane} is open again. ${allLanes} open.`,
+    `${allLanes} open and no track is muted. Bounces arrive on ${closedLane}.`,
+    `${allLanes} still open. Detection code has approved one lane, and no track is muted yet.`,
+    `The ${closedLane} track is muted, and the read-back confirmed it.${stayOpen}`,
+    `The ${closedLane} track is unmuted and the lane is open again. ${allLanes} open.`,
   ];
 }
 
 // With one lane no other lane is open, so the description names the paused lane as the only one.
 function drawingDescription(closedLane: string, openLanes: readonly string[], held: boolean, pausedAt: string): string {
-  const answered = `the answering pennant is close up after the read-back at ${pausedAt} UTC.`;
-  if (openLanes.length === 0) return `${closedLane}, the only lane from the SES account, flies flag L, and ${answered}`;
-  const open = openLanes.length === 1 ? 'is open and flies no signal' : 'are open and fly no signal';
-  return `${openLanes.join(', ')} ${open}. Flag L flies on ${closedLane}, which is ${held ? 'closed' : 'paused'}, and ${answered}`;
+  const confirmed = `and the read-back at ${pausedAt} UTC confirmed it.`;
+  if (openLanes.length === 0) return `${closedLane}, the only lane from the SES account, is muted: the lane is ${held ? 'closed' : 'paused'}, ${confirmed}`;
+  const open = openLanes.length === 1 ? 'is open, its track not muted' : 'are open, their tracks not muted';
+  return `${openLanes.join(', ')} ${open}. The ${closedLane} track is muted: the lane is ${held ? 'closed' : 'paused'}, ${confirmed}`;
 }
 
 function firstEventTime(events: readonly ReplayEvent[], step: number): string {
@@ -460,7 +462,7 @@ export function buildReplayView(artifact: ReplayArtifact): ReplayView {
       number: 'TAG 001',
     },
     landing: {
-      drawingTitle: `Signal flags on one SES account with ${String(artifact.lanes.length)} sending lanes`,
+      drawingTitle: `One SES account with ${String(artifact.lanes.length)} sending lanes, each lane a track`,
       drawingDescription: drawingDescription(artifact.closedLane, openLanes, held, pausedAt),
     },
     eventLog: {

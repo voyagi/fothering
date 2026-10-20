@@ -1,7 +1,7 @@
-@fontsource-variable/archivo 5.3.0
-==================================
+@fontsource-variable/public-sans 5.3.0
+======================================
 
-Copyright 2020 The Archivo Project Authors (https://github.com/Omnibus-Type/Archivo) Archivo-Italic[wdth,wght].ttf: Copyright 2020 The Archivo Project Authors (https://github.com/Omnibus-Type/Archivo)
+Copyright 2015 The Public Sans Project Authors (https://github.com/uswds/public-sans) PublicSans-Italic[wght].ttf: Copyright 2015 The Public Sans Project Authors (https://github.com/uswds/public-sans)
 
 This Font Software is licensed under the SIL Open Font License, Version 1.1.
 This license is copied below, and is also available with a FAQ at:
@@ -95,10 +95,10 @@ DAMAGES, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
 FROM, OUT OF THE USE OR INABILITY TO USE THE FONT SOFTWARE OR FROM
 OTHER DEALINGS IN THE FONT SOFTWARE.
 
-@fontsource-variable/geist 5.3.0
+@fontsource-variable/saira 5.3.0
 ================================
 
-Copyright 2024 The Geist Project Authors (https://github.com/vercel/geist-font) Geist-Italic[wght].ttf: Copyright 2024 The Geist Project Authors (https://github.com/vercel/geist-font)
+Copyright 2020 The Saira Project Authors (https://github.com/Omnibus-Type/Saira) Saira-Italic[wdth,wght].ttf: Copyright 2020 The Saira Project Authors (https://github.com/Omnibus-Type/Saira)
 
 This Font Software is licensed under the SIL Open Font License, Version 1.1.
 This license is copied below, and is also available with a FAQ at:

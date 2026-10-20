@@ -693,7 +693,7 @@ describe('the theme token blocks rule (AC-39, D-140)', () => {
   });
 
   it('fails dark blocks whose declarations differ', () => {
-    const css = renderTokensCss().replace(`:root[data-theme="dark"] {\n  color-scheme: dark;\n  --ground: #08111D;`, `:root[data-theme="dark"] {\n  color-scheme: dark;\n  --ground: #000000;`);
+    const css = renderTokensCss().replace(/(:root\[data-theme="dark"\] \{\n  color-scheme: dark;\n  --ground: )#[0-9A-F]{6};/, '$1#000000;');
     expect(css).not.toBe(renderTokensCss());
     expect(texts(themeTokenBlocksRule(siteOf(withFile('tokens.css', css)), context))).toEqual(['the dark blocks under the media query and under :root[data-theme="dark"] differ']);
   });

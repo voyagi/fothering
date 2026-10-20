@@ -327,12 +327,12 @@ describe('buildReplayView step contents', () => {
       number: 'TAG 001',
     });
     expect(view.boardDescriptions).toEqual([
-      'All 3 lanes are open and no signal flies. Bounces arrive on fothering-bulk.',
-      'All 3 lanes are still open. Detection code has approved one lane, and the answering pennant is at the dip.',
-      'Flag L flies on fothering-bulk, and the answering pennant is close up after the read-back. fothering-transactional, fothering-alerts stay open.',
-      'Flag L is hauled down and fothering-bulk is open again. All 3 lanes are open.',
+      'All 3 lanes are open and no track is muted. Bounces arrive on fothering-bulk.',
+      'All 3 lanes are still open. Detection code has approved one lane, and no track is muted yet.',
+      'The fothering-bulk track is muted, and the read-back confirmed it. fothering-transactional, fothering-alerts stay open.',
+      'The fothering-bulk track is unmuted and the lane is open again. All 3 lanes are open.',
     ]);
-    expect(view.landing.drawingTitle).toBe('Signal flags on one SES account with 3 sending lanes');
+    expect(view.landing.drawingTitle).toBe('One SES account with 3 sending lanes, each lane a track');
   });
 
   it('words nothing in the generated view as recorded or captured', () => {
@@ -367,14 +367,14 @@ describe('buildReplayView event log', () => {
   it('names no open lane and no flowing lane when the artifact has one lane', () => {
     const view = buildReplayView({ ...shippedArtifact(), lanes: ['fothering-bulk'] });
     expect(view.lanesLines).toEqual({ paused: 'Closed: fothering-bulk. No other lane.', reopened: 'Reopened: fothering-bulk. No other lane.' });
-    expect(view.boardDescriptions[2]).toBe('Flag L flies on fothering-bulk, and the answering pennant is close up after the read-back.');
+    expect(view.boardDescriptions[2]).toBe('The fothering-bulk track is muted, and the read-back confirmed it.');
     expect(view.steps[0]?.paragraphs[0]).toMatch(/came from two domains\.$/);
-    expect(view.landing.drawingDescription).toBe('fothering-bulk, the only lane from the SES account, flies flag L, and the answering pennant is close up after the read-back at 14:03 UTC.');
+    expect(view.landing.drawingDescription).toBe('fothering-bulk, the only lane from the SES account, is muted: the lane is closed, and the read-back at 14:03 UTC confirmed it.');
   });
 
-  it('names the open lanes the landing signal column shows', () => {
+  it('names the open lanes the landing step grid shows', () => {
     expect(buildReplayView(shippedArtifact()).landing.drawingDescription).toBe(
-      'fothering-transactional, fothering-alerts are open and fly no signal. Flag L flies on fothering-bulk, which is closed, and the answering pennant is close up after the read-back at 14:03 UTC.',
+      'fothering-transactional, fothering-alerts are open, their tracks not muted. The fothering-bulk track is muted: the lane is closed, and the read-back at 14:03 UTC confirmed it.',
     );
   });
 
@@ -613,42 +613,42 @@ describe('the delivery sentence follows the delivery events', () => {
   });
 });
 
-// The board and the landing's signal column describe the lanes' state, which their flags stand for,
-// never traffic: a capture that sent only on the paused lane still builds (WR-13).
-describe('the board and signal column descriptions name lane state, not traffic', () => {
+// The board and the landing's step grid describe the lanes' state, which the tracks and their mute
+// keys stand for, never traffic: a capture that sent only on the paused lane still builds (WR-13).
+describe('the board and step grid descriptions name lane state, not traffic', () => {
   const artifact = shippedArtifact();
 
   it('describes three lanes, two of them open', () => {
     const view = buildReplayView(artifact);
     expect(view.boardDescriptions).toEqual([
-      'All 3 lanes are open and no signal flies. Bounces arrive on fothering-bulk.',
-      'All 3 lanes are still open. Detection code has approved one lane, and the answering pennant is at the dip.',
-      'Flag L flies on fothering-bulk, and the answering pennant is close up after the read-back. fothering-transactional, fothering-alerts stay open.',
-      'Flag L is hauled down and fothering-bulk is open again. All 3 lanes are open.',
+      'All 3 lanes are open and no track is muted. Bounces arrive on fothering-bulk.',
+      'All 3 lanes are still open. Detection code has approved one lane, and no track is muted yet.',
+      'The fothering-bulk track is muted, and the read-back confirmed it. fothering-transactional, fothering-alerts stay open.',
+      'The fothering-bulk track is unmuted and the lane is open again. All 3 lanes are open.',
     ]);
-    expect(view.landing.drawingDescription).toBe('fothering-transactional, fothering-alerts are open and fly no signal. Flag L flies on fothering-bulk, which is closed, and the answering pennant is close up after the read-back at 14:03 UTC.');
+    expect(view.landing.drawingDescription).toBe('fothering-transactional, fothering-alerts are open, their tracks not muted. The fothering-bulk track is muted: the lane is closed, and the read-back at 14:03 UTC confirmed it.');
   });
 
   it('describes one open lane in the singular', () => {
     const view = buildReplayView({ ...artifact, lanes: ['fothering-transactional', 'fothering-bulk'] });
     expect(view.boardDescriptions).toEqual([
-      'All 2 lanes are open and no signal flies. Bounces arrive on fothering-bulk.',
-      'All 2 lanes are still open. Detection code has approved one lane, and the answering pennant is at the dip.',
-      'Flag L flies on fothering-bulk, and the answering pennant is close up after the read-back. fothering-transactional stays open.',
-      'Flag L is hauled down and fothering-bulk is open again. All 2 lanes are open.',
+      'All 2 lanes are open and no track is muted. Bounces arrive on fothering-bulk.',
+      'All 2 lanes are still open. Detection code has approved one lane, and no track is muted yet.',
+      'The fothering-bulk track is muted, and the read-back confirmed it. fothering-transactional stays open.',
+      'The fothering-bulk track is unmuted and the lane is open again. All 2 lanes are open.',
     ]);
-    expect(view.landing.drawingDescription).toBe('fothering-transactional is open and flies no signal. Flag L flies on fothering-bulk, which is closed, and the answering pennant is close up after the read-back at 14:03 UTC.');
+    expect(view.landing.drawingDescription).toBe('fothering-transactional is open, its track not muted. The fothering-bulk track is muted: the lane is closed, and the read-back at 14:03 UTC confirmed it.');
   });
 
   it('describes a single lane with no open lane', () => {
     const view = buildReplayView({ ...artifact, lanes: ['fothering-bulk'] });
     expect(view.boardDescriptions).toEqual([
-      'The only lane is open and no signal flies. Bounces arrive on fothering-bulk.',
-      'The only lane is still open. Detection code has approved one lane, and the answering pennant is at the dip.',
-      'Flag L flies on fothering-bulk, and the answering pennant is close up after the read-back.',
-      'Flag L is hauled down and fothering-bulk is open again. The only lane is open.',
+      'The only lane is open and no track is muted. Bounces arrive on fothering-bulk.',
+      'The only lane is still open. Detection code has approved one lane, and no track is muted yet.',
+      'The fothering-bulk track is muted, and the read-back confirmed it.',
+      'The fothering-bulk track is unmuted and the lane is open again. The only lane is open.',
     ]);
-    expect(view.landing.drawingDescription).toBe('fothering-bulk, the only lane from the SES account, flies flag L, and the answering pennant is close up after the read-back at 14:03 UTC.');
+    expect(view.landing.drawingDescription).toBe('fothering-bulk, the only lane from the SES account, is muted: the lane is closed, and the read-back at 14:03 UTC confirmed it.');
   });
 
   it('says nothing flows for a capture with no delivery on any lane', () => {

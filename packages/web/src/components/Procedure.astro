@@ -1,8 +1,9 @@
 ---
-// A procedure is a halyard read from the top, its step numbers set on the line itself, because the
-// steps are a real sequence. The printed number is hidden from assistive technology: the list
-// carries the number. Step text marks code spans with backticks, and each span renders as an
-// identifier; a step's commands come from the README reader, never from here.
+// A procedure is a row of keys read in order, each step's number printed on its key, because the
+// steps are a real sequence. The keys take the banks in order (red, orange, yellow, then white for
+// the fourth step and every one after it). The printed number is hidden from assistive technology:
+// the list carries the number. Step text marks code spans with backticks, and each span renders as
+// an identifier; a step's commands come from the README reader, never from here.
 import { textSegments } from '../site/identifier-text.ts';
 import CommandBlock from './CommandBlock.astro';
 import Identifier from './Identifier.astro';
@@ -28,11 +29,12 @@ interface Props {
 
 const { steps, removal = false } = Astro.props;
 const NO_TERMS = { names: [], values: [] };
+const bankOf = (index: number): string => `bank-${String(Math.min(index + 1, 4))}`;
 ---
 <ol class={removal ? 'procedure removal' : 'procedure'}>
   {steps.map((step, index) => (
     <li>
-      <span class="numeral" aria-hidden="true">{index + 1}</span>
+      <span class={`step-key ${bankOf(index)}`} aria-hidden="true"><span class="numeral">{index + 1}</span></span>
       <div>
         {step.title !== undefined && <h3>{step.title}</h3>}
         <p data-provenance={step.provenance}>{textSegments(step.text, NO_TERMS).map((segment) => (segment.kind === 'text' ? segment.text : <Identifier value={segment.text} />))}</p>

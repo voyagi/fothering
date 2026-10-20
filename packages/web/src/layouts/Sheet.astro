@@ -17,9 +17,9 @@ const THEMES = [
   { value: 'light', label: 'Light' },
   { value: 'dark', label: 'Dark' },
 ];
-// The signal row names the three working pages; the index on the sea at the foot names all five.
-const SIGNAL_PATHS = ['/replay/', '/deploy/', '/privacy-and-ai/'];
-const signalRoutes = SIGNAL_PATHS.map((path) => ROUTES.find((entry) => entry.path === path)).filter((entry) => entry !== undefined);
+// The top strip names the three working pages; the index at the foot names all five.
+const STRIP_PATHS = ['/replay/', '/deploy/', '/privacy-and-ai/'];
+const stripRoutes = STRIP_PATHS.map((path) => ROUTES.find((entry) => entry.path === path)).filter((entry) => entry !== undefined);
 const { provenance } = loadReplayArtifact(process.cwd());
 const status = PROVENANCE_LABELS[provenance].titleBlockStatus;
 const currentMark = (path: string): 'page' | undefined => (path === route.path ? 'page' : undefined);
@@ -41,11 +41,11 @@ const currentMark = (path: string): 'page' | undefined => (path === route.path ?
   </head>
   <body>
     <a class="skip" href="#main">Skip to main content</a>
-    <header class="signal-row">
+    <header class="top-strip">
       <a class="wordmark" href="/">FOTHERING</a>
       <nav aria-label="Main">
         <ul>
-          {signalRoutes.map((entry) => <li><a href={entry.path} aria-current={currentMark(entry.path)}>{entry.label}</a></li>)}
+          {stripRoutes.map((entry) => <li><a href={entry.path} aria-current={currentMark(entry.path)}><span class="lamp" aria-hidden="true"></span>{entry.label}</a></li>)}
         </ul>
       </nav>
       <fieldset class="theme">
@@ -53,7 +53,7 @@ const currentMark = (path: string): 'page' | undefined => (path === route.path ?
         {THEMES.map((theme) => (
           <label>
             <input type="radio" name="theme" value={theme.value} checked={theme.value === 'device'} />
-            <span>{theme.label}</span>
+            <span><span class="lamp" aria-hidden="true"></span><span class="cap" aria-hidden="true"></span>{theme.label}</span>
           </label>
         ))}
       </fieldset>
@@ -61,7 +61,7 @@ const currentMark = (path: string): 'page' | undefined => (path === route.path ?
     <main id="main" tabindex="-1">
       <slot />
     </main>
-    <footer class="index sea">
+    <footer class="index">
       <p class="project">Fothering. Stops one leak without stopping the ship.</p>
       <nav aria-label="Every page">
         <ul>

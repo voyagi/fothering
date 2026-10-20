@@ -63,21 +63,22 @@ describe('the token source and tokens.css (D-140, AC-39, AC-63)', () => {
     expect(page?.index).toBeGreaterThan(blocks().order[2] ?? Number.POSITIVE_INFINITY);
   });
 
-  it('holds the six R14 type tokens, the 58ch measure and the five codified flag hues equal in both themes', () => {
+  it('holds the six R14 type tokens, the 62ch measure, and the four bank hues with their legend ink equal in both themes', () => {
     const statics = new Map(source.static.map((token) => [token.name, token.value]));
     expect(statics.get('--text-small')).toBe('0.9375rem');
     expect(statics.get('--text-mono-value')).toBe('0.8125rem');
     for (const name of ['--text-lede', '--text-intro', '--text-narrative-headline', '--text-schedule-compact']) expect(statics.has(name), name).toBe(true);
-    expect(statics.get('--measure')).toBe('58ch');
-    const flags = source.themed.filter((token) => token.name.startsWith('--flag-'));
-    expect(flags.map((token) => token.name)).toEqual(['--flag-red', '--flag-yellow', '--flag-blue', '--flag-black', '--flag-white']);
-    for (const flag of flags) expect(flag.dark, flag.name).toBe(flag.light);
+    expect(statics.get('--measure')).toBe('62ch');
+    // A key is a physical part: its colour and the legend printed on it hold in both themes.
+    const keys = source.themed.filter((token) => /^--key-(?:red|orange|yellow|white|ink)$/.test(token.name));
+    expect(keys.map((token) => token.name)).toEqual(['--key-red', '--key-orange', '--key-yellow', '--key-white', '--key-ink']);
+    for (const key of keys) expect(key.dark, key.name).toBe(key.light);
   });
 
   it('TOKENS is the parsed tokens.json and themedValue reads one token in one theme', () => {
     expect(TOKENS).toEqual(source);
-    expect(themedValue(TOKENS, '--ground', 'light')).toBe('#FFFFFF');
-    expect(themedValue(TOKENS, '--ground', 'dark')).toBe('#08111D');
+    expect(themedValue(TOKENS, '--ground', 'light')).toBe('#D8D9D5');
+    expect(themedValue(TOKENS, '--ground', 'dark')).toBe('#1C1C1B');
     expect(() => themedValue(TOKENS, '--no-such-token', 'dark')).toThrow('--no-such-token is not a themed token in tokens.json');
   });
 
@@ -255,11 +256,11 @@ describe('HEAD_SCRIPT in node:vm (AC-40, AC-E29, AC-E5, AC-E17)', () => {
   });
 });
 
-// Archivo ships its width axis, so its faces come from wdth.css (which carries font-stretch); the
+// Saira ships its width axis, so its faces come from wdth.css (which carries font-stretch); the
 // other two from wght.css.
 const FACE_PACKAGES = [
-  { name: 'archivo', family: 'Archivo', css: 'wdth.css' },
-  { name: 'geist', family: 'Geist', css: 'wght.css' },
+  { name: 'saira', family: 'Saira', css: 'wdth.css' },
+  { name: 'public-sans', family: 'Public Sans', css: 'wght.css' },
   { name: 'source-code-pro', family: 'Source Code Pro', css: 'wght.css' },
 ] as const;
 // Only the latin and latin-ext normal files ship; the packages also install cyrillic, greek and
@@ -314,7 +315,7 @@ describe('the self-hosted faces (D-134, AC-59)', () => {
     expect(ours().map((rule) => fileName(rule.url)).sort()).toEqual([...installed.keys()].sort());
   });
 
-  it('names each family exactly Archivo, Geist or Source Code Pro, with font-display swap', () => {
+  it('names each family exactly Saira, Public Sans or Source Code Pro, with font-display swap', () => {
     const installed = installedFaces();
     const rules = ours();
     expect(rules.length).toBeGreaterThan(0);
@@ -328,7 +329,7 @@ describe('the self-hosted faces (D-134, AC-59)', () => {
     const installed = installedFaces();
     const rules = ours();
     expect(rules.length).toBeGreaterThan(0);
-    // Archivo's width axis rides on font-stretch, so a rule that lost it would set every width at 100%.
+    // Saira's width axis rides on font-stretch, so a rule that lost it would set every width at 100%.
     expect(rules.filter((rule) => rule.descriptors.has('font-stretch')).length).toBe(2);
     for (const rule of rules) {
       const source = installed.get(fileName(rule.url))?.rule;

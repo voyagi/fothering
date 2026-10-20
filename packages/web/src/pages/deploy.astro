@@ -65,22 +65,24 @@ const NO_TERMS = { names: [], values: [] };
 const intro = textSegments(fillRegion(DEPLOY_COPY.intro, region), NO_TERMS);
 ---
 <Sheet route={routeFor('/deploy/')}>
-  <section class="first-band" aria-labelledby="deploy-title">
+  <section class="first-band solo" aria-labelledby="deploy-title">
     <div class="claim">
       <h1 id="deploy-title">{DEPLOY_COPY.h1}</h1>
       <p class="intro">{intro.map((segment) => (segment.kind === 'text' ? segment.text : <Identifier value={segment.text} />))}</p>
       {!hasPauseGrant(snapshot) && <NoticeBox label={NOT_YET_NOTICE.label} text={NOT_YET_NOTICE.text} />}
-      <h2 id="steps-title">{DEPLOY_COPY.stepsHeading}</h2>
-      <p>{DEPLOY_COPY.stepsHead}</p>
     </div>
-    <div class="sea sea-col" role="group" aria-labelledby="steps-title">
+    <div class="steps-block" role="group" aria-labelledby="steps-title">
+      <div class="steps-head">
+        <h2 id="steps-title">{DEPLOY_COPY.stepsHeading}</h2>
+        <p>{DEPLOY_COPY.stepsHead}</p>
+      </div>
       <Procedure steps={steps} />
     </div>
   </section>
 
   <section class="band fit-resources" aria-labelledby="resources-title">
     <div class="band-head">
-      <h2 id="resources-title">{DEPLOY_COPY.resourcesHeading}</h2>
+      <h2 id="resources-title" class="keycap bank-1">{DEPLOY_COPY.resourcesHeading}</h2>
       <p>{DEPLOY_COPY.resourcesHead}</p>
     </div>
     <Schedule fit columns={RESOURCE_COLUMNS} rows={resources} caption={fillRegion(DEPLOY_COPY.resourcesCaption, region)} />
@@ -88,7 +90,7 @@ const intro = textSegments(fillRegion(DEPLOY_COPY.intro, region), NO_TERMS);
 
   <section class="band fit-permissions" aria-labelledby="permissions-title">
     <div class="band-head">
-      <h2 id="permissions-title">{DEPLOY_COPY.permissionsHeading}</h2>
+      <h2 id="permissions-title" class="keycap bank-2">{DEPLOY_COPY.permissionsHeading}</h2>
       <p>{DEPLOY_COPY.permissionsHead}</p>
     </div>
     <div class="roles">
@@ -116,7 +118,7 @@ const intro = textSegments(fillRegion(DEPLOY_COPY.intro, region), NO_TERMS);
 
   <section class="band" aria-labelledby="removal-title">
     <div class="band-head">
-      <h2 id="removal-title">{DEPLOY_COPY.removalHeading}</h2>
+      <h2 id="removal-title" class="keycap bank-3">{DEPLOY_COPY.removalHeading}</h2>
       <p>{DEPLOY_COPY.removalHead}</p>
     </div>
     <Procedure steps={removal} removal />

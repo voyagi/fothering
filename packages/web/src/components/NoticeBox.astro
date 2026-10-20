@@ -1,9 +1,6 @@
 ---
-// A notice is marked by the answering pennant at the dip: seen, not yet answered, the way what is not
-// built yet waits. The run-in label is read before the sentence, so the notice never passes as an
-// ordinary paragraph.
-import Flag from './Flag.astro';
-
+// A notice is marked by an unlit lamp: what it names is not on yet. The run-in label is read before
+// the sentence, so the notice never passes as an ordinary paragraph.
 interface Props {
   label: string;
   text: string;
@@ -12,6 +9,6 @@ interface Props {
 const { label, text } = Astro.props;
 ---
 <div class="notice" role="note" data-notice>
-  <span class="dip" aria-hidden="true"><Flag code="answer" /></span>
+  <span class="lamp" aria-hidden="true"></span>
   <p><b>{label}</b> {text}</p>
 </div>
