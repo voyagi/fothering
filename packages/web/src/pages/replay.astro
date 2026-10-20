@@ -1,6 +1,6 @@
 ---
 import CommandBlock from '../components/CommandBlock.astro';
-import Flag, { type FlagCode } from '../components/Flag.astro';
+import Flag from '../components/Flag.astro';
 import Identifier from '../components/Identifier.astro';
 import Message from '../components/Message.astro';
 import Schedule from '../components/Schedule.astro';
@@ -23,7 +23,6 @@ const held = artifact.holdCheck?.result === 'passed';
 const segmentsOf = (text: string): Segment[] => textSegments(text, view.identifierTerms);
 const faceOf = (segment: Segment): 'mono' | 'inherit' => (segment.kind === 'name' ? 'inherit' : 'mono');
 const clock = (step: { number: number; time: string }): string => `Step ${String(step.number)} of ${String(STEP_COUNT)}, ${step.time} UTC`;
-const numeral = (step: number): FlagCode => String(step) as FlagCode;
 
 // The view writes the read-back as "<field>: <value>, <time> UTC"; only the field is an identifier.
 // The reopen read the same field back, so its line is built from the same field.
@@ -125,7 +124,7 @@ const logRows = view.eventLog.rows.map((row) => ({
         {view.steps.map((step) => (
           <li>
             <button type="button" class="step" data-replay-goto={String(step.number)} data-clock={clock(step)} aria-current={step.number === 1 ? 'step' : undefined}>
-              <Flag code={numeral(step.number)} />
+              <span class="numeral" aria-hidden="true">{step.number}</span>
               <span class="t">{step.time}</span>
               <span class="step-label">{step.label}</span>
             </button>

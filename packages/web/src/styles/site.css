@@ -144,7 +144,7 @@ code { font-size: var(--text-mono-value); font-weight: 500; }
    control that does nothing. */
 :root:not(.js) .theme { display: none; }
 
-/* Flags. Every flag is a drawn image with its letter or number and its meaning printed beside it;
+/* Flags. Every flag is a drawn image with its letter or name and its meaning printed beside it;
    the codified colours hold in both themes. */
 .flag { display: block; flex: none; block-size: auto; overflow: visible; }
 .f-red { fill: var(--flag-red); }
@@ -248,23 +248,21 @@ code { font-size: var(--text-mono-value); font-weight: 500; }
 .band-intro { position: sticky; top: var(--space-lg); display: grid; gap: var(--space-md); }
 .band-intro p { margin: 0; color: var(--ink-2); }
 
-/* A procedure is a hoist read from the top: one numeral pennant per real step, its number printed
-   beside it (the ol carries the number for assistive technology). On the ground the halyard is ink;
-   on the sea the column's own halyard carries it. */
-ol.procedure { position: relative; display: grid; gap: var(--space-xl); margin: 0; padding: 0 0 0 var(--halyard-w); list-style: none; container-type: inline-size; }
-ol.procedure::before { content: ""; position: absolute; inset-block: 0; left: 0; width: var(--halyard-w); background: var(--ink); }
-.sea ol.procedure { margin-left: calc(var(--halyard-w) - var(--hoist-gap)); padding-left: 0; }
+/* A procedure is a halyard read from the top. Each real step's number is set on the line itself and
+   the line breaks around it, as a halyard runs behind what it carries; the ol carries the number for
+   assistive technology. On the ground the halyard is ink. On the sea the column's own halyard
+   carries the numbers, centred on it. The number column never reaches past the sea's left edge. */
+ol.procedure { --mark-col: min(48px, calc(var(--halyard-x) * 2 - 4px)); position: relative; display: grid; gap: var(--space-xl); margin: 0; padding: 0; list-style: none; }
+ol.procedure::before { content: ""; position: absolute; inset-block: 0; left: calc(var(--mark-col) / 2 - var(--halyard-w) / 2); width: var(--halyard-w); background: var(--ink); }
+.sea ol.procedure { margin-left: calc(var(--halyard-w) / 2 - var(--hoist-gap) - var(--mark-col) / 2); }
 .sea ol.procedure::before { content: none; }
-.procedure li { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: var(--space-lg); align-items: start; max-inline-size: none; }
-.pennant-n { display: flex; align-items: center; gap: var(--space-12); }
-.pennant-n .flag { inline-size: min(120px, 24cqi); }
-.numeral { min-inline-size: 1ch; font: 800 var(--text-numeral)/1 var(--font-signal); font-stretch: 112%; }
+.procedure li { display: grid; grid-template-columns: var(--mark-col) minmax(0, 1fr); gap: var(--space-lg); align-items: baseline; max-inline-size: none; }
+.numeral { font: 800 var(--text-numeral)/1 var(--font-signal); font-stretch: 112%; }
+.procedure .numeral { position: relative; z-index: 1; padding-block: var(--space-sm); background: var(--ground); text-align: center; }
+.sea .procedure .numeral { background: var(--sea); }
 .procedure h3 { margin-bottom: var(--space-xs); }
 .procedure p { margin: 0; font-size: var(--text-small); line-height: 1.5; color: var(--ink-2); }
 .sea .procedure p { color: var(--on-sea-2); }
-@container (width < 480px) {
-  .procedure li { grid-template-columns: minmax(0, 1fr); gap: var(--space-sm); }
-}
 
 /* A command as a reader would paste it: on the ground a sea tint, on the sea the ground. */
 pre.command { margin: var(--space-12) 0 0; padding: var(--space-12) var(--space-md); background: var(--sea-tint); color: var(--ink); white-space: pre-wrap; overflow-wrap: anywhere; font: 500 var(--text-mono-value)/1.5 var(--font-mono); font-feature-settings: "tnum" 1; }
@@ -377,13 +375,13 @@ ol.summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); ma
 .summary li + li { padding-left: var(--space-md); border-left: var(--w-rule) solid var(--rule); }
 .summary time { display: block; font: 600 var(--text-mono-value)/1.4 var(--font-mono); font-feature-settings: "tnum" 1; color: var(--label); }
 
-/* The step strip: a numeral pennant per step, the current one at full strength and the others a
-   value step down, the current label bold over the bar. */
+/* The step strip: each step's number, the current one in ink and the others a value step down, the
+   current label bold over the bar. */
 ol.steps { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--space-sm); margin: 0; padding: 0; list-style: none; border-bottom: var(--w-rule) solid var(--rule); }
 .steps li { max-inline-size: none; }
 .steps .step { display: flex; flex-direction: column; align-items: flex-start; gap: var(--space-sm); inline-size: 100%; min-block-size: 44px; padding: var(--space-md) var(--space-sm) var(--space-md) 0; border: 0; background: none; color: var(--ink); font: 400 var(--text-small)/1.3 var(--font-signal); text-align: left; cursor: pointer; }
-.steps .flag { inline-size: 64px; opacity: 0.5; }
-.steps .step[aria-current="step"] .flag { opacity: 1; }
+.steps .numeral { color: var(--label); }
+.steps .step[aria-current="step"] .numeral { color: var(--ink); }
 .steps .step:hover .step-label { text-decoration: underline 1px; text-underline-offset: 6px; }
 .steps .step[aria-current="step"] .step-label { font-weight: 700; text-decoration: underline 3px var(--underbar); text-underline-offset: 6px; }
 .steps .t { font: 500 var(--text-label)/1 var(--font-mono); font-feature-settings: "tnum" 1; color: var(--label); }
@@ -620,8 +618,6 @@ ul.site { display: grid; gap: var(--space-12); margin: 0; padding-left: var(--sp
 /* The key on the accessibility page: every flag the site flies, with its letter and meaning. */
 .key { display: grid; gap: var(--space-lg); margin: 0; padding: 0; list-style: none; }
 .key li { max-inline-size: none; }
-.key .row-of-pennants { display: flex; flex-wrap: wrap; gap: var(--space-sm); }
-.key .row-of-pennants .flag { inline-size: min(64px, 14cqi); }
 
 @media (max-width: 960px) {
   .first-band, .replay { grid-template-columns: minmax(0, 1fr); min-block-size: 0; }

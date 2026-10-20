@@ -1,11 +1,10 @@
 ---
-// A procedure is a run of numeral pennants on a halyard, one per step, because the steps are a real
-// sequence. The pennant and its printed numeral are hidden from assistive technology: the list
+// A procedure is a halyard read from the top, its step numbers set on the line itself, because the
+// steps are a real sequence. The printed number is hidden from assistive technology: the list
 // carries the number. Step text marks code spans with backticks, and each span renders as an
 // identifier; a step's commands come from the README reader, never from here.
 import { textSegments } from '../site/identifier-text.ts';
 import CommandBlock from './CommandBlock.astro';
-import Flag, { type FlagCode } from './Flag.astro';
 import Identifier from './Identifier.astro';
 
 interface Command {
@@ -29,17 +28,11 @@ interface Props {
 
 const { steps, removal = false } = Astro.props;
 const NO_TERMS = { names: [], values: [] };
-// Numeral pennants run 0 to 9, so a procedure longer than nine steps cannot be flown.
-if (steps.length > 9) throw new Error(`Procedure: ${String(steps.length)} steps, and numeral pennants fly 1 to 9 only. Split the procedure.`);
-const numeral = (index: number): FlagCode => String(index + 1) as FlagCode;
 ---
 <ol class={removal ? 'procedure removal' : 'procedure'}>
   {steps.map((step, index) => (
     <li>
-      <div class="pennant-n" aria-hidden="true">
-        <Flag code={numeral(index)} />
-        <span class="numeral">{index + 1}</span>
-      </div>
+      <span class="numeral" aria-hidden="true">{index + 1}</span>
       <div>
         {step.title !== undefined && <h3>{step.title}</h3>}
         <p data-provenance={step.provenance}>{textSegments(step.text, NO_TERMS).map((segment) => (segment.kind === 'text' ? segment.text : <Identifier value={segment.text} />))}</p>

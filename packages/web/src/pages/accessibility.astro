@@ -1,5 +1,5 @@
 ---
-import Flag, { type FlagCode } from '../components/Flag.astro';
+import Flag from '../components/Flag.astro';
 import Schedule from '../components/Schedule.astro';
 import Sheet from '../layouts/Sheet.astro';
 import { ACCESSIBILITY_RECORD, handCheckRows } from '../site/content.ts';
@@ -21,8 +21,6 @@ const recordRows = [
 ];
 
 const criterionRows = handCheckRows();
-// The procedures fly numeral pennants 1 to 5: the deploy page's five steps are the longest run.
-const NUMERALS: readonly FlagCode[] = ['1', '2', '3', '4', '5'];
 ---
 <Sheet route={routeFor('/accessibility/')}>
   <section class="first-band" aria-labelledby="page-title">
@@ -51,13 +49,6 @@ const NUMERALS: readonly FlagCode[] = ['1', '2', '3', '4', '5'];
           <div class="decode">
             <p class="k">Answering pennant, at the dip</p>
             <p class="v">Seen, not yet understood.</p>
-          </div>
-        </li>
-        <li>
-          <div class="row-of-pennants">{NUMERALS.map((numeral) => <Flag code={numeral} />)}</div>
-          <div class="decode">
-            <p class="k">Numeral pennants 1 to 5</p>
-            <p class="v">They number the steps of a procedure, read from the top.</p>
           </div>
         </li>
       </ul>
