@@ -130,7 +130,9 @@ export const DEPLOY_COPY = Object.freeze({
   stepsHeading: 'Five steps, one template',
   stepsHead: 'The deploy is one CDK app. Building it is free and offline, so you can read the CloudFormation it produces before anything is created.',
   resourcesHeading: 'What the template creates',
-  resourcesHead: 'Nothing outside this list. Each row comes from the synthesized templates, with what removal does to it.',
+  // One clause per NOT_LISTED type in resources-view.ts; deploy.test.ts fails when that map changes.
+  resourcesHead:
+    "Each row comes from the synthesized templates, with what removal does to it. Three kinds of attachment have no row of their own: the policies attached to the roles (the permissions table lists every grant they hold), each function's retry setting for the events that invoke it, and the grants that let an event rule invoke its function. Nothing else is left out.",
   resourcesCaption: 'Resource schedule, `{region}`, generated from packages/infra/resources.json.',
   permissionsHeading: 'Every permission, and why',
   permissionsHead: 'Listed per role, generated from the committed permissions snapshot, which the test suite compares with the synthesized templates both ways. If a role in the template you deploy holds anything not listed here, do not deploy it.',
@@ -170,7 +172,13 @@ export const DEPLOY_STEPS: readonly DeployStepCopy[] = Object.freeze([
     uses: [],
   },
   { title: 'Build and read the template', text: 'This writes the CloudFormation templates into `cdk.out`. Read their IAM statements against the tables below.', uses: ['build'] },
-  { title: 'Deploy with the switch off', text: 'The stacks start in dry run: they read and store events and log what they would do.', uses: ['bootstrap', 'deploy'] },
+  // CDK also reads context from these three files (CDK guide, context values), so a key left there
+  // turns this deploy live with no flag on the line.
+  {
+    title: 'Deploy with the switch off',
+    text: 'The stacks start in dry run: they read and store events and log what they would do. A `fothering:live` key left in `cdk.json`, `cdk.context.json` or `~/.cdk.json` would switch them on, so check that none of the three holds one.',
+    uses: ['bootstrap', 'deploy'],
+  },
   { title: 'Turn the switch on', text: 'Only after a dry-run week you are happy with.', uses: ['go-live'] },
 ]);
 

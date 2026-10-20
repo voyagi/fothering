@@ -337,9 +337,20 @@ describe('initFlowSwitch (AC-43 and AC-E31 unit half, D-141)', () => {
 class StandIn extends Target {
   readonly attrs = new Map<string, string>();
   readonly writes: string[] = [];
-  disabled = false;
   textContent: string | null = '';
   isContentEditable = false;
+  // Set, this control drops focus the moment it is disabled, as a browser may.
+  blursWhenDisabled = false;
+  private isDisabled = false;
+
+  get disabled(): boolean {
+    return this.isDisabled;
+  }
+
+  set disabled(value: boolean) {
+    this.isDisabled = value;
+    if (value && this.blursWhenDisabled && this.owner.activeElement === this) this.owner.activeElement = null;
+  }
 
   constructor(readonly owner: { activeElement: unknown }, attrs: Readonly<Record<string, string>> = {}, readonly within: readonly string[] = []) {
     super();
@@ -373,6 +384,7 @@ class StandIn extends Target {
 interface ReplayOptions {
   readonly dataStep?: string;
   readonly hash?: string;
+  readonly blurOnDisable?: boolean;
 }
 
 // A replay page reduced to what replay.ts touches: the root's data-step, the two controls, the four
@@ -383,6 +395,8 @@ function makeReplay(options: ReplayOptions = {}) {
   const root = new StandIn(owner, options.dataStep === undefined ? {} : { 'data-step': options.dataStep });
   const previous = new StandIn(owner, { 'data-replay-previous': '' });
   const next = new StandIn(owner, { 'data-replay-next': '' });
+  previous.blursWhenDisabled = options.blurOnDisable === true;
+  next.blursWhenDisabled = options.blurOnDisable === true;
   const steps = [1, 2, 3, 4].map((step) => new StandIn(owner, { 'data-replay-goto': String(step), 'data-clock': `Step ${String(step)} of 4, 14:0${String(step)} UTC` }));
   const clock = new StandIn(owner, { 'data-replay-clock': '' });
   const desc = new StandIn(owner, Object.fromEntries([1, 2, 3, 4].map((step) => [`data-desc-${String(step)}`, `board at step ${String(step)}`])));
@@ -466,6 +480,20 @@ describe('initReplay (AC-4, AC-7, AC-10, AC-E5, AC-E6, AC-E30)', () => {
     initReplay(replay.deps);
     replay.next.focus();
     replay.next.dispatch('click');
+    expect(replay.owner.activeElement).toBe(replay.previous);
+    replay.steps[1]?.dispatch('click');
+    replay.previous.focus();
+    replay.previous.dispatch('click');
+    expect(replay.shown()).toBe('1');
+    expect(replay.owner.activeElement).toBe(replay.next);
+  });
+
+  it('moves focus to the other control even where disabling the focused control drops its focus', () => {
+    const replay = makeReplay({ dataStep: '3', blurOnDisable: true });
+    initReplay(replay.deps);
+    replay.next.focus();
+    replay.next.dispatch('click');
+    expect(replay.next.disabled).toBe(true);
     expect(replay.owner.activeElement).toBe(replay.previous);
     replay.steps[1]?.dispatch('click');
     replay.previous.focus();

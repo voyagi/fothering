@@ -11,7 +11,7 @@ import {
   permissionSchedules,
   runtimeRoleHoldsNoDataAction,
 } from './permissions-view.js';
-import { DEPLOY_STEPS, REMOVAL_STEP_TEXTS } from './content.js';
+import { DEPLOY_COPY, DEPLOY_STEPS, REMOVAL_STEP_TEXTS } from './content.js';
 import {
   deploySteps,
   isOfferedCommand,
@@ -117,6 +117,14 @@ describe('the resource schedule', () => {
 
   it('gives every not-listed type a reason', () => {
     for (const reason of Object.values(NOT_LISTED)) expect(reason.trim()).not.toBe('');
+  });
+
+  // The schedule's heading names each left-out kind in words; a type added to or dropped from the
+  // map fails here until that sentence is reworded to match.
+  it('names the three left-out kinds in the schedule heading', () => {
+    expect(Object.keys(NOT_LISTED)).toEqual(['AWS::IAM::Policy', 'AWS::Lambda::EventInvokeConfig', 'AWS::Lambda::Permission']);
+    expect(DEPLOY_COPY.resourcesHead).toContain('Three kinds of attachment have no row of their own');
+    expect(DEPLOY_COPY.resourcesHead).not.toMatch(/Nothing outside this list/);
   });
 
   it('returns one row per listed resource of the committed snapshot, in snapshot order', () => {
@@ -518,6 +526,24 @@ describe('the deploy steps', () => {
     });
     expect(steps[3]?.commands.map(({ command }) => command)).toEqual(['npx cdk bootstrap', 'npx cdk deploy --all']);
     expect(steps[4]?.commands.map(({ command }) => command)).toEqual(['npx cdk deploy --all --context=fothering:live=live']);
+  });
+
+  // Only fothering:live=live turns the stacks on (live-switch.ts); any other context leaves a deploy.
+  it('files a deploy whose context does not turn the switch on under the deploy step, never the go-live step', () => {
+    const lines = (commands: readonly string[]) => commands.map((command) => ({ command, note: null }));
+    for (const plain of ['npx cdk deploy --all -c fothering:trial=1', 'npx cdk deploy --all --context=fothering:live=off', 'npx cdk deploy --all -c fothering:live=LIVE']) {
+      const steps = deploySteps({ deployCommands: lines(['npm run build', 'npx cdk bootstrap', plain, 'npx cdk deploy --all -c fothering:live=live']), region: 'xx-planted-9' });
+      expect(steps[3]?.commands.map(({ command }) => command), plain).toEqual(['npx cdk bootstrap', plain]);
+      expect(steps[4]?.commands.map(({ command }) => command), plain).toEqual(['npx cdk deploy --all -c fothering:live=live']);
+    }
+  });
+
+  it('refuses a cdk line that sets the live switch twice', () => {
+    const lines = (commands: readonly string[]) => commands.map((command) => ({ command, note: null }));
+    const twice = 'npx cdk deploy --all -c fothering:live=live --context=fothering:live=off';
+    expect(() => deploySteps({ deployCommands: lines(['npm run build', 'npx cdk bootstrap', 'npx cdk deploy --all', twice]), region: 'xx-planted-9' })).toThrow(
+      /^README\.md: Deploy and remove: "npx cdk deploy --all -c fothering:live=live --context=fothering:live=off" sets fothering:live 2 times, /,
+    );
   });
 
   it('shows only commands the README or package.json offers', () => {

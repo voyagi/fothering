@@ -186,16 +186,43 @@ export interface RemovalStep {
   commands: DeployCommand[];
 }
 
+// The deployed stacks go live only when the context key is exactly this value (live-switch.ts).
+const LIVE_KEY = 'fothering:live';
+const LIVE_VALUE = 'live';
+
+// The value a cdk line gives the live switch, read from a context flag spaced from its value (-c k=v,
+// --context k=v) or joined to it (--context=k=v), the forms stackScope reads. The CDK guide does not
+// say which of two values for one key wins, so a line that sets the key twice is refused.
+function liveSwitchValue(command: string): string | undefined {
+  const words = command.split(/\s+/);
+  const values: string[] = [];
+  for (let index = 0; index < words.length; index += 1) {
+    const word = words[index] ?? '';
+    let assignment: string | undefined;
+    if (word === '-c' || word === '--context') {
+      index += 1;
+      assignment = words[index];
+    } else if (word.startsWith('--context=')) assignment = word.slice('--context='.length);
+    if (assignment?.startsWith(`${LIVE_KEY}=`) === true) values.push(assignment.slice(LIVE_KEY.length + 1));
+  }
+  if (values.length > 1) {
+    throw new Error(`${README_PREFIX}: "${command}" sets ${LIVE_KEY} ${String(values.length)} times, and the deploy sheet cannot tell which one CDK keeps. Set it once.`);
+  }
+  return values[0];
+}
+
+const DEPLOY_LINE = /^npx cdk deploy\b/;
+const isGoLive = (command: string): boolean => DEPLOY_LINE.test(command) && liveSwitchValue(command) === LIVE_VALUE;
+
 // What a README line does, read from its CDK verb, so a step shows whichever line the README holds
-// for it (a later README that names the stacks instead of --all still lands on the same step).
-// A context flag spaced from its value (-c k=v, --context k=v) or joined to it (--context=k=v), the
-// forms stackScope reads.
-const CONTEXT_FLAG = String.raw`\s(?:(?:-c|--context)\s|--context=)`;
-const COMMAND_USES: Readonly<Record<DeployCommandUse, RegExp>> = {
+// for it (a later README that names the stacks instead of --all still lands on the same step). A
+// deploy goes to the go-live step only when it turns the switch on: any other context it passes
+// leaves it a plain deploy.
+const COMMAND_USES: Readonly<Record<DeployCommandUse, { test(command: string): boolean }>> = {
   'build': /^npm run build$/,
   'bootstrap': /^npx cdk bootstrap\b/,
-  'deploy': new RegExp(String.raw`^npx cdk deploy\b(?!.*${CONTEXT_FLAG})`),
-  'go-live': new RegExp(String.raw`^npx cdk deploy\b.*${CONTEXT_FLAG}`),
+  'deploy': { test: (command) => DEPLOY_LINE.test(command) && !isGoLive(command) },
+  'go-live': { test: isGoLive },
   'destroy': /^npx cdk destroy\b/,
 };
 

@@ -35,10 +35,11 @@ function ownsArrowKeys(target: EventTarget | null): boolean {
   return typeof element.closest === 'function' && element.closest(OWNS_ARROWS) !== null;
 }
 
-function keepFocus(doc: Document, previous: HTMLButtonElement | null, next: HTMLButtonElement | null): void {
-  const active = doc.activeElement;
-  if (active === previous && previous?.disabled === true) next?.focus();
-  else if (active === next && next?.disabled === true) previous?.focus();
+// `focused` is read before either control is disabled: a browser may drop focus from a control the
+// moment it becomes disabled, and activeElement read after that names the body instead.
+function keepFocus(focused: Element | null, previous: HTMLButtonElement | null, next: HTMLButtonElement | null): void {
+  if (focused === previous && previous?.disabled === true) next?.focus();
+  else if (focused === next && next?.disabled === true) previous?.focus();
 }
 
 // Visibility is CSS only: the panels, board parts and log rows carry their steps and the stylesheet
@@ -61,9 +62,10 @@ export function initReplay(deps: ReplayDeps): void {
       if (button.getAttribute('data-replay-goto') === digit) button.setAttribute('aria-current', 'step');
       else button.removeAttribute('aria-current');
     }
+    const focused = doc.activeElement;
     if (previous !== null) previous.disabled = step === FIRST;
     if (next !== null) next.disabled = step === LAST;
-    keepFocus(doc, previous, next);
+    keepFocus(focused, previous, next);
     const clockText = gotos.find((button) => button.getAttribute('data-replay-goto') === digit)?.getAttribute('data-clock');
     if (clock !== null && clockText !== null && clockText !== undefined) clock.textContent = clockText;
     for (const description of descriptions) {
