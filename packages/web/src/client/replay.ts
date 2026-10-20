@@ -84,8 +84,12 @@ export function initReplay(deps: ReplayDeps): void {
   for (const button of gotos) {
     button.addEventListener('click', () => go(parseStep(`#step-${button.getAttribute('data-replay-goto') ?? ''}`)));
   }
+  // A hash naming an element on the page is an in-page link (the skip link, the sheet index link)
+  // and leaves the step where it is; any other hash that is not a step address shows step 1.
   deps.window.addEventListener('hashchange', () => {
-    const step = parseStep(deps.location.hash);
+    const hash = deps.location.hash;
+    if (!STEP_HASH.test(hash) && hash.length > 1 && doc.getElementById(hash.slice(1)) !== null) return;
+    const step = parseStep(hash);
     if (step !== shown) render(step);
   });
   doc.addEventListener('keydown', (event: KeyboardEvent) => {

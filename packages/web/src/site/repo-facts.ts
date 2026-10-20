@@ -98,7 +98,8 @@ function joinContinuations(lines: readonly string[]): string[] {
   let pending: string | undefined;
   for (const line of lines) {
     const text = pending === undefined ? line : `${pending} ${line.trim()}`;
-    const continued = /\s*\\$/.exec(text);
+    // A backslash inside a comment is comment text to the shell, never a continuation.
+    const continued = /(?:^|\s)#/.test(text) ? null : /\s*\\$/.exec(text);
     pending = continued ? text.slice(0, continued.index) : undefined;
     if (!continued) joined.push(text);
   }
@@ -177,11 +178,14 @@ export interface RemovalStep {
 
 // What a README line does, read from its CDK verb, so a step shows whichever line the README holds
 // for it (a later README that names the stacks instead of --all still lands on the same step).
+// A context flag spaced from its value (-c k=v, --context k=v) or joined to it (--context=k=v), the
+// forms stackScope reads.
+const CONTEXT_FLAG = String.raw`\s(?:(?:-c|--context)\s|--context=)`;
 const COMMAND_USES: Readonly<Record<DeployCommandUse, RegExp>> = {
   'build': /^npm run build$/,
   'bootstrap': /^npx cdk bootstrap\b/,
-  'deploy': /^npx cdk deploy\b(?!.*\s(?:-c|--context)\s)/,
-  'go-live': /^npx cdk deploy\b.*\s(?:-c|--context)\s/,
+  'deploy': new RegExp(String.raw`^npx cdk deploy\b(?!.*${CONTEXT_FLAG})`),
+  'go-live': new RegExp(String.raw`^npx cdk deploy\b.*${CONTEXT_FLAG}`),
   'destroy': /^npx cdk destroy\b/,
 };
 

@@ -331,6 +331,14 @@ describe('the README deploy commands', () => {
     expect(() => readDeployCommands('## Deploy and remove\n\n```sh\naws planted run \\\n```\n')).toThrow(/ends in a backslash/);
   });
 
+  it('reads a backslash at the end of a comment as comment text, the way the shell does', () => {
+    const section = '## Deploy and remove\n\n```sh\nnpx cdk bootstrap  # once \\\n# a note \\\nnpm run build\n```\n';
+    expect(readDeployCommands(section)).toEqual([
+      { command: 'npx cdk bootstrap', note: 'once \\' },
+      { command: 'npm run build', note: null },
+    ]);
+  });
+
   it('throws when the Deploy and remove section is missing', () => {
     expect(() => readDeployCommands(readme.replace('## Deploy and remove', '## Install'))).toThrow(/^README\.md: Deploy and remove: section not found/);
   });
@@ -491,6 +499,16 @@ describe('the deploy steps', () => {
     );
     const steps = deploySteps({ deployCommands: lines([...base, 'npx cdk deploy A B', 'npx cdk deploy B --context=fothering:trial=1']), region: 'xx-planted-9' });
     expect(steps[3]?.commands.map(({ command }) => command)).toEqual(['npx cdk bootstrap', 'npx cdk deploy A B']);
+  });
+
+  it('files a go-live line written with --context= under the go-live step, never the deploy step', () => {
+    const lines = (commands: readonly string[]) => commands.map((command) => ({ command, note: null }));
+    const steps = deploySteps({
+      deployCommands: lines(['npm run build', 'npx cdk bootstrap', 'npx cdk deploy --all', 'npx cdk deploy --all --context=fothering:live=live']),
+      region: 'xx-planted-9',
+    });
+    expect(steps[3]?.commands.map(({ command }) => command)).toEqual(['npx cdk bootstrap', 'npx cdk deploy --all']);
+    expect(steps[4]?.commands.map(({ command }) => command)).toEqual(['npx cdk deploy --all --context=fothering:live=live']);
   });
 
   it('shows only commands the README or package.json offers', () => {

@@ -394,6 +394,8 @@ function makeReplay(options: ReplayOptions = {}) {
   const doc = Object.assign(new Target(), owner, {
     documentElement: root,
     readyState: 'interactive',
+    // The in-page targets every sheet holds: the skip link's and the sheet index link's.
+    getElementById: (id: string): StandIn | null => (id === 'main' || id === 'index' ? root : null),
     querySelector: (selector: string): StandIn | null => single[selector] ?? null,
     querySelectorAll: (selector: string): StandIn[] => {
       if (selector === 'button[data-replay-goto]') return steps;
@@ -512,6 +514,19 @@ describe('initReplay (AC-4, AC-7, AC-10, AC-E5, AC-E6, AC-E30)', () => {
     replay.win.dispatch('hashchange');
     expect(replay.shown()).toBe('1');
     expect(replay.calls).toEqual([]);
+  });
+
+  it('keeps the shown step when the skip link or the sheet index link changes the hash, and a hash naming nothing shows step 1', () => {
+    const replay = makeReplay({ dataStep: '3', hash: '#step-3' });
+    initReplay(replay.deps);
+    for (const hash of ['#main', '#index']) {
+      replay.location.hash = hash;
+      replay.win.dispatch('hashchange');
+      expect(replay.shown()).toBe('3');
+    }
+    replay.location.hash = '#nowhere';
+    replay.win.dispatch('hashchange');
+    expect(replay.shown()).toBe('1');
   });
 
   it('Next, Previous and the step buttons replace the history entry with the digit only and never push one', () => {
