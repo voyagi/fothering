@@ -1540,7 +1540,7 @@ describe('the privacy statements rule (AC-19, AC-E14)', () => {
     expect(privacyTexts(privacyStatementsRule, privacyBody())).toEqual([]);
   });
 
-  it.each(['event-region', 'model-requests', 'keyed-hash', 'retention', 'dead-letter', 'logs', 'forget', 'forget-reach', 'addresses', 'deployment-controller', 'tag-values'])('fails a section missing the %s statement, naming it', (id) => {
+  it.each(['event-region', 'model-requests', 'keyed-hash', 'retention', 'dead-letter', 'logs', 'forget', 'forget-reach', 'addresses', 'deployment-controller', 'tag-values', 'incident-items'])('fails a section missing the %s statement, naming it', (id) => {
     const missing = statementById(privacy.required, id);
     // The keyed-hash statement is also the stored-field row of the hash, so it goes from the row too.
     const body = privacyBody({ statements: omitting(privacy.required, id) }).replaceAll(missing.text, '');

@@ -220,6 +220,12 @@ export const PRIVACY_REQUIRED: readonly Statement[] = Object.freeze([
   { id: 'deployment-controller', text: "The business that deploys Fothering is the controller of its recipients' data." },
   // RESEARCH A7: the minimizer stores the operator's own tag values, which no map can class.
   { id: 'tag-values', text: 'Tag values are text you choose, so keep personal data out of them.' },
+  // The stored-field table is generated from the event record alone, while an incident's evidence
+  // configuration rows (evidence-record.ts) and the model's explanation keep the sender's domains too.
+  {
+    id: 'incident-items',
+    text: "An incident's evidence and decision items can name its From domains, and the SES identities, custom MAIL FROM domains and DNS names read to check their authentication records.",
+  },
 ]);
 
 // UI-SPEC section 17 item 1: the role-only default until the owner names a controller (AC-P16).

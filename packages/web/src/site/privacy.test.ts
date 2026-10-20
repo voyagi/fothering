@@ -183,7 +183,7 @@ describe('the privacy lists (AC-19, AC-21, AC-P16)', () => {
 
   it('holds every AC-19 statement, the Bedrock one carrying the AWS page as its link', () => {
     expect(PRIVACY_REQUIRED.map((statement) => statement.id)).toEqual([
-      'event-region', 'model-requests', 'keyed-hash', 'retention', 'dead-letter', 'logs', 'forget', 'forget-reach', 'addresses', 'deployment-controller', 'tag-values',
+      'event-region', 'model-requests', 'keyed-hash', 'retention', 'dead-letter', 'logs', 'forget', 'forget-reach', 'addresses', 'deployment-controller', 'tag-values', 'incident-items',
     ]);
     expect(PRIVACY_REQUIRED.find((statement) => statement.id === 'model-requests')?.link).toBe('https://docs.aws.amazon.com/bedrock/latest/userguide/geographic-cross-region-inference.html');
     expect(PRIVACY_REQUIRED.find((statement) => statement.id === 'forget')?.text).toContain(FORGET_DOC);
