@@ -231,6 +231,31 @@ describe('the dash rule (AC-54, AC-E40)', () => {
   });
 });
 
+describe('the claim rules read what a screen reader or a search result shows', () => {
+  it('fails a claim held only in an aria-label, an alt, a title, a description meta or an og:title', () => {
+    const site = siteOf({
+      'a/index.html': page('<button aria-label="Reply to reopen the lane">x</button>'),
+      'b/index.html': page('<img src="/a.png" alt="Everything stays in Frankfurt">'),
+      'c/index.html': page('<a href="/" title="Records are deleted exactly 30 days after the send">x</a>'),
+      'd/index.html': page('<p>clean</p>', '<title>p</title><meta name="description" content="Compare with the VDM advisor">'),
+      'e/index.html': page('<p>clean</p>', '<title>p</title><meta property="og:title" content="closed — one lane">'),
+    });
+    const findings = [replyPromiseRule, regionClaimRule, exactThirtyDaysRule, bannedNameRule, dashRule].flatMap((rule) => rule(site, context));
+    expect(findings.map((finding) => [finding.rule, finding.route])).toEqual([
+      ['reply-promise', '/a/'],
+      ['region-claim', '/b/'],
+      ['exact-30-days', '/c/'],
+      ['banned-name', '/d/'],
+      ['dash', '/e/'],
+    ]);
+  });
+
+  it('fails a unit figure in a label outside a provenance label and passes the same label inside one', () => {
+    expect(caseFindings(unitFigureRule, 'unit-figure', ['<span aria-label="Closed in 120 ms">x</span>'])).toHaveLength(1);
+    expect(unitFigureRule(casesSite(['<p data-provenance="generated"><span aria-label="Closed in 120 ms">x</span></p>']), context)).toEqual([]);
+  });
+});
+
 describe('runBuiltChecks', () => {
   it('registers every rule by a stable id and reports every hit, not the first', () => {
     expect(RULE_IDS).toContain('dash');

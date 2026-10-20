@@ -137,7 +137,10 @@ export const DEPLOY_COPY = Object.freeze({
   runtimeRoleSentence: 'The runtime role holds no SES, DynamoDB or S3 action.',
   denyHeading: 'Denied on every role',
   removalHeading: 'Taking it out',
-  removalHead: 'Removal deletes what the template created. Your configuration sets and their event destinations are yours to remove.',
+  // The bootstrap step deploys CDKToolkit, an S3 bucket and an ECR repository for the whole account
+  // and Region, which deleting this app's stacks leaves in place (CDK guide, cdk bootstrap).
+  removalHead:
+    'Removal deletes what the template created. Your configuration sets and their event destinations are yours to remove, and so is the CDKToolkit stack the bootstrap step adds: it holds an S3 bucket and an ECR repository for every CDK app in this account and Region, so delete it only when nothing else deploys there.',
 });
 
 // AC-36: the sentence and its reason, rendered whole so the one-caller rule can find it.

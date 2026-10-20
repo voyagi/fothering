@@ -29,7 +29,7 @@ import { isOfferedCommand, removedByText, type DeployCommand, type ForgetCommand
 import { resourceRows } from '../site/resources-view.js';
 import { sitemapUrls, type SiteRoute } from '../site/route-list.js';
 import { scriptHash } from '../theme/head-script.js';
-import { NOT_FOUND_ROUTE as NOT_FOUND_PAGE, textOf, walk, type BuiltElement, type BuiltPage, type BuiltSite } from './built-site.js';
+import { normalizeText, NOT_FOUND_ROUTE as NOT_FOUND_PAGE, textOf, walk, type BuiltElement, type BuiltPage, type BuiltSite } from './built-site.js';
 
 // Later plans' expected-red tracers name these ids, so an id is never renamed once a plan names it.
 export const RULE_IDS = Object.freeze([
@@ -166,11 +166,30 @@ function matchesIn(rule: RuleId, route: string, text: string, pattern: RegExp): 
   return [...text.matchAll(global)].map((match) => ({ rule, route, text: excerpt(text, match.index, match[0].length) }));
 }
 
-function patternsIn(rule: RuleId, site: BuiltSite, patterns: readonly RegExp[], textOfPage: (page: BuiltPage) => string = (page) => page.text): Finding[] {
-  return site.pages.flatMap((page) => {
-    const text = textOfPage(page);
-    return patterns.flatMap((pattern) => matchesIn(rule, page.route, text, pattern));
-  });
+const LABEL_ATTRS = ['aria-label', 'alt', 'title'] as const;
+// What a search result or a shared link shows in place of the page.
+const SHOWN_METAS: readonly (readonly [string, string])[] = [['name', 'description'], ['property', 'og:title'], ['property', 'og:description']];
+
+// The labels a screen reader speaks, outside any subtree the caller skips.
+function labelTexts(element: BuiltElement, skip: (element: BuiltElement) => boolean = () => false): string[] {
+  if (skip(element)) return [];
+  const own = LABEL_ATTRS.flatMap((name) => (element.attrs[name] === undefined ? [] : [normalizeText(element.attrs[name])]));
+  return [...own, ...element.children.flatMap((child) => (typeof child === 'string' ? [] : labelTexts(child, skip)))];
+}
+
+function shownMetaTexts(page: BuiltPage): string[] {
+  return page.metas.flatMap((meta) =>
+    SHOWN_METAS.some(([key, value]) => meta[key] === value) && meta.content !== undefined ? [normalizeText(meta.content)] : []);
+}
+
+// A claim a reader meets anywhere counts: the page text, every label, and the shown metas. Each is
+// matched on its own, so no phrase is made from the end of one and the start of the next.
+const claimTexts = (page: BuiltPage, skip?: (element: BuiltElement) => boolean): string[] =>
+  [skip === undefined ? page.text : textOf(page.root, skip), ...labelTexts(page.root, skip), ...shownMetaTexts(page)];
+
+function patternsIn(rule: RuleId, site: BuiltSite, patterns: readonly RegExp[], textsOfPage: (page: BuiltPage) => readonly string[] = (page) => claimTexts(page)): Finding[] {
+  return site.pages.flatMap((page) =>
+    textsOfPage(page).flatMap((text) => patterns.flatMap((pattern) => matchesIn(rule, page.route, text, pattern))));
 }
 
 const escapeRegExp = (text: string): string => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -252,7 +271,7 @@ const UNIT_FIGURES: readonly RegExp[] = [
 export function unitFigureRule(site: BuiltSite, context: CheckContext): Finding[] {
   const exempt = (element: BuiltElement): boolean =>
     element.attrs['data-provenance'] !== undefined || (BLOCK_TAGS.has(element.tag) && linksTo(element, context.reputationPageUrl));
-  return patternsIn('unit-figure', site, UNIT_FIGURES, (page) => textOf(page.root, exempt));
+  return patternsIn('unit-figure', site, UNIT_FIGURES, (page) => claimTexts(page, exempt));
 }
 
 export function bannedNameRule(site: BuiltSite, context: CheckContext): Finding[] {
@@ -963,22 +982,10 @@ export function replayLanesRule(site: BuiltSite, context: CheckContext): Finding
 }
 
 const CAPTURE_WORDS = /\b(?:record(?:ed|ing)|captur(?:e|ed|es|ing))\b/gi;
-const LABEL_ATTRS = ['aria-label', 'alt', 'title'] as const;
 const FIXTURE_PROVENANCES: ReadonlySet<Provenance> = new Set(['doc-derived', 'generated']);
 
-function labelTexts(page: BuiltPage): string[] {
-  const labels: string[] = [];
-  walk(page.root, (element) => {
-    for (const name of LABEL_ATTRS) {
-      const value = element.attrs[name];
-      if (value !== undefined) labels.push(value);
-    }
-  });
-  return labels;
-}
-
 function wordingFindings(page: BuiltPage, provenance: Provenance): string[] {
-  const texts = [page.text, ...labelTexts(page)].flatMap((text) =>
+  const texts = [page.text, ...labelTexts(page.root)].flatMap((text) =>
     [...text.matchAll(CAPTURE_WORDS)].map((match) => `the replay page says "${excerpt(text, match.index, match[0].length)}" about a ${provenance} artifact`));
   const { timeWording } = PROVENANCE_LABELS[provenance];
   if (!page.textOutsideSvg.includes(timeWording)) texts.push(`the replay page does not carry the time wording "${timeWording}"`);
