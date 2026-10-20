@@ -229,6 +229,14 @@ describe('the permission reasons', () => {
     const rows = permissionSchedules(committedPermissions()).flatMap((schedule) => schedule.rows);
     for (const row of rows) expect(row.reason).toBe(PERMISSION_REASONS[permissionKey(row) as keyof typeof PERMISSION_REASONS]);
   });
+
+  // Counter items change only through conditional updates (port-types.ts), so detection's key reads
+  // are a lane's incident marker and an incident's evidence, state and decision items (detect.ts).
+  it('never say the detection role reads a counter item by its key', () => {
+    const getItem = PERMISSION_REASONS['FotheringDetection/DetectRole/permission/Allow/dynamodb:GetItem'];
+    expect(getItem).not.toMatch(/counter/i);
+    expect(getItem).toMatch(/incident marker/);
+  });
 });
 
 describe('the pause grant and runtime role predicates', () => {

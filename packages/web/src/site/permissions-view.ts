@@ -39,7 +39,8 @@ const LAMBDA_TRUST = 'Only the Lambda service may take on this role, to run the 
 export const PERMISSION_REASONS: Reasons = {
   'FotheringDetection/DetectRole/permission/Allow/bedrock-agentcore:InvokeAgentRuntime':
     'Invokes the agent runtime for an incident the stored events opened, within the per-incident and per-day caps; it may invoke this runtime and its endpoints only.',
-  'FotheringDetection/DetectRole/permission/Allow/dynamodb:GetItem': 'Reads one incident, evidence, decision or counter item by its key.',
+  'FotheringDetection/DetectRole/permission/Allow/dynamodb:GetItem':
+    "Reads a lane's incident marker, or an incident's evidence, state or decision item, by its key.",
   'FotheringDetection/DetectRole/permission/Allow/dynamodb:PutItem': 'Writes a new incident, evidence or decision item to the table.',
   'FotheringDetection/DetectRole/permission/Allow/dynamodb:Query': "Reads a lane's stored events to fold the detection window.",
   'FotheringDetection/DetectRole/permission/Allow/dynamodb:UpdateItem':
