@@ -37,16 +37,17 @@ export const BANNED_NAMES: readonly string[] = Object.freeze([
 ]);
 
 // The event records and the model requests are processed in different places, so no sentence may
-// put all of it in one Region (AC-E14).
+// put all of it in one Region (AC-E14). Up to two words may qualify the data ("all of your event data").
 export const REGION_CLAIM_PATTERNS: readonly RegExp[] = Object.freeze([
-  /\ball\s+(?:of\s+)?(?:the\s+|your\s+)?data\b[^.]{0,80}?\b(?:eu-central-1|Frankfurt)\b/i,
+  /\ball\s+(?:of\s+)?(?:the\s+|your\s+|our\s+)?(?:\w+\s+){0,2}data\b[^.]{0,80}?\b(?:eu-central-1|Frankfurt)\b/i,
   /\beverything\b[^.]{0,80}?\b(?:eu-central-1|Frankfurt)\b/i,
 ]);
 
-// DynamoDB deletes an expired item within a few days after its TTL, never at it (AC-P12).
+// DynamoDB deletes an expired item within a few days after its TTL, never at it (AC-P12), so a
+// deadline at 30 days ("within", "by") is as wrong as the exact day.
 export const EXACT_30_DAY_PATTERNS: readonly RegExp[] = Object.freeze([
   /\bexactly\s+(?:30|thirty)\s+days\b/i,
-  /\b(?:deleted|removed|erased)\s+(?:(?:at|on|after)\s+)?(?:30|thirty)\s+days\b/i,
+  /\b(?:deleted|removed|erased)\s+(?:(?:at|on|after|within|by)\s+)?(?:30|thirty)\s+days\b/i,
 ]);
 
 // Until phase 3's files are on the branch, no page states an Article 50 verdict, the pause error

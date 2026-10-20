@@ -475,6 +475,20 @@ describe('the region claim and exact-30-days rules (AC-E14, AC-P12)', () => {
   it('passes expiry at 30 days with deletion within a few days after it', () => {
     expect(exactThirtyDaysRule(casesSite(['<p>Records expire 30 days after the send and are deleted within a few days after that.</p>']), context)).toEqual([]);
   });
+
+  // A word or two between the determiner and "data" still puts all of it in one Region.
+  it('fails an all-data sentence with words before data', () => {
+    expect(caseFindings(regionClaimRule, 'region-claim', [
+      '<p>All of your event data stays in eu-central-1.</p>',
+      '<p>All personal data is processed in Frankfurt.</p>',
+      '<p>All the stored event data stays in eu-central-1.</p>',
+    ])).not.toEqual([]);
+  });
+
+  // TTL deletion can land days after the 30, so a deadline at 30 days is as wrong as an exact day.
+  it('fails a deleted-within-30-days and a deleted-by-30-days sentence', () => {
+    expect(caseFindings(exactThirtyDaysRule, 'exact-30-days', ['<p>Records are deleted within 30 days.</p>', '<p>Records are removed by thirty days after the send.</p>'])).not.toEqual([]);
+  });
 });
 
 describe('the pre-R6 words rule (AC-31, D-146)', () => {
