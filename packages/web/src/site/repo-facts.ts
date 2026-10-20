@@ -188,7 +188,8 @@ const COMMAND_USES: Readonly<Record<DeployCommandUse, RegExp>> = {
 const STACK_USES: ReadonlySet<DeployCommandUse> = new Set(['deploy', 'go-live', 'destroy']);
 
 // How many stacks a cdk line selects: --all selects every one, otherwise each word that is neither
-// an option nor a context value names one.
+// an option nor a context value names one. Any other option may take a value (--profile p) or not
+// (--exclusively), which no word count can tell apart, so such a line is refused rather than counted.
 function stackScope(command: string): number {
   const words = command.split(/\s+/).slice(3);
   if (words.includes('--all')) return Number.POSITIVE_INFINITY;
@@ -196,7 +197,10 @@ function stackScope(command: string): number {
   for (let index = 0; index < words.length; index += 1) {
     const word = words[index] ?? '';
     if (word === '-c' || word === '--context') index += 1;
-    else if (!word.startsWith('-')) named += 1;
+    else if (word.startsWith('--context=')) continue;
+    else if (word.startsWith('-')) {
+      throw new Error(`${README_PREFIX}: "${command}" holds the option ${word}, and the deploy sheet counts the stacks a line selects from its words. Keep only --all, -c or --context on that line, or name the stacks.`);
+    } else named += 1;
   }
   return named;
 }

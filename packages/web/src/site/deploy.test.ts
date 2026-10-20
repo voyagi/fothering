@@ -482,6 +482,17 @@ describe('the deploy steps', () => {
     expect(named[4]?.commands.map(({ command }) => command)).toEqual(['npx cdk deploy A B C --context fothering:live=live']);
   });
 
+  // Counted as words, --profile p would read as two stacks and tie B's trial with A B; it is refused.
+  it('refuses a cdk line naming stacks beside an option other than --all, -c or --context, and reads --context=', () => {
+    const lines = (commands: readonly string[]) => commands.map((command) => ({ command, note: null }));
+    const base = ['npm run build', 'npx cdk bootstrap', 'npx cdk deploy --all -c fothering:live=live', 'npx cdk destroy --all'];
+    expect(() => deploySteps({ deployCommands: lines([...base, 'npx cdk deploy A B', 'npx cdk deploy B --profile p']), region: 'xx-planted-9' })).toThrow(
+      /^README\.md: Deploy and remove: "npx cdk deploy B --profile p" holds the option --profile, and the deploy sheet counts the stacks a line selects from its words\. /,
+    );
+    const steps = deploySteps({ deployCommands: lines([...base, 'npx cdk deploy A B', 'npx cdk deploy B --context=fothering:trial=1']), region: 'xx-planted-9' });
+    expect(steps[3]?.commands.map(({ command }) => command)).toEqual(['npx cdk bootstrap', 'npx cdk deploy A B']);
+  });
+
   it('shows only commands the README or package.json offers', () => {
     for (const step of steps) {
       for (const { command } of step.commands) expect(isOfferedCommand(command, facts.deployCommands, facts.scripts), command).toBe(true);
