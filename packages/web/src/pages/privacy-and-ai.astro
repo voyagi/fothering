@@ -1,5 +1,5 @@
 ---
-import FlowSwitch from '../components/FlowSwitch.astro';
+import Flag from '../components/Flag.astro';
 import Identifier from '../components/Identifier.astro';
 import Schedule from '../components/Schedule.astro';
 import Sheet from '../layouts/Sheet.astro';
@@ -63,6 +63,9 @@ const legalBasis = website('legal-basis');
 const article = 'Article 6(1)(f)';
 const articleAt = legalBasis.indexOf(article);
 if (articleAt < 0) throw new Error(`privacy page: the legal-basis statement no longer cites ${article}`);
+// The storage sentence counts the entries the list holds, so it can never name a number it lacks.
+const ENTRY_COUNTS = ['no entries', 'one entry', 'two entries', 'three entries'];
+const entryCount = ENTRY_COUNTS[STORAGE_ENTRIES.length] ?? `${String(STORAGE_ENTRIES.length)} entries`;
 
 const runtimeRole = modelSaid.find((statement) => statement.id === 'runtime-role');
 const neverItems = [
@@ -79,247 +82,234 @@ const INTERLOCK_TITLE = 'Interlock drawing';
 const INTERLOCK_DESC = 'Stored events, which hold no addresses, go to detection code, which writes one evidence record and approves at most one lane. The model reads that record, explains it, and confirms the approved lane or says unknown. The action check, which is code, reloads the record and checks it. Only a closure that passes reaches SES; unknown or refused, nothing closes.';
 ---
 <Sheet route={routeFor('/privacy-and-ai/')}>
-  <div class="row">
-    <div class="rail" aria-hidden="true">1</div>
-    <section class="sheet-intro" aria-labelledby="page-title">
+  <section class="first-band" aria-labelledby="page-title">
+    <div class="claim">
       <h1 id="page-title">Privacy and AI: what is kept, and what the model decides</h1>
-      <div class="intro-side">
-        <p>Two things are covered here: a Fothering deployment, which runs in its operator's own AWS account, and this website. The second half says what the AI model decides and what code decides.</p>
-        <p class="jump"><a href="#privacy">Privacy</a><a href="#ai">AI</a></p>
-      </div>
-    </section>
-  </div>
-
-  <div class="row">
-    <div class="rail" aria-hidden="true">2</div>
-    <section class="sheet fit-fields" aria-labelledby="privacy">
-      <div class="sheet-head">
-        <h2 id="privacy">Every event passes one filter before it is stored</h2>
-        <p>The ingest function sits between SES and the table. It keeps a closed list of fields and nothing else, so the table never holds an address, a subject or a header.</p>
-      </div>
-      <figure class="filter">
-        <svg class="dwg dwg-wide dwg-filter" viewBox="0 0 920 172" role="img" aria-labelledby="filter-wide-title filter-wide-desc">
-          <title id="filter-wide-title">{FILTER_TITLE}</title>
-          <desc id="filter-wide-desc">{FILTER_DESC}</desc>
-          <rect class="dwg-source" x="4" y="50" width="120" height="60" />
-          <text class="dwg-source-name dwg-source-name-narrow" x="64" y="86" text-anchor="middle">SES event</text>
-          <line class="dwg-pipe" x1="124" y1="80" x2="360" y2="80" />
-          <line class="dwg-flow flow-dash" x1="128" y1="80" x2="360" y2="80" />
-          <rect class="dwg-unit" x="360" y="40" width="200" height="80" />
-          <path class="dwg-funnel" d="M380 56 h160 l-50 48 h-60 z" />
-          <text class="dwg-caption-text" x="460" y="138" text-anchor="middle">ingest filter</text>
-          <line class="dwg-pipe" x1="560" y1="80" x2="796" y2="80" />
-          <line class="dwg-flow flow-dash" x1="564" y1="80" x2="796" y2="80" />
-          <text class="dwg-lane" x="580" y="68">domain, keyed hash</text>
-          <text class="dwg-lane" x="580" y="102">tags, bounce type</text>
-          <path class="dwg-unit" d="M796 56 a60 12 0 0 1 120 0 v48 a60 12 0 0 1 -120 0 z" />
-          <text class="dwg-source-name dwg-source-name-narrow" x="856" y="90" text-anchor="middle">Table</text>
-          <line class="dwg-stem" x1="460" y1="120" x2="460" y2="126" />
-          <line class="dwg-pipe dwg-dotted" x1="460" y1="146" x2="460" y2="168" />
-          <text class="dwg-state-text" x="476" y="164">not stored: subject, headers, addresses</text>
-        </svg>
-        <svg class="dwg dwg-narrow dwg-filter" viewBox="0 0 360 250" role="img" aria-labelledby="filter-narrow-title filter-narrow-desc">
-          <title id="filter-narrow-title">{FILTER_TITLE}</title>
-          <desc id="filter-narrow-desc">{FILTER_DESC}</desc>
-          <rect class="dwg-source" x="110" y="4" width="140" height="44" />
-          <text class="dwg-source-name dwg-source-name-narrow" x="180" y="31" text-anchor="middle">SES event</text>
-          <line class="dwg-pipe" x1="180" y1="48" x2="180" y2="84" />
-          <rect class="dwg-unit" x="100" y="84" width="160" height="56" />
-          <path class="dwg-funnel" d="M116 96 h128 l-40 32 h-48 z" />
-          <line class="dwg-pipe dwg-dotted" x1="260" y1="112" x2="300" y2="112" />
-          <text class="dwg-state-text" x="352" y="104" text-anchor="end">dropped</text>
-          <line class="dwg-pipe" x1="180" y1="140" x2="180" y2="190" />
-          <path class="dwg-unit" d="M120 196 a60 10 0 0 1 120 0 v36 a60 10 0 0 1 -120 0 z" />
-          <text class="dwg-source-name dwg-source-name-narrow" x="180" y="222" text-anchor="middle">Table</text>
-        </svg>
-        <figcaption class="caption-row filter-caption">
-          <span class="caption">One filter between SES and the table. The drain line carries what is never stored.</span>
-          <FlowSwitch />
-        </figcaption>
-      </figure>
-      <div class="fit-form">
-        <Schedule
-          fit
-          columns={['Field', 'Identifies', 'What is stored']}
-          rows={fieldRows}
-          caption="Stored event fields that can identify a person, generated from the event record type on every build."
-        />
-      </div>
-      <div class="after-schedule">
-        <p>{privacy('incident-items')}</p>
-        <p>Not stored: the recipient address itself, <Identifier value="mail.destination" />, <Identifier value="mail.headers" />, <Identifier value="mail.commonHeaders" />, and the free text of a bounce's <Identifier value="diagnosticCode" />, of which only the reply code and the enhanced status code are kept.</p>
-        <p>{privacy('tag-values')} They are stored as written, so a cause can be named by them.</p>
-      </div>
-    </section>
-  </div>
-
-  <div class="row">
-    <div class="rail" aria-hidden="true">3</div>
-    <section class="sheet" aria-labelledby="facts-title">
-      <div class="sheet-head">
-        <h2 id="facts-title">Where, how long, and how to delete</h2>
-        <p>What a deployment keeps lives in its operator's own account, for a fixed time, and one command removes a recipient from it.</p>
-      </div>
-      <div class="facts">
-        <div>
-          <h3>Where</h3>
-          <p>{segments(privacy('event-region')).map((segment) => (segment.kind === 'text' ? segment.text : <Identifier value={segment.text} />))}</p>
-          <p>{privacy('model-requests')} <a href={BEDROCK_GEOGRAPHY_URL}>How Bedrock keeps requests in one geography</a></p>
-        </div>
-        <div>
-          <h3>How long</h3>
-          <p>{privacy('retention')} {privacy('dead-letter')} {privacy('logs')}</p>
-        </div>
-        <div>
-          <h3>Deleting</h3>
-          <p>{segments(privacy('forget')).map((segment) => (segment.kind === 'text' ? segment.text : <Identifier value={segment.text} />))} It runs <Identifier value={forget.command} /> on the function the <Identifier value={forget.output} /> stack output names, hashes the address with the same key and deletes every matching record.</p>
-          <p>{privacy('forget-reach')}</p>
+      <p class="intro">Two things are covered here: a Fothering deployment, which runs in its operator's own AWS account, and this website. The second half says what the AI model decides and what code decides.</p>
+      <p class="jump"><a href="#privacy">Privacy</a><a href="#ai">AI</a></p>
+    </div>
+    <div class="sea sea-col">
+      <div class="hoist hoist-answer">
+        <Flag code="answer" />
+        <div class="decode">
+          <p class="k">Answering pennant, close up</p>
+          <p class="v">Close, with the option id code approved.</p>
         </div>
       </div>
-      <div class="decides">
-        <h3>Who decides</h3>
-        <p>{privacy('deployment-controller')} {website('aws-dpa')} {privacy('addresses')}</p>
-      </div>
-    </section>
-  </div>
-
-  <div class="row">
-    <div class="rail" aria-hidden="true">4</div>
-    <section class="sheet" aria-labelledby="site-title">
-      <div class="sheet-head">
-        <h2 id="site-title">This website</h2>
-        <p>These pages are static files. {website('no-cookie')}, {website('no-analytics')} and have no form.</p>
-      </div>
-      <ul class="site">
-        <li>{website('controller')} {website('contact')}</li>
-        <li>Cloudflare delivers these pages and receives your IP address to do so. {legalBasis.slice(0, articleAt)}<span class="keep-whole">{article}</span>{legalBasis.slice(articleAt + article.length)} {website('cloudflare-dpa')}</li>
-        <li>Your browser keeps two entries in localStorage, and nothing is sent anywhere: {STORAGE_ENTRIES.map((entry, index) => (
-          <Fragment>{index > 0 && ' and '}<Identifier value={entry.key} /> ({segments(entry.holds).map((segment) => (segment.kind === 'text' ? segment.text : <Identifier value={segment.text} />))})</Fragment>
-        ))}.</li>
-        <li>Fonts are served from this site, not from a font service.</li>
-        <li>You have the right of {rights.map((right, index) => <Fragment>{index > 0 && ', '}<span data-right>{right}</span></Fragment>)} and <span data-right>{lastRight}</span>, {complaintLead}<a href={COMPLAINT_AUTHORITY_URL}>{authority}</a>.</li>
-        <li>The replay plays a fixture that ships with the page. It holds no real recipient.</li>
-      </ul>
-    </section>
-  </div>
-
-  <div class="row">
-    <div class="rail" aria-hidden="true">5</div>
-    <section class="sheet" aria-labelledby="ai">
-      <div class="sheet-head">
-        <h2 id="ai">What the model decides, and what it cannot</h2>
-        <p data-model-role>{model('evidence-record')} {model('receives-only')}, explains it in the operator email, and returns close with the option id code approved, or unknown. {model('no-tool')}</p>
-      </div>
-      <figure class="interlock">
-        <svg class="dwg dwg-wide dwg-interlock" viewBox="0 0 1000 214" role="img" aria-labelledby="interlock-wide-title interlock-wide-desc">
-          <title id="interlock-wide-title">{INTERLOCK_TITLE}</title>
-          <desc id="interlock-wide-desc">{INTERLOCK_DESC}</desc>
-          <rect class="dwg-source" x="4" y="55" width="140" height="80" />
-          <text class="dwg-source-name dwg-source-name-narrow" x="74" y="91" text-anchor="middle">Stored events</text>
-          <text class="dwg-caption-text" x="74" y="111" text-anchor="middle">no addresses</text>
-          <line class="dwg-pipe" x1="144" y1="95" x2="184" y2="95" />
-          <rect class="dwg-source" x="184" y="50" width="170" height="90" />
-          <text class="dwg-source-name dwg-source-name-narrow" x="269" y="84" text-anchor="middle">Detection code</text>
-          <text class="dwg-caption-text" x="269" y="104" text-anchor="middle">evidence record,</text>
-          <text class="dwg-caption-text" x="269" y="120" text-anchor="middle">at most one lane</text>
-          <line class="dwg-pipe" x1="354" y1="95" x2="394" y2="95" />
-          <rect class="dwg-source dwg-model" x="394" y="50" width="170" height="90" />
-          <text class="dwg-source-name dwg-source-name-narrow" x="479" y="84" text-anchor="middle">Model</text>
-          <text class="dwg-caption-text" x="479" y="104" text-anchor="middle">explains, confirms</text>
-          <text class="dwg-caption-text" x="479" y="120" text-anchor="middle">that lane or unknown</text>
-          <line class="dwg-pipe" x1="564" y1="95" x2="604" y2="95" />
-          <rect class="dwg-unit dwg-check" x="604" y="50" width="170" height="90" />
-          <text class="dwg-source-name dwg-source-name-narrow" x="689" y="84" text-anchor="middle">Action check</text>
-          <text class="dwg-caption-text" x="689" y="104" text-anchor="middle">code: reloads</text>
-          <text class="dwg-caption-text" x="689" y="120" text-anchor="middle">and checks</text>
-          <line class="dwg-pipe" x1="774" y1="95" x2="826" y2="95" />
-          <path class="dwg-valve-open" d="M826 83 l14 12 -14 12 z M854 83 l-14 12 14 12 z" />
-          <line class="dwg-pipe" x1="854" y1="95" x2="890" y2="95" />
-          <rect class="dwg-source" x="890" y="60" width="104" height="70" />
-          <text class="dwg-source-name dwg-source-name-narrow" x="942" y="100" text-anchor="middle">SES</text>
-          <line class="dwg-stem" x1="689" y1="140" x2="689" y2="176" />
-          <path class="dwg-stem" d="M681 170 l8 10 8 -10" />
-          <text class="dwg-state-text" x="689" y="204" text-anchor="middle">unknown or refused: nothing closes</text>
-        </svg>
-        <svg class="dwg dwg-narrow dwg-interlock" viewBox="0 0 300 410" role="img" aria-labelledby="interlock-narrow-title interlock-narrow-desc">
-          <title id="interlock-narrow-title">{INTERLOCK_TITLE}</title>
-          <desc id="interlock-narrow-desc">{INTERLOCK_DESC}</desc>
-          <rect class="dwg-source" x="50" y="4" width="160" height="44" />
-          <text class="dwg-source-name dwg-source-name-narrow" x="130" y="31" text-anchor="middle">Stored events</text>
-          <line class="dwg-pipe" x1="130" y1="48" x2="130" y2="74" />
-          <rect class="dwg-source" x="50" y="74" width="160" height="50" />
-          <text class="dwg-source-name dwg-source-name-narrow" x="130" y="104" text-anchor="middle">Detection code</text>
-          <line class="dwg-pipe" x1="130" y1="124" x2="130" y2="150" />
-          <rect class="dwg-source dwg-model" x="50" y="150" width="160" height="50" />
-          <text class="dwg-source-name dwg-source-name-narrow" x="130" y="180" text-anchor="middle">Model explains</text>
-          <line class="dwg-pipe" x1="130" y1="200" x2="130" y2="226" />
-          <rect class="dwg-unit dwg-check" x="50" y="226" width="160" height="50" />
-          <text class="dwg-source-name dwg-source-name-narrow" x="130" y="256" text-anchor="middle">Action check</text>
-          <line class="dwg-pipe" x1="130" y1="276" x2="130" y2="352" />
-          <path class="dwg-valve-open" d="M118 300 l12 14 12 -14 z M118 328 l12 -14 12 14 z" />
-          <rect class="dwg-source" x="80" y="352" width="100" height="50" />
-          <text class="dwg-source-name dwg-source-name-narrow" x="130" y="382" text-anchor="middle">SES</text>
-          <path class="dwg-stem" d="M210 251 h40 v28" />
-          <path class="dwg-stem" d="M243 273 l7 9 7 -9" />
-          <text class="dwg-state-text" x="250" y="302" text-anchor="middle">unknown or</text>
-          <text class="dwg-state-text" x="250" y="318" text-anchor="middle">refused:</text>
-          <text class="dwg-state-text" x="250" y="334" text-anchor="middle">nothing</text>
-          <text class="dwg-state-text" x="250" y="350" text-anchor="middle">closes</text>
-        </svg>
-      </figure>
-    </section>
-  </div>
-
-  <div class="row">
-    <div class="rail" aria-hidden="true">6</div>
-    <section class="sheet" aria-labelledby="does-title">
-      <div class="sheet-head">
-        <h2 id="does-title">What the model does, and what it never does</h2>
-        <p>The split is enforced by permissions and code, not by instructions in a prompt.</p>
-      </div>
-      <div class="split">
-        <div>
-          <h3 id="does-list">It does</h3>
-          <ul aria-labelledby="does-list" data-model-role data-model-subject>
-            <li>Receives one evidence record that detection code wrote: counts with denominators, a verdict per dimension, and at most one approved lane.</li>
-            <li>{model('one-paragraph')}</li>
-            <li>{model('returns')}</li>
-          </ul>
-        </div>
-        <div>
-          <h3 id="never-list">It never</h3>
-          <ul aria-labelledby="never-list" data-model-role>
-            {neverItems.map((item) => <li>{item}</li>)}
-          </ul>
-          {runtimeRole !== undefined && <p class="split-note" data-model-role>{runtimeRole.text}</p>}
+      <div class="hoist">
+        <Flag code="answer" />
+        <div class="decode">
+          <p class="k">Answering pennant, at the dip</p>
+          <p class="v">Unknown: nothing closes.</p>
         </div>
       </div>
-    </section>
-  </div>
+    </div>
+  </section>
 
-  <div class="row">
-    <div class="rail" aria-hidden="true">7</div>
-    <section class="sheet fit-model" aria-labelledby="model-title">
-      <div class="sheet-head">
-        <h2 id="model-title">Which model, and where it runs</h2>
-        <p>One model, called from the operator's own AWS account, in the EU.</p>
-      </div>
-      <Schedule fit columns={['Item', 'Value']} rows={modelRows} caption="Model record for this build, read from the repository's model pin." />
-    </section>
-  </div>
+  <section class="band fit-fields" aria-labelledby="privacy">
+    <div class="band-head">
+      <h2 id="privacy">Every event passes one filter before it is stored</h2>
+      <p>The ingest function sits between SES and the table. It keeps a closed list of fields and nothing else, so the table never holds an address, a subject or a header.</p>
+    </div>
+    <figure class="filter">
+      <svg class="dwg dwg-wide dwg-filter" viewBox="0 0 920 172" role="img" aria-labelledby="filter-wide-title filter-wide-desc">
+        <title id="filter-wide-title">{FILTER_TITLE}</title>
+        <desc id="filter-wide-desc">{FILTER_DESC}</desc>
+        <rect class="dwg-source" x="4" y="50" width="120" height="60" />
+        <text class="dwg-source-name dwg-source-name-narrow" x="64" y="86" text-anchor="middle">SES event</text>
+        <line class="dwg-pipe" x1="124" y1="80" x2="360" y2="80" />
+        <rect class="dwg-unit" x="360" y="40" width="200" height="80" />
+        <path class="dwg-funnel" d="M380 56 h160 l-50 48 h-60 z" />
+        <text class="dwg-caption-text" x="460" y="138" text-anchor="middle">ingest filter</text>
+        <line class="dwg-pipe" x1="560" y1="80" x2="796" y2="80" />
+        <text class="dwg-lane" x="580" y="68">domain, keyed hash</text>
+        <text class="dwg-lane" x="580" y="102">tags, bounce type</text>
+        <path class="dwg-unit" d="M796 56 a60 12 0 0 1 120 0 v48 a60 12 0 0 1 -120 0 z" />
+        <text class="dwg-source-name dwg-source-name-narrow" x="856" y="90" text-anchor="middle">Table</text>
+        <line class="dwg-stem" x1="460" y1="120" x2="460" y2="126" />
+        <line class="dwg-pipe dwg-dotted" x1="460" y1="146" x2="460" y2="168" />
+        <text class="dwg-state-text" x="476" y="164">not stored: subject, headers, addresses</text>
+      </svg>
+      <svg class="dwg dwg-narrow dwg-filter" viewBox="0 0 360 250" role="img" aria-labelledby="filter-narrow-title filter-narrow-desc">
+        <title id="filter-narrow-title">{FILTER_TITLE}</title>
+        <desc id="filter-narrow-desc">{FILTER_DESC}</desc>
+        <rect class="dwg-source" x="110" y="4" width="140" height="44" />
+        <text class="dwg-source-name dwg-source-name-narrow" x="180" y="31" text-anchor="middle">SES event</text>
+        <line class="dwg-pipe" x1="180" y1="48" x2="180" y2="84" />
+        <rect class="dwg-unit" x="100" y="84" width="160" height="56" />
+        <path class="dwg-funnel" d="M116 96 h128 l-40 32 h-48 z" />
+        <line class="dwg-pipe dwg-dotted" x1="260" y1="112" x2="300" y2="112" />
+        <text class="dwg-state-text" x="352" y="104" text-anchor="end">dropped</text>
+        <line class="dwg-pipe" x1="180" y1="140" x2="180" y2="190" />
+        <path class="dwg-unit" d="M120 196 a60 10 0 0 1 120 0 v36 a60 10 0 0 1 -120 0 z" />
+        <text class="dwg-source-name dwg-source-name-narrow" x="180" y="222" text-anchor="middle">Table</text>
+      </svg>
+      <figcaption class="figure-caption">One filter between SES and the table. The drain line carries what is never stored.</figcaption>
+    </figure>
+    <div class="fit-form">
+      <Schedule
+        fit
+        columns={['Field', 'Identifies', 'What is stored']}
+        rows={fieldRows}
+        caption="Stored event fields that can identify a person, generated from the event record type on every build."
+      />
+    </div>
+    <div class="after-schedule">
+      <p>{privacy('incident-items')}</p>
+      <p>Not stored: the recipient address itself, <Identifier value="mail.destination" />, <Identifier value="mail.headers" />, <Identifier value="mail.commonHeaders" />, and the free text of a bounce's <Identifier value="diagnosticCode" />, of which only the reply code and the enhanced status code are kept.</p>
+      <p>{privacy('tag-values')} They are stored as written, so a cause can be named by them.</p>
+    </div>
+  </section>
 
-  <div class="row">
-    <div class="rail" aria-hidden="true">8</div>
-    <section class="sheet" aria-labelledby="wrong-title">
-      <div class="sheet-head">
-        <h2 id="wrong-title">Where it can be wrong</h2>
-        <p>The model's part is small on purpose. It can still get that part wrong, and so can the code around it.</p>
+  <section class="band" aria-labelledby="facts-title">
+    <div class="band-head">
+      <h2 id="facts-title">Where, how long, and how to delete</h2>
+      <p>What a deployment keeps lives in its operator's own account, for a fixed time, and one command removes a recipient from it.</p>
+    </div>
+    <div class="facts">
+      <div>
+        <h3>Where</h3>
+        <p>{segments(privacy('event-region')).map((segment) => (segment.kind === 'text' ? segment.text : <Identifier value={segment.text} />))}</p>
+        <p>{privacy('model-requests')} <a href={BEDROCK_GEOGRAPHY_URL}>How Bedrock keeps requests in one geography</a></p>
       </div>
-      <div class="wrong">
-        <p>Its explanation can be badly worded or claim more than the evidence shows. What closed, what stays open, the read-back and the reopen command come from a template over the closure record, so a poor paragraph cannot change them, and the email names the paragraph the agent wrote.</p>
-        <p>It can say unknown when code approved a lane and a person would have closed it. That is the intended trade: a missed closure costs the operator one decision, a wrong closure costs a lane of mail.</p>
-        <p>Detection sees only what SES publishes. A cause that shows only in an application's own logs stays invisible, and the result is unknown.</p>
+      <div>
+        <h3>How long</h3>
+        <p>{privacy('retention')} {privacy('dead-letter')} {privacy('logs')}</p>
       </div>
-    </section>
-  </div>
+      <div>
+        <h3>Deleting</h3>
+        <p>{segments(privacy('forget')).map((segment) => (segment.kind === 'text' ? segment.text : <Identifier value={segment.text} />))} It runs <Identifier value={forget.command} /> on the function the <Identifier value={forget.output} /> stack output names, hashes the address with the same key and deletes every matching record.</p>
+        <p>{privacy('forget-reach')}</p>
+      </div>
+    </div>
+    <div class="decides">
+      <h3>Who decides</h3>
+      <p>{privacy('deployment-controller')} {website('aws-dpa')} {privacy('addresses')}</p>
+    </div>
+  </section>
+
+  <section class="band" aria-labelledby="site-title">
+    <div class="band-head">
+      <h2 id="site-title">This website</h2>
+      <p>These pages are static files. {website('no-cookie')}, {website('no-analytics')} and have no form.</p>
+    </div>
+    <ul class="site">
+      <li>{website('controller')} {website('contact')}</li>
+      <li>Cloudflare delivers these pages and receives your IP address to do so. {legalBasis.slice(0, articleAt)}<span class="keep-whole">{article}</span>{legalBasis.slice(articleAt + article.length)} {website('cloudflare-dpa')}</li>
+      <li>Your browser keeps {entryCount} in localStorage, and nothing is sent anywhere: {STORAGE_ENTRIES.map((entry, index) => (
+        <Fragment>{index > 0 && ' and '}<Identifier value={entry.key} /> ({segments(entry.holds).map((segment) => (segment.kind === 'text' ? segment.text : <Identifier value={segment.text} />))})</Fragment>
+      ))}.</li>
+      <li>Fonts are served from this site, not from a font service.</li>
+      <li>You have the right of {rights.map((right, index) => <Fragment>{index > 0 && ', '}<span data-right>{right}</span></Fragment>)} and <span data-right>{lastRight}</span>, {complaintLead}<a href={COMPLAINT_AUTHORITY_URL}>{authority}</a>.</li>
+      <li>The replay plays a fixture that ships with the page. It holds no real recipient.</li>
+    </ul>
+  </section>
+
+  <section class="band" aria-labelledby="ai">
+    <div class="band-head">
+      <h2 id="ai">What the model decides, and what it cannot</h2>
+      <p data-model-role>{model('evidence-record')} {model('receives-only')}, explains it in the operator email, and returns close with the option id code approved, or unknown. {model('no-tool')}</p>
+    </div>
+    <figure class="interlock">
+      <svg class="dwg dwg-wide dwg-interlock" viewBox="0 0 1000 214" role="img" aria-labelledby="interlock-wide-title interlock-wide-desc">
+        <title id="interlock-wide-title">{INTERLOCK_TITLE}</title>
+        <desc id="interlock-wide-desc">{INTERLOCK_DESC}</desc>
+        <rect class="dwg-source" x="4" y="55" width="140" height="80" />
+        <text class="dwg-source-name dwg-source-name-narrow" x="74" y="91" text-anchor="middle">Stored events</text>
+        <text class="dwg-caption-text" x="74" y="111" text-anchor="middle">no addresses</text>
+        <line class="dwg-pipe" x1="144" y1="95" x2="184" y2="95" />
+        <rect class="dwg-source" x="184" y="50" width="170" height="90" />
+        <text class="dwg-source-name dwg-source-name-narrow" x="269" y="84" text-anchor="middle">Detection code</text>
+        <text class="dwg-caption-text" x="269" y="104" text-anchor="middle">evidence record,</text>
+        <text class="dwg-caption-text" x="269" y="120" text-anchor="middle">at most one lane</text>
+        <line class="dwg-pipe" x1="354" y1="95" x2="394" y2="95" />
+        <rect class="dwg-source dwg-model" x="394" y="50" width="170" height="90" />
+        <text class="dwg-source-name dwg-source-name-narrow" x="479" y="84" text-anchor="middle">Model</text>
+        <text class="dwg-caption-text" x="479" y="104" text-anchor="middle">explains, confirms</text>
+        <text class="dwg-caption-text" x="479" y="120" text-anchor="middle">that lane or unknown</text>
+        <line class="dwg-pipe" x1="564" y1="95" x2="604" y2="95" />
+        <rect class="dwg-unit dwg-check" x="604" y="50" width="170" height="90" />
+        <text class="dwg-source-name dwg-source-name-narrow" x="689" y="84" text-anchor="middle">Action check</text>
+        <text class="dwg-caption-text" x="689" y="104" text-anchor="middle">code: reloads</text>
+        <text class="dwg-caption-text" x="689" y="120" text-anchor="middle">and checks</text>
+        <line class="dwg-pipe" x1="774" y1="95" x2="826" y2="95" />
+        <path class="dwg-valve-open" d="M826 83 l14 12 -14 12 z M854 83 l-14 12 14 12 z" />
+        <line class="dwg-pipe" x1="854" y1="95" x2="890" y2="95" />
+        <rect class="dwg-source" x="890" y="60" width="104" height="70" />
+        <text class="dwg-source-name dwg-source-name-narrow" x="942" y="100" text-anchor="middle">SES</text>
+        <line class="dwg-stem" x1="689" y1="140" x2="689" y2="176" />
+        <path class="dwg-stem" d="M681 170 l8 10 8 -10" />
+        <text class="dwg-state-text" x="689" y="204" text-anchor="middle">unknown or refused: nothing closes</text>
+      </svg>
+      <svg class="dwg dwg-narrow dwg-interlock" viewBox="0 0 300 410" role="img" aria-labelledby="interlock-narrow-title interlock-narrow-desc">
+        <title id="interlock-narrow-title">{INTERLOCK_TITLE}</title>
+        <desc id="interlock-narrow-desc">{INTERLOCK_DESC}</desc>
+        <rect class="dwg-source" x="50" y="4" width="160" height="44" />
+        <text class="dwg-source-name dwg-source-name-narrow" x="130" y="31" text-anchor="middle">Stored events</text>
+        <line class="dwg-pipe" x1="130" y1="48" x2="130" y2="74" />
+        <rect class="dwg-source" x="50" y="74" width="160" height="50" />
+        <text class="dwg-source-name dwg-source-name-narrow" x="130" y="104" text-anchor="middle">Detection code</text>
+        <line class="dwg-pipe" x1="130" y1="124" x2="130" y2="150" />
+        <rect class="dwg-source dwg-model" x="50" y="150" width="160" height="50" />
+        <text class="dwg-source-name dwg-source-name-narrow" x="130" y="180" text-anchor="middle">Model explains</text>
+        <line class="dwg-pipe" x1="130" y1="200" x2="130" y2="226" />
+        <rect class="dwg-unit dwg-check" x="50" y="226" width="160" height="50" />
+        <text class="dwg-source-name dwg-source-name-narrow" x="130" y="256" text-anchor="middle">Action check</text>
+        <line class="dwg-pipe" x1="130" y1="276" x2="130" y2="352" />
+        <path class="dwg-valve-open" d="M118 300 l12 14 12 -14 z M118 328 l12 -14 12 14 z" />
+        <rect class="dwg-source" x="80" y="352" width="100" height="50" />
+        <text class="dwg-source-name dwg-source-name-narrow" x="130" y="382" text-anchor="middle">SES</text>
+        <path class="dwg-stem" d="M210 251 h40 v28" />
+        <path class="dwg-stem" d="M243 273 l7 9 7 -9" />
+        <text class="dwg-state-text" x="250" y="302" text-anchor="middle">unknown or</text>
+        <text class="dwg-state-text" x="250" y="318" text-anchor="middle">refused:</text>
+        <text class="dwg-state-text" x="250" y="334" text-anchor="middle">nothing</text>
+        <text class="dwg-state-text" x="250" y="350" text-anchor="middle">closes</text>
+      </svg>
+    </figure>
+  </section>
+
+  <section class="band" aria-labelledby="does-title">
+    <div class="band-head">
+      <h2 id="does-title">What the model does, and what it never does</h2>
+      <p>The split is enforced by permissions and code, not by instructions in a prompt.</p>
+    </div>
+    <div class="split">
+      <div>
+        <h3 id="does-list">It does</h3>
+        <ul aria-labelledby="does-list" data-model-role data-model-subject>
+          <li>Receives one evidence record that detection code wrote: counts with denominators, a verdict per dimension, and at most one approved lane.</li>
+          <li>{model('one-paragraph')}</li>
+          <li>{model('returns')}</li>
+        </ul>
+      </div>
+      <div>
+        <h3 id="never-list">It never</h3>
+        <ul aria-labelledby="never-list" data-model-role>
+          {neverItems.map((item) => <li>{item}</li>)}
+        </ul>
+        {runtimeRole !== undefined && <p class="split-note" data-model-role>{runtimeRole.text}</p>}
+      </div>
+    </div>
+  </section>
+
+  <section class="band fit-model" aria-labelledby="model-title">
+    <div class="band-head">
+      <h2 id="model-title">Which model, and where it runs</h2>
+      <p>One model, called from the operator's own AWS account, in the EU.</p>
+    </div>
+    <Schedule fit columns={['Item', 'Value']} rows={modelRows} caption="Model record for this build, read from the repository's model pin." />
+  </section>
+
+  <section class="band" aria-labelledby="wrong-title">
+    <div class="band-head">
+      <h2 id="wrong-title">Where it can be wrong</h2>
+      <p>The model's part is small on purpose. It can still get that part wrong, and so can the code around it.</p>
+    </div>
+    <div class="wrong">
+      <p>Its explanation can be badly worded or claim more than the evidence shows. What closed, what stays open, the read-back and the reopen command come from a template over the closure record, so a poor paragraph cannot change them, and the email names the paragraph the agent wrote.</p>
+      <p>It can say unknown when code approved a lane and a person would have closed it. That is the intended trade: a missed closure costs the operator one decision, a wrong closure costs a lane of mail.</p>
+      <p>Detection sees only what SES publishes. A cause that shows only in an application's own logs stays invisible, and the result is unknown.</p>
+    </div>
+  </section>
 </Sheet>

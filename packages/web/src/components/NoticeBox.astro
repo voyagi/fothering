@@ -1,6 +1,9 @@
 ---
-// A dashed outline marks what is not built yet (DESIGN.md Notice Box); the run-in label is read
-// before the sentence, so the notice never passes as an ordinary paragraph.
+// A notice is marked by the answering pennant at the dip: seen, not yet answered, the way what is not
+// built yet waits. The run-in label is read before the sentence, so the notice never passes as an
+// ordinary paragraph.
+import Flag from './Flag.astro';
+
 interface Props {
   label: string;
   text: string;
@@ -8,4 +11,7 @@ interface Props {
 
 const { label, text } = Astro.props;
 ---
-<p class="notice" role="note" data-notice><b>{label}</b> {text}</p>
+<div class="notice" role="note" data-notice>
+  <span class="dip" aria-hidden="true"><Flag code="answer" /></span>
+  <p><b>{label}</b> {text}</p>
+</div>

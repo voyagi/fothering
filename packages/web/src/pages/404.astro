@@ -1,24 +1,31 @@
 ---
+import Flag from '../components/Flag.astro';
 import Sheet from '../layouts/Sheet.astro';
 import { NOT_FOUND_ROUTE, ROUTES } from '../site/route-list.ts';
 
-// The copy names the sheet count in words (UI-SPEC 11.1), so a sheet added or removed stops the build
+// The copy names the page count in words (UI-SPEC 11.1), so a page added or removed stops the build
 // rather than leaving the sentence wrong.
-if (ROUTES.length !== 5) throw new Error(`404 page: the copy says five sheets and the route list holds ${String(ROUTES.length)}. Reword the paragraph.`);
+if (ROUTES.length !== 5) throw new Error(`404 page: the copy says five pages and the route list holds ${String(ROUTES.length)}. Reword the paragraph.`);
 ---
 <Sheet route={NOT_FOUND_ROUTE}>
-  <div class="row">
-    <div class="rail" aria-hidden="true">1</div>
-    <section class="sheet-intro not-found" aria-labelledby="page-title">
-      <h1 id="page-title">No sheet at this address</h1>
-      <div class="intro-side">
-        <p>The address you followed is not one of the five sheets of this drawing set. Every sheet is listed in the title block at the foot of this page.</p>
-        <p class="not-found-action">
-          <a class="button" href="/">Open the first sheet
-            <svg viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M3 8h9M8.5 4l4 4-4 4" stroke="currentColor" stroke-width="1.8" /></svg>
-          </a>
-        </p>
+  <section class="first-band not-found" aria-labelledby="page-title">
+    <div class="claim">
+      <h1 id="page-title">No page at this address</h1>
+      <p class="intro">The address you followed is not one of the five pages of this site. Every page is listed in the index at the foot of this page.</p>
+      <p class="not-found-action">
+        <a class="flagbtn" href="/">Open the landing page
+          <svg viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M3 8h9M8.5 4l4 4-4 4" stroke="currentColor" stroke-width="1.8" /></svg>
+        </a>
+      </p>
+    </div>
+    <div class="sea sea-col">
+      <div class="hoist">
+        <Flag code="answer" />
+        <div class="decode">
+          <p class="k">Answering pennant, at the dip</p>
+          <p class="v">Seen, not yet understood.</p>
+        </div>
       </div>
-    </section>
-  </div>
+    </div>
+  </section>
 </Sheet>

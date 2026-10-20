@@ -1,5 +1,4 @@
 ---
-import CommandBlock from '../components/CommandBlock.astro';
 import Identifier from '../components/Identifier.astro';
 import NoticeBox from '../components/NoticeBox.astro';
 import Procedure from '../components/Procedure.astro';
@@ -12,7 +11,7 @@ import { deploySteps, fillRegion, loadRepoFacts, readDeployRegion, removalSteps,
 import { loadResourceSnapshot, resourceRows } from '../site/resources-view.ts';
 import { routeFor } from '../site/route-list.ts';
 
-// Every table, command and the Region come from the committed sources on each build, so the sheet
+// Every table, command and the Region come from the committed sources on each build, so the page
 // follows the template with no edit here (D-142, D-143, D-145).
 const root = repoRoot(process.cwd());
 const facts = loadRepoFacts(root);
@@ -66,85 +65,60 @@ const NO_TERMS = { names: [], values: [] };
 const intro = textSegments(fillRegion(DEPLOY_COPY.intro, region), NO_TERMS);
 ---
 <Sheet route={routeFor('/deploy/')}>
-  <div class="row">
-    <div class="rail" aria-hidden="true">1</div>
-    <section class="sheet-intro" aria-labelledby="deploy-title">
+  <section class="first-band" aria-labelledby="deploy-title">
+    <div class="claim">
       <h1 id="deploy-title">{DEPLOY_COPY.h1}</h1>
-      <p>{intro.map((segment) => (segment.kind === 'text' ? segment.text : <Identifier value={segment.text} />))}</p>
+      <p class="intro">{intro.map((segment) => (segment.kind === 'text' ? segment.text : <Identifier value={segment.text} />))}</p>
       {!hasPauseGrant(snapshot) && <NoticeBox label={NOT_YET_NOTICE.label} text={NOT_YET_NOTICE.text} />}
-    </section>
-  </div>
+      <h2 id="steps-title">{DEPLOY_COPY.stepsHeading}</h2>
+      <p>{DEPLOY_COPY.stepsHead}</p>
+    </div>
+    <div class="sea sea-col" role="group" aria-labelledby="steps-title">
+      <Procedure steps={steps} />
+    </div>
+  </section>
 
-  <div class="row">
-    <div class="rail" aria-hidden="true">2</div>
-    <section class="sheet" aria-labelledby="steps-title">
-      <div class="sheet-head">
-        <h2 id="steps-title">{DEPLOY_COPY.stepsHeading}</h2>
-        <p>{DEPLOY_COPY.stepsHead}</p>
-      </div>
-      <Procedure steps={steps} closingStep={steps.length} />
-    </section>
-  </div>
+  <section class="band fit-resources" aria-labelledby="resources-title">
+    <div class="band-head">
+      <h2 id="resources-title">{DEPLOY_COPY.resourcesHeading}</h2>
+      <p>{DEPLOY_COPY.resourcesHead}</p>
+    </div>
+    <Schedule fit columns={RESOURCE_COLUMNS} rows={resources} caption={fillRegion(DEPLOY_COPY.resourcesCaption, region)} />
+  </section>
 
-  <div class="row">
-    <div class="rail" aria-hidden="true">3</div>
-    <section class="sheet fit-resources" aria-labelledby="resources-title">
-      <div class="sheet-head">
-        <h2 id="resources-title">{DEPLOY_COPY.resourcesHeading}</h2>
-        <p>{DEPLOY_COPY.resourcesHead}</p>
+  <section class="band fit-permissions" aria-labelledby="permissions-title">
+    <div class="band-head">
+      <h2 id="permissions-title">{DEPLOY_COPY.permissionsHeading}</h2>
+      <p>{DEPLOY_COPY.permissionsHead}</p>
+    </div>
+    <div class="roles">
+      {roles.map((role) => (
+        <section class="role" data-permission-role={role.id} aria-labelledby={`role-${role.name}`}>
+          <div class="role-head">
+            <h3 id={`role-${role.name}`}>{role.name}</h3>
+            <p class="role-stack"><span>Stack</span> <Identifier value={role.stack} /></p>
+          </div>
+          <Schedule fit columns={PERMISSION_COLUMNS} rows={role.rows} wordColumns={[ACTION_COLUMN]} caption={DEPLOY_COPY.permissionsCaption} />
+        </section>
+      ))}
+    </div>
+    <div class="perm-notes">
+      <p>{ONE_CALLER_SENTENCE}</p>
+      {runtimeRoleHoldsNoDataAction(snapshot) && <p>{DEPLOY_COPY.runtimeRoleSentence}</p>}
+    </div>
+    {denied.length > 0 && (
+      <div class="deny" data-deny>
+        <h3>{DEPLOY_COPY.denyHeading}</h3>
+        <Schedule fit columns={['Role', ...PERMISSION_COLUMNS]} rows={denied} wordColumns={[ACTION_COLUMN + 1]} caption={DEPLOY_COPY.permissionsCaption} />
       </div>
-      <Schedule fit columns={RESOURCE_COLUMNS} rows={resources} caption={fillRegion(DEPLOY_COPY.resourcesCaption, region)} />
-    </section>
-  </div>
+    )}
+  </section>
 
-  <div class="row">
-    <div class="rail" aria-hidden="true">4</div>
-    <section class="sheet fit-permissions" aria-labelledby="permissions-title">
-      <div class="sheet-head">
-        <h2 id="permissions-title">{DEPLOY_COPY.permissionsHeading}</h2>
-        <p>{DEPLOY_COPY.permissionsHead}</p>
-      </div>
-      <div class="roles">
-        {roles.map((role) => (
-          <section class="role" data-permission-role={role.id} aria-labelledby={`role-${role.name}`}>
-            <div class="role-head">
-              <h3 id={`role-${role.name}`}>{role.name}</h3>
-              <p class="role-stack"><span>Stack</span> <Identifier value={role.stack} /></p>
-            </div>
-            <Schedule fit columns={PERMISSION_COLUMNS} rows={role.rows} wordColumns={[ACTION_COLUMN]} caption={DEPLOY_COPY.permissionsCaption} />
-          </section>
-        ))}
-      </div>
-      <div class="perm-notes">
-        <p>{ONE_CALLER_SENTENCE}</p>
-        {runtimeRoleHoldsNoDataAction(snapshot) && <p>{DEPLOY_COPY.runtimeRoleSentence}</p>}
-      </div>
-      {denied.length > 0 && (
-        <div class="deny" data-deny>
-          <h3>{DEPLOY_COPY.denyHeading}</h3>
-          <Schedule fit columns={['Role', ...PERMISSION_COLUMNS]} rows={denied} wordColumns={[ACTION_COLUMN + 1]} caption={DEPLOY_COPY.permissionsCaption} />
-        </div>
-      )}
-    </section>
-  </div>
-
-  <div class="row">
-    <div class="rail" aria-hidden="true">5</div>
-    <section class="sheet" aria-labelledby="removal-title">
-      <div class="sheet-head">
-        <h2 id="removal-title">{DEPLOY_COPY.removalHeading}</h2>
-        <p>{DEPLOY_COPY.removalHead}</p>
-      </div>
-      <ol class="removal">
-        {removal.map((step) => (
-          <li>
-            <div>
-              <p>{step.text}</p>
-              {step.commands.map((command) => <CommandBlock command={command.command} note={command.note} />)}
-            </div>
-          </li>
-        ))}
-      </ol>
-    </section>
-  </div>
+  <section class="band" aria-labelledby="removal-title">
+    <div class="band-head">
+      <h2 id="removal-title">{DEPLOY_COPY.removalHeading}</h2>
+      <p>{DEPLOY_COPY.removalHead}</p>
+    </div>
+    <Procedure steps={removal} removal />
+  </section>
 </Sheet>

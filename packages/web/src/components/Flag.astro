@@ -1,0 +1,76 @@
+---
+// One flag of the International Code of Signals, drawn the way the NOAA signal sheet draws it.
+// Every part is a polygon already cut to the flag's outline, so no clip path id repeats when a page
+// flies the same flag twice. Fills come from classes, so the codified colours hold in both themes,
+// and the flag is hidden from assistive technology because its letter or number and its meaning
+// always sit beside it as text.
+export type FlagCode = 'L' | 'answer' | '0' | '1' | '2' | '3' | '4' | '5' | '6' | '7' | '8' | '9';
+type Fill = 'red' | 'yellow' | 'blue' | 'black' | 'white';
+
+interface Props {
+  code: FlagCode;
+  class?: string;
+}
+
+interface Shape {
+  points?: string;
+  circle?: { cx: number; cy: number; r: number };
+  fill: Fill;
+}
+
+const { code, class: extra } = Astro.props;
+
+// Pennants sit in a 125 by 50 box and taper to 18 units at the fly.
+const W = 125;
+const H = 50;
+const TAPER = 18;
+const round = (value: number): number => Math.round(value * 100) / 100;
+const top = (x: number): number => round((TAPER * x) / W);
+const bottom = (x: number): number => round(H - (TAPER * x) / W);
+const MID = H / 2;
+// A vertical band of the pennant between two distances from the hoist.
+const band = (x0: number, x1: number): string => `${x0},${top(x0)} ${x1},${top(x1)} ${x1},${bottom(x1)} ${x0},${bottom(x0)}`;
+const upper = (x0: number, x1: number): string => `${x0},${top(x0)} ${x1},${top(x1)} ${x1},${MID} ${x0},${MID}`;
+const lower = (x0: number, x1: number): string => `${x0},${MID} ${x1},${MID} ${x1},${bottom(x1)} ${x0},${bottom(x0)}`;
+const PENNANT = band(0, W);
+const DISC = { cx: 40, cy: MID, r: 14 };
+// The cross of pennants 4 and 8: an upright near the hoist and a bar the full length.
+const CROSS_UPRIGHT = band(34, 48);
+const CROSS_BAR = `0,19 ${W},19 ${W},31 0,31`;
+const THIRDS = [0, 42, 83, W] as const;
+const HALF = W / 2;
+
+const PENNANTS: Record<Exclude<FlagCode, 'L'>, readonly Shape[]> = {
+  answer: [0, 25, 50, 75, 100].map((x, index) => ({ points: band(x, x + 25), fill: index % 2 === 0 ? 'red' : 'white' })),
+  '0': [{ points: band(THIRDS[0], THIRDS[1]), fill: 'yellow' }, { points: band(THIRDS[1], THIRDS[2]), fill: 'red' }, { points: band(THIRDS[2], THIRDS[3]), fill: 'yellow' }],
+  '1': [{ points: PENNANT, fill: 'white' }, { circle: DISC, fill: 'red' }],
+  '2': [{ points: PENNANT, fill: 'blue' }, { circle: DISC, fill: 'white' }],
+  '3': [{ points: band(THIRDS[0], THIRDS[1]), fill: 'red' }, { points: band(THIRDS[1], THIRDS[2]), fill: 'white' }, { points: band(THIRDS[2], THIRDS[3]), fill: 'blue' }],
+  '4': [{ points: PENNANT, fill: 'red' }, { points: CROSS_UPRIGHT, fill: 'white' }, { points: CROSS_BAR, fill: 'white' }],
+  '5': [{ points: band(0, HALF), fill: 'yellow' }, { points: band(HALF, W), fill: 'blue' }],
+  '6': [{ points: upper(0, W), fill: 'black' }, { points: lower(0, W), fill: 'white' }],
+  '7': [{ points: upper(0, W), fill: 'yellow' }, { points: lower(0, W), fill: 'red' }],
+  '8': [{ points: PENNANT, fill: 'white' }, { points: CROSS_UPRIGHT, fill: 'red' }, { points: CROSS_BAR, fill: 'red' }],
+  '9': [{ points: upper(0, HALF), fill: 'white' }, { points: upper(HALF, W), fill: 'black' }, { points: lower(0, HALF), fill: 'red' }, { points: lower(HALF, W), fill: 'yellow' }],
+};
+
+// Flag L is quartered yellow and black, yellow in the upper hoist, on a 3 by 2 flag.
+const LETTER_L: readonly Shape[] = [
+  { points: '0,0 30,0 30,20 0,20', fill: 'yellow' },
+  { points: '30,0 60,0 60,20 30,20', fill: 'black' },
+  { points: '0,20 30,20 30,40 0,40', fill: 'black' },
+  { points: '30,20 60,20 60,40 30,40', fill: 'yellow' },
+];
+
+const isLetter = code === 'L';
+const shapes = isLetter ? LETTER_L : PENNANTS[code];
+const box = isLetter ? { width: 60, height: 40 } : { width: W, height: H };
+const edge = isLetter ? '0,0 60,0 60,40 0,40' : PENNANT;
+const classes = ['flag', isLetter ? 'flag-letter' : 'flag-pennant', extra].filter((name) => name !== undefined && name !== '').join(' ');
+---
+<svg class={classes} viewBox={`0 0 ${String(box.width)} ${String(box.height)}`} width={box.width} height={box.height} aria-hidden="true" focusable="false" data-flag={code}>
+  {shapes.map((shape) => (shape.circle === undefined
+    ? <polygon class={`f-${shape.fill}`} points={shape.points} />
+    : <circle class={`f-${shape.fill}`} cx={shape.circle.cx} cy={shape.circle.cy} r={shape.circle.r} />))}
+  <polygon class="f-edge" points={edge} />
+</svg>

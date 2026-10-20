@@ -375,13 +375,13 @@ export function requestsVerdict(reading: RequestsReading): Verdict {
   return foreign.length === 0 ? { ok: true } : { ok: false, reason: E2E_MESSAGES.foreignRequest(page, foreign) };
 }
 
-// D-141: the two localStorage keys are the site's only stored state; sessionStorage holds none.
+// D-141: the localStorage keys in STORAGE_ENTRIES are the site's only stored state; sessionStorage holds none.
 export function storageVerdict(reading: StorageReading): Verdict {
   const outside = [...reading.local.filter((key) => !STORAGE_KEYS.has(key)), ...reading.session.map((key) => `session:${key}`)];
   return outside.length === 0 ? { ok: true } : { ok: false, reason: E2E_MESSAGES.storageKeys(outside) };
 }
 
-// AC-22: every key the run wrote, after using the theme switch and the flow control, is named on the
+// AC-22: every key the run wrote, after using the theme switch, is named on the
 // privacy section. A run that wrote nothing named nothing, so it fails rather than passing empty.
 export function storageKeysVerdict(reading: StorageReading, privacyText: string | null): Verdict {
   if (privacyText === null) return { ok: false, reason: E2E_MESSAGES.storageNoPrivacy() };
@@ -1256,10 +1256,10 @@ export const E2E_MESSAGES = Object.freeze({
   fontControl: (family: string) => `the undeclared control family ${family} reads present, so the font check proves nothing`,
   noRequests: () => 'the page recorded no request, so where its requests went is unknown',
   foreignRequest: (page: string, origins: readonly string[]) => `request(s) left the page's origin ${page}: ${origins.join(', ')}`,
-  storageKeys: (keys: readonly string[]) => `storage holds ${keys.join(', ')}; only fothering-theme and fothering-flow in localStorage are allowed`,
+  storageKeys: (keys: readonly string[]) => `storage holds ${keys.join(', ')}; localStorage may hold only ${[...STORAGE_KEYS].join(' and ')}`,
   storageUnnamed: (keys: readonly string[]) => `the privacy section at ${PRIVACY_ROUTE} does not name the storage key(s) ${keys.join(', ')} that the site wrote`,
   storageNoPrivacy: () => `the build holds no privacy section at ${PRIVACY_ROUTE}, so the storage keys the site writes are named nowhere`,
-  storageNothingWritten: () => 'the run wrote no storage key after using the theme switch and the flow control, so the check named nothing',
+  storageNothingWritten: () => 'the run wrote no storage key after using the theme switch, so the check named nothing',
   sizeLimit: (status: number | null) => `size-limit exited ${String(status)}, 0 expected; the client scripts are over the budget in packages/web/package.json or were not measured`,
   noProseBlocks: () => 'the line test measured zero prose blocks across the site, so no line was checked',
   lineTooLong: (route: string, characters: number, line: string) => `${route}: a rendered line holds ${characters} characters, at most 80 allowed: "${line.slice(0, 60)}"`,
@@ -1747,7 +1747,7 @@ function judgeStorage(text: string | undefined, privacyText: string | null): { v
   const allowed = storageVerdict(value);
   return {
     verdict: allowed.ok ? storageKeysVerdict(value, privacyText) : allowed,
-    detail: `keys after using the switch and the flow control: ${keys.join(', ') || 'none'}, each named on ${PRIVACY_ROUTE}`,
+    detail: `keys after using the switch: ${keys.join(', ') || 'none'}, each named on ${PRIVACY_ROUTE}`,
   };
 }
 

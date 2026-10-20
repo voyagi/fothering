@@ -640,7 +640,7 @@ describe('the sitemap rule (AC-50, AC-E38, AC-E39)', () => {
 
   it('leaves out a built route the route list marks not indexable', () => {
     const site = siteOf({ ...completeSite(TWO_SHEETS), 'sitemap.xml': sitemapOf(['/', '/privacy-and-ai/', '/deploy/', '/accessibility/']) });
-    const draft = { path: '/replay/', sheet: 'FTH-002', label: 'Replay', title: 't', description: 'd', indexable: false };
+    const draft = { path: '/replay/', label: 'Replay', title: 't', description: 'd', indexable: false };
     expect(sitemapRule(site, { ...context, routes: [draft] })).toEqual([]);
   });
 });
@@ -693,7 +693,7 @@ describe('the theme token blocks rule (AC-39, D-140)', () => {
   });
 
   it('fails dark blocks whose declarations differ', () => {
-    const css = renderTokensCss().replace(`:root[data-theme="dark"] {\n  color-scheme: dark;\n  --ground: #0F1316;`, `:root[data-theme="dark"] {\n  color-scheme: dark;\n  --ground: #000000;`);
+    const css = renderTokensCss().replace(`:root[data-theme="dark"] {\n  color-scheme: dark;\n  --ground: #08111D;`, `:root[data-theme="dark"] {\n  color-scheme: dark;\n  --ground: #000000;`);
     expect(css).not.toBe(renderTokensCss());
     expect(texts(themeTokenBlocksRule(siteOf(withFile('tokens.css', css)), context))).toEqual(['the dark blocks under the media query and under :root[data-theme="dark"] differ']);
   });
@@ -1030,7 +1030,7 @@ describe('the limits rule (AC-3, UI-SPEC E11)', () => {
   });
 
   it('holds three fixed rows beside the replay row', () => {
-    expect(LIMITS_FIXED_ROWS.map((row) => row.part)).toEqual(['Measured numbers', 'Live run', 'Deploy sheet']);
+    expect(LIMITS_FIXED_ROWS.map((row) => row.part)).toEqual(['Measured numbers', 'Live run', 'Deploy page']);
   });
 });
 

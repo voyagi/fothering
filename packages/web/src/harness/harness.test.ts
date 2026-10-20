@@ -831,12 +831,13 @@ describe('requestsVerdict (AC-57, AC-E52)', () => {
 });
 
 describe('storageVerdict (AC-22, D-141)', () => {
-  it('passes fothering-theme and fothering-flow in localStorage', () => {
-    expect(storageVerdict({ local: ['fothering-theme', 'fothering-flow'], session: [] })).toEqual({ ok: true });
+  it('passes fothering-theme in localStorage', () => {
+    expect(storageVerdict({ local: ['fothering-theme'], session: [] })).toEqual({ ok: true });
   });
 
-  it('fails a localStorage key outside the two, and any sessionStorage key', () => {
+  it('fails a localStorage key outside fothering-theme, the retired fothering-flow included, and any sessionStorage key', () => {
     expect(storageVerdict({ local: ['fothering-theme', 'tracking-id'], session: [] })).toEqual(failed(E2E_MESSAGES.storageKeys(['tracking-id'])));
+    expect(storageVerdict({ local: ['fothering-theme', 'fothering-flow'], session: [] })).toEqual(failed(E2E_MESSAGES.storageKeys(['fothering-flow'])));
     expect(storageVerdict({ local: [], session: ['fothering-theme'] })).toEqual(failed(E2E_MESSAGES.storageKeys(['session:fothering-theme'])));
   });
 });
@@ -1872,17 +1873,19 @@ describe('the built checks through the CLI and the e2e step (D-150, D-151)', () 
     expect(storage.lines).toContain(E2E_MESSAGES.renderedFailed('STORAGE', E2E_MESSAGES.storageKeys(['other'])));
   });
 
-  it('the rendered step fails a storage key the built privacy section does not name, and names both keys it does', async () => {
-    const both = { STORAGE: { local: ['fothering-theme', 'fothering-flow'], session: [] } };
-    const named = await e2e(renderedTree(), {}, { lines: siteLines(both) });
+  it('the rendered step fails a storage key the built privacy section does not name, and names the key it does', async () => {
+    const theme = { STORAGE: { local: ['fothering-theme'], session: [] } };
+    const named = await e2e(renderedTree(), {}, { lines: siteLines(theme) });
     expect(named.code).toBe(0);
-    expect(named.lines.find((text) => text.startsWith('[e2e] rendered STORAGE: ok, '))).toContain('fothering-flow');
+    expect(named.lines.find((text) => text.startsWith('[e2e] rendered STORAGE: ok, '))).toContain('fothering-theme');
     const unnamed = plantSite(completeSite({ 'index.html': '<p>closed - one lane</p>', 'privacy-and-ai/index.html': '' }));
     const body = readFileSync(join(unnamed.dist, 'privacy-and-ai', 'index.html'), 'utf8');
-    writeFileSync(join(unnamed.dist, 'privacy-and-ai', 'index.html'), body.replace('<code>fothering-flow</code>', ''));
-    const failedRun = await e2e(unnamed, {}, { lines: siteLines(both) });
+    const stripped = body.replace('<code>fothering-theme</code>', '');
+    expect(stripped).not.toBe(body);
+    writeFileSync(join(unnamed.dist, 'privacy-and-ai', 'index.html'), stripped);
+    const failedRun = await e2e(unnamed, {}, { lines: siteLines(theme) });
     expect(failedRun.code).toBe(1);
-    expect(failedRun.lines).toContain(E2E_MESSAGES.renderedFailed('STORAGE', E2E_MESSAGES.storageUnnamed(['fothering-flow'])));
+    expect(failedRun.lines).toContain(E2E_MESSAGES.renderedFailed('STORAGE', E2E_MESSAGES.storageUnnamed(['fothering-theme'])));
   });
 
   it('the rendered step serves the planted dist on 127.0.0.1 and hands the driver its base URL, the landing route and every route', async () => {

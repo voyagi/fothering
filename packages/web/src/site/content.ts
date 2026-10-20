@@ -116,16 +116,16 @@ export const LIMITS_REPLAY_ROW = Object.freeze({ id: 'replay', part: 'Incident r
 export const LIMITS_FIXED_ROWS: readonly LimitsRow[] = Object.freeze([
   { id: 'measured-numbers', part: 'Measured numbers', state: 'None yet', mark: 'later', note: 'This site shows no measured number. Numbers come only from recorded live runs.' },
   { id: 'live-run', part: 'Live run', state: 'Not yet', mark: 'later', note: 'One run against the SES mailbox simulator and a verified address is planned before submission.' },
-  { id: 'deploy-sheet', part: 'Deploy sheet', state: 'From the template', mark: 'open', note: 'Its permissions and resources are generated from the template on every build.' },
+  { id: 'deploy-sheet', part: 'Deploy page', state: 'From the template', mark: 'open', note: 'Its permissions and resources are generated from the template on every build.' },
 ]);
 
-// The deploy sheet (UI-SPEC 11.7). Its commands, permissions, resources and Region come from the
+// The deploy page (UI-SPEC 11.7). Its commands, permissions, resources and Region come from the
 // committed sources through repo-facts.ts and the snapshot views; `{region}` is filled from the
 // stack pin, so no text here names a command, a permission or the Region.
 
 export const DEPLOY_COPY = Object.freeze({
   h1: 'Deploy into your own AWS account',
-  intro: 'Fothering runs in your account, in `{region}`. Read the template before you deploy it: this sheet lists everything it creates, every permission it holds, and how to take all of it out again, each generated from the template on every build.',
+  intro: 'Fothering runs in your account, in `{region}`. Read the template before you deploy it: this page lists everything it creates, every permission it holds, and how to take all of it out again, each generated from the template on every build.',
   stepsHeading: 'Five steps, one template',
   stepsHead: 'The deploy is one CDK app. Building it is free and offline, so you can read the CloudFormation it produces before anything is created.',
   resourcesHeading: 'What the template creates',
@@ -146,7 +146,7 @@ export const ONE_CALLER_SENTENCE = 'Each lane sends through its own IAM caller i
 // UI-SPEC Q16: shown while no role may pause a lane, and gone with no edit once one may.
 export const NOT_YET_NOTICE = Object.freeze({
   label: 'NOT YET',
-  text: 'This template has no stack that pauses or reopens a lane yet. Every table on this sheet shows the template as it stands.',
+  text: 'This template has no stack that pauses or reopens a lane yet. Every table on this page shows the template as it stands.',
 });
 
 // Which README command lines a step shows, by what each line does (repo-facts.ts classifies them).
@@ -253,7 +253,6 @@ export const SIX_RIGHTS: readonly string[] = Object.freeze(['access', 'rectifica
 // D-141: the site's only stored state, and what each key holds, named on the privacy section (AC-22).
 export const STORAGE_ENTRIES = Object.freeze([
   { key: 'fothering-theme', holds: '`light` or `dark`, when you pick Light or Dark; Device removes it' },
-  { key: 'fothering-flow', holds: '`stopped` or `running`, when you use the Stop flow button' },
 ]);
 
 export const RUNTIME_ROLE_STATEMENT = 'runtime-role';
@@ -352,15 +351,15 @@ export const HAND_CHECK_CRITERIA: readonly HandCheckCriterion[] = Object.freeze(
   { number: '1.2.5', name: 'Audio Description (Prerecorded)', result: 'not-yet-checked', how: 'Check that the site has no prerecorded video.' },
   { number: '1.3.2', name: 'Meaningful Sequence', result: 'not-yet-checked', how: 'Check that every page keeps its meaning when read with a screen reader and with styles turned off.' },
   { number: '1.3.3', name: 'Sensory Characteristics', result: 'not-yet-checked', how: 'Check that no instruction relies on shape, colour, size, position or sound alone.' },
-  { number: '1.4.5', name: 'Images of Text', result: 'not-yet-checked', how: 'Check that every word is text, the drawing labels included, and none is a picture of text.' },
+  { number: '1.4.5', name: 'Images of Text', result: 'not-yet-checked', how: 'Check that every word is text, the flag letters included, and none is a picture of text.' },
   { number: '1.4.10', name: 'Reflow', result: 'not-yet-checked', how: 'Check that at 320 pixels wide and at the largest zoom no page scrolls sideways or cuts content off.' },
-  { number: '1.4.11', name: 'Non-text Contrast', result: 'not-yet-checked', how: 'Check that the state marks, drawing lines, theme switch and focus rings meet the contrast minimum in Light and Dark.' },
+  { number: '1.4.11', name: 'Non-text Contrast', result: 'not-yet-checked', how: 'Check that the state marks, flags, halyard, theme switch and focus rings meet the contrast minimum in Light and Dark.' },
   { number: '1.4.13', name: 'Content on Hover or Focus', result: 'not-yet-checked', how: 'Check that hovering over or focusing any link or control opens no tooltip or pop-up over the page.' },
   { number: '2.1.2', name: 'No Keyboard Trap', result: 'not-yet-checked', how: 'Check that focus can leave every control when tabbing forwards and backwards with the keyboard alone.' },
   { number: '2.1.4', name: 'Character Key Shortcuts', result: 'not-yet-checked', how: 'Check that pressing letter, number and punctuation keys on every page triggers no shortcut.' },
-  { number: '2.3.1', name: 'Three Flashes or Below Threshold', result: 'not-yet-checked', how: 'Check that nothing on the site flashes, the moving flow dashes included.' },
+  { number: '2.3.1', name: 'Three Flashes or Below Threshold', result: 'not-yet-checked', how: 'Check that nothing on the site flashes, the flag hoist included.' },
   { number: '2.4.3', name: 'Focus Order', result: 'not-yet-checked', how: 'Check that tabbing through every page moves focus in reading order, not only in page source order.' },
-  { number: '2.4.5', name: 'Multiple Ways', result: 'not-yet-checked', how: 'Check that the title block on every page links to every other sheet.' },
+  { number: '2.4.5', name: 'Multiple Ways', result: 'not-yet-checked', how: 'Check that the index at the foot of every page links to every other page.' },
   { number: '2.4.6', name: 'Headings and Labels', result: 'not-yet-checked', how: 'Check that every heading and control label says what its section or control is for.' },
   { number: '2.4.7', name: 'Focus Visible', result: 'not-yet-checked', how: 'Check that every link, button and radio shows its focus outline or ring in Light, Dark and Device.' },
   { number: '2.4.11', name: 'Focus Not Obscured (Minimum)', result: 'not-yet-checked', how: 'Check that at 320 pixels wide no focused element hides behind the sticky replay controls.' },
@@ -370,7 +369,7 @@ export const HAND_CHECK_CRITERIA: readonly HandCheckCriterion[] = Object.freeze(
   { number: '2.5.7', name: 'Dragging Movements', result: 'not-yet-checked', how: 'Check that nothing on the site needs dragging.' },
   { number: '3.2.1', name: 'On Focus', result: 'not-yet-checked', how: 'Check that focusing any control never changes the page, opens anything or moves focus.' },
   { number: '3.2.2', name: 'On Input', result: 'not-yet-checked', how: 'Check that choosing a theme by keyboard or pointer changes only the colours, with focus kept on the radio.' },
-  { number: '3.2.3', name: 'Consistent Navigation', result: 'not-yet-checked', how: 'Check that the top bar and title block hold the same links in the same order on every page.' },
+  { number: '3.2.3', name: 'Consistent Navigation', result: 'not-yet-checked', how: 'Check that the signal row and the index at the foot list their links in one order on every page.' },
   { number: '3.2.4', name: 'Consistent Identification', result: 'not-yet-checked', how: 'Check that each control or link keeps one name for one function on every page, theme switch included.' },
   { number: '3.2.6', name: 'Consistent Help', result: 'not-yet-checked', how: 'Check that any help or contact route repeated across pages sits in the same order on each.' },
   { number: '3.3.1', name: 'Error Identification', result: 'not-yet-checked', how: NO_FORM },
@@ -429,7 +428,7 @@ export const ACCESSIBILITY_RECORD: AccessibilityRecord = Object.freeze({
   widths: Object.freeze([320, 1440]),
   themes: Object.freeze(['light', 'dark', 'device']),
   limitations: Object.freeze([
-    { id: 'drawings', text: 'The flow drawings are images with text descriptions; every lane name and state they show is also in the page text.' },
+    { id: 'drawings', text: 'The signal flags are drawn images with text beside them; every letter, meaning, lane and state they show is also in the page text.' },
     { id: 'hand-check', text: 'An automated audit cannot decide every criterion. Those listed under Checked by hand need a person in a real browser.' },
   ]),
   contact: `To report an accessibility problem, ${CONTROLLER.contact}.`,
