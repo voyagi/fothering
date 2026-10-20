@@ -1,4 +1,5 @@
 import type { Provenance } from '@fothering/core/records';
+import { REPUTATION_PAGE_URL } from './content.js';
 
 export type LimitsMark = 'later' | 'open';
 
@@ -13,9 +14,9 @@ export interface ProvenanceLabel {
   readonly timeWording: string;
 }
 
-// The simulator caption's second sentence rests on this page, so the link travels with the caption
-// rather than living in a page that might render the sentence without it.
-const SES_REPUTATION_PAGE = 'https://docs.aws.amazon.com/ses/latest/dg/reputationdashboardmessages.html';
+// The simulator caption's second sentence rests on the reputation page, so the link travels with the
+// caption rather than living in a page that might render the sentence without it. It is the same URL
+// the threshold-link rule asks for, so the two cannot drift apart.
 
 export const PROVENANCE_LABELS = {
   'doc-derived': {
@@ -40,7 +41,7 @@ export const PROVENANCE_LABELS = {
     stamp: 'SIMULATOR RUN',
     caption:
       'Captured from the SES mailbox simulator in eu-central-1. Simulator mail does not count toward SES reputation metrics.',
-    captionLinkHref: SES_REPUTATION_PAGE,
+    captionLinkHref: REPUTATION_PAGE_URL,
     titleBlockStatus: 'simulator',
     limitsState: 'Simulator',
     limitsMark: 'later',
