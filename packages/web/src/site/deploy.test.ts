@@ -24,7 +24,7 @@ import {
   repoRoot,
   resolveModelId,
 } from './repo-facts.js';
-import { NOT_LISTED, RESOURCE_NOUNS, resourceRows } from './resources-view.js';
+import { loadResourceSnapshot, NOT_LISTED, RESOURCE_NOUNS, resourceRows } from './resources-view.js';
 
 const ROOT = repoRoot(process.cwd());
 
@@ -93,6 +93,15 @@ function plantFile(relative: string, text: string): void {
   mkdirSync(dirname(file), { recursive: true });
   writeFileSync(file, text);
 }
+
+describe('the snapshot loaders', () => {
+  it('name the file and the snapshot command when a snapshot is not JSON', () => {
+    const root = join(PLANT, 'torn-snapshots');
+    for (const name of ['permissions', 'resources']) plantFile(`torn-snapshots/packages/infra/${name}.json`, '[{"stack": ');
+    expect(() => loadPermissionSnapshot(root)).toThrow(/^packages\/infra\/permissions\.json: not valid JSON \([\s\S]+\)\. Run npm run permissions:snapshot\.$/);
+    expect(() => loadResourceSnapshot(root)).toThrow(/^packages\/infra\/resources\.json: not valid JSON \([\s\S]+\)\. Run npm run permissions:snapshot\.$/);
+  });
+});
 
 describe('the resource schedule', () => {
   it('classes every type in the committed snapshot in exactly one of the noun map and the not-listed map', () => {

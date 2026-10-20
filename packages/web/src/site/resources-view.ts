@@ -1,9 +1,9 @@
-import { readRepoText } from './repo-facts.js';
+import { readRepoJson } from './repo-facts.js';
 
 const SOURCE = 'packages/infra/resources.json';
 
 export function loadResourceSnapshot(root: string): unknown[] {
-  const parsed: unknown = JSON.parse(readRepoText(SOURCE, root));
+  const parsed = readRepoJson(SOURCE, root, 'Run npm run permissions:snapshot.');
   if (!Array.isArray(parsed)) throw new Error(`${SOURCE}: not a list. Run npm run permissions:snapshot.`);
   return parsed;
 }

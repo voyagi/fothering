@@ -53,6 +53,16 @@ export function readRepoText(relativePath: string, root: string): string {
   return text;
 }
 
+// A committed JSON file, with the file and its remedy named when it does not parse.
+export function readRepoJson(relativePath: string, root: string, remedy: string): unknown {
+  const text = readRepoText(relativePath, root);
+  try {
+    return JSON.parse(text);
+  } catch (error) {
+    throw new Error(`${relativePath}: not valid JSON (${(error as Error).message}). ${remedy}`);
+  }
+}
+
 export interface DeployCommand {
   command: string;
   /** The line's trailing `# ...` comment, or null. */
