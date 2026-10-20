@@ -1442,10 +1442,13 @@ describe('the deploy resources rule (AC-35)', () => {
 });
 
 describe('the deploy Deny rule (AC-37, AC-E27)', () => {
-  const denied = plantedEntry({ effect: 'Deny', action: 'ses:UpdateAccountSendingEnabled', resource: '*' });
+  // One Deny of the action on every role, the way phase 3's template denies it, so the box's heading
+  // "Denied on every role" holds.
+  const roleEntries = [...new Map((DEPLOY_FACTS.permissions as SnapshotEntry[]).map((entry) => [`${entry.stack}/${entry.role}`, entry])).values()];
+  const denied = roleEntries.map((entry) => plantedEntry({ stack: entry.stack, role: entry.role, effect: 'Deny', action: 'ses:UpdateAccountSendingEnabled', resource: '*' }));
   const deniedFacts = {
-    permissions: [...DEPLOY_FACTS.permissions, denied],
-    reasons: { ...PERMISSION_REASONS, [permissionKey(denied)]: 'Stops a pause of the whole account.' },
+    permissions: [...DEPLOY_FACTS.permissions, ...denied],
+    reasons: { ...PERMISSION_REASONS, ...Object.fromEntries(denied.map((entry) => [permissionKey(entry), 'Stops a pause of the whole account.'])) },
   };
 
   it('passes the shipped snapshot, which holds no Deny entry, with no Deny box', () => {
@@ -1465,7 +1468,8 @@ describe('the deploy Deny rule (AC-37, AC-E27)', () => {
 
   it('renders a planted Deny entry as a row in the Deny box, and fails a page without it', () => {
     expect(deployTexts(deployDenyRule, deployBody({}, { ...DEPLOY_FACTS, ...deniedFacts }), withDeploy(deniedFacts))).toEqual([]);
-    expect(deployTexts(deployDenyRule, deployBody(), withDeploy(deniedFacts))).toEqual(['the snapshot holds 1 Deny entry, and the deploy page has no Deny box']);
+    expect(denied.length).toBeGreaterThan(1);
+    expect(deployTexts(deployDenyRule, deployBody(), withDeploy(deniedFacts))).toEqual([`the snapshot holds ${String(denied.length)} Deny entries, and the deploy page has no Deny box`]);
   });
 });
 

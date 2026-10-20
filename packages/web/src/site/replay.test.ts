@@ -436,6 +436,8 @@ describe('buildReplayView refuses an artifact the replay copy would misstate', (
     receivingDomain: 'outlook.com',
   };
   const at = (time: string): string => `2026-10-14T${time}Z`;
+  const shippedHold = artifact.holdCheck ?? { atUtc: at('14:04:00'), holdFromUtc: at('14:03:00'), result: 'passed' as const };
+  const withHold = (change: Partial<typeof shippedHold>): ReplayArtifact => ({ ...artifact, holdCheck: { ...shippedHold, ...change } });
   const cases: [string, ReplayArtifact, RegExp][] = [
     ['a bounce on another lane', { ...artifact, events: [...artifact.events, otherLaneBounce] }, /: events: a bounce sits on fothering-transactional, and the replay heads step one "Hard bounces on one lane"\. Replay an incident whose bounces are all on the paused lane\.$/],
     ['mixed SMTP codes on the closed lane', withEvent(secondBounce, { smtpCode: '552 5.2.2' }), /: events: the bounces on fothering-bulk carry 550 5\.1\.1 and 552 5\.2\.2, and step one says the bounces logged here read one code\. /],
@@ -451,6 +453,12 @@ describe('buildReplayView refuses an artifact the replay copy would misstate', (
     ['a pause read-back before the pause', { ...artifact, pause: { ...artifact.pause, readBack: { ...artifact.pause.readBack, atUtc: at('14:02:59') } } }, /: pause\.readBack\.atUtc: 2026-10-14T14:02:59Z is before pause\.atUtc 2026-10-14T14:03:00Z\. /],
     ['a reopen before the pause read-back', { ...artifact, reopen: { ...artifact.reopen, atUtc: at('14:03:01'), readBack: { ...artifact.reopen.readBack, atUtc: at('14:03:01') } } }, /: reopen\.atUtc: 2026-10-14T14:03:01Z is before pause\.readBack\.atUtc 2026-10-14T14:03:02Z\. /],
     ['a reopen read-back before the reopen command', { ...artifact, reopen: { ...artifact.reopen, readBack: { ...artifact.reopen.readBack, atUtc: at('15:19:59') } } }, /: reopen\.readBack\.atUtc: 2026-10-14T15:19:59Z is before reopen\.atUtc 2026-10-14T15:20:00Z\. /],
+    ['a hold window that starts before the pause', withHold({ holdFromUtc: at('14:02:59') }), /: holdCheck\.holdFromUtc: 2026-10-14T14:02:59Z is before pause\.atUtc 2026-10-14T14:03:00Z\. /],
+    ['a hold check before its hold window starts', withHold({ holdFromUtc: at('14:03:30'), atUtc: at('14:03:20') }), /: holdCheck\.atUtc: 2026-10-14T14:03:20Z is before holdCheck\.holdFromUtc 2026-10-14T14:03:30Z\. /],
+    ['a hold check before the pause read-back', withHold({ atUtc: at('14:03:01') }), /: holdCheck\.atUtc: 2026-10-14T14:03:01Z is before pause\.readBack\.atUtc 2026-10-14T14:03:02Z\. /],
+    ['a reopen before the hold check', withHold({ atUtc: at('15:20:01') }), /: reopen\.atUtc: 2026-10-14T15:20:00Z is before holdCheck\.atUtc 2026-10-14T15:20:01Z\. /],
+    ['an email sent before the pause read-back', { ...artifact, email: { ...artifact.email, sentAtUtc: at('14:03:01') } }, /: email\.sentAtUtc: 2026-10-14T14:03:01Z is before pause\.readBack\.atUtc 2026-10-14T14:03:02Z\. /],
+    ['a reopen before the email', { ...artifact, email: { ...artifact.email, sentAtUtc: at('15:20:01') } }, /: reopen\.atUtc: 2026-10-14T15:20:00Z is before email\.sentAtUtc 2026-10-14T15:20:01Z\. /],
     ['a step 2 event earlier than a step 1 event', withEvent(artifact.events.findIndex((event) => event.step === 2), { atUtc: at('14:01:00') }), /: events: step 2 has an event at 2026-10-14T14:01:00Z, before a step 1 event at 2026-10-14T14:01:20Z\. /],
   ];
 
@@ -714,5 +722,23 @@ describe('fixtureFindings', () => {
   it('fails a manifest holding a 12-digit number other than its account id', () => {
     const manifest = { ...manifestFor(liveArtifact()), requestIds: ['444455556666'] };
     expect(fixtureFindings('capture-manifest.json', JSON.stringify(manifest))).toEqual([expect.stringMatching(/a 12-digit number/)]);
+  });
+
+  it('passes a request id or SES message id whose last UUID group is all digits, in either file', () => {
+    const requestId = 'a1b2c3d4-5e6f-7a8b-9c0d-123456789012';
+    const messageId = '0107019a1b2c3d4e-1a2b3c4d-1a2b-3c4d-5e6f-210987654321-000000';
+    const planted = shippedText.replace('"Delivered, stream receipts"', `"Delivered, stream receipts, request ${requestId}, message ${messageId}"`);
+    expect(planted).not.toBe(shippedText);
+    expect(fixtureFindings('replay-incident.json', planted)).toEqual([]);
+    const manifest = { ...manifestFor(liveArtifact()), requestIds: [requestId], sesMessageIds: [messageId] };
+    expect(fixtureFindings('capture-manifest.json', JSON.stringify(manifest))).toEqual([]);
+  });
+
+  it('still fails 12 digits after a head that is not a whole UUID, and names the one file that may hold them', () => {
+    for (const head of ['option-', 'a1b2c3d4-5e6f-7a8b-', 'zzzzzzzz-5e6f-7a8b-9c0d-']) {
+      const planted = shippedText.replace('"option-7d2e"', `"${head}123456789012"`);
+      expect(planted, head).not.toBe(shippedText);
+      expect(fixtureFindings('replay-incident.json', planted), head).toEqual([expect.stringMatching(/^replay-incident\.json:\d+: a 12-digit number outside capture-manifest\.json, the only file that may hold the account id$/)]);
+    }
   });
 });

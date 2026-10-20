@@ -194,11 +194,19 @@ describe('the Deny rows', () => {
     expect(denyRows(committedPermissions())).toEqual([]);
   });
 
-  it('hold exactly one row for a planted snapshot with one Deny entry', () => {
+  it('hold one row per role for a Deny planted on every role', () => {
+    const roles = [...new Map(committedPermissions().map((entry) => [`${entry.stack}/${entry.role}`, entry])).values()];
+    const denies = roles.map((entry) => permission({ stack: entry.stack, role: entry.role, effect: 'Deny', action: 'ses:PutConfigurationSetSendingOptions', resource: '"*"' }));
+    const reasons = { ...PERMISSION_REASONS, ...Object.fromEntries(denies.map((deny) => [permissionKey(deny), 'Planted.'])) };
+    expect(denies.length).toBeGreaterThan(1);
+    const rows = denyRows([...committedPermissions(), ...denies], reasons);
+    expect(rows.map((row) => `${row.effect} ${row.action}`)).toEqual(denies.map(() => 'Deny ses:PutConfigurationSetSendingOptions'));
+  });
+
+  it('refuse a Deny that some role lacks, which the heading "Denied on every role" would misstate', () => {
     const deny = permission({ role: 'IngestRoleAF8AE6D8', effect: 'Deny', action: 'ses:PutConfigurationSetSendingOptions', resource: '"*"' });
     const reasons = { ...PERMISSION_REASONS, [permissionKey(deny)]: 'Planted.' };
-    const rows = denyRows([...committedPermissions(), deny], reasons);
-    expect(rows.map((row) => `${row.effect} ${row.action}`)).toEqual(['Deny ses:PutConfigurationSetSendingOptions']);
+    expect(() => denyRows([...committedPermissions(), deny], reasons)).toThrow(/: ses:PutConfigurationSetSendingOptions is denied on some roles but not on FotheringDetection\/DetectRole, FotheringIngest\/ForgetRole, FotheringRuntime\/RuntimeRole, and the deploy page heads the Deny box "Denied on every role"\. Deny it on every role, or retitle the box\.$/);
   });
 });
 
@@ -247,6 +255,23 @@ describe('the pause grant and runtime role predicates', () => {
   it('report a pause grant for a planted Allow of ses:PutConfigurationSetSendingOptions', () => {
     const planted = [...committedPermissions(), permission({ action: 'ses:PutConfigurationSetSendingOptions', resource: '"*"' })];
     expect(hasPauseGrant(planted)).toBe(true);
+  });
+
+  it('refuse one role name in two stacks, which would give two role sections one id', () => {
+    const twin = permission({ stack: 'FotheringOther', role: 'IngestRoleABCDEF12' });
+    const reasons = { ...PERMISSION_REASONS, [permissionKey(twin)]: 'Planted.' };
+    expect(() => permissionSchedules([...committedPermissions(), twin], reasons)).toThrow(/: two roles are named IngestRole, in FotheringIngest and FotheringOther, and the deploy page ids each role section by its name\. Rename one of them\.$/);
+    const renamed = permission({ stack: 'FotheringOther', role: 'OtherRoleABCDEF12' });
+    expect(() => permissionSchedules([...committedPermissions(), renamed], { ...PERMISSION_REASONS, [permissionKey(renamed)]: 'Planted.' })).not.toThrow();
+  });
+
+  it('report a pause grant for a wildcard Allow that covers the action, and none for one that does not', () => {
+    for (const action of ['ses:*', '*', 'ses:PutConfigurationSet*', 'SES:putconfigurationsetsendingoptions', 'ses:PutConfigurationSetSendingOption?']) {
+      expect(hasPauseGrant([...committedPermissions(), permission({ action, resource: '"*"' })]), action).toBe(true);
+    }
+    for (const action of ['ses:Get*', 'ses:PutConfigurationSetSendingOptions?', 'dynamodb:*', 'ses:PutConfigurationSet.SendingOptions']) {
+      expect(hasPauseGrant([...committedPermissions(), permission({ action, resource: '"*"' })]), action).toBe(false);
+    }
   });
 
   it('report no pause grant for a Deny of it alone', () => {

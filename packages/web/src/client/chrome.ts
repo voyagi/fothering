@@ -98,11 +98,8 @@ export function initFlowSwitch(deps: ChromeDeps): void {
     const controls = Array.from(doc.querySelectorAll<HTMLButtonElement>(FLOW_CONTROLS));
     if (controls.length === 0) return;
     const root = doc.documentElement;
-    const applyStored = (): void => {
-      const stored = known(read(deps, FLOW_KEY), FLOW_CHOICES);
-      if (stored !== null) root.setAttribute('data-flow', stored);
-    };
-    applyStored();
+    const stored = known(read(deps, FLOW_KEY), FLOW_CHOICES);
+    if (stored !== null) root.setAttribute('data-flow', stored);
     // With no stored choice the CSS follows prefers-reduced-motion live, so the label must too.
     const reduce = deps.window.matchMedia('(prefers-reduced-motion: reduce)');
     const isStopped = (): boolean => {
@@ -113,20 +110,39 @@ export function initFlowSwitch(deps: ChromeDeps): void {
       const text = isStopped() ? 'Run flow' : 'Stop flow';
       for (const control of controls) control.textContent = text;
     };
+    // The stored value this page view last saw, as the theme switch keeps it: a different one later
+    // means a choice made in another tab or on another page, and an unchanged one leaves a choice
+    // this view made with storage blocked standing. No stored choice hands the flow back to the
+    // motion preference.
+    let seen = read(deps, FLOW_KEY);
+    const follow = (): void => {
+      const now = read(deps, FLOW_KEY);
+      if (now === seen) return;
+      seen = now;
+      const choice = known(now, FLOW_CHOICES);
+      if (choice === null) root.removeAttribute('data-flow');
+      else root.setAttribute('data-flow', choice);
+    };
     for (const control of controls) {
       control.addEventListener('click', () => {
         const next: FlowChoice = isStopped() ? 'running' : 'stopped';
         root.setAttribute('data-flow', next);
         attempt(() => deps.storage().setItem(FLOW_KEY, next));
+        seen = read(deps, FLOW_KEY);
         label();
       });
     }
     reduce.addEventListener('change', label);
+    deps.window.addEventListener('storage', (event) => {
+      if (event.key !== null && event.key !== FLOW_KEY) return;
+      follow();
+      label();
+    });
     // A page restored from the back/forward cache missed any choice made on another page and any
-    // motion preference change, so it rereads storage and relabels, as the theme switch does.
+    // motion preference change, so it rereads storage and relabels.
     deps.window.addEventListener('pageshow', (event) => {
       if (!event.persisted) return;
-      applyStored();
+      follow();
       label();
     });
     label();

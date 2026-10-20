@@ -277,6 +277,38 @@ describe('initFlowSwitch (AC-43 and AC-E31 unit half, D-141)', () => {
     expect(labels(page)).toEqual(['Run flow']);
   });
 
+  it('a storage event for the flow applies the choice another tab made, and one for another key does not', () => {
+    const page = makePage({ buttons: 1, reduce: false });
+    initFlowSwitch(page.deps);
+    page.store.set('fothering-flow', 'stopped');
+    page.win.dispatch('storage', { key: 'fothering-theme', newValue: 'dark' });
+    expect(page.attrs.has('data-flow')).toBe(false);
+    expect(labels(page)).toEqual(['Stop flow']);
+    page.win.dispatch('storage', { key: 'fothering-flow', newValue: 'stopped' });
+    expect(page.attrs.get('data-flow')).toBe('stopped');
+    expect(labels(page)).toEqual(['Run flow']);
+  });
+
+  it('a cleared store hands the flow back to the motion preference', () => {
+    const page = makePage({ buttons: 1, reduce: false, stored: { 'fothering-flow': 'stopped' }, attrs: { 'data-flow': 'stopped' } });
+    initFlowSwitch(page.deps);
+    expect(labels(page)).toEqual(['Run flow']);
+    page.store.delete('fothering-flow');
+    page.win.dispatch('storage', { key: null, newValue: null });
+    expect(page.attrs.has('data-flow')).toBe(false);
+    expect(labels(page)).toEqual(['Stop flow']);
+  });
+
+  it('with every storage call throwing, a click still stands after a storage event or a restore', () => {
+    const page = makePage({ buttons: 1, reduce: false, storage: 'throws' });
+    initFlowSwitch(page.deps);
+    page.buttons[0]?.dispatch('click');
+    page.win.dispatch('storage', { key: 'fothering-flow' });
+    page.win.dispatch('pageshow', { persisted: true });
+    expect(page.attrs.get('data-flow')).toBe('stopped');
+    expect(labels(page)).toEqual(['Run flow']);
+  });
+
   it('a page restored from the back/forward cache labels a reduced-motion change it missed', () => {
     const page = makePage({ buttons: 1, reduce: false });
     initFlowSwitch(page.deps);

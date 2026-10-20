@@ -170,23 +170,54 @@ export function permissionSchedules(values: readonly unknown[], reasons: Reasons
     schedule.rows.push(rowOf(entry, reasons));
     schedules.set(id, schedule);
   }
+  // The deploy page ids each role's section by the role name alone, so one name on two roles would
+  // give two sections one id and break the label that points at it.
+  const stackOfName = new Map<string, string>();
+  for (const schedule of schedules.values()) {
+    const name = roleName(schedule.role);
+    const other = stackOfName.get(name);
+    if (other !== undefined) throw new Error(`${SOURCE}: two roles are named ${name}, in ${other} and ${schedule.stack}, and the deploy page ids each role section by its name. Rename one of them.`);
+    stackOfName.set(name, schedule.stack);
+  }
   return [...schedules.values()];
 }
 
 export function denyRows(values: readonly unknown[], reasons: Reasons = PERMISSION_REASONS): PermissionRow[] {
-  return permissionSchedules(values, reasons)
-    .flatMap((schedule) => schedule.rows)
-    .filter((row) => row.effect === 'Deny');
+  const schedules = permissionSchedules(values, reasons);
+  const rows = schedules.flatMap((schedule) => schedule.rows).filter((row) => row.effect === 'Deny');
+  // The deploy page heads the Deny box "Denied on every role", so a Deny that some role lacks is
+  // refused rather than printed under that heading.
+  for (const action of new Set(rows.map((row) => row.action))) {
+    const lacking = schedules.filter((schedule) => !schedule.rows.some((row) => row.effect === 'Deny' && row.action === action));
+    if (lacking.length > 0) {
+      const names = lacking.map((schedule) => `${schedule.stack}/${roleName(schedule.role)}`).join(', ');
+      throw new Error(`${SOURCE}: ${action} is denied on some roles but not on ${names}, and the deploy page heads the Deny box "Denied on every role". Deny it on every role, or retitle the box.`);
+    }
+  }
+  return rows;
 }
 
 function grants(entry: PermissionEntry, pattern: RegExp): boolean {
   return entry.kind === 'permission' && entry.effect === 'Allow' && pattern.test(entry.action);
 }
 
-// The deploy page's NOT YET notice stays until some role is allowed to pause a lane; a Deny of the
-// action alone grants nothing.
+const PAUSE_ACTION = 'ses:PutConfigurationSetSendingOptions';
+
+// A granted IAM action is a pattern: names are case-insensitive, * matches any run of characters and
+// ? any one character, so ses:*, ses:Put* and a bare * all cover the pause action.
+function actionPattern(granted: string): RegExp {
+  const source = Array.from(granted, (character) => {
+    if (character === '*') return '.*';
+    if (character === '?') return '.';
+    return character.replace(/[.+^${}()|[\]\\]/g, '\\$&');
+  }).join('');
+  return new RegExp(`^${source}$`, 'i');
+}
+
+// The deploy page's NOT YET notice stays until some role is allowed to pause a lane, by name or by a
+// wildcard; a Deny of the action alone grants nothing.
 export function hasPauseGrant(values: readonly unknown[]): boolean {
-  return permissionEntries(values).some((entry) => grants(entry, /^ses:PutConfigurationSetSendingOptions$/i));
+  return permissionEntries(values).some((entry) => entry.kind === 'permission' && entry.effect === 'Allow' && actionPattern(entry.action).test(PAUSE_ACTION));
 }
 
 // IAM action names are case-insensitive, and a bare * covers every service.
