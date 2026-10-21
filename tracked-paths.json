@@ -24,6 +24,7 @@
     "vitest.config.ts",
     "vitest.stryker.config.ts",
     "docs/forget-one-recipient.md",
+    "docs/measurement-scenarios.json",
     "docs/agent-unavailable.md",
     "docs/reopen-a-lane.md",
     "docs/ai-act.md"

@@ -1,0 +1,101 @@
+{
+  "recipientDomain": "simulator.amazonses.com",
+  "minGapMs": 1250,
+  "scenarios": [
+    {
+      "run": 1,
+      "name": "bulk-stale-import",
+      "lane": "fothering-bulk",
+      "precondition": "A fresh deploy with the live switch on from the first deploy, the three lane-map sets reading sending enabled with their EventBridge destinations, no open incident on fothering-bulk, and a From identity with no default configuration set.",
+      "expectedDecision": { "outcome": "close", "dimension": "tag", "tagKind": "batch", "value": "stale-import" },
+      "steps": [
+        {
+          "name": "spike",
+          "groups": [
+            { "name": "clean-import", "lane": "fothering-bulk", "tag": { "kind": "batch", "value": "clean-import" }, "recipient": "success", "count": 96 },
+            { "name": "stale-import", "lane": "fothering-bulk", "tag": { "kind": "batch", "value": "stale-import" }, "recipient": "bounce", "count": 24 },
+            { "name": "receipts", "lane": "fothering-transactional", "tag": { "kind": "template", "value": "order-receipt" }, "recipient": "success", "count": 12 }
+          ],
+          "cycle": [
+            { "group": "clean-import", "take": 4 },
+            { "group": "stale-import", "take": 1 }
+          ],
+          "interleave": { "group": "receipts", "afterEvery": 10 }
+        },
+        {
+          "name": "after-pause",
+          "groups": [
+            { "name": "bulk-retry", "lane": "fothering-bulk", "tag": { "kind": "batch", "value": "clean-import" }, "recipient": "success", "count": 3 },
+            { "name": "receipts-after", "lane": "fothering-transactional", "tag": { "kind": "template", "value": "order-receipt" }, "recipient": "success", "count": 3 }
+          ],
+          "cycle": [
+            { "group": "bulk-retry", "take": 1 },
+            { "group": "receipts-after", "take": 1 }
+          ]
+        }
+      ]
+    },
+    {
+      "run": 2,
+      "name": "transactional-spike",
+      "lane": "fothering-transactional",
+      "precondition": "Run 1's lane reopened and read back as sending, with run 1's raw files saved and check-saved exiting 0.",
+      "expectedDecision": { "outcome": "unknown", "reason": "not-closeable" },
+      "steps": [
+        {
+          "name": "spike",
+          "groups": [
+            { "name": "order-receipt", "lane": "fothering-transactional", "tag": { "kind": "template", "value": "order-receipt" }, "recipient": "success", "count": 96 },
+            { "name": "invoice-reminder", "lane": "fothering-transactional", "tag": { "kind": "template", "value": "invoice-reminder" }, "recipient": "bounce", "count": 24 }
+          ],
+          "cycle": [
+            { "group": "order-receipt", "take": 4 },
+            { "group": "invoice-reminder", "take": 1 }
+          ]
+        }
+      ]
+    },
+    {
+      "run": 3,
+      "name": "bulk-complaint-campaign",
+      "lane": "fothering-bulk",
+      "precondition": "No open incident on fothering-bulk, so at least 14 hours after run 1's lane went quiet, which inside live session B means it is logged as not run with that reason.",
+      "expectedDecision": { "outcome": "close", "dimension": "tag", "tagKind": "campaign", "value": "winback" },
+      "steps": [
+        {
+          "name": "spike",
+          "groups": [
+            { "name": "october-news", "lane": "fothering-bulk", "tag": { "kind": "campaign", "value": "october-news" }, "recipient": "success", "count": 96 },
+            { "name": "winback-success", "lane": "fothering-bulk", "tag": { "kind": "campaign", "value": "winback" }, "recipient": "success", "count": 20 },
+            { "name": "winback-complaint", "lane": "fothering-bulk", "tag": { "kind": "campaign", "value": "winback" }, "recipient": "complaint", "count": 4 }
+          ],
+          "cycle": [
+            { "group": "october-news", "take": 4 },
+            { "group": "winback-success", "take": 1 },
+            { "group": "october-news", "take": 4 },
+            { "group": "winback-success", "take": 1 },
+            { "group": "october-news", "take": 4 },
+            { "group": "winback-success", "take": 1 },
+            { "group": "october-news", "take": 4 },
+            { "group": "winback-success", "take": 1 },
+            { "group": "october-news", "take": 4 },
+            { "group": "winback-success", "take": 1 },
+            { "group": "october-news", "take": 4 },
+            { "group": "winback-complaint", "take": 1 }
+          ]
+        },
+        {
+          "name": "after-pause",
+          "groups": [
+            { "name": "bulk-retry", "lane": "fothering-bulk", "tag": { "kind": "batch", "value": "clean-import" }, "recipient": "success", "count": 3 },
+            { "name": "receipts-after", "lane": "fothering-transactional", "tag": { "kind": "template", "value": "order-receipt" }, "recipient": "success", "count": 3 }
+          ],
+          "cycle": [
+            { "group": "bulk-retry", "take": 1 },
+            { "group": "receipts-after", "take": 1 }
+          ]
+        }
+      ]
+    }
+  ]
+}
