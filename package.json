@@ -33,7 +33,8 @@
     "mutate": "stryker run",
     "mutate:gate": "node scripts/mutate-gate.mjs",
     "build": "node scripts/build.mjs",
-    "permissions:snapshot": "node scripts/permissions-snapshot.mjs"
+    "permissions:snapshot": "node scripts/permissions-snapshot.mjs",
+    "live-run": "node scripts/live-run.mjs"
   },
   "devDependencies": {
     "@size-limit/file": "13.1.1",

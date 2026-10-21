@@ -1,7 +1,10 @@
+import { pathToFileURL } from 'node:url';
 import { MAX_RATE_MILLI, MIN_SEND_GAP_MS, parseRate, refusalMessage, resolveStep } from '@fothering/core/live-run';
 import { resolveProviderMode } from '@fothering/core/mode';
 import type { StepPlanEntry } from '@fothering/core/scenarios';
-import type { LiveRunDeps } from './root.js';
+import { createLiveRunPortFactory } from '@fothering/providers/live/live-run-ports';
+import { readLiveSwitch } from '@fothering/providers/live-switch';
+import { buildLiveRunRoot, type LiveRunDeps } from './root.js';
 import { refuse, runSendStep } from './send.js';
 
 export const LIVE_RUN_MESSAGES = {
@@ -110,4 +113,18 @@ export async function main(argv: readonly string[], deps: LiveRunDeps): Promise<
   if (subcommand === 'plan') return plan(rest, deps);
   if (subcommand === 'send') return send(rest, deps);
   return usage(deps);
+}
+
+// Bundled into dist/tools/live-run-cli.mjs and run by scripts/live-run.mjs. A test that imports
+// this file runs nothing, because its own URL is not the process entry then. The live factory is
+// handed over unbuilt: the root calls it only after the switch reads exactly live.
+const entry = process.argv[1];
+if (entry !== undefined && import.meta.url === pathToFileURL(entry).href) {
+  const deps = buildLiveRunRoot({
+    runtimeContext: 'deployed',
+    switchValue: readLiveSwitch(),
+    liveFactory: () => createLiveRunPortFactory(),
+    repoRoot: process.cwd(),
+  });
+  process.exit(await main(process.argv.slice(2), deps));
 }
