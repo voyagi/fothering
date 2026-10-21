@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { REPO_ROOT } from '../test/planted-dist.js';
-import { initThemeSwitch, known, THEME_CHOICES, type ChromeDeps } from './chrome.js';
+import { forgetRetiredKeys, initThemeSwitch, known, THEME_CHOICES, type ChromeDeps } from './chrome.js';
 import { initReplay, parseStep, type ReplayDeps } from './replay.js';
 
 type Listener = (event: Record<string, unknown>) => void;
@@ -499,6 +499,22 @@ describe('storage keys (AC-22, AC-P11)', () => {
     page.win.dispatch('pageshow', { persisted: true });
     expect(page.writes.length).toBeGreaterThan(0);
     expect(new Set(page.writes)).toEqual(new Set(['fothering-theme']));
+  });
+
+  it('removes the retired flow switch entry and leaves the theme entry as it was', () => {
+    for (const flow of ['stopped', 'running']) {
+      const page = makePage({ stored: { 'fothering-flow': flow, 'fothering-theme': 'dark' } });
+      forgetRetiredKeys(page.deps);
+      expect(page.store.has('fothering-flow'), flow).toBe(false);
+      expect(page.store.get('fothering-theme'), flow).toBe('dark');
+      expect(page.writes, flow).toEqual(['fothering-flow']);
+    }
+  });
+
+  it('leaves blocked storage alone without throwing', () => {
+    const page = makePage({ storage: 'throws', stored: { 'fothering-flow': 'stopped' } });
+    expect(() => forgetRetiredKeys(page.deps)).not.toThrow();
+    expect(page.store.get('fothering-flow')).toBe('stopped');
   });
 
   it('never names sessionStorage in the shipped source', () => {

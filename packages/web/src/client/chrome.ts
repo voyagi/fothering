@@ -6,6 +6,9 @@ type ThemeChoice = (typeof THEME_CHOICES)[number];
 const STORED_THEMES = ['light', 'dark'] as const;
 const THEME_KEY = 'fothering-theme';
 const THEME_RADIOS = 'input[type="radio"][name="theme"]';
+// Keys an earlier version of the site wrote and nothing reads any more. Each page removes them, so
+// no visitor keeps an entry the privacy page no longer names (AC-22): the flow switch's choice.
+const RETIRED_KEYS = ['fothering-flow'] as const;
 
 export interface ChromeDeps {
   readonly document: Document;
@@ -41,6 +44,10 @@ function attempt(write: () => void): void {
 function whenParsed(doc: Document, run: () => void): void {
   if (doc.readyState === 'loading') doc.addEventListener('DOMContentLoaded', run);
   else run();
+}
+
+export function forgetRetiredKeys(deps: Pick<ChromeDeps, 'storage'>): void {
+  for (const key of RETIRED_KEYS) attempt(() => deps.storage().removeItem(key));
 }
 
 export function initThemeSwitch(deps: ChromeDeps): void {
@@ -89,5 +96,7 @@ export function initThemeSwitch(deps: ChromeDeps): void {
 }
 
 if (typeof document !== 'undefined') {
-  initThemeSwitch({ document, window, storage: () => window.localStorage });
+  const storage = (): Storage => window.localStorage;
+  forgetRetiredKeys({ storage });
+  initThemeSwitch({ document, window, storage });
 }
