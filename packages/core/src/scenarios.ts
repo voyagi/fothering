@@ -111,6 +111,27 @@ export interface StepPlanEntry {
   recipient: string;
 }
 
+export interface TagTotals {
+  sends: number;
+  bounces: number;
+  complaints: number;
+}
+
+export interface ScenarioTotals {
+  lanes: Record<string, TagTotals & { tags: Record<string, TagTotals> }>;
+}
+
+export const CLOSE_RULE_FAILURES = ['not-a-close-scenario', 'lane-sends', 'row-sends', 'ratio'] as const;
+export type CloseRuleFailure = (typeof CLOSE_RULE_FAILURES)[number];
+
+export function scenarioTotals(_source: ScenarioSource, _scenarioName: string): ScenarioTotals {
+  return { lanes: {} };
+}
+
+export function closeScenarioMeetsRules(_source: ScenarioSource, _scenarioName: string): { ok: boolean; failures: CloseRuleFailure[] } {
+  return { ok: true, failures: [] };
+}
+
 export function parseScenarioSource(json: unknown): ScenarioSource {
   return scenarioSourceSchema.parse(json);
 }

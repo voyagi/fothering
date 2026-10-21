@@ -142,6 +142,10 @@ function utc(ms: number): string {
   return new Date(ms).toISOString();
 }
 
+export function appendAttempt(file: string, record: AttemptRecord): void {
+  appendFileSync(file, `${JSON.stringify(record)}\n`);
+}
+
 async function sendStep(deps: LiveRunDeps, request: SendStepRequest, step: CheckedStep): Promise<number> {
   const factory = deps.portFactory();
   const callers = await readCallers(factory, scenarioLanes(step.scenario), request);
@@ -172,7 +176,7 @@ async function sendStep(deps: LiveRunDeps, request: SendStepRequest, step: Check
       messageId: result.messageId,
       requestId: result.requestId,
     };
-    appendFileSync(step.paths.attempts, `${JSON.stringify(record)}\n`);
+    appendAttempt(step.paths.attempts, record);
   }
   return 0;
 }

@@ -5,6 +5,9 @@ import {
   LIVE_RUN_REFUSALS,
   MAX_RATE_MILLI,
   MIN_SEND_GAP_MS,
+  accountVerdict,
+  callerKeyOf,
+  checkCallers,
   isSimulatorRecipient,
   parseRate,
   parseRunId,
@@ -151,5 +154,77 @@ describe('refusalMessage', () => {
 
   it.each(['someone@example.com', '../outside', 'two words', ''])('drops the subject %j', (subject) => {
     expect(refusalMessage('unknown-scenario', subject)).toBe(refusalMessage('unknown-scenario'));
+  });
+});
+
+// Built at run time so no twelve-digit literal sits in the file.
+const ACCOUNT = '0'.repeat(12);
+const OTHER_ACCOUNT = '1'.repeat(12);
+
+function roleArn(role: string, session: string, account = ACCOUNT): string {
+  return `arn:aws:sts::${account}:assumed-role/${role}/${session}`;
+}
+
+describe('callerKeyOf', () => {
+  it('reads the role name of an assumed-role caller, the identity SES records for a role sender', () => {
+    expect(callerKeyOf(roleArn('live-run-bulk', 'session-1'))).toBe('live-run-bulk');
+    expect(callerKeyOf(roleArn('live-run-bulk', 'another-session'))).toBe('live-run-bulk');
+  });
+
+  it.each([
+    ['an IAM user', `arn:aws:iam::${ACCOUNT}:user/operator`],
+    ['a federated user', `arn:aws:sts::${ACCOUNT}:federated-user/operator`],
+    ['the root user', `arn:aws:iam::${ACCOUNT}:root`],
+    ['an assumed role with no session name', `arn:aws:sts::${ACCOUNT}:assumed-role/live-run-bulk`],
+  ])('reads no key for %s', (_label, arn) => {
+    expect(callerKeyOf(arn)).toBeUndefined();
+  });
+});
+
+describe('checkCallers', () => {
+  const accountCaller = { arn: roleArn('live-run-account', 'session-1'), account: ACCOUNT };
+  const lane = (name: string, arn: string, account = ACCOUNT) => ({ lane: name, arn, account });
+
+  it('passes two lanes on two different roles in one account', () => {
+    expect(
+      checkCallers([lane('fothering-bulk', roleArn('live-run-bulk', 's1')), lane('fothering-transactional', roleArn('live-run-transactional', 's1'))], accountCaller),
+    ).toBeUndefined();
+  });
+
+  it('refuses two sessions of one role behind two lanes, naming the second lane', () => {
+    expect(
+      checkCallers([lane('fothering-bulk', roleArn('live-run-shared', 's1')), lane('fothering-transactional', roleArn('live-run-shared', 's2'))], accountCaller),
+    ).toEqual({ code: 'caller-shared', subject: 'fothering-transactional' });
+  });
+
+  it('compares role names byte for byte, so names differing only in case are two callers', () => {
+    expect(
+      checkCallers([lane('fothering-bulk', roleArn('Live-Run', 's1')), lane('fothering-transactional', roleArn('live-run', 's1'))], accountCaller),
+    ).toBeUndefined();
+  });
+
+  it('refuses a lane whose caller is not an assumed role, naming it', () => {
+    expect(
+      checkCallers([lane('fothering-bulk', `arn:aws:iam::${ACCOUNT}:user/operator`), lane('fothering-transactional', roleArn('live-run-transactional', 's1'))], accountCaller),
+    ).toEqual({ code: 'caller-not-role', subject: 'fothering-bulk' });
+  });
+
+  it('refuses a lane in another account than the account profile, naming it', () => {
+    expect(
+      checkCallers(
+        [lane('fothering-bulk', roleArn('live-run-bulk', 's1')), lane('fothering-transactional', roleArn('live-run-transactional', 's1', OTHER_ACCOUNT), OTHER_ACCOUNT)],
+        accountCaller,
+      ),
+    ).toEqual({ code: 'account-mismatch', subject: 'fothering-transactional' });
+  });
+});
+
+describe('accountVerdict', () => {
+  it.each([1, 0.8, 14])('accepts a MaxSendRate of %s', (maxSendRate) => {
+    expect(accountVerdict({ maxSendRate })).toBeUndefined();
+  });
+
+  it.each([0.5, 0.79, Number.NaN, 'absent' as const])('refuses a MaxSendRate of %s', (maxSendRate) => {
+    expect(accountVerdict({ maxSendRate })).toEqual({ code: 'send-rate-low' });
   });
 });

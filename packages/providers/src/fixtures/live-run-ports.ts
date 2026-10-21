@@ -10,7 +10,8 @@ export type FixtureLiveRunCall =
 
 export interface FixtureLiveRunState {
   callers: Map<string, CallerIdentity>;
-  account: LiveRunAccount;
+  /** An errorName makes GetAccount throw an error of that name instead of answering. */
+  account: LiveRunAccount | { errorName: string };
   sendAnswers: FixtureSendAnswer[];
   calls: FixtureLiveRunCall[];
   constructions: number;
@@ -43,7 +44,9 @@ export function createFixtureLiveRunPorts(state: FixtureLiveRunState): LiveRunPo
         {
           async getAccount() {
             state.calls.push({ operation: 'getAccount', profile });
-            return { ...state.account };
+            const { account } = state;
+            if ('errorName' in account) throw namedError(account.errorName, 'the fixture SES was scripted to fail GetAccount');
+            return { ...account };
           },
           async sendEmail(request: LiveRunSendRequest) {
             state.calls.push({ operation: 'sendEmail', profile, request: { ...request, tags: request.tags.map((tag) => ({ ...tag })) } });

@@ -2,17 +2,21 @@ import { existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, describe, expect, it } from 'vitest';
+import fc from 'fast-check';
 import { parseLaneMap, type LaneEntry } from '@fothering/core/lanes';
-import { attemptRecordSchema, MIN_SEND_GAP_MS, refusalMessage, spacingViolations } from '@fothering/core/live-run';
+import { attemptRecordSchema, MIN_SEND_GAP_MS, refusalMessage, spacingViolations, type AttemptRecord } from '@fothering/core/live-run';
 import { parseScenarioSource, stepPlan, type ScenarioSource, type ScenarioTagKind } from '@fothering/core/scenarios';
+import { propertySeed } from '@fothering/core/test/property-seed';
 import {
   createFixtureLiveRunState,
   type FixtureLiveRunCall,
   type FixtureLiveRunState,
 } from '@fothering/providers/fixtures/live-run-ports';
-import type { LiveRunSendRequest } from '@fothering/providers/live-run-port-types';
-import { main } from './cli.js';
+import type { LiveRunPortFactory, LiveRunSendRequest } from '@fothering/providers/live-run-port-types';
+import { sleep } from '@fothering/providers/ses-facts';
+import { LIVE_RUN_MESSAGES, main } from './cli.js';
 import { buildLiveRunRoot, type BuildLiveRunRootOptions, type LiveRunDeps } from './root.js';
+import { appendAttempt } from './send.js';
 import lanesJson from '../../../../lanes.json' with { type: 'json' };
 import scenariosJson from '../../../../docs/measurement-scenarios.json' with { type: 'json' };
 
@@ -404,5 +408,341 @@ describe('send refuses every unsafe or unnamed request before any port exists', 
     const outcome = await run(sendArgs(RUN_ID, 'bulk-stale-import', 'after-pause'));
     expect(outcome.code).toBe(0);
     expect(existsSync(join(outcome.root, 'reports', 'live-runs', '.lock'))).toBe(false);
+  });
+
+  it('refuses a lane the scenario sends on that has no profile, naming the lane', async () => {
+    const argv = sendArgs(RUN_ID, 'bulk-stale-import', 'spike').filter((arg, index, all) => arg !== `fothering-transactional=${PROFILES.transactional}` && all[index + 1] !== `fothering-transactional=${PROFILES.transactional}`);
+    expect(refusalLine(await run(argv))).toBe(refusalMessage('lane-profile-missing', 'fothering-transactional'));
+  });
+
+  it.each([
+    [['bogus']],
+    [[]],
+    [['send', RUN_ID, 'bulk-stale-import', 'spike', 'extra', '--from', FROM, '--account-profile', PROFILES.account]],
+    [sendArgs(RUN_ID, 'bulk-stale-import', 'spike').map((arg) => (arg === FROM ? 'not-an-address' : arg))],
+    [sendArgs(RUN_ID, 'bulk-stale-import', 'spike', ['--from', FROM])],
+    [sendArgs(RUN_ID, 'bulk-stale-import', 'spike', ['--unknown', 'value'])],
+    [sendArgs(RUN_ID, 'bulk-stale-import', 'spike', ['--rate'])],
+    [sendArgs(RUN_ID, 'bulk-stale-import', 'spike', ['--lane-profile', 'fothering-bulk'])],
+    [sendArgs(RUN_ID, 'bulk-stale-import', 'spike', ['--lane-profile', `fothering-bulk=${PROFILES.bulk}`])],
+    [sendArgs(RUN_ID, 'bulk-stale-import', 'spike', ['--lane-profile', '=nameless'])],
+    [sendArgs(RUN_ID, 'bulk-stale-import', 'spike', ['--lane-profile', 'fothering-alerts='])],
+    [['send', RUN_ID, 'bulk-stale-import', 'spike', '--from', FROM, '--lane-profile', `fothering-bulk=${PROFILES.bulk}`]],
+  ])('refuses the command line %j as a usage error', async (argv) => {
+    const outcome = await run(argv);
+    expect(refusalLine(outcome)).toBe(refusalMessage('usage'));
+    expect(outcome.err[1]).toBe(LIVE_RUN_MESSAGES.usage);
+  });
+});
+
+// After the port factory: exit 1, the named refusal first, nothing sent and no line with an
+// address or a profile name. Caller and account ports exist by then, so constructions may not be 0.
+function portRefusalLine(outcome: Outcome): string {
+  const leaks = [...outcome.out, ...outcome.err].filter((line) => line.includes('@') || Object.values(PROFILES).some((profile) => line.includes(profile)));
+  const sends = sendsOf(outcome.state).length;
+  if (outcome.code !== 1 || sends !== 0 || leaks.length > 0) {
+    return `exit ${outcome.code}, ${sends} sends, ${leaks.length} lines with an address or profile`;
+  }
+  return outcome.err[0] ?? 'no error line';
+}
+
+function readAttempts(root: string, step: string): AttemptRecord[] {
+  return readFileSync(join(runFolder(root), `${step}.attempts.jsonl`), 'utf8')
+    .split('\n')
+    .filter((line) => line !== '')
+    .map((line) => attemptRecordSchema.parse(JSON.parse(line)));
+}
+
+describe('callers and the account are read and judged before the first send', () => {
+  it('refuses two sessions of one role behind two lanes', async () => {
+    const state = fixtureState();
+    state.callers.set(PROFILES.bulk, { arn: roleArn('live-run-shared', 'session-1'), account: ACCOUNT });
+    state.callers.set(PROFILES.transactional, { arn: roleArn('live-run-shared', 'session-2'), account: ACCOUNT });
+    expect(portRefusalLine(await run(sendArgs(RUN_ID, 'bulk-stale-import', 'spike'), { state }))).toBe(refusalMessage('caller-shared', 'fothering-transactional'));
+  });
+
+  it('passes role names that differ only in case as two callers', async () => {
+    const state = fixtureState();
+    state.callers.set(PROFILES.bulk, { arn: roleArn('Live-Run-Lane'), account: ACCOUNT });
+    state.callers.set(PROFILES.transactional, { arn: roleArn('live-run-lane'), account: ACCOUNT });
+    const outcome = await run(sendArgs(RUN_ID, 'bulk-stale-import', 'spike'), { state });
+    expect(outcome.code).toBe(0);
+    expect(sendsOf(state)).toHaveLength(132);
+  });
+
+  it.each([
+    ['an IAM user', `arn:aws:iam::${ACCOUNT}:user/operator`],
+    ['a federated user', `arn:aws:sts::${ACCOUNT}:federated-user/operator`],
+    ['the root user', `arn:aws:iam::${ACCOUNT}:root`],
+  ])('refuses %s as a lane caller, naming the lane', async (_label, arn) => {
+    const state = fixtureState();
+    state.callers.set(PROFILES.bulk, { arn, account: ACCOUNT });
+    expect(portRefusalLine(await run(sendArgs(RUN_ID, 'bulk-stale-import', 'spike'), { state }))).toBe(refusalMessage('caller-not-role', 'fothering-bulk'));
+  });
+
+  it('refuses a lane caller in another account', async () => {
+    const state = fixtureState();
+    const other = '1'.repeat(12);
+    state.callers.set(PROFILES.transactional, { arn: roleArn('live-run-transactional', 'session-1', other), account: other });
+    expect(portRefusalLine(await run(sendArgs(RUN_ID, 'bulk-stale-import', 'spike'), { state }))).toBe(refusalMessage('account-mismatch', 'fothering-transactional'));
+  });
+
+  it('refuses an account profile in another account than the lanes', async () => {
+    const state = fixtureState();
+    const other = '1'.repeat(12);
+    state.callers.set(PROFILES.account, { arn: roleArn('live-run-account', 'session-1', other), account: other });
+    expect(portRefusalLine(await run(sendArgs(RUN_ID, 'bulk-stale-import', 'spike'), { state }))).toBe(refusalMessage('account-mismatch', 'fothering-bulk'));
+  });
+
+  it('refuses a lane profile that does not resolve, naming the lane', async () => {
+    const state = fixtureState();
+    state.callers.delete(PROFILES.bulk);
+    expect(portRefusalLine(await run(sendArgs(RUN_ID, 'bulk-stale-import', 'spike'), { state }))).toBe(refusalMessage('caller-unresolved', 'fothering-bulk'));
+  });
+
+  it('refuses an account profile that does not resolve', async () => {
+    const state = fixtureState();
+    state.callers.delete(PROFILES.account);
+    expect(portRefusalLine(await run(sendArgs(RUN_ID, 'bulk-stale-import', 'spike'), { state }))).toBe(refusalMessage('caller-unresolved'));
+  });
+
+  it('reads each caller once and the account once, all before the first send', async () => {
+    const state = fixtureState();
+    expect((await run(sendArgs(RUN_ID, 'bulk-stale-import', 'spike'), { state })).code).toBe(0);
+    const firstSend = state.calls.findIndex((call) => call.operation === 'sendEmail');
+    const before = state.calls.slice(0, firstSend);
+    expect(before.map((call) => `${call.operation}:${call.profile}`).sort()).toEqual(
+      [`getAccount:${PROFILES.account}`, ...Object.values(PROFILES).map((profile) => `getCallerIdentity:${profile}`)].sort(),
+    );
+    expect(state.calls.filter((call) => call.operation !== 'sendEmail')).toHaveLength(before.length);
+  });
+
+  it.each([
+    ['0.5 per second', 0.5],
+    ['absent', 'absent' as const],
+  ])('refuses an account whose MaxSendRate is %s', async (_label, maxSendRate) => {
+    const state = fixtureState();
+    state.account = { vdmEnabled: 'ENABLED', productionAccessEnabled: true, maxSendRate, requestId: 'fixture-request-account' };
+    expect(portRefusalLine(await run(sendArgs(RUN_ID, 'bulk-stale-import', 'spike'), { state }))).toBe(refusalMessage('send-rate-low'));
+  });
+
+  it('refuses when GetAccount does not answer', async () => {
+    const state = fixtureState();
+    state.account = { errorName: 'AccessDeniedException' };
+    expect(portRefusalLine(await run(sendArgs(RUN_ID, 'bulk-stale-import', 'spike'), { state }))).toBe(refusalMessage('account-unreadable'));
+  });
+});
+
+function withLatency(factory: LiveRunPortFactory, clock: FakeClock, latencies: readonly number[], starts: number[]): LiveRunPortFactory {
+  return {
+    callerIdentity: (profile) => factory.callerIdentity(profile),
+    ses: (profile) => {
+      const port = factory.ses(profile);
+      return {
+        getAccount: () => port.getAccount(),
+        sendEmail: async (request) => {
+          starts.push(clock.monotonicMs());
+          clock.advance(latencies[starts.length % latencies.length] ?? 0);
+          return port.sendEmail(request);
+        },
+      };
+    },
+  };
+}
+
+describe('the attempt log holds under faults', () => {
+  it('records a paused lane and a throttle by error name only, keeps the pace and never retries', async () => {
+    const state = fixtureState();
+    state.sendAnswers = ['accept', { errorName: 'SendingPausedException' }, 'accept', { errorName: 'TooManyRequestsException' }, 'accept', 'accept'];
+    const outcome = await run(sendArgs(RUN_ID, 'bulk-stale-import', 'after-pause'), { state });
+    expect(outcome.code).toBe(0);
+    expect(sendsOf(state)).toHaveLength(6);
+    const records = readAttempts(outcome.root, 'after-pause');
+    expect(records.map((record) => ('errorName' in record ? record.errorName : record.messageId))).toEqual([
+      'fixture-message-1', 'SendingPausedException', 'fixture-message-3', 'TooManyRequestsException', 'fixture-message-5', 'fixture-message-6',
+    ]);
+    expect(Object.keys(records[1] ?? {}).sort()).toEqual(['endUtc', 'errorName', 'lane', 'recipient', 'startUtc', 'tags']);
+    expect(spacingViolations(attemptStartsMs(outcome.root, 'after-pause'), MIN_SEND_GAP_MS)).toEqual([]);
+  });
+
+  it('records a thrown value that is not an Error under a fixed name', async () => {
+    const root = plantRoot();
+    const state = fixtureState();
+    const { deps } = harness(root, state, 'live');
+    const fixture = deps.portFactory;
+    const throwing = (): LiveRunPortFactory => {
+      const factory = fixture();
+      return {
+        callerIdentity: (profile) => factory.callerIdentity(profile),
+        ses: (profile) => {
+          const port = factory.ses(profile);
+          return {
+            getAccount: () => port.getAccount(),
+            sendEmail: () => Promise.reject(new Map([['reason', 'not an error']])),
+          };
+        },
+      };
+    };
+    expect(await main(sendArgs(RUN_ID, 'bulk-stale-import', 'after-pause'), { ...deps, portFactory: throwing })).toBe(0);
+    expect(readAttempts(root, 'after-pause').map((record) => ('errorName' in record ? record.errorName : 'accepted'))).toEqual(Array(6).fill('non-error-throw'));
+  });
+
+  it('keeps every finished attempt, in send order, when the step stops part way', async () => {
+    const root = plantRoot();
+    const state = fixtureState();
+    const { deps, clock } = harness(root, state, 'live');
+    let sleeps = 0;
+    const stopping = async (ms: number): Promise<void> => {
+      sleeps += 1;
+      if (sleeps === 3) throw new Error('the operator stopped the step');
+      await clock.sleep(ms);
+    };
+    await expect(main(sendArgs(RUN_ID, 'bulk-stale-import', 'spike'), { ...deps, sleep: stopping })).rejects.toThrow('the operator stopped the step');
+    const records = readAttempts(root, 'spike');
+    expect(records.map((record) => record.recipient)).toEqual(stepPlan(SOURCE, 'bulk-stale-import', 'spike', RUN_ID).slice(0, 3).map((entry) => entry.recipient));
+    const starts = records.map((record) => Date.parse(record.startUtc));
+    expect(starts).toEqual([...starts].sort((a, b) => a - b));
+    expect(existsSync(join(root, 'reports', 'live-runs', '.lock'))).toBe(false);
+  });
+
+  it('writes a newline first when the attempts file does not end in one', () => {
+    const root = plantRoot();
+    const file = join(root, 'torn.jsonl');
+    const record: AttemptRecord = {
+      lane: 'fothering-bulk',
+      tags: [{ name: 'stream', value: 'newsletter' }],
+      recipient: `success+${RUN_ID}-spike-001@simulator.amazonses.com`,
+      startUtc: '2026-10-22T09:00:00.000Z',
+      endUtc: '2026-10-22T09:00:00.250Z',
+      messageId: 'fixture-message-1',
+      requestId: 'fixture-request-1',
+    };
+    // What a write cut off mid-record leaves behind: a partial line with no newline after it.
+    const torn = JSON.stringify(record).slice(0, 40);
+    writeFileSync(file, torn);
+    appendAttempt(file, record);
+    appendAttempt(file, record);
+    expect(readFileSync(file, 'utf8')).toBe(`${torn}\n${JSON.stringify(record)}\n${JSON.stringify(record)}\n`);
+  });
+
+  it('starts a new attempts file with the record itself', () => {
+    const file = join(plantRoot(), 'fresh.jsonl');
+    const record: AttemptRecord = {
+      lane: 'fothering-bulk',
+      tags: [{ name: 'stream', value: 'newsletter' }],
+      recipient: `success+${RUN_ID}-spike-001@simulator.amazonses.com`,
+      startUtc: '2026-10-22T09:00:00.000Z',
+      endUtc: '2026-10-22T09:00:00.250Z',
+      errorName: 'SendingPausedException',
+    };
+    appendAttempt(file, record);
+    expect(readFileSync(file, 'utf8')).toBe(`${JSON.stringify(record)}\n`);
+  });
+
+  it('keeps the gap across lanes for any plan and any send latency', async () => {
+    await fc.assert(
+      fc.asyncProperty(
+        fc.integer({ min: 1, max: 6 }),
+        fc.integer({ min: 1, max: 6 }),
+        fc.integer({ min: 1, max: 3 }),
+        fc.integer({ min: 1, max: 3 }),
+        fc.array(fc.integer({ min: 0, max: 4000 }), { minLength: 1, maxLength: 12 }),
+        async (bulk, transactional, bulkTake, transactionalTake, latencies) => {
+          const scenarios = sourceCopy();
+          const step = scenarios.scenarios[0]?.steps[1];
+          const [bulkGroup, transactionalGroup] = step?.groups ?? [];
+          if (step === undefined || bulkGroup === undefined || transactionalGroup === undefined) throw new Error('run 1 has no after-pause groups');
+          bulkGroup.count = bulk;
+          transactionalGroup.count = transactional;
+          step.cycle = [
+            { group: bulkGroup.name, take: bulkTake },
+            { group: transactionalGroup.name, take: transactionalTake },
+          ];
+          const { deps, clock } = harness(plantRoot(), fixtureState(), 'live', { scenarios });
+          const starts: number[] = [];
+          const fixture = deps.portFactory;
+          const code = await main(sendArgs(RUN_ID, 'bulk-stale-import', 'after-pause'), {
+            ...deps,
+            portFactory: () => withLatency(fixture(), clock, latencies, starts),
+          });
+          expect(code).toBe(0);
+          expect(starts).toHaveLength(bulk + transactional);
+          expect(spacingViolations(starts, MIN_SEND_GAP_MS)).toEqual([]);
+        },
+      ),
+      { seed: propertySeed(), numRuns: 30 },
+    );
+  });
+});
+
+describe('plan prints a step without the switch or any port', () => {
+  it('prints run 1 spike as a header and 132 lines', async () => {
+    const outcome = await run(['plan', 'bulk-stale-import', 'spike', RUN_ID], { switchValue: undefined });
+    expect(outcome.code).toBe(0);
+    expect(outcome.out[0]).toBe(LIVE_RUN_MESSAGES.planHeader('bulk-stale-import', 'spike', 132));
+    expect(outcome.out).toHaveLength(133);
+    expect(outcome.out[1]).toBe('001 fothering-bulk batch=clean-import success');
+    expect(outcome.out[11]).toBe('011 fothering-transactional template=order-receipt success');
+    expect(outcome.state.constructions).toBe(0);
+    expect(outcome.out.some((line) => line.includes('@'))).toBe(false);
+  });
+
+  it('refuses an unknown scenario and a run id of another run', async () => {
+    expect(refusalLine(await run(['plan', 'no-such-scenario', 'spike', RUN_ID]))).toBe(refusalMessage('unknown-scenario', 'no-such-scenario'));
+    expect(refusalLine(await run(['plan', 'bulk-stale-import', 'spike', 'live-20261022-s3-1']))).toBe(refusalMessage('run-id-invalid'));
+  });
+
+  it('refuses a missing argument as a usage error', async () => {
+    expect(refusalLine(await run(['plan', 'bulk-stale-import', 'spike']))).toBe(refusalMessage('usage'));
+  });
+});
+
+describe('buildLiveRunRoot', () => {
+  const OVERRIDES: (keyof BuildLiveRunRootOptions)[] = ['scenarios', 'laneMap', 'monotonicMs', 'nowUtc', 'sleep', 'gitCheckIgnore'];
+
+  it.each(OVERRIDES)('refuses a %s override outside runtimeContext test', (name) => {
+    const options = { runtimeContext: 'deployed', switchValue: 'live', repoRoot: REPO_ROOT, [name]: () => 0 } as BuildLiveRunRootOptions;
+    expect(() => buildLiveRunRoot(options)).toThrow(`a ${name} override is accepted only in runtimeContext test`);
+    expect(() => buildLiveRunRoot({ ...options, runtimeContext: 'test' })).not.toThrow();
+  });
+
+  it('builds no live port factory in deployed while the switch is not exactly live', () => {
+    let built = 0;
+    const liveFactory = (): LiveRunPortFactory => {
+      built += 1;
+      throw new Error('never built in this test');
+    };
+    for (const switchValue of [undefined, '', 'LIVE', ' live', 'true']) {
+      const deps = buildLiveRunRoot({ runtimeContext: 'deployed', switchValue, repoRoot: REPO_ROOT, liveFactory });
+      expect(() => deps.portFactory()).toThrow('reads live');
+    }
+    expect(built).toBe(0);
+  });
+
+  it('hands over the live factory in deployed only once the switch reads live, and refuses with none given', () => {
+    const live: LiveRunPortFactory = {
+      ses: () => {
+        throw new Error('a live port is never built in this test');
+      },
+      callerIdentity: () => {
+        throw new Error('a live port is never built in this test');
+      },
+    };
+    const deps = buildLiveRunRoot({ runtimeContext: 'deployed', switchValue: 'live', repoRoot: REPO_ROOT, liveFactory: () => live });
+    expect(deps.portFactory()).toBe(live);
+    const without = buildLiveRunRoot({ runtimeContext: 'deployed', switchValue: 'live', repoRoot: REPO_ROOT });
+    expect(() => without.portFactory()).toThrow('no live port factory was given');
+  });
+
+  it('defaults to the committed source and lane map, the real clocks and the shared sleep', async () => {
+    const deps = buildLiveRunRoot({ runtimeContext: 'test', switchValue: undefined, repoRoot: REPO_ROOT });
+    expect(deps.scenarios).toEqual(SOURCE);
+    expect(deps.laneMap).toEqual(LANES);
+    expect(deps.sleep).toBe(sleep);
+    expect(typeof deps.monotonicMs()).toBe('number');
+    expect(Math.abs(deps.nowUtc() - Date.now())).toBeLessThan(60_000);
+    await expect(deps.portFactory().callerIdentity('unscripted').getCallerIdentity()).rejects.toThrow('the fixture holds no caller for that profile');
+    expect(() => deps.gitCheckIgnore(join(REPO_ROOT, 'packages', 'functions', 'src', 'live-run', 'cli.ts'))).toThrow();
+    expect(() => deps.gitCheckIgnore(join(REPO_ROOT, 'node_modules'))).not.toThrow();
   });
 });

@@ -1,6 +1,16 @@
 import { describe, expect, it } from 'vitest';
 import { MIN_SEND_GAP_MS } from './live-run.js';
-import { RECIPIENT_KINDS, SIMULATOR_DOMAIN, findStep, parseScenarioSource, scenarioSourceSchema, stepPlan, type ScenarioSource } from './scenarios.js';
+import {
+  RECIPIENT_KINDS,
+  SIMULATOR_DOMAIN,
+  closeScenarioMeetsRules,
+  findStep,
+  parseScenarioSource,
+  scenarioSourceSchema,
+  scenarioTotals,
+  stepPlan,
+  type ScenarioSource,
+} from './scenarios.js';
 import scenariosJson from '../../../docs/measurement-scenarios.json' with { type: 'json' };
 
 const RUN_ID = 'live-20261022-s1-1';
@@ -125,5 +135,82 @@ describe('scenarioSourceSchema checks what the shape alone cannot', () => {
 
   it('accepts the committed source with no issue', () => {
     expect(issuesOf(scenariosJson)).toEqual([]);
+  });
+});
+
+type Group = ScenarioSource['scenarios'][number]['steps'][number]['groups'][number];
+
+function bulkGroup(name: string, batch: string, recipient: Group['recipient'], count: number): Group {
+  return { name, lane: 'fothering-bulk', tag: { kind: 'batch', value: batch }, recipient, count };
+}
+
+/** Run 1 with its spike's bulk groups replaced, the receipts group kept. */
+function run1With(groups: Group[]): ScenarioSource {
+  const source = committedCopy();
+  const step = firstStep(source);
+  step.groups = [...groups, ...step.groups.filter((group) => group.lane !== 'fothering-bulk')];
+  return source;
+}
+
+describe('the committed close scenarios meet the committed thresholds by arithmetic', () => {
+  const source = parseScenarioSource(scenariosJson);
+
+  it('totals run 1 spike per lane and per tag value', () => {
+    const totals = scenarioTotals(source, 'bulk-stale-import');
+    expect(totals.lanes['fothering-bulk']).toEqual({
+      sends: 120,
+      bounces: 24,
+      complaints: 0,
+      tags: {
+        'batch:clean-import': { sends: 96, bounces: 0, complaints: 0 },
+        'batch:stale-import': { sends: 24, bounces: 24, complaints: 0 },
+      },
+    });
+    expect(totals.lanes['fothering-transactional']?.sends).toBe(12);
+  });
+
+  it('passes runs 1 and 3 and does not judge run 2, which is built to end unknown', () => {
+    expect(closeScenarioMeetsRules(source, 'bulk-stale-import')).toEqual({ ok: true, failures: [] });
+    expect(closeScenarioMeetsRules(source, 'bulk-complaint-campaign')).toEqual({ ok: true, failures: [] });
+    expect(closeScenarioMeetsRules(source, 'transactional-spike')).toEqual({ ok: false, failures: ['not-a-close-scenario'] });
+    expect(closeScenarioMeetsRules(source, 'no-such-scenario')).toEqual({ ok: false, failures: ['not-a-close-scenario'] });
+  });
+
+  it('fails 99 lane sends by name and passes 100', () => {
+    expect(closeScenarioMeetsRules(run1With([bulkGroup('clean-import', 'clean-import', 'success', 75), bulkGroup('stale-import', 'stale-import', 'bounce', 24)]), 'bulk-stale-import')).toEqual({
+      ok: false,
+      failures: ['lane-sends'],
+    });
+    expect(closeScenarioMeetsRules(run1With([bulkGroup('clean-import', 'clean-import', 'success', 76), bulkGroup('stale-import', 'stale-import', 'bounce', 24)]), 'bulk-stale-import')).toEqual({
+      ok: true,
+      failures: [],
+    });
+  });
+
+  it('fails a batch of 19 by name and passes 20', () => {
+    expect(closeScenarioMeetsRules(run1With([bulkGroup('clean-import', 'clean-import', 'success', 96), bulkGroup('stale-import', 'stale-import', 'bounce', 19)]), 'bulk-stale-import')).toEqual({
+      ok: false,
+      failures: ['row-sends'],
+    });
+    expect(closeScenarioMeetsRules(run1With([bulkGroup('clean-import', 'clean-import', 'success', 96), bulkGroup('stale-import', 'stale-import', 'bounce', 20)]), 'bulk-stale-import')).toEqual({
+      ok: true,
+      failures: [],
+    });
+  });
+
+  it('fails 2 permanent bounces by name, and 3 at or above 5 percent clear the ratio rule', () => {
+    const two = run1With([bulkGroup('clean-import', 'clean-import', 'success', 96), bulkGroup('stale-bounce', 'stale-import', 'bounce', 2), bulkGroup('stale-ok', 'stale-import', 'success', 22)]);
+    expect(closeScenarioMeetsRules(two, 'bulk-stale-import')).toEqual({ ok: false, failures: ['ratio'] });
+    // 3 of 60 is exactly 5 percent: the ratio rule passes, and only the lane minimum is short.
+    const three = run1With([bulkGroup('clean-import', 'clean-import', 'success', 40), bulkGroup('stale-bounce', 'stale-import', 'bounce', 3), bulkGroup('stale-ok', 'stale-import', 'success', 17)]);
+    expect(closeScenarioMeetsRules(three, 'bulk-stale-import')).toEqual({ ok: false, failures: ['lane-sends'] });
+  });
+
+  it('runs scenario 1 first, and every close scenario needs no open incident on its lane', () => {
+    expect(source.scenarios[0]?.run).toBe(1);
+    expect(source.scenarios[0]?.expectedDecision.outcome).toBe('close');
+    for (const scenario of source.scenarios.filter((candidate) => candidate.expectedDecision.outcome === 'close')) {
+      expect(scenario.precondition.toLowerCase()).toContain(`no open incident on ${scenario.lane}`);
+    }
   });
 });

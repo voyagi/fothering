@@ -73,6 +73,8 @@ export const LIVE_RUN_REFUSALS = [
   'caller-shared',
   'account-mismatch',
   'send-rate-low',
+  'caller-unresolved',
+  'account-unreadable',
 ] as const;
 export type LiveRunRefusalCode = (typeof LIVE_RUN_REFUSALS)[number];
 
@@ -103,6 +105,8 @@ const REFUSAL_TEXT: Readonly<Record<LiveRunRefusalCode, string>> = {
   'caller-shared': 'two lanes resolve to one caller',
   'account-mismatch': 'the callers are not all in one account',
   'send-rate-low': 'the account MaxSendRate is below 0.8 per second, or absent',
+  'caller-unresolved': 'a profile did not resolve to a caller',
+  'account-unreadable': 'GetAccount did not answer',
 };
 
 // A subject is a lane name or a repo-relative file and nothing else, so neither an address, a
@@ -192,7 +196,21 @@ export function callerKeyOf(arn: string): string | undefined {
   return ASSUMED_ROLE_ARN.exec(arn)?.[1];
 }
 
-const ISO_UTC_MILLIS = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
+export interface LaneCaller {
+  lane: string;
+  arn: string;
+  account: string;
+}
+
+export function checkCallers(_lanes: readonly LaneCaller[], _account: { arn: string; account: string }): LiveRunRefusal | undefined {
+  return undefined;
+}
+
+export function accountVerdict(_answer: { maxSendRate: number | 'absent' }): LiveRunRefusal | undefined {
+  return undefined;
+}
+
+const ISO_UTC_MILLIS =/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 const ERROR_NAME_PATTERN = /^[A-Za-z][A-Za-z0-9_-]{0,127}$/;
 const tagSchema = z.strictObject({ name: z.string().regex(SES_TAG_PATTERN), value: z.string().regex(SES_TAG_PATTERN) });
 
