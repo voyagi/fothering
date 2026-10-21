@@ -77,7 +77,7 @@ function sectionProse(text: string, heading: string): string {
 
 // U+2012 to U+2015 are the figure, en, em and horizontal-bar dashes the house style bans; they are
 // non-ASCII too, but each gets its own finding so a pasted dash is named rather than counted.
-const BANNED_DASH_RE = /[‒-―]/;
+const BANNED_DASH_RE = /[\u2012-\u2015]/;
 
 function isAscii(line: string): boolean {
   return [...line].every((character) => character.charCodeAt(0) < 128);
@@ -255,9 +255,9 @@ describe('the measurement protocol has every section, in order, in plain ASCII',
   it('reports a CRLF copy, a non-ASCII character and a banned dash', () => {
     const good = HEADINGS.map((heading) => `## ${heading}\n\nText.\n`).join('\n');
     expect(protocolFindings(good.replaceAll('\n', '\r\n'))).toContain('the file is not LF');
-    expect(protocolFindings(good.replace('Text.', 'Café.'))).toContain('line 3 holds a non-ASCII character');
-    expect(protocolFindings(good.replace('Text.', 'One — two.'))).toContain('line 3 holds a dash between U+2012 and U+2015');
-    expect(protocolFindings(good.replace('Text.', 'One ‒ two.'))).toContain('line 3 holds a dash between U+2012 and U+2015');
+    expect(protocolFindings(good.replace('Text.', 'Caf\u00e9.'))).toContain('line 3 holds a non-ASCII character');
+    expect(protocolFindings(good.replace('Text.', 'One \u2014 two.'))).toContain('line 3 holds a dash between U+2012 and U+2015');
+    expect(protocolFindings(good.replace('Text.', 'One \u2012 two.'))).toContain('line 3 holds a dash between U+2012 and U+2015');
   });
 });
 
