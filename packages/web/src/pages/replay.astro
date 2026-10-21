@@ -5,7 +5,7 @@ import Message from '../components/Message.astro';
 import Schedule from '../components/Schedule.astro';
 import Sheet from '../layouts/Sheet.astro';
 import { LOG_API_NAMES, textSegments, type Segment } from '../site/identifier-text.ts';
-import { buildReplayView, KIND_LABELS, loadReplayArtifact } from '../site/replay-view.ts';
+import { buildReplayView, KIND_LABELS, loadReplayArtifact, MAX_BANK_SPAN } from '../site/replay-view.ts';
 import { routeFor } from '../site/route-list.ts';
 import { segmentNumber } from '../site/seven-segment.ts';
 import { buildTrackGrid, type TrackKey } from '../site/track-grid.ts';
@@ -51,9 +51,9 @@ const padClass = (key: TrackKey, step: number, index: number): string =>
   ['pad', `bank-${String(step)}`, key.lamp === 'event' ? 'lit' : key.lamp === 'bounce' ? 'bounce' : '', key.muted ? 'muted' : '', at(index - bankFirst(step))].filter((part) => part !== '').join(' ');
 const muteStep = grid.columns[grid.muteColumn]?.step ?? 3;
 const muteAt = at(grid.muteColumn - bankFirst(muteStep));
-// A bank's step key spans the bank's pads; the stylesheet carries span classes up to sixteen.
-const MAX_SPAN = 16;
-const spanOf = (step: number): number => Math.min(grid.banks.find((bank) => bank.step === step)?.columns ?? 1, MAX_SPAN);
+// A bank's step key spans the bank's pads; the replay refuses a step with more events than the
+// stylesheet's span classes reach (MAX_BANK_SPAN), so the cap below never cuts a bank short.
+const spanOf = (step: number): number => Math.min(grid.banks.find((bank) => bank.step === step)?.columns ?? 1, MAX_BANK_SPAN);
 
 const evidenceRows = view.schedule.rows.map((row) => ({
   header: row.label,

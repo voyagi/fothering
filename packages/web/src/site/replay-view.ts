@@ -151,6 +151,10 @@ function refuse(path: string, problem: string, fix: string): never {
 }
 
 const STEP_NUMBERS = [1, 2, 3, 4] as const;
+// The stylesheet carries column span classes up to .cols-16, so a step's label or key spans at most
+// this many pads. The landing continues a longer bank in single cells; the replay's step keys are one
+// list item a step, so the replay refuses a step it could not draw under its own pads.
+export const MAX_BANK_SPAN = 16;
 const STEP_LABELS = ['Bounces arrive', 'Cause named', 'Paused, read back', 'Reopened by command'] as const;
 const DIMENSION_LABELS: Record<EvidenceRow['dimension'], string> = { tag: 'Tag', provider: 'Provider', configuration: 'Configuration' };
 const VERDICT_LABELS: Record<EvidenceRow['verdict'], string> = { cause: 'Cause', clean: 'Clean', 'ruled-out': 'Ruled out' };
@@ -190,6 +194,10 @@ function assertReplayable(artifact: ReplayArtifact): void {
   }
   for (const step of STEP_NUMBERS) {
     if (!artifact.events.some((event) => event.step === step)) refuse('events', `step ${String(step)} has no event`, 'Add the events of every step');
+    const count = artifact.events.filter((event) => event.step === step).length;
+    if (count > MAX_BANK_SPAN) {
+      refuse('events', `step ${String(step)} has ${String(count)} events, and the replay's step key spans at most ${String(MAX_BANK_SPAN)} of its pads`, `Keep at most ${String(MAX_BANK_SPAN)} events in each step`);
+    }
   }
   assertBounceClaims(artifact);
   assertTimeOrder(artifact);
@@ -272,10 +280,10 @@ function assertTimeOrder(artifact: ReplayArtifact): void {
       refuse('events', `step ${String(event.step)} has an event at ${event.atUtc}, before a step ${String(previous.step)} event at ${previous.atUtc}`, 'Correct the times so every step follows the one before it');
     }
   });
-  // The step pattern mutes the closed lane from the first column at or after the pause and opens it
-  // from the first at or after the reopen (track-grid.ts), so each needs an event of its own step
-  // from that moment on, or the pattern would show the lane open while the readout says paused, or
-  // still muted after the reopen read back true.
+  // The step pattern mutes the closed lane from the paused step's first column at or after the pause
+  // and opens it from the reopen step's first at or after the reopen (track-grid.ts), so each step
+  // needs an event from that moment on, or the pattern would show the lane open while the readout
+  // says paused, or still muted after the reopen read back true.
   refuseUnplaced(artifact, 3, 'pause.atUtc', pause.atUtc, `${artifact.closedLane} open on the paused step`);
   refuseUnplaced(artifact, 4, 'reopen.atUtc', reopen.atUtc, `${artifact.closedLane} muted after the reopen`);
 }

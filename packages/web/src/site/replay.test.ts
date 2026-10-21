@@ -6,7 +6,7 @@ import { replayArtifactHash, replayArtifactSchema, type ReplayArtifact } from '@
 import { afterAll, describe, expect, it } from 'vitest';
 import { PROVENANCE_LABELS } from './labels.js';
 import { readRepoText, repoRoot } from './repo-facts.js';
-import { buildReplayView, fixtureFindings, loadReplayArtifact } from './replay-view.js';
+import { buildReplayView, fixtureFindings, loadReplayArtifact, MAX_BANK_SPAN } from './replay-view.js';
 
 const WEB_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const REPO_ROOT = resolve(WEB_ROOT, '../..');
@@ -401,6 +401,27 @@ describe('buildReplayView refusals', () => {
   it.each(cases)('throws by name for %s', (_name, candidate, pattern) => {
     expect(() => buildReplayView(candidate)).toThrow(/^packages\/web\/src\/fixtures\/replay-incident\.json: /);
     expect(() => buildReplayView(candidate)).toThrow(pattern);
+  });
+
+  // A step filled to a given size with copies of its own last event, which keeps the time order.
+  const withStepSize = (step: number, size: number): ReplayArtifact => {
+    const own = artifact.events.filter((event) => event.step === step);
+    const last = own.at(-1);
+    if (last === undefined) throw new Error(`the shipped artifact has no step ${String(step)} event`);
+    return { ...artifact, events: [...artifact.events, ...Array.from({ length: size - own.length }, () => ({ ...last }))] };
+  };
+
+  it('builds a step of exactly as many events as a step key spans, and refuses one more by name', () => {
+    expect(buildReplayView(withStepSize(2, MAX_BANK_SPAN)).eventLog.rows.filter((row) => row.step === 2)).toHaveLength(MAX_BANK_SPAN);
+    expect(() => buildReplayView(withStepSize(2, MAX_BANK_SPAN + 1))).toThrow(
+      /: events: step 2 has 17 events, and the replay's step key spans at most 16 of its pads\. Keep at most 16 events in each step\.$/,
+    );
+  });
+
+  it('matches the widest span class the stylesheet carries', () => {
+    const css = readFileSync(join(WEB_ROOT, 'src', 'styles', 'site.css'), 'utf8');
+    expect(css).toContain(`.cols-${String(MAX_BANK_SPAN)} { grid-column: span ${String(MAX_BANK_SPAN)}; }`);
+    expect(css).not.toContain(`.cols-${String(MAX_BANK_SPAN + 1)} `);
   });
 });
 

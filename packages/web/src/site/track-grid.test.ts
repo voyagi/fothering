@@ -13,6 +13,11 @@ function shippedArtifact(): ReplayArtifact {
 
 const lampsOf = (grid: ReturnType<typeof buildTrackGrid>, lane: string): string[] => grid.tracks.find((track) => track.lane === lane)?.keys.map((key) => key.lamp) ?? [];
 const mutedOf = (grid: ReturnType<typeof buildTrackGrid>, lane: string): boolean[] => grid.tracks.find((track) => track.lane === lane)?.keys.map((key) => key.muted) ?? [];
+// The closed lane through the paused step: its last key, and what its mute key reports.
+const grid3Muted = (artifact: ReplayArtifact): { last: boolean; track: boolean } => {
+  const grid = buildTrackGrid(artifact, 3);
+  return { last: mutedOf(grid, 'fothering-bulk').at(-1) ?? false, track: grid.tracks.find((track) => track.lane === 'fothering-bulk')?.muted ?? false };
+};
 
 describe('buildTrackGrid', () => {
   it('draws one column per recorded event through step 3, in the replay order, banked by step', () => {
@@ -52,6 +57,26 @@ describe('buildTrackGrid', () => {
     expect(grid.muteColumn).toBe(-1);
     expect(grid.tracks.flatMap((track) => track.keys).some((key) => key.muted)).toBe(false);
     expect(grid.tracks.some((track) => track.muted)).toBe(false);
+  });
+
+  it('starts the mute in the paused step even when an earlier step has an event at the pause time', () => {
+    const artifact = shippedArtifact();
+    const lastStepTwo = artifact.events.findLastIndex((event) => event.step === 2);
+    const shared = { ...artifact, events: artifact.events.map((event, index) => (index === lastStepTwo ? { ...event, atUtc: artifact.pause.atUtc } : event)) };
+    expect(buildTrackGrid(shared, 2).muteColumn).toBe(-1);
+    expect(mutedOf(buildTrackGrid(shared, 2), 'fothering-bulk').some(Boolean)).toBe(false);
+    expect(buildTrackGrid(shared, 3).muteColumn).toBe(6);
+    expect(mutedOf(buildTrackGrid(shared, 3), 'fothering-bulk')).toEqual([false, false, false, false, false, false, true, true, true]);
+  });
+
+  it('keeps the closed lane muted through the paused step even when a step 3 event shares the reopen time', () => {
+    const artifact = shippedArtifact();
+    const lastStepThree = artifact.events.findLastIndex((event) => event.step === 3);
+    const firstStepFour = artifact.events.findIndex((event) => event.step === 4);
+    const reopenAt = artifact.reopen.atUtc;
+    const shared = { ...artifact, events: artifact.events.map((event, index) => (index === lastStepThree || index === firstStepFour ? { ...event, atUtc: reopenAt } : event)) };
+    expect(grid3Muted(shared)).toEqual({ last: true, track: true });
+    expect(mutedOf(buildTrackGrid(shared, 4), 'fothering-bulk')).toEqual([false, false, false, false, false, false, true, true, true, false, false, false]);
   });
 
   it('refuses an event on a lane the artifact does not list, naming the lane and the event time', () => {

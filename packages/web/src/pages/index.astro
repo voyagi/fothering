@@ -7,7 +7,7 @@ import { LANDING_SECTIONS, LIMITS_FIXED_ROWS, LIMITS_REPLAY_ROW, NO_MEASURED_NUM
 import { textSegments, type Segment } from '../site/identifier-text.ts';
 import { PROVENANCE_LABELS } from '../site/labels.ts';
 import { readDeployRegion, repoRoot } from '../site/repo-facts.ts';
-import { buildReplayView, KIND_LABELS, loadReplayArtifact } from '../site/replay-view.ts';
+import { buildReplayView, KIND_LABELS, loadReplayArtifact, MAX_BANK_SPAN } from '../site/replay-view.ts';
 import { routeFor } from '../site/route-list.ts';
 import { segmentNumber } from '../site/seven-segment.ts';
 import { buildTrackGrid, type TrackKey } from '../site/track-grid.ts';
@@ -45,9 +45,8 @@ const padClass = (key: TrackKey, step: number, index: number): string =>
 // A bank's label spans the bank's pads, so it wraps inside its own bank and never runs into the
 // next one. The stylesheet carries span classes up to sixteen columns; a longer bank continues in
 // single cells, which keeps every later bank under its own pads.
-const MAX_SPAN = 16;
 const bankCells = grid.banks.flatMap((bank) => {
-  const span = Math.min(bank.columns, MAX_SPAN);
+  const span = Math.min(bank.columns, MAX_BANK_SPAN);
   const rest = Array.from({ length: bank.columns - span }, () => ({ span: 1, step: undefined }));
   return [{ span, step: view.steps[bank.step - 1] }, ...rest];
 });

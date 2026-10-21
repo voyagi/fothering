@@ -44,9 +44,14 @@ type GridSource = Pick<ReplayArtifact, 'lanes' | 'closedLane' | 'events' | 'paus
 
 const at = (utc: string): number => Date.parse(utc);
 
-// The first column at or after a moment, or -1 when every shown column is earlier.
-function columnFrom(events: readonly ReplayEvent[], utc: string): number {
-  return events.findIndex((event) => at(event.atUtc) >= at(utc));
+// The pause belongs to step 3 and the reopen to step 4, the steps the replay names after them.
+const PAUSED_STEP = 3;
+const REOPEN_STEP = 4;
+
+// The first column of one step at or after a moment, or -1 when that step shows no such column. Only
+// that step's columns count, so an earlier step's event at the same moment never moves the mute.
+function columnFrom(events: readonly ReplayEvent[], step: number, utc: string): number {
+  return events.findIndex((event) => event.step === step && at(event.atUtc) >= at(utc));
 }
 
 function banksOf(columns: readonly TrackColumn[]): TrackBank[] {
@@ -59,10 +64,10 @@ function banksOf(columns: readonly TrackColumn[]): TrackBank[] {
   return banks;
 }
 
-// The closed lane is muted from the column the pause lands on up to the column the reopen lands on,
-// so a pattern that stops before the reopen leaves it muted, and one that stops before the pause
-// leaves every track open. The replay refuses an artifact whose paused step or reopen step has no
-// event from that moment on (replay-view.ts), so neither column is ever missing from its own step.
+// The closed lane is muted from the column the pause lands on in the paused step up to the column the
+// reopen lands on in the reopen step, so a pattern that stops before the reopen step leaves it muted,
+// and one that stops before the paused step leaves every track open. The replay refuses an artifact
+// whose paused step or reopen step has no event from that moment on (replay-view.ts).
 export function buildTrackGrid(artifact: GridSource, throughStep: number): TrackGrid {
   if (!Number.isInteger(throughStep) || throughStep < 1 || throughStep > 4) {
     throw new Error(`track grid: throughStep is ${String(throughStep)}, and the replay has steps 1 to 4. Pass a step from 1 to 4.`);
@@ -72,8 +77,8 @@ export function buildTrackGrid(artifact: GridSource, throughStep: number): Track
   if (stray !== undefined) {
     throw new Error(`track grid: an event at ${stray.atUtc} sits on ${stray.lane}, which is not one of the artifact's lanes (${artifact.lanes.join(', ')}). Add the lane to lanes or correct the event.`);
   }
-  const muteColumn = columnFrom(events, artifact.pause.atUtc);
-  const reopenColumn = muteColumn < 0 ? -1 : columnFrom(events, artifact.reopen.atUtc);
+  const muteColumn = columnFrom(events, PAUSED_STEP, artifact.pause.atUtc);
+  const reopenColumn = muteColumn < 0 ? -1 : columnFrom(events, REOPEN_STEP, artifact.reopen.atUtc);
   const mutedAt = (index: number): boolean => muteColumn >= 0 && index >= muteColumn && (reopenColumn < 0 || index < reopenColumn);
   const columns = events.map((event) => ({ step: event.step, kind: event.kind, time: event.atUtc.slice(11, 19) }));
   const tracks = artifact.lanes.map((lane) => {
