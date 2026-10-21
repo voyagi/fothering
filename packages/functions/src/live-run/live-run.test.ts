@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -48,6 +49,16 @@ function plantRoot(): string {
   rmSync(root, { recursive: true, force: true });
   mkdirSync(root, { recursive: true });
   plantRoots.push(root);
+  return root;
+}
+
+// A planted root that is its own git repository, so what git reads as ignored there follows only
+// the rules planted in it. A tracked folder of this project is no proof of "not ignored": Stryker
+// runs the suite from a copy under the git-ignored .stryker-tmp/, where every path reads as ignored.
+function plantGitRepo(gitignore?: string): string {
+  const root = plantRoot();
+  execFileSync('git', ['init', '-q'], { cwd: root, stdio: 'ignore', windowsHide: true });
+  if (gitignore !== undefined) writeFileSync(join(root, '.gitignore'), gitignore);
   return root;
 }
 
@@ -536,16 +547,12 @@ describe('send refuses every unsafe or unnamed request before any port exists', 
   });
 
   it('refuses a run folder git does not read as ignored, and creates nothing there', async () => {
-    // A tracked source folder: /reports/ is ignored only at the repository root, so this run folder
-    // is not, and git check-ignore needs no existing path to say so.
-    const root = join(REPO_ROOT, 'packages', 'functions', 'src', 'live-run');
-    try {
-      const outcome = await run(sendArgs(RUN_ID, 'bulk-stale-import', 'spike'), { root });
-      expect(refusalLine(outcome)).toBe(refusalMessage('output-not-ignored', `reports/live-runs/${RUN_ID}/run`));
-      expect(existsSync(join(root, 'reports'))).toBe(false);
-    } finally {
-      rmSync(join(root, 'reports'), { recursive: true, force: true });
-    }
+    // Its own repository with no ignore rule, inside this project's ignored node_modules/: the check
+    // must ask git from the run's root, or it would read the folder as ignored and send.
+    const root = plantGitRepo();
+    const outcome = await run(sendArgs(RUN_ID, 'bulk-stale-import', 'spike'), { root });
+    expect(refusalLine(outcome)).toBe(refusalMessage('output-not-ignored', `reports/live-runs/${RUN_ID}/run`));
+    expect(existsSync(join(root, 'reports'))).toBe(false);
   });
 
   it('refuses when the ignore check itself fails', async () => {
@@ -917,8 +924,10 @@ describe('buildLiveRunRoot', () => {
     expect(typeof deps.monotonicMs()).toBe('number');
     expect(Math.abs(deps.nowUtc() - Date.now())).toBeLessThan(60_000);
     await expect(deps.portFactory().callerIdentity('unscripted').getCallerIdentity()).rejects.toThrow('the fixture holds no caller for that profile');
-    expect(() => deps.gitCheckIgnore(join(REPO_ROOT, 'packages', 'functions', 'src', 'live-run', 'cli.ts'))).toThrow();
-    expect(() => deps.gitCheckIgnore(join(REPO_ROOT, 'node_modules'))).not.toThrow();
+    const repo = plantGitRepo('/ignored/\n');
+    const inRepo = buildLiveRunRoot({ runtimeContext: 'test', switchValue: undefined, repoRoot: repo });
+    expect(() => inRepo.gitCheckIgnore(join(repo, 'cli.ts'))).toThrow();
+    expect(() => inRepo.gitCheckIgnore(join(repo, 'ignored', 'run'))).not.toThrow();
   });
 });
 
