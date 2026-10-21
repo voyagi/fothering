@@ -28,7 +28,9 @@
     "docs/agent-unavailable.md",
     "docs/reopen-a-lane.md",
     "docs/ai-act.md",
-    "docs/measurement-protocol.md"
+    "docs/measurement-protocol.md",
+    "docs/live-run-policy-transactional.json",
+    "docs/live-run-policy-bulk.json"
   ],
   "prefixes": [
     ".github/workflows/",

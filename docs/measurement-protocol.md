@@ -22,7 +22,17 @@ outcome instead of an interval.
 
 ## Per-hop breakdown
 
-Each hop of the interval is bounded by two stored times, read from the run's saved records.
+Each hop of the interval is bounded by two stored times, read from the run's saved records. In
+order from the SES event to the operator email:
+
+1. The SES event time, when SES says the event happened, on the stored event record.
+2. The EventBridge envelope time, `envelopeTimeMs` on the stored event record.
+3. The ingest arrival, `arrivalTimeMs`, when the ingest function stored the event.
+4. The evidence record and then the decision, as detection stored them for the incident.
+5. The pause request, `pauseRequestedAtMs` on the closure.
+6. The read-back, `readBackAtMs` on the closure, which ends the measured interval.
+7. The hold end, `holdEndMs`, and the hold check, `holdCheckedAtMs`, both on the closure.
+8. The operator email sent, `email.sentAtMs` on the closure.
 
 ## Damage count
 
@@ -33,7 +43,25 @@ at or after the hold end. This is a definition only. No number is derived from i
 ## Thresholds and minimum sample
 
 The thresholds are the values the code enforces in `packages/core/src/verdicts.ts`, unchanged from
-the commit of this protocol to the last logged run.
+the commit of this protocol to the last logged run. Ratios are integer fractions, compared by
+cross-multiplication, never as decimals.
+
+| Constant | Value |
+| --- | --- |
+| HARD_BOUNCE_THRESHOLD | 5/100 |
+| COMPLAINT_THRESHOLD | 1/1000 |
+| MIN_RATIO_EVENTS | 3 |
+| LANE_MIN_RECIPIENT_SENDS | 100 |
+| ROW_MIN_RECIPIENT_SENDS | 20 |
+| COVERAGE_THRESHOLD | 9/10 |
+
+A lane meets its rule when it holds at least `LANE_MIN_RECIPIENT_SENDS` recipient-sends, every row
+of the cause's tag kind holds at least `ROW_MIN_RECIPIENT_SENDS`, and its permanent bounces reach
+`HARD_BOUNCE_THRESHOLD` or its complaints reach `COMPLAINT_THRESHOLD`, either with at least
+`MIN_RATIO_EVENTS` events. `COVERAGE_THRESHOLD` is the share of recipient-sends that must have
+their events stored before the evidence counts as data. The scenarios are sized against these:
+run 1 sends 120 bulk messages with 24 bounces, every batch at least 24, and run 3 sends 120 bulk
+messages with 4 complaints, every campaign at least 24.
 
 ## Scenarios
 
@@ -158,8 +186,14 @@ an email that says the cause is not settled.
 
 ## Pacing and throttles
 
-The command spaces its sends so the account's send rate is never reached, and it never retries a
-send.
+The command starts each send at least 1250 milliseconds after the previous send started, across
+every lane of the step, because the SES send rate is per account and not per configuration set.
+That holds a step at 0.8 sends a second. The scenario source states the same gap as `minGapMs`,
+and the command refuses to start when the account's maximum send rate reads below 0.8 a second.
+
+The command never retries a send. Its SES client makes one attempt per message, so a throttle is
+not absorbed by a hidden retry inside the gap. A throttled or refused attempt is recorded by its
+error name, and the step continues at the same pace.
 
 ## Every run reported
 
@@ -185,17 +219,72 @@ record, so causes of those kinds appear on fixtures only, never in a live run.
 
 ## One caller identity per lane
 
-Each lane the scenarios send on has its own sender role, so SES records one caller per lane.
+Each lane the scenarios send on has its own sender role: `fothering-live-run-transactional` for
+`fothering-transactional` and `fothering-live-run-bulk` for `fothering-bulk`, both under the IAM
+path `/fothering-live-run/`, so whether either remains after removal is one role-list read. Each
+role holds one permission policy, the statement in `docs/live-run-policy-transactional.json` or
+`docs/live-run-policy-bulk.json`: `ses:SendEmail` on that lane's configuration set and on the From
+domain's identity, and nothing else. The committed files carry the placeholders `<ACCOUNT_ID>` and
+`<FROM_DOMAIN>`. IAM refuses a policy that still holds them, so a forgotten substitution fails
+closed; the operator fills them in a scratch copy outside the repository.
+
+Why one role per lane: SES records a role sender's caller identity by its role name, so two
+sessions of one role are one caller. Fothering's closeability check refuses to close a lane whose
+caller also sends through another configuration set, so one sender for both lanes would make the
+bulk lane not closeable and the run would measure nothing. Before the first send the command checks
+that every lane's profile resolves to an assumed role, that no two lanes share a role name, and
+that all of them are in one account.
+
+Each role trusts only the operator's own administrator identity in the same account, with a
+maximum session of one hour. The operator creates both roles before the first send and deletes them
+in the removal step; no code in this repository creates, changes or deletes an IAM principal or
+policy. `fothering-alerts` carries only Fothering's own operator email, sent by the action
+function's role, and the command never sends on it.
+
+If the From address is itself a verified identity, not only its domain, SES may authorize a send
+against the address identity instead. The operator reads that before creating the roles. If it is,
+the address identity's ARN is added to both policies before the first send, and the policy test
+widens to three resources in the same commit.
 
 ## Incident limit
 
-Fothering pauses a lane at most once per incident, and scenario 3 waits for the bulk lane's
-incident from run 1 to end.
+Fothering pauses a lane at most once per incident. The product states that limit to the operator in
+this sentence, quoted here for the bulk lane:
+
+> Fothering pauses a lane at most once per incident, and an incident stays open while fothering-bulk keeps spiking and for at least 14 hours after it goes quiet, since SES can still report bounces from deliveries it retried for that long. If you reopen fothering-bulk inside that time and it spikes again, Fothering makes no new evidence record or decision, does not pause it again and sends no new email, so watch fothering-bulk yourself until then.
+
+Scenario 3 sends on `fothering-bulk` like scenario 1, so it can start only after run 1's incident
+has ended, at least 14 hours after the lane went quiet. That cannot happen inside the session that
+ran run 1, so in that session scenario 3 is logged as not run, with this limit as the reason.
 
 ## Spend and what runs while deployed
 
-The runs send a few hundred simulator messages, and the deployed stacks keep running on their
-schedules until they are removed.
+Sends, from the scenario source, every one to the mailbox simulator:
+
+- Run 1, step spike: 132 sends
+- Run 1, step after-pause: 6 sends
+- Run 2, step spike: 120 sends
+- Run 3, step spike: 120 sends
+- Run 3, step after-pause: 6 sends
+
+The model runs only when detection opens an incident from stored events. Each incident allows at
+most `MODEL_VALUES.perIncidentInvocations` (3) invocations and each UTC day at most
+`MODEL_VALUES.perDayInvocations` (6). One invocation makes at most `MODEL_VALUES.modelCallCeiling`
+(3) model calls and reserves `TOKEN_RESERVATION_PER_INVOCATION` (64512) tokens, and a UTC day
+reserves at most `MODEL_VALUES.perDayTokenReservations` (390000). The worst UTC day is therefore 18
+model calls with at most 368640 input tokens and 18432 output tokens. At Claude Sonnet 4.6 EU geo
+inference prices of USD 3.30 per million input tokens and USD 16.50 per million output tokens (the
+Bedrock offer as read on 2026-10-17, UNVERIFIED until re-read on the day of the runs), that is about
+USD 1.22 of input and USD 0.30 of output, about USD 1.52 for the worst day. SES, Lambda, DynamoDB,
+EventBridge and AgentCore charges are not priced here.
+
+The account carries a USD 10 monthly budget alarm, which warns and does not stop spending. The
+hackathon's USD 50 AWS credit ends on 2026-10-31.
+
+While the stacks are deployed, detection runs every five minutes and the action function runs every
+five minutes, whether or not anything is sent. With no new sending they open no incident and make
+no model call. Removal ends both schedules. If the stacks are kept after the runs, the run log names
+the removal date, no later than 2026-10-31, and both schedules run until then.
 
 ## Switch on from the start
 
@@ -213,8 +302,49 @@ Publishing measured numbers is listed under What's next, after more runs than th
 
 ## Removal order
 
-The stacks are removed in a fixed order once every lane Fothering closed is open again.
+The stacks are removed in this order, and nothing is destroyed before step 3:
+
+1. Every lane Fothering closed is reopened with the reopen command (`docs/reopen-a-lane.md`) and read back as sending, and each lane-map set's configuration is saved under `aws/sets-before-removal/`.
+2. The run's raw files are saved (Saved files) and the live-run command's `check-saved` check for the run exits 0; the first destroy waits for that exit code.
+3. `FotheringAction` is destroyed first. The reopen function goes with it, which is why every reopen comes before this step.
+4. `FotheringDetection` is destroyed next, then `FotheringRuntime` and `FotheringIngest`, since detection imports from both of them (README, Deploy and remove).
+5. The two live-run roles under `/fothering-live-run/` are deleted.
+6. The after-removal reads are saved under `aws/after-removal/` and checked: each stack reads deleted, every stack resource reads deleted, no log group remains under the stacks' prefixes, and no role remains under the roles' path.
+
+If the operator keeps the stacks after the runs instead, steps 3 to 6 move to a removal date no
+later than 2026-10-31, the run log names that date, and the spend in Spend and what runs while
+deployed continues until then.
 
 ## Saved files
 
-Every raw file a run produces is saved under the run's own folder before anything is removed.
+Every file of a run lives under `reports/live-runs/<runId>/`, a folder git ignores. The command
+writes `run/`. The operator writes `aws/`, each file the output of one AWS CLI read, and appends one
+line to `aws/saved.jsonl` for every saved file and for the deploy-finished and destroy-started
+events, so the order of the saves can be checked.
+
+Written by the command, per step:
+
+- `run/<step>.account.json`: the account read (VDM state).
+- `run/<step>.callers.json`: each lane's role name, account and ARN.
+- `run/<step>.attempts.jsonl`: one record per send attempt, in send order.
+
+Saved by the operator before removal:
+
+- `aws/saved.jsonl`: the save log described above.
+- `aws/stacks.json`: the four stacks after the last deploy, with the `FotheringAction` parameters and the outputs.
+- `aws/templates/<StackName>.json`: each stack's original template.
+- `aws/reopen-function.json`: the reopen function's configuration.
+- `aws/items-pointers.json`: the bulk lane's incident marker and pause pointer.
+- `aws/items-incident.json`: the incident's state, evidence, decision and closure, saved after the reopen result.
+- `aws/items-lane-<set>.json`: each lane-map set's stored records.
+- `aws/reopen-result.json`: the reopen command's own output file.
+- `aws/sets-before-removal/<set>.json`: each set's configuration after the reopen and before the first destroy.
+
+Saved after removal:
+
+- `aws/after-removal/stack-<StackName>.json` and `aws/after-removal/resources-<StackName>.json`: each stack and its resources, read by stack id.
+- `aws/after-removal/log-groups.json`: the log groups left under the stacks' prefixes.
+- `aws/after-removal/roles.json`: the roles left under `/fothering-live-run/`.
+
+The callers file holds the account id and role ARNs, and the operator's files hold addresses and
+account details. None of them is ever committed.
