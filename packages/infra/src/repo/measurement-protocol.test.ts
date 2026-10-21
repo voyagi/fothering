@@ -57,6 +57,11 @@ function sectionBody(text: string, heading: string): string {
   return protocolSections(text).find((section) => section.heading === heading)?.body ?? '';
 }
 
+// Prose is wrapped at about 100 columns, so a phrase the tests look for may span a line break.
+function sectionProse(text: string, heading: string): string {
+  return sectionBody(text, heading).replace(/\s+/g, ' ');
+}
+
 // U+2012 to U+2015 are the figure, en, em and horizontal-bar dashes the house style bans; they are
 // non-ASCII too, but each gets its own finding so a pasted dash is named rather than counted.
 const BANNED_DASH_RE = /[‒-―]/;
@@ -262,7 +267,7 @@ describe('the protocol scenario tables are the committed scenario source', () =>
   });
 
   it('says scenario 3 shares the bulk lane with scenario 1 and that a pause scenario needs no open incident', () => {
-    const scenarios = sectionBody(readCommitted(PROTOCOL_PATH) ?? '', 'Scenarios');
+    const scenarios = sectionProse(readCommitted(PROTOCOL_PATH) ?? '', 'Scenarios');
     expect(scenarios).toContain('Scenario 3 shares `fothering-bulk` with scenario 1');
     expect(scenarios).toContain('A scenario that needs a pause runs only when its lane has no open incident');
   });

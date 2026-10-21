@@ -27,7 +27,8 @@
     "docs/measurement-scenarios.json",
     "docs/agent-unavailable.md",
     "docs/reopen-a-lane.md",
-    "docs/ai-act.md"
+    "docs/ai-act.md",
+    "docs/measurement-protocol.md"
   ],
   "prefixes": [
     ".github/workflows/",
