@@ -11,6 +11,18 @@ const tsParser = { parser: tseslint.parser, parserOptions: { ecmaVersion: 'lates
 
 const TEST_FILES = ['**/*.{test,spec}.{ts,tsx,js,jsx,mjs,cjs}'];
 
+const DRIVER_TEMPLATES = 'scripts/*.devbrowser.js';
+
+const SCRIPT_RULES = {
+  'no-undef': 'error',
+  'no-unused-vars': ['error', { caughtErrors: 'none' }],
+  'no-unreachable': 'error',
+  'no-dupe-keys': 'error',
+  'no-self-compare': 'error',
+  'use-isnan': 'error',
+  'valid-typeof': 'error',
+};
+
 // The aggregated SESv2 class carries every SES API v2 command, the account-level pause among them,
 // so only the per-command classes may be imported, and the v1 client not at all. importNames also
 // reports a namespace import of the module, which would reach the same classes.
@@ -43,20 +55,45 @@ export default [
   // proven code for no user-facing gain.
   {
     files: ['scripts/**/*.{js,mjs,cjs}'],
+    ignores: [DRIVER_TEMPLATES],
     languageOptions: {
       ecmaVersion: 'latest',
       sourceType: 'module',
-      globals: { process: 'readonly', console: 'readonly', Buffer: 'readonly', URL: 'readonly' },
+      globals: {
+        process: 'readonly',
+        console: 'readonly',
+        Buffer: 'readonly',
+        URL: 'readonly',
+        setTimeout: 'readonly',
+        clearTimeout: 'readonly',
+        AbortController: 'readonly',
+      },
     },
-    rules: {
-      'no-undef': 'error',
-      'no-unused-vars': ['error', { caughtErrors: 'none' }],
-      'no-unreachable': 'error',
-      'no-dupe-keys': 'error',
-      'no-self-compare': 'error',
-      'use-isnan': 'error',
-      'valid-typeof': 'error',
+    rules: SCRIPT_RULES,
+  },
+  // dev-browser driver templates run in its QuickJS sandbox, not Node: no process, no require, only
+  // the sandbox's globals, plus the page globals that functions passed to page.evaluate() use once
+  // they run inside the browser.
+  {
+    files: [DRIVER_TEMPLATES],
+    languageOptions: {
+      ecmaVersion: 'latest',
+      sourceType: 'module',
+      globals: {
+        browser: 'readonly',
+        readFile: 'readonly',
+        writeFile: 'readonly',
+        saveScreenshot: 'readonly',
+        console: 'readonly',
+        setTimeout: 'readonly',
+        clearTimeout: 'readonly',
+        window: 'readonly',
+        document: 'readonly',
+        localStorage: 'readonly',
+        getComputedStyle: 'readonly',
+      },
     },
+    rules: SCRIPT_RULES,
   },
   // A test with no assertion passes forever, and two tests with one title hide each other in reports.
   {
@@ -68,9 +105,10 @@ export default [
       'vitest/no-identical-title': 'error',
     },
   },
-  // Browser API support is checked on site code only: on Node code the plugin flags valid syntax.
+  // Browser API support is checked on the site's browser files only: on Node code, the harness and
+  // build-time modules included, the plugin flags valid syntax.
   {
-    files: ['apps/web/src/**/*.{ts,tsx,js,jsx,mjs}', '**/*.{jsx,tsx}'],
+    files: ['packages/web/src/client/**/*.{ts,js}', '**/*.{jsx,tsx}'],
     ignores: TEST_FILES,
     languageOptions: { ...tsParser },
     plugins: { compat },

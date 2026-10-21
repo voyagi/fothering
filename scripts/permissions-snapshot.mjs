@@ -1,7 +1,7 @@
 #!/usr/bin/env node
-// permissions-snapshot.mjs - regenerates packages/infra/permissions.json from the synthesized
-// stacks. Run it after a change to any role, and commit the file with the change: the permissions
-// test fails until the two agree.
+// permissions-snapshot.mjs - regenerates packages/infra/permissions.json and resources.json from
+// the synthesized stacks. Run it after a change to any role or resource, and commit both files with
+// the change: the permissions and resources tests fail until they agree.
 //
 // The tool is bundled into dist/, inside the repo, so Node resolves aws-cdk-lib from the repo's own
 // node_modules (a bundle in a temp folder would find none). It runs in the same credential-free

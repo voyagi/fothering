@@ -25,6 +25,8 @@
     "vitest.stryker.config.ts",
     "docs/forget-one-recipient.md",
     "docs/agent-unavailable.md",
+    "tools/dev-browser/package.json",
+    "tools/dev-browser/package-lock.json",
     "docs/reopen-a-lane.md",
     "docs/ai-act.md"
   ],

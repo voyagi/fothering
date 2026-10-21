@@ -1,0 +1,187 @@
+{
+  "schemaVersion": 1,
+  "provenance": "generated",
+  "region": "eu-central-1",
+  "lanes": ["fothering-transactional", "fothering-bulk", "fothering-alerts"],
+  "closedLane": "fothering-bulk",
+  "cause": { "dimension": "tag", "key": "batch", "value": "2026-10-14-b" },
+  "window": {
+    "startUtc": "2026-10-14T13:01:30Z",
+    "endUtc": "2026-10-14T14:01:30Z",
+    "sends": 412,
+    "receivingProviders": 9
+  },
+  "evidence": [
+    {
+      "dimension": "tag",
+      "subject": "batch=2026-10-14-b",
+      "count": 31,
+      "denominator": 31,
+      "unit": "hard bounces",
+      "verdict": "cause",
+      "threshold": "all bounces"
+    },
+    {
+      "dimension": "tag",
+      "subject": "batch=2026-10-14-a",
+      "count": 0,
+      "denominator": 60,
+      "unit": "sends",
+      "verdict": "clean",
+      "threshold": "same rule"
+    },
+    {
+      "dimension": "provider",
+      "subject": "web.de",
+      "count": 6,
+      "denominator": 38,
+      "unit": "sends",
+      "verdict": "ruled-out",
+      "threshold": "9 providers"
+    },
+    {
+      "dimension": "configuration",
+      "subject": "DKIM and MAIL FROM",
+      "count": 2,
+      "denominator": 2,
+      "unit": "verified",
+      "verdict": "ruled-out",
+      "threshold": "both verified"
+    }
+  ],
+  "events": [
+    {
+      "step": 1,
+      "atUtc": "2026-10-14T14:01:07Z",
+      "kind": "bounce",
+      "lane": "fothering-bulk",
+      "detail": "Permanent bounce, General, tag batch=2026-10-14-b",
+      "provenance": "generated",
+      "bounceType": "Permanent",
+      "smtpCode": "550 5.1.1",
+      "receivingDomain": "web.de"
+    },
+    {
+      "step": 1,
+      "atUtc": "2026-10-14T14:01:09Z",
+      "kind": "bounce",
+      "lane": "fothering-bulk",
+      "detail": "Permanent bounce, General, tag batch=2026-10-14-b",
+      "provenance": "generated",
+      "bounceType": "Permanent",
+      "smtpCode": "550 5.1.1",
+      "receivingDomain": "gmx.net"
+    },
+    {
+      "step": 1,
+      "atUtc": "2026-10-14T14:01:12Z",
+      "kind": "delivery",
+      "lane": "fothering-transactional",
+      "detail": "Delivered, stream receipts",
+      "provenance": "generated",
+      "receivingDomain": "outlook.com"
+    },
+    {
+      "step": 1,
+      "atUtc": "2026-10-14T14:01:20Z",
+      "kind": "delivery",
+      "lane": "fothering-alerts",
+      "detail": "Delivered, stream operator",
+      "provenance": "generated",
+      "receivingDomain": "gmail.com"
+    },
+    {
+      "step": 2,
+      "atUtc": "2026-10-14T14:02:00Z",
+      "kind": "evidence-record",
+      "lane": "fothering-bulk",
+      "detail": "Cause batch=2026-10-14-b, 31 of 31 hard bounces; one lane approved",
+      "provenance": "generated"
+    },
+    {
+      "step": 2,
+      "atUtc": "2026-10-14T14:02:04Z",
+      "kind": "agent",
+      "lane": "fothering-bulk",
+      "detail": "Confirmed the approved option and wrote the Why paragraph",
+      "provenance": "generated"
+    },
+    {
+      "step": 3,
+      "atUtc": "2026-10-14T14:03:00Z",
+      "kind": "ses-call",
+      "lane": "fothering-bulk",
+      "detail": "PutConfigurationSetSendingOptions, SendingEnabled false",
+      "provenance": "generated"
+    },
+    {
+      "step": 3,
+      "atUtc": "2026-10-14T14:03:02Z",
+      "kind": "read-back",
+      "lane": "fothering-bulk",
+      "detail": "GetConfigurationSet, SendingOptions.SendingEnabled false",
+      "provenance": "generated"
+    },
+    {
+      "step": 3,
+      "atUtc": "2026-10-14T14:04:00Z",
+      "kind": "hold-check",
+      "lane": "fothering-bulk",
+      "detail": "No send accepted after 14:03 UTC",
+      "provenance": "generated"
+    },
+    {
+      "step": 4,
+      "atUtc": "2026-10-14T14:04:05Z",
+      "kind": "email-sent",
+      "lane": "fothering-alerts",
+      "detail": "Operator email with the evidence and the reopen command",
+      "provenance": "generated"
+    },
+    {
+      "step": 4,
+      "atUtc": "2026-10-14T15:20:00Z",
+      "kind": "reopen-command",
+      "lane": "fothering-bulk",
+      "detail": "Reopen command run by the operator",
+      "provenance": "generated"
+    },
+    {
+      "step": 4,
+      "atUtc": "2026-10-14T15:20:02Z",
+      "kind": "read-back",
+      "lane": "fothering-bulk",
+      "detail": "GetConfigurationSet, SendingOptions.SendingEnabled true",
+      "provenance": "generated"
+    }
+  ],
+  "pause": {
+    "operation": "PutConfigurationSetSendingOptions",
+    "atUtc": "2026-10-14T14:03:00Z",
+    "readBack": {
+      "operation": "GetConfigurationSet",
+      "field": "SendingOptions.SendingEnabled",
+      "value": "false",
+      "atUtc": "2026-10-14T14:03:02Z"
+    }
+  },
+  "holdCheck": {
+    "atUtc": "2026-10-14T14:04:00Z",
+    "holdFromUtc": "2026-10-14T14:03:00Z",
+    "result": "passed"
+  },
+  "agent": {
+    "outcome": "close",
+    "optionId": "option-7d2e",
+    "paragraph": "All 31 hard bounces carry batch=2026-10-14-b, and the earlier batch delivered cleanly."
+  },
+  "email": {
+    "subject": "Closed: fothering-bulk, one lane in eu-central-1",
+    "sentAtUtc": "2026-10-14T14:04:05Z"
+  },
+  "reopen": {
+    "command": "aws sesv2 put-configuration-set-sending-options --configuration-set-name fothering-bulk --sending-enabled --region eu-central-1",
+    "atUtc": "2026-10-14T15:20:00Z",
+    "readBack": { "value": "true", "atUtc": "2026-10-14T15:20:02Z" }
+  }
+}

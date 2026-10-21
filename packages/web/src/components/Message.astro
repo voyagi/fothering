@@ -1,0 +1,29 @@
+---
+// The operator email shown as a message, not described (DESIGN.md Message). The disclosure line
+// opens the body above a rule, so the agent's paragraph is named before it is read. With terms,
+// the configuration set names and tag values in the email render as identifiers.
+import { textSegments, type IdentifierTerms, type Segment } from '../site/identifier-text.ts';
+import type { ReplayView } from '../site/replay-view.ts';
+import Identifier from './Identifier.astro';
+
+interface Props {
+  email: ReplayView['email'];
+  label: string;
+  terms?: IdentifierTerms;
+}
+
+const { email, label, terms = { names: [], values: [] } } = Astro.props;
+const segmentsOf = (text: string): Segment[] => textSegments(text, terms);
+const faceOf = (segment: Segment): 'mono' | 'inherit' => (segment.kind === 'name' ? 'inherit' : 'mono');
+---
+<article class="message" aria-label={label}>
+  <dl>
+    <dt>Subject</dt>
+    <dd>{segmentsOf(email.subject).map((segment) => (segment.kind === 'text' ? segment.text : <Identifier value={segment.text} face={faceOf(segment)} />))}</dd>
+  </dl>
+  <div class="message-body">
+    <p class="disclosure" data-model-role>{email.disclosure}</p>
+    <p><b>Why.</b> {segmentsOf(email.why).map((segment) => (segment.kind === 'text' ? segment.text : <Identifier value={segment.text} face={faceOf(segment)} />))}</p>
+    <p><b>Reopen.</b> {segmentsOf(email.reopen).map((segment) => (segment.kind === 'text' ? segment.text : <Identifier value={segment.text} face={faceOf(segment)} />))}</p>
+  </div>
+</article>

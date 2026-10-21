@@ -1,0 +1,80 @@
+---
+import Schedule from '../components/Schedule.astro';
+import Sheet from '../layouts/Sheet.astro';
+import { ACCESSIBILITY_RECORD, handCheckRows } from '../site/content.ts';
+import { routeFor } from '../site/route-list.ts';
+
+// Every fact here comes from the committed record, which a test holds equal to the audit's own
+// configuration and the built checks hold this page to (D-156, AC-53).
+const record = ACCESSIBILITY_RECORD;
+const code = (values: readonly (string | number)[]): string[] => values.map((value) => `\`${String(value)}\``);
+const listed = (items: readonly string[]): string => (items.length < 2 ? items.join('') : `${items.slice(0, -1).join(', ')} and ${items.at(-1) ?? ''}`);
+const themeName = (theme: string): string => `${theme.charAt(0).toUpperCase()}${theme.slice(1)}`;
+
+const recordRows = [
+  { header: 'Target', cells: [{ text: record.target }] },
+  { header: 'Last automated audit', cells: [{ text: `\`${record.lastAutomatedAudit}\`` }] },
+  { header: 'Tool', cells: [{ text: `\`axe-core\` ${record.axeVersion}, tags ${listed(code(record.tags))}, with ${listed(code(record.enabledRules))} enabled by name` }] },
+  { header: 'Covered', cells: [{ text: `${listed([...code(record.routes), 'the page an unknown address shows'])}, at ${listed(record.widths.map(String))} pixels wide, in the ${listed(record.themes.map(themeName))} themes` }] },
+  { header: 'Also checked', cells: [{ text: 'Keyboard order, a visible focus indicator on every control, no sideways scrolling, flow animation stoppable and still under reduced motion.' }] },
+];
+
+const criterionRows = handCheckRows();
+---
+<Sheet route={routeFor('/accessibility/')}>
+  <div class="row">
+    <div class="rail" aria-hidden="true">1</div>
+    <section class="sheet-intro" aria-labelledby="page-title">
+      <h1 id="page-title">Accessibility statement</h1>
+      <p>This site aims to meet WCAG 2.2 at level AA. This statement is voluntary, and it says what was tested, how, and what is still open.</p>
+    </section>
+  </div>
+
+  <div class="row">
+    <div class="rail" aria-hidden="true">2</div>
+    <section class="sheet fit-record" aria-labelledby="tested-title">
+      <div class="sheet-head">
+        <h2 id="tested-title">What was tested, and how</h2>
+        <p>The audit runs in a real browser as part of every ship check, and a test holds this record equal to its configuration.</p>
+      </div>
+      <div class="fit-form">
+        <Schedule fit columns={['Item', 'Record']} rows={recordRows} caption="Audit record, read from the accessibility record committed with the site." />
+      </div>
+    </section>
+  </div>
+
+  <div class="row">
+    <div class="rail" aria-hidden="true">3</div>
+    <section class="sheet fit-checks" aria-labelledby="hand-title">
+      <div class="sheet-head">
+        <h2 id="hand-title">Checked by hand</h2>
+        <p>Each criterion below needs a person to check it. Results appear here after the hand check in a real browser.</p>
+      </div>
+      <div class="fit-form">
+        <Schedule fit columns={['Criterion', 'Result', 'How checked']} rows={criterionRows} caption="WCAG 2.2 A and AA criteria no axe-core rule decides, from the W3C criteria list and the axe-core rule table." />
+      </div>
+    </section>
+  </div>
+
+  <div class="row">
+    <div class="rail" aria-hidden="true">4</div>
+    <section class="sheet" aria-labelledby="limits-title">
+      <div class="sheet-head">
+        <h2 id="limits-title">Known limitations, and how to report a problem</h2>
+        <p>What this statement and its audit leave open, and where to say what is wrong.</p>
+      </div>
+      <div class="split">
+        <div>
+          <h3 id="limits-list">Known limitations</h3>
+          <ul aria-labelledby="limits-list">
+            {record.limitations.map((limitation) => <li>{limitation.text}</li>)}
+          </ul>
+        </div>
+        <div>
+          <h3 id="report-title">Report a problem</h3>
+          <p class="report">{record.contact}</p>
+        </div>
+      </div>
+    </section>
+  </div>
+</Sheet>

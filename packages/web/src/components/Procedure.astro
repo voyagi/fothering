@@ -1,0 +1,47 @@
+---
+// A procedure is one process line with a valve and a numeral per step; the step that closes is drawn
+// with the filled valve (DESIGN.md Procedure). Step text marks code spans with backticks, and each
+// span renders as an identifier; a step's commands come from the README reader, never from here.
+import { textSegments } from '../site/identifier-text.ts';
+import CommandBlock from './CommandBlock.astro';
+import Identifier from './Identifier.astro';
+
+interface Command {
+  command: string;
+  note: string | null;
+}
+
+interface Step {
+  title: string;
+  text: string;
+  // Set when the step's text carries an artifact value.
+  provenance?: string;
+  commands?: readonly Command[];
+}
+
+interface Props {
+  steps: readonly Step[];
+  closingStep: number;
+}
+
+const { steps, closingStep } = Astro.props;
+const NO_TERMS = { names: [], values: [] };
+---
+<ol class={`procedure steps-${steps.length}`}>
+  {steps.map((step, index) => (
+    <li>
+      <div class="valve">
+        <span class="n">{index + 1}</span>
+        <svg viewBox="0 0 64 36" aria-hidden="true">
+          <path class={index + 1 === closingStep ? 'dwg-valve-shut' : 'dwg-valve-open'} d="M8 8 l24 10 -24 10 z M56 8 l-24 10 24 10 z" />
+        </svg>
+        <span class="pipe" aria-hidden="true"></span>
+      </div>
+      <div>
+        <h3>{step.title}</h3>
+        <p data-provenance={step.provenance}>{textSegments(step.text, NO_TERMS).map((segment) => (segment.kind === 'text' ? segment.text : <Identifier value={segment.text} />))}</p>
+        {(step.commands ?? []).map((command) => <CommandBlock command={command.command} note={command.note} />)}
+      </div>
+    </li>
+  ))}
+</ol>
