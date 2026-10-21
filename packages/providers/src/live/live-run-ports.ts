@@ -18,6 +18,15 @@ const LIVE_RUN_REGION = 'eu-central-1';
 // a second request inside that gap that no attempt record shows, so each client makes one attempt.
 const ONE_ATTEMPT = 1;
 
+// The attempt log records a fault by its error name alone, so each missing field gets its own name.
+class MissingMessageIdError extends Error {
+  override name = 'MissingMessageIdError';
+}
+
+class MissingCallerIdentityError extends Error {
+  override name = 'MissingCallerIdentityError';
+}
+
 function sendInput(request: LiveRunSendRequest): SendEmailCommandInput {
   const subject = { Data: request.subject };
   const body = { Text: { Data: request.text, Charset: 'UTF-8' } };
@@ -47,7 +56,9 @@ function sesPort(profile: string): LiveRunSesPort {
         const response = await client().send(new SendEmailCommand(sendInput(request)));
         const messageId = response.MessageId;
         const requestId = response.$metadata.requestId;
-        if (messageId === undefined || requestId === undefined) throw new Error('SES answered SendEmail without a message id or request id');
+        if (messageId === undefined || requestId === undefined) {
+          throw new MissingMessageIdError('SES answered SendEmail without a message id or request id');
+        }
         return { messageId, requestId };
       },
     },
@@ -61,7 +72,9 @@ function callerIdentityPort(profile: string): CallerIdentityPort {
     {
       async getCallerIdentity() {
         const { Arn, Account } = await client().send(new GetCallerIdentityCommand({}));
-        if (Arn === undefined || Account === undefined) throw new Error('STS answered GetCallerIdentity without an ARN or account');
+        if (Arn === undefined || Account === undefined) {
+          throw new MissingCallerIdentityError('STS answered GetCallerIdentity without an ARN or account');
+        }
         return { arn: Arn, account: Account };
       },
     },
