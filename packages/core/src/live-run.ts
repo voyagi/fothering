@@ -202,16 +202,39 @@ export interface LaneCaller {
   account: string;
 }
 
-export function checkCallers(_lanes: readonly LaneCaller[], _account: { arn: string; account: string }): LiveRunRefusal | undefined {
-  return undefined;
+/**
+ * Each lane signs as its own assumed role, keyed by role name and compared byte for byte as
+ * closeability compares callers, and every caller sits in the account profile's account.
+ */
+export function checkCallers(lanes: readonly LaneCaller[], account: { arn: string; account: string }): LiveRunRefusal | undefined {
+  const seen = new Set<string>();
+  for (const lane of lanes) {
+    const key = callerKeyOf(lane.arn);
+    if (key === undefined) return { code: 'caller-not-role', subject: lane.lane };
+    if (seen.has(key)) return { code: 'caller-shared', subject: lane.lane };
+    seen.add(key);
+  }
+  const elsewhere = lanes.find((lane) => lane.account !== account.account);
+  return elsewhere === undefined ? undefined : { code: 'account-mismatch', subject: elsewhere.lane };
 }
 
-export function accountVerdict(_answer: { maxSendRate: number | 'absent' }): LiveRunRefusal | undefined {
-  return undefined;
+/** An absent MaxSendRate refuses like a low one: the pace can only be trusted against a rate SES stated. */
+export function accountVerdict(answer: { maxSendRate: number | 'absent' }): LiveRunRefusal | undefined {
+  const rate = answer.maxSendRate;
+  return rate !== 'absent' && rate * 1000 >= MAX_RATE_MILLI ? undefined : { code: 'send-rate-low' };
 }
 
-const ISO_UTC_MILLIS =/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 const ERROR_NAME_PATTERN = /^[A-Za-z][A-Za-z0-9_-]{0,127}$/;
+
+/**
+ * An SDK error's name is its exception type; its message can echo an address, so only the name is
+ * ever recorded, and anything that is not an Error with a plain name is recorded under one fixed code.
+ */
+export function attemptErrorName(error: unknown): string {
+  return error instanceof Error && ERROR_NAME_PATTERN.test(error.name) ? error.name : 'non-error-throw';
+}
+
+const ISO_UTC_MILLIS = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 const tagSchema = z.strictObject({ name: z.string().regex(SES_TAG_PATTERN), value: z.string().regex(SES_TAG_PATTERN) });
 
 const attemptFields = {

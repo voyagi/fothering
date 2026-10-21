@@ -1,5 +1,13 @@
 import * as z from 'zod';
 import { CONFIGURATION_SET_PATTERN } from './lanes.js';
+import {
+  COMPLAINT_THRESHOLD,
+  HARD_BOUNCE_THRESHOLD,
+  LANE_MIN_RECIPIENT_SENDS,
+  MIN_RATIO_EVENTS,
+  ROW_MIN_RECIPIENT_SENDS,
+  ratioAtOrAbove,
+} from './verdicts.js';
 
 export const SIMULATOR_DOMAIN = 'simulator.amazonses.com';
 export const RECIPIENT_KINDS = ['success', 'bounce', 'complaint'] as const;
@@ -124,12 +132,54 @@ export interface ScenarioTotals {
 export const CLOSE_RULE_FAILURES = ['not-a-close-scenario', 'lane-sends', 'row-sends', 'ratio'] as const;
 export type CloseRuleFailure = (typeof CLOSE_RULE_FAILURES)[number];
 
-export function scenarioTotals(_source: ScenarioSource, _scenarioName: string): ScenarioTotals {
-  return { lanes: {} };
+function noTotals(): TagTotals {
+  return { sends: 0, bounces: 0, complaints: 0 };
 }
 
-export function closeScenarioMeetsRules(_source: ScenarioSource, _scenarioName: string): { ok: boolean; failures: CloseRuleFailure[] } {
-  return { ok: true, failures: [] };
+function addGroup(totals: TagTotals, group: ScenarioGroup): void {
+  totals.sends += group.count;
+  if (group.recipient === 'bounce') totals.bounces += group.count;
+  if (group.recipient === 'complaint') totals.complaints += group.count;
+}
+
+/**
+ * Recipient-sends per lane and per tag value, and the bounce or complaint recipients among them, of
+ * the scenario's first step: every later step runs after the lane closed, so only the first builds
+ * the spike. A tag row is keyed kind:value.
+ */
+export function scenarioTotals(source: ScenarioSource, scenarioName: string): ScenarioTotals {
+  const scenario = source.scenarios.find((candidate) => candidate.name === scenarioName);
+  const lanes: ScenarioTotals['lanes'] = {};
+  for (const group of scenario?.steps[0]?.groups ?? []) {
+    const lane = (lanes[group.lane] ??= { ...noTotals(), tags: {} });
+    addGroup(lane, group);
+    addGroup((lane.tags[`${group.tag.kind}:${group.tag.value}`] ??= noTotals()), group);
+  }
+  return { lanes };
+}
+
+/**
+ * The committed thresholds applied to a close scenario's own counts, each failing rule named: the
+ * lane minimum, the row minimum for every row of the cause's tag kind, and the lane ratio for the
+ * kind of event the cause row carries, through ratioAtOrAbove with its minimum event count.
+ */
+export function closeScenarioMeetsRules(source: ScenarioSource, scenarioName: string): { ok: boolean; failures: CloseRuleFailure[] } {
+  const scenario = source.scenarios.find((candidate) => candidate.name === scenarioName);
+  const expected = scenario?.expectedDecision;
+  if (scenario === undefined || expected?.outcome !== 'close') return { ok: false, failures: ['not-a-close-scenario'] };
+  const lane = scenarioTotals(source, scenarioName).lanes[scenario.lane] ?? { ...noTotals(), tags: {} };
+  const rows = Object.entries(lane.tags).filter(([key]) => key.startsWith(`${expected.tagKind}:`));
+  const cause = lane.tags[`${expected.tagKind}:${expected.value}`];
+  const ratioMet =
+    cause !== undefined &&
+    (cause.complaints > 0
+      ? ratioAtOrAbove(lane.complaints, lane.sends, COMPLAINT_THRESHOLD, MIN_RATIO_EVENTS)
+      : ratioAtOrAbove(lane.bounces, lane.sends, HARD_BOUNCE_THRESHOLD, MIN_RATIO_EVENTS));
+  const failures: CloseRuleFailure[] = [];
+  if (lane.sends < LANE_MIN_RECIPIENT_SENDS) failures.push('lane-sends');
+  if (rows.length === 0 || rows.some(([, row]) => row.sends < ROW_MIN_RECIPIENT_SENDS)) failures.push('row-sends');
+  if (!ratioMet) failures.push('ratio');
+  return { ok: failures.length === 0, failures };
 }
 
 export function parseScenarioSource(json: unknown): ScenarioSource {

@@ -1,7 +1,10 @@
-import { appendFileSync, closeSync, existsSync, mkdirSync, openSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, closeSync, existsSync, mkdirSync, openSync, readSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join, relative } from 'node:path';
 import {
+  accountVerdict,
+  attemptErrorName,
   callerKeyOf,
+  checkCallers,
   isSimulatorRecipient,
   MAX_RATE_MILLI,
   planRequests,
@@ -9,11 +12,12 @@ import {
   resolveStep,
   sendGapMs,
   type AttemptRecord,
+  type LaneCaller,
   type LiveRunRefusal,
   type LiveRunRequest,
 } from '@fothering/core/live-run';
 import type { Scenario, StepPlanEntry } from '@fothering/core/scenarios';
-import type { LiveRunPortFactory, LiveRunSesPort } from '@fothering/providers/live-run-port-types';
+import type { CallerIdentity, LiveRunAccount, LiveRunPortFactory, LiveRunSesPort } from '@fothering/providers/live-run-port-types';
 import type { LiveRunDeps } from './root.js';
 
 export interface SendStepRequest {
@@ -95,6 +99,8 @@ function localChecks(deps: LiveRunDeps, request: SendStepRequest): CheckedStep |
   const planned = planRequests(step.entries, deps.laneMap, request.runId, request.from);
   if (!planned.ok) return planned.refusal;
   if (request.rateMilli > MAX_RATE_MILLI) return { code: 'rate-too-high' };
+  const unprofiled = scenarioLanes(step.scenario).find((lane) => !request.laneProfiles.has(lane));
+  if (unprofiled !== undefined) return { code: 'lane-profile-missing', subject: unprofiled };
   const paths = stepPaths(deps.repoRoot, request);
   const refusal = outputRefusal(deps, paths);
   if (refusal !== undefined) return refusal;
@@ -117,14 +123,55 @@ function scenarioLanes(scenario: Scenario): string[] {
   return [...new Set(scenario.steps.flatMap((step) => step.groups.map((group) => group.lane)))].sort();
 }
 
-async function readCallers(factory: LiveRunPortFactory, lanes: readonly string[], request: SendStepRequest): Promise<unknown> {
-  const laneCallers = [];
-  for (const lane of lanes) {
-    const caller = await factory.callerIdentity(request.laneProfiles.get(lane) ?? '').getCallerIdentity();
-    laneCallers.push({ lane, roleName: callerKeyOf(caller.arn), account: caller.account, arn: caller.arn });
+interface CallersFile {
+  lanes: { lane: string; roleName: string | undefined; account: string; arn: string }[];
+  account: { account: string; arn: string };
+}
+
+async function resolveCaller(factory: LiveRunPortFactory, profile: string): Promise<CallerIdentity | undefined> {
+  try {
+    return await factory.callerIdentity(profile).getCallerIdentity();
+  } catch {
+    return undefined;
   }
-  const accountCaller = await factory.callerIdentity(request.accountProfile).getCallerIdentity();
-  return { lanes: laneCallers, account: { account: accountCaller.account, arn: accountCaller.arn } };
+}
+
+// One GetCallerIdentity per distinct profile, so a profile named for two lanes is read once and
+// then refused as one caller behind both.
+async function checkedCallers(factory: LiveRunPortFactory, lanes: readonly string[], request: SendStepRequest): Promise<CallersFile | LiveRunRefusal> {
+  const byProfile = new Map<string, Promise<CallerIdentity | undefined>>();
+  const callerFor = (profile: string): Promise<CallerIdentity | undefined> => {
+    const pending = byProfile.get(profile) ?? resolveCaller(factory, profile);
+    byProfile.set(profile, pending);
+    return pending;
+  };
+  const laneCallers: LaneCaller[] = [];
+  for (const lane of lanes) {
+    const caller = await callerFor(request.laneProfiles.get(lane) ?? '');
+    if (caller === undefined) return { code: 'caller-unresolved', subject: lane };
+    laneCallers.push({ lane, arn: caller.arn, account: caller.account });
+  }
+  const accountCaller = await callerFor(request.accountProfile);
+  if (accountCaller === undefined) return { code: 'caller-unresolved' };
+  const refusal = checkCallers(laneCallers, accountCaller);
+  if (refusal !== undefined) return refusal;
+  return {
+    lanes: laneCallers.map((caller) => ({ lane: caller.lane, roleName: callerKeyOf(caller.arn), account: caller.account, arn: caller.arn })),
+    account: { account: accountCaller.account, arn: accountCaller.arn },
+  };
+}
+
+// Only the four fields the measurement needs are kept; whatever else an account answer holds is
+// never written.
+async function checkedAccount(factory: LiveRunPortFactory, profile: string): Promise<LiveRunAccount | LiveRunRefusal> {
+  let answer: LiveRunAccount;
+  try {
+    answer = await factory.ses(profile).getAccount();
+  } catch {
+    return { code: 'account-unreadable' };
+  }
+  const { vdmEnabled, productionAccessEnabled, maxSendRate, requestId } = answer;
+  return accountVerdict(answer) ?? { vdmEnabled, productionAccessEnabled, maxSendRate, requestId };
 }
 
 // Starts are spaced on the monotonic clock across every lane of the step, because the send rate
@@ -142,14 +189,31 @@ function utc(ms: number): string {
   return new Date(ms).toISOString();
 }
 
+function endsWithoutNewline(file: string): boolean {
+  if (!existsSync(file)) return false;
+  const { size } = statSync(file);
+  if (size === 0) return false;
+  const last = Buffer.alloc(1);
+  const handle = openSync(file, 'r');
+  try {
+    readSync(handle, last, 0, 1, size - 1);
+  } finally {
+    closeSync(handle);
+  }
+  return last[0] !== 0x0a;
+}
+
+/** A crash can leave a torn last line with no newline; appending straight after it would fuse the two records. */
 export function appendAttempt(file: string, record: AttemptRecord): void {
-  appendFileSync(file, `${JSON.stringify(record)}\n`);
+  appendFileSync(file, `${endsWithoutNewline(file) ? '\n' : ''}${JSON.stringify(record)}\n`);
 }
 
 async function sendStep(deps: LiveRunDeps, request: SendStepRequest, step: CheckedStep): Promise<number> {
   const factory = deps.portFactory();
-  const callers = await readCallers(factory, scenarioLanes(step.scenario), request);
-  const account = await factory.ses(request.accountProfile).getAccount();
+  const callers = await checkedCallers(factory, scenarioLanes(step.scenario), request);
+  if ('code' in callers) return refuse(deps, callers);
+  const account = await checkedAccount(factory, request.accountProfile);
+  if ('code' in account) return refuse(deps, account);
   mkdirSync(step.paths.folder, { recursive: true });
   writeFileSync(join(step.paths.folder, `${request.stepName}.callers.json`), `${JSON.stringify(callers, null, 2)}\n`);
   writeFileSync(join(step.paths.folder, `${request.stepName}.account.json`), `${JSON.stringify(account, null, 2)}\n`);
@@ -166,17 +230,15 @@ async function sendStep(deps: LiveRunDeps, request: SendStepRequest, step: Check
     ports.set(profile, port);
     previousStart = await waitForGap(deps, previousStart, gapMs);
     const startUtc = utc(deps.nowUtc());
-    const result = await port.sendEmail(sendRequest);
-    const record: AttemptRecord = {
-      lane: entry.lane,
-      tags: sendRequest.tags,
-      recipient: entry.recipient,
-      startUtc,
-      endUtc: utc(deps.nowUtc()),
-      messageId: result.messageId,
-      requestId: result.requestId,
-    };
-    appendAttempt(step.paths.attempts, record);
+    let outcome: { messageId: string; requestId: string } | { errorName: string };
+    try {
+      const result = await port.sendEmail(sendRequest);
+      outcome = { messageId: result.messageId, requestId: result.requestId };
+    } catch (error) {
+      // A paused lane or a throttle is a result to record, never a reason to retry or stop.
+      outcome = { errorName: attemptErrorName(error) };
+    }
+    appendAttempt(step.paths.attempts, { lane: entry.lane, tags: sendRequest.tags, recipient: entry.recipient, startUtc, endUtc: utc(deps.nowUtc()), ...outcome });
   }
   return 0;
 }
