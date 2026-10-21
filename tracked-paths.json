@@ -30,7 +30,8 @@
     "docs/ai-act.md",
     "docs/measurement-protocol.md",
     "docs/live-run-policy-transactional.json",
-    "docs/live-run-policy-bulk.json"
+    "docs/live-run-policy-bulk.json",
+    "docs/deploy-the-site.md"
   ],
   "prefixes": [
     ".github/workflows/",
