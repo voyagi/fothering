@@ -48,6 +48,12 @@ describe('readSavedItems', () => {
     expect(refusalOf(text)).toBe(expected);
   });
 
+  it('refuses a fraction past the safe integer range, which unmarshall cannot convert, by its named error and without the number', () => {
+    const digits = `${'9'.repeat(20)}.5`;
+    const refusal = refusalOf(`{"Items":[{"count":{"N":"${digits}"}}]}`);
+    expect(refusal).toBe('SavedItemsError: Items entry 1 could not be unmarshalled');
+  });
+
   it('never puts the saved text into the error message', () => {
     expect(refusalOf('{"Items":[{"pk":"secret-value@example.com"}]}')).not.toContain('secret-value');
   });

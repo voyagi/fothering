@@ -1,6 +1,6 @@
 import * as z from 'zod';
-import { INCIDENT_PARTS, incidentItemKey, incidentLaneKey } from './evidence-record.js';
-import { lanePartitionKey, PARTITION_KEY } from './records.js';
+import { INCIDENT_PARTS, incidentItemKey, incidentLaneKey, incidentPauseKey, type IncidentPart } from './evidence-record.js';
+import { lanePartitionKey, PARTITION_KEY, SORT_KEY, type EventRecord, type RecordKey } from './records.js';
 import { REOPEN_COMMAND_TEMPLATE, REOPEN_FUNCTION_NAME_SLOT } from './reopen.js';
 
 // The raw-file contract of a live run (D-178). Removal deletes the log groups, the table and the
@@ -82,9 +82,23 @@ function queryCommand(partitionKey: string): string {
   );
 }
 
+const POINTERS_PATH = 'aws/items-pointers.json';
+const INCIDENT_PATH = 'aws/items-incident.json';
+const LANE_ITEMS_PATH = 'aws/items-lane-<set>.json';
+const REOPEN_RESULT_PATH = 'aws/reopen-result.json';
+const SETS_BEFORE_REMOVAL_PREFIX = 'aws/sets-before-removal/';
+
+function laneItemsPath(set: string): string {
+  return LANE_ITEMS_PATH.replace(EXPANSION_SLOT.set, set);
+}
+
+function incidentPartitionKey(incidentId: string): string {
+  return incidentItemKey(incidentId, INCIDENT_PARTS[0]).pk;
+}
+
 const REOPEN_SAVE_COMMAND = REOPEN_COMMAND_TEMPLATE.replace(REOPEN_FUNCTION_NAME_SLOT, '<ReopenFunctionName>')
   .replace('{set}', '<lane>')
-  .replace(/result\.json$/, 'aws/reopen-result.json');
+  .replace(/result\.json$/, REOPEN_RESULT_PATH);
 
 export const RUN_FOLDER_FILES: readonly RunFolderFile[] = [
   written('account.json', 'json', 'requestId'),
@@ -98,11 +112,11 @@ export const RUN_FOLDER_FILES: readonly RunFolderFile[] = [
   read('aws/reopen-function.json', 'FunctionArn', cli('aws lambda get-function-configuration', `--region ${REGION}`, '--function-name <ReopenFunctionName>'), {
     appliesTo: 'close',
   }),
-  read('aws/items-pointers.json', 'Items', queryCommand(incidentLaneKey('<lane>').pk), { format: 'items' }),
-  read('aws/items-incident.json', 'Items', queryCommand(incidentItemKey('<IncidentId>', INCIDENT_PARTS[0]).pk), { format: 'items' }),
-  read('aws/items-lane-<set>.json', 'Items', queryCommand(lanePartitionKey('<set>')), { format: 'items', expands: 'set', emptyAllowed: true }),
-  read('aws/reopen-result.json', 'result', REOPEN_SAVE_COMMAND, { appliesTo: 'close' }),
-  read('aws/sets-before-removal/<set>.json', 'SendingOptions', cli('aws sesv2 get-configuration-set', `--region ${REGION}`, '--configuration-set-name <set>'), {
+  read(POINTERS_PATH, 'Items', queryCommand(incidentLaneKey('<lane>').pk), { format: 'items' }),
+  read(INCIDENT_PATH, 'Items', queryCommand(incidentPartitionKey('<IncidentId>')), { format: 'items' }),
+  read(LANE_ITEMS_PATH, 'Items', queryCommand(lanePartitionKey('<set>')), { format: 'items', expands: 'set', emptyAllowed: true }),
+  read(REOPEN_RESULT_PATH, 'result', REOPEN_SAVE_COMMAND, { appliesTo: 'close' }),
+  read(`${SETS_BEFORE_REMOVAL_PREFIX}<set>.json`, 'SendingOptions', cli('aws sesv2 get-configuration-set', `--region ${REGION}`, '--configuration-set-name <set>'), {
     expands: 'set',
   }),
   read('aws/after-removal/stack-<StackName>.json', 'Stacks', cli('aws cloudformation describe-stacks', `--region ${REGION}`, '--stack-name <StackId>'), {
@@ -183,39 +197,187 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-function parsedValues(text: string, format: 'json' | 'jsonl'): unknown[] | undefined {
+type Items = readonly Record<string, unknown>[];
+
+/** A file's own findings and, only when it read cleanly, what it held, for the checks across files. */
+interface FileRead {
+  findings: string[];
+  values?: unknown[];
+  items?: Items;
+}
+
+// A JSONL file always ends in a newline, so a last line without one is a torn write: the whole
+// file reads as a finding rather than the torn line being dropped and the rest passing.
+function parseText(path: string, file: RunFolderFile, text: string): { values: unknown[] } | { finding: string } {
+  if (text.trim() === '') return { finding: `${path}: is empty` };
+  if (file.format === 'items') return { finding: `${path}: was not read as DynamoDB items` };
+  if (file.format === 'jsonl' && !text.endsWith('\n')) return { finding: `${path}: the last line has no newline` };
   try {
-    return format === 'json' ? [JSON.parse(text)] : text.split('\n').filter((line) => line !== '').map((line) => JSON.parse(line) as unknown);
+    const values = file.format === 'json' ? [JSON.parse(text) as unknown] : text.slice(0, -1).split('\n').map((line) => JSON.parse(line) as unknown);
+    return { values };
   } catch {
-    return undefined;
+    return { finding: `${path}: is not JSON` };
   }
 }
 
-function textFindings(path: string, file: RunFolderFile, text: string): string[] {
-  if (file.format === 'items') return [`${path}: was not read as DynamoDB items`];
-  const values = parsedValues(text, file.format);
-  if (values === undefined) return [`${path}: is not JSON`];
-  return values.some((value) => !isRecord(value) || value[file.envelope] === undefined) ? [`${path}: holds no ${file.envelope}`] : [];
+function envelopeFindings(path: string, file: RunFolderFile, values: readonly unknown[]): string[] {
+  if (values.some((value) => !isRecord(value) || value[file.envelope] === undefined)) return [`${path}: holds no ${file.envelope}`];
+  const first = values[0];
+  const list = isRecord(first) ? first[file.envelope] : undefined;
+  return !file.emptyAllowed && Array.isArray(list) && list.length === 0 ? [`${path}: its ${file.envelope} list is empty`] : [];
 }
 
 const SAVED_LOG_PATH = 'aws/saved.jsonl';
+const DEPLOY_COMMIT = /^[0-9a-f]{40}$/;
 
-function savedLogFindings(text: string): string[] {
-  const lines = parsedValues(text, 'jsonl');
-  if (lines === undefined) return [`${SAVED_LOG_PATH}: is not JSON`];
-  return lines.some((line) => !savedLogLineSchema.safeParse(line).success) ? [`${SAVED_LOG_PATH}: holds a line that is not a save log line`] : [];
+type SavedLogLine = z.infer<typeof savedLogLineSchema>;
+
+function savedLineFinding(line: unknown, index: number): string[] {
+  if (savedLogLineSchema.safeParse(line).success) return [];
+  const at = `${SAVED_LOG_PATH} line ${index + 1}`;
+  const badCommit = isRecord(line) && line.event === 'deploy-finished' && !(typeof line.deployCommit === 'string' && DEPLOY_COMMIT.test(line.deployCommit));
+  return [badCommit ? `${at}: the deploy commit is not 40 lowercase hex` : `${at}: is not a save log line`];
 }
 
-function fileFindings(path: string, file: RunFolderFile, content: SavedFileContent = { kind: 'missing' }): string[] {
-  if (content.kind === 'missing') return [`${path}: is missing`];
-  if (content.kind === 'unreadable') return [`${path}: could not be read`];
-  if (content.kind === 'items-refused') return [`${path}: the items reader refused it (${content.errorName})`];
-  if (content.kind === 'items') return [];
-  return path === SAVED_LOG_PATH ? savedLogFindings(content.text) : textFindings(path, file, content.text);
+function readFile(path: string, file: RunFolderFile, content: SavedFileContent = { kind: 'missing' }): FileRead {
+  if (content.kind === 'missing') return { findings: [`${path}: is missing`] };
+  if (content.kind === 'unreadable') return { findings: [`${path}: could not be read`] };
+  if (content.kind === 'items-refused') return { findings: [`${path}: the items reader refused it (${content.errorName})`] };
+  if (content.kind === 'items') return { findings: [], items: content.items };
+  const parsed = parseText(path, file, content.text);
+  if ('finding' in parsed) return { findings: [parsed.finding] };
+  const findings = path === SAVED_LOG_PATH ? parsed.values.flatMap(savedLineFinding) : envelopeFindings(path, file, parsed.values);
+  return findings.length === 0 ? { findings, values: parsed.values } : { findings };
+}
+
+const STACKS_PATH = 'aws/stacks.json';
+
+function stacksFindings(values: readonly unknown[] | undefined): string[] {
+  const first = values?.[0];
+  const stacks = isRecord(first) ? first.Stacks : undefined;
+  if (!Array.isArray(stacks)) return [];
+  const names = new Set(stacks.filter(isRecord).map((stack) => stack.StackName));
+  return FOTHERING_STACK_NAMES.filter((name) => !names.has(name)).map((name) => `${STACKS_PATH}: names no stack ${name}`);
+}
+
+const RUN_ID_FIELD = 'runId' satisfies keyof EventRecord;
+const DECIDED_PARTS: readonly IncidentPart[] = INCIDENT_PARTS.filter((part) => part === 'EVIDENCE' || part === 'DECISION');
+const CLOSED_PARTS: readonly IncidentPart[] = INCIDENT_PARTS.filter((part) => part === 'EVIDENCE' || part === 'DECISION' || part === 'CLOSURE');
+
+function hasKey(items: Items, key: RecordKey): boolean {
+  return items.some((item) => item[PARTITION_KEY] === key.pk && item[SORT_KEY] === key.sk);
+}
+
+function outsidePartition(path: string, items: Items, partition: string): string[] {
+  return items.some((item) => item[PARTITION_KEY] !== partition) ? [`${path}: holds an item outside its partition`] : [];
+}
+
+function markerIncidentId(items: Items, lane: string): string | undefined {
+  const key = incidentLaneKey(lane);
+  const marker = items.find((item) => item[PARTITION_KEY] === key.pk && item[SORT_KEY] === key.sk);
+  return typeof marker?.incidentId === 'string' ? marker.incidentId : undefined;
+}
+
+function pointerFindings(items: Items, scenario: CheckSavedScenario): string[] {
+  const marker = incidentLaneKey(scenario.lane);
+  const pause = incidentPauseKey(scenario.lane);
+  const findings = outsidePartition(POINTERS_PATH, items, marker.pk);
+  if (!hasKey(items, marker)) findings.push(`${POINTERS_PATH}: has no ${marker.sk} item`);
+  else if (markerIncidentId(items, scenario.lane) === undefined) findings.push(`${POINTERS_PATH}: its ${marker.sk} item names no incident`);
+  if (scenario.outcome === 'close' && !hasKey(items, pause)) findings.push(`${POINTERS_PATH}: has no ${pause.sk} item`);
+  return findings;
+}
+
+// Without a marker naming the incident the partition cannot be checked, but the parts still can.
+function incidentFindings(items: Items, incidentId: string | undefined, outcome: CheckSavedScenario['outcome']): string[] {
+  const partition = incidentId === undefined ? undefined : incidentPartitionKey(incidentId);
+  const inside = partition === undefined ? items : items.filter((item) => item[PARTITION_KEY] === partition);
+  const findings = partition === undefined ? [] : outsidePartition(INCIDENT_PATH, items, partition);
+  for (const part of outcome === 'close' ? CLOSED_PARTS : DECIDED_PARTS) {
+    if (!inside.some((item) => item[SORT_KEY] === part)) findings.push(`${INCIDENT_PATH}: has no ${part} item`);
+  }
+  return findings;
+}
+
+function laneFindings(set: string, items: Items, input: CheckSavedInput): string[] {
+  const path = laneItemsPath(set);
+  const partition = lanePartitionKey(set);
+  const findings = outsidePartition(path, items, partition);
+  const ofRun = items.some((item) => item[PARTITION_KEY] === partition && item[RUN_ID_FIELD] === input.runId);
+  if (set === input.scenario.lane && !ofRun) findings.push(`${path}: holds no record of the run`);
+  return findings;
+}
+
+function itemsFindings(input: CheckSavedInput, reads: ReadonlyMap<string, FileRead>): string[] {
+  const pointers = reads.get(POINTERS_PATH)?.items;
+  const incident = reads.get(INCIDENT_PATH)?.items;
+  const incidentId = pointers === undefined ? undefined : markerIncidentId(pointers, input.scenario.lane);
+  return [
+    ...(pointers === undefined ? [] : pointerFindings(pointers, input.scenario)),
+    ...(incident === undefined ? [] : incidentFindings(incident, incidentId, input.scenario.outcome)),
+    ...input.sets.flatMap((set) => {
+      const items = reads.get(laneItemsPath(set))?.items;
+      return items === undefined ? [] : laneFindings(set, items, input);
+    }),
+  ];
+}
+
+interface SaveOrder {
+  lines: readonly SavedLogLine[];
+  /** The index of the last save line of each file: a file saved again is judged by its last save. */
+  lastSave: ReadonlyMap<string, number>;
+}
+
+function saveOrderOf(values: readonly unknown[]): SaveOrder {
+  const lines = values.map((value) => savedLogLineSchema.parse(value));
+  const lastSave = new Map<string, number>();
+  lines.forEach((line, index) => {
+    if ('file' in line) lastSave.set(line.file, index);
+  });
+  return { lines, lastSave };
+}
+
+function lastEventIndex(lines: readonly SavedLogLine[], event: 'deploy-finished' | 'destroy-started'): number {
+  return lines.findLastIndex((line) => 'event' in line && line.event === event);
+}
+
+function deployOrderFindings(order: SaveOrder, reads: readonly string[]): string[] {
+  const deploy = lastEventIndex(order.lines, 'deploy-finished');
+  const findings = deploy < 0 ? [`${SAVED_LOG_PATH}: has no deploy-finished line`] : [];
+  for (const path of reads) {
+    const at = order.lastSave.get(path);
+    if (at === undefined) findings.push(`${SAVED_LOG_PATH}: has no line for ${path}`);
+    else if (at < deploy) findings.push(`${SAVED_LOG_PATH}: ${path} was saved before deploy-finished`);
+  }
+  return findings;
+}
+
+// RESEARCH Pitfall 9: incident items or a set read taken before the reopen hold the pre-reopen
+// state, which the capture cannot use, so each must be saved after the reopen result.
+function reopenOrderFindings(order: SaveOrder, reads: readonly string[]): string[] {
+  const reopen = order.lastSave.get(REOPEN_RESULT_PATH);
+  if (reopen === undefined) return [];
+  return reads
+    .filter((path) => path === INCIDENT_PATH || path.startsWith(SETS_BEFORE_REMOVAL_PREFIX))
+    .filter((path) => (order.lastSave.get(path) ?? reopen) < reopen)
+    .map((path) => `${SAVED_LOG_PATH}: ${path} was saved before ${REOPEN_RESULT_PATH}`);
+}
+
+function saveLogFindings(input: CheckSavedInput, expected: readonly ExpectedRunFolderFile[], values: readonly unknown[] | undefined): string[] {
+  if (values === undefined) return [];
+  const order = saveOrderOf(values);
+  const reads = expected.filter(({ path, file }) => file.phase === 'pre-removal' && path.startsWith('aws/') && path !== SAVED_LOG_PATH).map(({ path }) => path);
+  return [...deployOrderFindings(order, reads), ...(input.scenario.outcome === 'close' ? reopenOrderFindings(order, reads) : [])];
 }
 
 export function checkSavedFolder(input: CheckSavedInput): CheckSavedResult {
   const expected = expectedRunFolderFiles(input);
-  const findings = expected.flatMap(({ path, file }) => fileFindings(path, file, input.files.get(path)));
+  const reads = new Map(expected.map(({ path, file }) => [path, readFile(path, file, input.files.get(path))]));
+  const findings = [
+    ...[...reads.values()].flatMap((read) => read.findings),
+    ...stacksFindings(reads.get(STACKS_PATH)?.values),
+    ...itemsFindings(input, reads),
+    ...saveLogFindings(input, expected, reads.get(SAVED_LOG_PATH)?.values),
+  ];
   return { ok: findings.length === 0, findings, checked: expected.length };
 }
