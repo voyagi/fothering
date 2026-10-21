@@ -289,13 +289,15 @@ describe('IngestStack synth', () => {
     expect(Object.keys(resourcesOfType(stacks.ingest, 'AWS::Lambda::Function'))).toHaveLength(2);
   });
 
-  // The detection stack imports the table, so CDK exports its name and ARN from here.
-  it('outputs the forget function name, and exports only the table name and arn detection imports', () => {
+  // The detection and action stacks import the table, and the action stack the address key, so CDK
+  // exports the table's name and ARN and the secret's ARN from here.
+  it('outputs the forget function name, and exports only the table name and arn and the address key arn the other stacks import', () => {
     const { ForgetFunctionName, ...exported } = stacks.ingest.toJSON().Outputs as Record<string, { Value: unknown; Export?: { Name: string } }>;
     expect(ForgetFunctionName).toEqual({ Value: { Ref: forgetFunction().logicalId } });
     const tableId = logicalIdOf(stacks.ingest, 'AWS::DynamoDB::Table');
+    const secretId = logicalIdOf(stacks.ingest, 'AWS::SecretsManager::Secret');
     expect(Object.values(exported).map((output) => JSON.stringify(output.Value)).sort()).toEqual(
-      [JSON.stringify({ 'Fn::GetAtt': [tableId, 'Arn'] }), JSON.stringify({ Ref: tableId })].sort(),
+      [JSON.stringify({ 'Fn::GetAtt': [tableId, 'Arn'] }), JSON.stringify({ Ref: tableId }), JSON.stringify({ Ref: secretId })].sort(),
     );
     for (const output of Object.values(exported)) expect(output.Export?.Name).toMatch(/^FotheringIngest:ExportsOutput/);
   });

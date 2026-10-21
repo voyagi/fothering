@@ -2,7 +2,7 @@ import { App } from 'aws-cdk-lib';
 import { parseLaneMap } from '@fothering/core/lanes';
 import lanesJson from '../../../lanes.json' with { type: 'json' };
 import { cdkJsonContext } from './cdk-context.js';
-import { addFotheringStacks, DETECTION_STACK_ID, INGEST_STACK_ID, RUNTIME_STACK_ID } from './create-app.js';
+import { ACTION_STACK_ID, addFotheringStacks, DETECTION_STACK_ID, INGEST_STACK_ID, RUNTIME_STACK_ID } from './create-app.js';
 import { createStubAssets } from './stub-assets.js';
 
 interface CfnResource {
@@ -38,16 +38,23 @@ export interface PermissionDiff {
   extra: PermissionEntry[];
 }
 
-// The detection function reuses the ingest stub folder: a stub bundle only has to exist to be hashed.
+const STACK_IDS = [INGEST_STACK_ID, RUNTIME_STACK_ID, DETECTION_STACK_ID, ACTION_STACK_ID] as const;
+
+// The detection and action functions reuse the ingest stub folder and the reopen function the forget
+// one: a stub bundle only has to exist to be hashed.
 export function synthesizePermissionTemplates(): StackTemplates {
   const assets = createStubAssets();
   try {
     const app = new App({ context: { ...cdkJsonContext }, outdir: assets.outdir });
-    addFotheringStacks(app, { laneMap: parseLaneMap(lanesJson), ...assets, detectAssetDir: assets.ingestAssetDir });
+    addFotheringStacks(app, {
+      laneMap: parseLaneMap(lanesJson),
+      ...assets,
+      detectAssetDir: assets.ingestAssetDir,
+      actionAssetDir: assets.ingestAssetDir,
+      reopenAssetDir: assets.forgetAssetDir,
+    });
     const assembly = app.synth();
-    return Object.fromEntries(
-      [INGEST_STACK_ID, RUNTIME_STACK_ID, DETECTION_STACK_ID].map((id) => [id, assembly.getStackByName(id).template as CfnTemplate]),
-    );
+    return Object.fromEntries(STACK_IDS.map((id) => [id, assembly.getStackByName(id).template as CfnTemplate]));
   } finally {
     assets.remove();
   }

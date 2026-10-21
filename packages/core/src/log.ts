@@ -1,4 +1,5 @@
 import { AGENT_UNAVAILABLE_REASONS, INVALID_CHECKS, type RuntimeResult } from './agent-answer.js';
+import { CLOSURE_LOG_OUTCOMES, CLOSURE_LOG_REASONS } from './closure.js';
 import { DECISION_REASONS } from './evidence-record.js';
 import { INCIDENT_TRANSITIONS } from './incident.js';
 import { CONFIGURATION_SET_PATTERN } from './lanes.js';
@@ -27,6 +28,8 @@ export interface LogEntry {
   reason?: string;
   check?: string;
   status?: string;
+  /** A closure or reopen outcome; `closed` reaches a line only here, as the outcome itself (D-112). */
+  outcome?: string;
   modelCalls?: number;
   inputTokens?: number;
   outputTokens?: number;
@@ -50,9 +53,10 @@ const RUNTIME_STATUSES = ['answered', 'failed', 'refused', 'dry-run'] as const s
 const runtimeStatusesComplete: Exclude<RuntimeResult['status'], (typeof RUNTIME_STATUSES)[number]> extends never ? true : never = true;
 void runtimeStatusesComplete;
 
-const REASONS: ReadonlySet<string> = new Set([...DECISION_REASONS, ...AGENT_UNAVAILABLE_REASONS, ...INCIDENT_TRANSITIONS]);
+const REASONS: ReadonlySet<string> = new Set([...DECISION_REASONS, ...AGENT_UNAVAILABLE_REASONS, ...INCIDENT_TRANSITIONS, ...CLOSURE_LOG_REASONS]);
 const CHECKS: ReadonlySet<string> = new Set(INVALID_CHECKS);
 const STATUSES: ReadonlySet<string> = new Set(RUNTIME_STATUSES);
+const OUTCOMES: ReadonlySet<string> = new Set(CLOSURE_LOG_OUTCOMES);
 
 // The level is the method the caller chose, written as a fixed word, never read from the entry:
 // without it an info line and an error line are identical, so no reader can tell a failed message
@@ -87,6 +91,7 @@ function sanitizedLine(entry: LogEntry, level: LogLevel): Record<string, unknown
   setIfPresent(line, 'reason', closedString(entry.reason, (value) => REASONS.has(value)));
   setIfPresent(line, 'check', closedString(entry.check, (value) => CHECKS.has(value)));
   setIfPresent(line, 'status', closedString(entry.status, (value) => STATUSES.has(value)));
+  setIfPresent(line, 'outcome', closedString(entry.outcome, (value) => OUTCOMES.has(value)));
   setIfPresent(line, 'modelCalls', wholeCount(entry.modelCalls));
   setIfPresent(line, 'inputTokens', wholeCount(entry.inputTokens));
   setIfPresent(line, 'outputTokens', wholeCount(entry.outputTokens));

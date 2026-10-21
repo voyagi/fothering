@@ -34,25 +34,35 @@ const RECORD_PARTITION_KEY = new RegExp(`^LANE#${CONFIGURATION_SET_PATTERN.sourc
 // recordKey's sort key: B#, a 13-digit bucket start, then the event type and an identity made of
 // SES ids, HMAC hex and a timestamp, joined by #. A key built any other way is refused, not printed.
 const RECORD_SORT_KEY = /^B#\d{13}#[A-Za-z0-9._#-]{1,1024}$/;
-// The decision store's three partition key shapes (D-65): the incident marker under a configuration
-// set, an incident by its 32-hex id, and a UTC day counter. Its sort keys are a closed set of words.
+// The decision store's four partition key shapes (D-65, D-99): the incident marker and pause pointer
+// under a configuration set, an incident by its 32-hex id, a UTC day counter and a lane-hour counter.
+// Its sort keys are a closed set of words.
 const INCIDENT_LANE_PARTITION_KEY = new RegExp(`^INCIDENT_LANE#${CONFIGURATION_SET_PATTERN.source.replace(/^\^/, '')}`);
 const INCIDENT_PARTITION_KEY = /^INCIDENT#[0-9a-f]{32}$/;
 const COUNTER_DAY_PARTITION_KEY = /^COUNTER_DAY#\d{4}-\d{2}-\d{2}$/;
-const DECISION_PARTITION_KEYS = [INCIDENT_LANE_PARTITION_KEY, INCIDENT_PARTITION_KEY, COUNTER_DAY_PARTITION_KEY];
-const DECISION_SORT_KEY = new RegExp(`^(?:MARKER|${INCIDENT_PARTS.join('|')})$`);
+// Pitfall 8: the set rule goes in the middle of this key, so both its anchors come off; a $ left in
+// place would match nothing and refuse every lane-hour line.
+const CONFIGURATION_SET_BODY = CONFIGURATION_SET_PATTERN.source.replace(/^\^/, '').replace(/\$$/, '');
+const COUNTER_LANE_HOUR_PARTITION_KEY = new RegExp(`^COUNTER_LANE_HOUR#${CONFIGURATION_SET_BODY}#\\d{4}-\\d{2}-\\d{2}T\\d{2}$`);
+const DECISION_PARTITION_KEYS = [INCIDENT_LANE_PARTITION_KEY, INCIDENT_PARTITION_KEY, COUNTER_DAY_PARTITION_KEY, COUNTER_LANE_HOUR_PARTITION_KEY];
+// MARKER and PAUSE sit under INCIDENT_LANE#, the incident parts under INCIDENT#.
+const DECISION_SORT_KEY = new RegExp(`^(?:MARKER|PAUSE|${INCIDENT_PARTS.join('|')})$`);
 const MODEL_ID = /^[A-Za-z0-9._:-]{1,256}$/;
 const RUNTIME_ARN = /^arn:[A-Za-z0-9:/_.-]{1,512}$/;
 const DEAD_LETTER_TARGET = new RegExp(`^${DEAD_LETTER_QUEUE_TARGET}$`);
 
 const recordKeySchema = z.object({ pk: z.string().regex(RECORD_PARTITION_KEY), sk: z.string().regex(RECORD_SORT_KEY) });
 const configurationSetSchema = z.string().regex(CONFIGURATION_SET_PATTERN);
+// A header name is held to the field-name letters RFC 5322 mail uses here, so no address or sentence can
+// ride along in one; a header value never reaches the line.
+const HEADER_NAME = /^[A-Za-z0-9-]{1,126}$/;
 const sendEmailSchema = z.object({
   from: z.string(),
   to: z.array(z.string()),
   subject: z.string(),
   text: z.string(),
   configurationSetName: configurationSetSchema.optional(),
+  headers: z.array(z.object({ name: z.string().regex(HEADER_NAME), value: z.string() })).optional(),
 });
 // Two integers and the model id, never a message: the request a model line records is built field by
 // field from counts, so no prompt or answer text can reach the line (T-02-10).
@@ -81,6 +91,11 @@ const usageSchema = z.object({
   outputTokens: z.int().nonnegative(),
   modelCalls: z.int().nonnegative(),
 });
+const laneAttemptSchema = z.object({
+  key: z.object({ pk: z.string().regex(COUNTER_LANE_HOUR_PARTITION_KEY), sk: z.literal('COUNTER') }),
+  cap: z.int().positive(),
+  expiresAt: z.int().nonnegative(),
+});
 
 type Summary = Record<string, unknown>;
 
@@ -107,6 +122,7 @@ async function summarizeSend(request: unknown, context: SummaryContext): Promise
     recipients: email.to.map(pseudonym),
     subjectLength: email.subject.length,
     textLength: email.text.length,
+    ...(email.headers !== undefined ? { headers: email.headers.map((header) => header.name) } : {}),
   };
 }
 
@@ -133,6 +149,11 @@ function summarizeUsage(request: unknown): Summary {
   return { inputTokens, outputTokens, modelCalls };
 }
 
+function summarizeLaneAttempt(request: unknown): Summary {
+  const { cap, expiresAt } = laneAttemptSchema.parse(request);
+  return { cap, expiresAt };
+}
+
 const SHAPES = new Map<string, DryRunShape>([
   ['eventStore.putIfAbsent', RECORD_KEY_SHAPE],
   ['eventStore.deleteRecord', RECORD_KEY_SHAPE],
@@ -146,6 +167,7 @@ const SHAPES = new Map<string, DryRunShape>([
   ],
   ['decisionStore.reserveInvocation', { targets: [INCIDENT_PARTITION_KEY], summarize: summarizeReservation }],
   ['decisionStore.recordUsage', { targets: [INCIDENT_PARTITION_KEY], summarize: summarizeUsage }],
+  ['decisionStore.reserveLaneAttempt', { targets: [COUNTER_LANE_HOUR_PARTITION_KEY], summarize: summarizeLaneAttempt }],
   ['deadLetter.send', { targets: [DEAD_LETTER_TARGET], summarize: summarizeDeadLetter }],
   ['ses.pauseConfigurationSet', CONFIGURATION_SET_SHAPE],
   ['ses.reopenConfigurationSet', CONFIGURATION_SET_SHAPE],

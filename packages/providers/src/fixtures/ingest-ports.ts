@@ -13,6 +13,7 @@ import type {
 } from '../port-types.js';
 import {
   assertDecisionItemKey,
+  assertLaneAttempt,
   assertReservation,
   assertUsage,
   assertVersionedUpdate,
@@ -118,6 +119,18 @@ function laneSnapshot(
   return result.sort(bySortKeyBytes);
 }
 
+function nextMacrotask(): Promise<void> {
+  return new Promise((resolve) => setImmediate(resolve));
+}
+
+// Pitfall 9: with yieldBetweenOperations every operation first gives up a macrotask, so roots built
+// over one table interleave as separate Lambda instances do. The yield sits before the check and never
+// between check and set, which would invent a race DynamoDB's conditional writes do not have. Off, no
+// await is added at all, so earlier fixture tests see the timing they always had.
+function yieldsBetweenOperations(options: FixtureOptions): boolean {
+  return options.yieldBetweenOperations === true;
+}
+
 // Models the table's conditional put (attribute_not_exists(pk), D-08): the check and the set
 // happen with no await between them, so two calls issued together under Promise.all resolve
 // exactly like DynamoDB's conditional write, one written and one duplicate. Records go in and
@@ -127,9 +140,11 @@ function laneSnapshot(
 export function createFixtureEventStore(options: FixtureOptions = {}, dryRun?: DryRunLog): EventStorePort {
   const { items } = options.store ?? createFixtureTableState();
   const pageSize = pageSizeOf(options);
+  const yields = yieldsBetweenOperations(options);
 
   return brandPort({
     async putIfAbsent(record) {
+      if (yields) await nextMacrotask();
       await dryRun?.would('eventStore.putIfAbsent', record.pk, record);
       if (options.eventStoreFailure === 'put') {
         throw new FixtureWriteError('fixture event store is configured to fail on put');
@@ -141,12 +156,14 @@ export function createFixtureEventStore(options: FixtureOptions = {}, dryRun?: D
       return 'written';
     },
     async queryLane(configurationSet, fromBucketMs, toBucketMs, nowMs) {
+      if (yields) await nextMacrotask();
       return laneSnapshot(items, configurationSet, fromBucketMs, toBucketMs, nowMs);
     },
     // The snapshot is taken before the first page and every page yields to the event loop, so a
     // write landing while the fold runs is never in it: counted at most once (the R1 concurrency
     // backstop). An empty window still delivers one empty page, as a DynamoDB query answers one.
     async foldLane(configurationSet, fromBucketMs, toBucketMs, nowMs, fold) {
+      if (yields) await nextMacrotask();
       assertFoldWindow(fromBucketMs, toBucketMs);
       const snapshot = laneSnapshot(items, configurationSet, fromBucketMs, toBucketMs, nowMs);
       let state = fold.initial;
@@ -159,6 +176,7 @@ export function createFixtureEventStore(options: FixtureOptions = {}, dryRun?: D
       return state;
     },
     async queryByRecipient(recipientHmac) {
+      if (yields) await nextMacrotask();
       const result: RecordKey[] = [];
       for (const item of items.values()) {
         if (isLaneRecord(item) && item.recipientHmac === recipientHmac) result.push({ pk: item.pk, sk: item.sk });
@@ -166,10 +184,12 @@ export function createFixtureEventStore(options: FixtureOptions = {}, dryRun?: D
       return result;
     },
     async deleteRecord(key) {
+      if (yields) await nextMacrotask();
       await dryRun?.would('eventStore.deleteRecord', key.pk, key);
       return items.delete(keyOf(key));
     },
     async getRecord(key) {
+      if (yields) await nextMacrotask();
       const item = items.get(keyOf(key));
       return isLaneRecord(item) ? structuredClone(item) : undefined;
     },
@@ -226,9 +246,11 @@ function transactionConflictsOf(options: FixtureOptions): number {
 export function createFixtureDecisionStore(options: FixtureOptions = {}, dryRun?: DryRunLog): DecisionStorePort {
   const { items } = options.store ?? createFixtureTableState();
   let conflictsLeft = transactionConflictsOf(options);
+  const yields = yieldsBetweenOperations(options);
 
   return brandPort({
     async putIfAbsent(item, nowMs) {
+      if (yields) await nextMacrotask();
       await dryRun?.would('decisionStore.putIfAbsent', item.pk, item);
       rejectUnmarshallable(item);
       rejectUnmarshallable(nowMs);
@@ -239,11 +261,13 @@ export function createFixtureDecisionStore(options: FixtureOptions = {}, dryRun?
       return 'written';
     },
     async getItem(key, nowMs) {
+      if (yields) await nextMacrotask();
       rejectUnmarshallable(nowMs);
       const item = unexpiredDecisionItem(items.get(keyOf(key)), nowMs);
       return item === undefined ? undefined : structuredClone(item);
     },
     async updateIfVersion(key, expectedVersion, attributes, nowMs, expected = {}) {
+      if (yields) await nextMacrotask();
       assertVersionedUpdate(key, expectedVersion, attributes);
       rejectUnmarshallable(attributes);
       rejectUnmarshallable(nowMs);
@@ -260,6 +284,7 @@ export function createFixtureDecisionStore(options: FixtureOptions = {}, dryRun?
       return 'updated';
     },
     async reserveInvocation(request) {
+      if (yields) await nextMacrotask();
       assertReservation(request);
       await dryRun?.would('decisionStore.reserveInvocation', request.incidentKey.pk, request);
       if (conflictsLeft > 0) {
@@ -274,6 +299,7 @@ export function createFixtureDecisionStore(options: FixtureOptions = {}, dryRun?
     },
     // attribute_exists(pk) on both updates of one transaction live, so a missing counter refuses both.
     async recordUsage(usage) {
+      if (yields) await nextMacrotask();
       assertUsage(usage);
       await dryRun?.would('decisionStore.recordUsage', usage.incidentKey.pk, usage);
       if (!items.has(keyOf(usage.incidentKey)) || !items.has(keyOf(usage.dayKey))) return 'not-reserved';
@@ -281,6 +307,15 @@ export function createFixtureDecisionStore(options: FixtureOptions = {}, dryRun?
       addToCounter(items, usage.incidentKey, amounts);
       addToCounter(items, usage.dayKey, amounts);
       return 'recorded';
+    },
+    // The live condition reads "attribute_not_exists(attempts) OR attempts < cap" on one item.
+    async reserveLaneAttempt(request) {
+      if (yields) await nextMacrotask();
+      assertLaneAttempt(request);
+      await dryRun?.would('decisionStore.reserveLaneAttempt', request.key.pk, request);
+      if (!hasRoom(numberAttribute(items.get(keyOf(request.key)), 'attempts'), request.cap)) return 'cap';
+      addToCounter(items, request.key, { attempts: 1 }, request.expiresAt);
+      return 'reserved';
     },
   }, 'fixture');
 }

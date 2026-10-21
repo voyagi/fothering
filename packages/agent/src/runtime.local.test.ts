@@ -7,19 +7,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { bucketStartMs, isCountedRecord } from '@fothering/core/buckets';
-import { REQUIRED_EVENT_TYPES, checkCloseability } from '@fothering/core/closeability';
-import { decideLane } from '@fothering/core/decision';
-import { buildEvidenceRecord, incidentIdFor, type EvidenceRecord } from '@fothering/core/evidence-record';
-import { buildTagRows } from '@fothering/core/evidence-rows';
-import { parseLaneMap } from '@fothering/core/lanes';
 import { PINNED_MODEL_VALUES } from '@fothering/core/model-values';
-import { RETENTION_SECONDS } from '@fothering/core/records';
-import { scenarioRecords } from '@fothering/core/test/event-arbitraries';
-import { LANE_RATIO_LABELS, LANE_SHARE_LABEL, laneSpikeVerdict, renderPercent } from '@fothering/core/verdicts';
-import { createWindowFold, spikeWindowFor, summarizeWindow } from '@fothering/core/window-fold';
-import { TEST_ADDRESS_KEY_SET } from '@fothering/providers/fixtures/ingest-ports';
-import lanesJson from '../../../lanes.json' with { type: 'json' };
+import { fixtureEvidenceRecord } from '@fothering/core/test/decision-cycle';
 import { SYSTEM_PROMPT_SHA256 } from './handler.js';
 
 // This file lives at packages/agent/src/, two levels below the repo root every path here is
@@ -105,65 +94,6 @@ async function waitForOk(url: string, deadlineMs: number, exitedEarly: () => str
       await new Promise((resolveDelay) => setTimeout(resolveDelay, 200));
     }
   }
-}
-
-// A real evidence record, built in this process by the core path detection runs: one bad import
-// batch on fothering-bulk with one approved option. The runtime child receives it as the request body.
-function fixtureEvidenceRecord(): EvidenceRecord {
-  const lanes = parseLaneMap(lanesJson);
-  const bulk = 'fothering-bulk';
-  const nowMs = Date.UTC(2026, 9, 11, 12, 2, 0);
-  const records = scenarioRecords(
-    {
-      configurationSet: bulk,
-      streamTag: 'newsletter',
-      callerIdentity: 'bulk-sender',
-      fromDomain: 'news.example.com',
-      groups: [
-        { bucketOffset: 0, count: 40, batch: 'import-0915', permanentBounces: 15 },
-        { bucketOffset: 1, count: 160, batch: 'import-0901' },
-      ],
-    },
-    nowMs,
-    lanes,
-    TEST_ADDRESS_KEY_SET,
-  );
-  const window = spikeWindowFor(nowMs);
-  const fold = createWindowFold({ lane: bulk, window, nowMs });
-  const summary = summarizeWindow(fold.step(fold.initial, records));
-  const spike = laneSpikeVerdict(summary.totals);
-  const rows = buildTagRows('batch', summary, spike);
-  const ses = {
-    configurationSets: new Set(lanes.lanes.map((lane) => lane.configurationSet)),
-    defaultConfigurationSets: new Set<string>(),
-    eventDestinations: new Map([[bulk, [{ enabled: true, eventBridge: true, matchingEventTypes: [...REQUIRED_EVENT_TYPES] }]]]),
-  };
-  const closeability = checkCloseability(bulk, { laneMap: lanes, observed: new Map([[bulk, summary.observed]]), ses });
-  const decision = decideLane({ spike, rows, configurationRows: [], closeability, coverageNoData: false, bound: null, otherSpikingLanes: [] });
-  const countable = records.filter(isCountedRecord).length;
-  return buildEvidenceRecord({
-    incidentId: incidentIdFor(bulk, bucketStartMs(nowMs)),
-    lane: { configurationSet: bulk, lane: bulk },
-    window,
-    laneTotals: {
-      recipientSends: summary.totals.recipientSends,
-      permanentBounces: summary.totals.permanentBounces,
-      complaints: summary.totals.complaints,
-      hardBounceRatio: spike.hardBounceRatio,
-      complaintRatio: spike.complaintRatio,
-      verdict: spike.verdict,
-      triggers: [...spike.triggers],
-      label: { hardBounceRatio: LANE_RATIO_LABELS.hardBounce, complaintRatio: LANE_RATIO_LABELS.complaint },
-    },
-    share: { laneCountableEvents: countable, storedCountableEvents: countable, percent: renderPercent(countable, countable), label: LANE_SHARE_LABEL },
-    rows,
-    configurationRows: [],
-    isolation: 'confined',
-    decision: { ...decision, noData: false, bound: null, otherSpikingLanes: [], sharedCause: null },
-    question: null,
-    fix: null,
-    expiresAt: Math.floor(nowMs / 1000) + RETENTION_SECONDS,
-  });
 }
 
 describe('the agent bundle answers the AgentCore contract with the real handler and no AWS client', () => {

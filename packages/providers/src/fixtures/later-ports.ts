@@ -6,6 +6,7 @@ import type {
   DnsPort,
   EmailIdentityFacts,
   EventDestinationFact,
+  FixtureSesState,
   Recording,
   ReplyBucketPort,
   SesPort,
@@ -22,9 +23,67 @@ export interface FixtureMutatingOptions extends FixtureRecordingOptions {
   dryRun: DryRunLog;
 }
 
-// Reads answer from recordings and throw on an unrecorded request; the three mutations are
-// recorders that answer every call with a fixed result and leave one dry-run line.
-export function createFixtureSes(options: FixtureMutatingOptions): SesPort {
+export interface FixtureSesOptions extends FixtureMutatingOptions {
+  state?: FixtureSesState | undefined;
+}
+
+export class FixtureSesFault extends Error {
+  constructor(operation: string) {
+    super(`the fixture SES was scripted to fail ${operation}`);
+    this.name = 'FixtureSesFault';
+  }
+}
+
+export function createFixtureSesState(): FixtureSesState {
+  return { sendingEnabled: new Map(), putFaults: new Map(), getAnswers: new Map(), sendAnswers: [], calls: [] };
+}
+
+// The put and the read-back keep separate state: the put moves sendingEnabled, and the read-back
+// answers a scripted override when one is set for the set, so a test can make SES accept a put and
+// still read the set as sending (AC-3). Unscripted, the read-back follows the put.
+function fixtureSesWrites(state: FixtureSesState, dryRun: DryRunLog): Pick<
+  SesPort,
+  'getConfigurationSetSending' | 'pauseConfigurationSet' | 'reopenConfigurationSet' | 'sendEmail'
+> {
+  const recorder = createSesDryRun(dryRun);
+  const put = (configurationSet: string, sendingEnabled: boolean): void => {
+    state.calls.push(`put-issued:${configurationSet}:${String(sendingEnabled)}`);
+    if (state.putFaults.has(configurationSet)) throw new FixtureSesFault('PutConfigurationSetSendingOptions');
+    state.sendingEnabled.set(configurationSet, sendingEnabled);
+    state.calls.push(`put-resolved:${configurationSet}:${String(sendingEnabled)}`);
+  };
+  return {
+    async getConfigurationSetSending(configurationSet) {
+      state.calls.push(`get-issued:${configurationSet}`);
+      const scripted = state.getAnswers.get(configurationSet);
+      if (scripted === 'throw') throw new FixtureSesFault('GetConfigurationSet');
+      // A set Fothering never paused is sending, as every configuration set is when created.
+      const answer = scripted === 'missing' ? {} : { sendingEnabled: scripted ?? state.sendingEnabled.get(configurationSet) ?? true };
+      state.calls.push(`get-resolved:${configurationSet}`);
+      return answer;
+    },
+    async pauseConfigurationSet(configurationSet) {
+      await recorder.pauseConfigurationSet(configurationSet);
+      put(configurationSet, false);
+    },
+    async reopenConfigurationSet(configurationSet) {
+      await recorder.reopenConfigurationSet(configurationSet);
+      put(configurationSet, true);
+    },
+    async sendEmail(request) {
+      await recorder.sendEmail(request);
+      state.calls.push('send-issued');
+      if ((state.sendAnswers.shift() ?? 'accept') === 'throw') throw new FixtureSesFault('SendEmail');
+      state.calls.push('send-resolved');
+      const sent = state.calls.filter((call) => call === 'send-resolved').length;
+      return { messageId: `fixture-message-${sent}` };
+    },
+  };
+}
+
+// Reads answer from recordings and throw on an unrecorded request; every write leaves its one dry-run
+// line before it touches the fixture state.
+export function createFixtureSes(options: FixtureSesOptions): SesPort {
   const recorded = recordedPort(options.recordings);
   return brandPort(
     {
@@ -40,7 +99,7 @@ export function createFixtureSes(options: FixtureMutatingOptions): SesPort {
       async getConfigurationSetEventDestinations(configurationSetName: string) {
         return recorded.respond<EventDestinationFact[]>('ses.getConfigurationSetEventDestinations', configurationSetName);
       },
-      ...createSesDryRun(options.dryRun),
+      ...fixtureSesWrites(options.state ?? createFixtureSesState(), options.dryRun),
     },
     'fixture',
   );
