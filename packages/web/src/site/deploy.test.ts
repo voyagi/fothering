@@ -510,6 +510,27 @@ describe('the deploy steps', () => {
     expect(steps.some((step) => step.text.includes('{region}'))).toBe(false);
   });
 
+  // The bullets under the README's "Before that first deploy:" line, continuation lines included,
+  // up to the first blank line after them.
+  const firstDeployList = (readme: string): string => {
+    const lines = readme.split(/\r?\n/);
+    const start = lines.findIndex((line) => line.trim() === 'Before that first deploy:');
+    if (start < 0) throw new Error('README.md: no "Before that first deploy:" line');
+    const rest = lines.slice(start + 1);
+    const first = rest.findIndex((line) => line.startsWith('- '));
+    const end = rest.findIndex((line, index) => index > first && line.trim() === '');
+    return rest.slice(first, end < 0 ? undefined : end).join('\n');
+  };
+
+  it('names every code span of the README list the first deploy needs, and the sandbox', () => {
+    const list = firstDeployList(readRepoText('README.md', ROOT));
+    const spans = [...list.matchAll(/`([^`]+)`/g)].map((match) => match[1] ?? '');
+    expect(spans).toEqual(expect.arrayContaining(['FromAddress', 'fothering-alerts', 'OperatorAddress']));
+    const [check] = deploySteps({ deployCommands: facts.deployCommands, region: readDeployRegion(ROOT) });
+    expect(spans.filter((span) => !check?.text.includes(`\`${span}\``))).toEqual([]);
+    expect(check?.text).toContain('SES sandbox');
+  });
+
   it('puts no command on the first two steps', () => {
     expect(steps.slice(0, 2).map((step) => step.commands)).toEqual([[], []]);
   });

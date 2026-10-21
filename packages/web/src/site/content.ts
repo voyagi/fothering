@@ -164,8 +164,14 @@ export interface DeployStepCopy {
   readonly uses: readonly DeployCommandUse[];
 }
 
+// Step one carries the README's "Before that first deploy" list (deploy.test.ts compares the two):
+// the action stack's first deploy needs all three. SES sandbox rule: request-production-access.html.
 export const DEPLOY_STEPS: readonly DeployStepCopy[] = Object.freeze([
-  { title: 'Check what you have', text: 'An AWS account with SES in `{region}`, Node.js 22, and credentials for that account.', uses: [] },
+  {
+    title: 'Check what you have',
+    text: 'An AWS account with SES in `{region}`, Node.js 22, and credentials for that account. The address you deploy as `FromAddress` must be a verified SES identity in `{region}`, or sit on a verified domain. The `fothering-alerts` configuration set must exist, with an enabled EventBridge event destination for all six event types: the operator email goes out through it. While the account is in the SES sandbox, SES delivers only to verified identities, so verify `OperatorAddress` too.',
+    uses: [],
+  },
   {
     title: 'Name the lanes to watch',
     text: 'List every configuration set you send through in `lanes.json`, transactional ones included, each with an EventBridge event destination for all six event types.',
