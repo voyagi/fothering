@@ -1,6 +1,7 @@
 import type { Message, ModelStreamEvent, StreamOptions } from '@strands-agents/sdk';
 import { lanePartitionKey, type EventRecord, type RecordKey } from '@fothering/core/records';
 import type { AddressKeySet } from '@fothering/core/address';
+import { CONFIGURATION_SET_PATTERN } from '@fothering/core/lanes';
 import type { DnsMxOutcome, DnsTxtOutcome, IdentityAuthFacts } from '@fothering/core/evidence-rows';
 import type { LaneFold } from '@fothering/core/window-fold';
 
@@ -66,6 +67,14 @@ export interface UsageRecord {
   modelCalls: number;
 }
 
+/** One pause or reopen attempt on one lane in one UTC hour (D-99); the cap and the key are the caller's to compute. */
+export interface LaneAttemptRequest {
+  key: RecordKey;
+  cap: number;
+  /** Written on the counter's first attempt and kept after, as the invocation counters keep theirs. */
+  expiresAt: number;
+}
+
 /** No operation here deletes an item or lowers a counter: the caps hold only if nothing can (AC-P6). */
 export interface DecisionStorePort {
   /**
@@ -91,6 +100,8 @@ export interface DecisionStorePort {
   reserveInvocation(request: ReservationRequest): Promise<ReservationResult>;
   /** Adds to both counters only when both already exist, all or nothing. */
   recordUsage(usage: UsageRecord): Promise<UsageResult>;
+  /** Adds one attempt to a lane-hour counter while it is below the cap; it only ever adds (D-99). */
+  reserveLaneAttempt(request: LaneAttemptRequest): Promise<'reserved' | 'cap'>;
 }
 
 const LANE_PARTITION_PREFIX = lanePartitionKey('');
@@ -111,15 +122,15 @@ function requireWholeNumber(name: string, value: number, minimum: number): void 
 
 /**
  * A decision item never sits under an event record's LANE# key (D-65), and a counter moves only
- * through reserveInvocation and recordUsage, which only add: a put or a versioned update could
- * otherwise write one back to zero.
+ * through reserveInvocation, recordUsage and reserveLaneAttempt, which only add: a put or a versioned
+ * update could otherwise write one back to zero.
  */
 export function assertDecisionItemKey(key: RecordKey): void {
   if (key.pk.startsWith(LANE_PARTITION_PREFIX)) {
     throw new RangeError('a decision store item never takes a LANE# partition key, which belongs to event records');
   }
   if (key.sk === COUNTER_SORT_KEY) {
-    throw new RangeError('a counter item changes only through reserveInvocation and recordUsage, which only add');
+    throw new RangeError('a counter item changes only through reserveInvocation, recordUsage and reserveLaneAttempt, which only add');
   }
 }
 
@@ -175,6 +186,20 @@ export function assertReservation(request: ReservationRequest): void {
   if (request.tokenReservation > request.dayTokenCap) throw new RangeError('tokenReservation is larger than dayTokenCap');
 }
 
+const LANE_HOUR_PARTITION_KEY = /^COUNTER_LANE_HOUR#(.+)#\d{4}-\d{2}-\d{2}T\d{2}$/;
+
+function isLaneHourKey(key: RecordKey): boolean {
+  const set = LANE_HOUR_PARTITION_KEY.exec(key.pk)?.[1];
+  return key.sk === COUNTER_SORT_KEY && set !== undefined && CONFIGURATION_SET_PATTERN.test(set);
+}
+
+/** A lane attempt names one lane-hour counter and a cap of at least one; nothing else reaches the table. */
+export function assertLaneAttempt(request: LaneAttemptRequest): void {
+  if (!isLaneHourKey(request.key)) throw new RangeError('key must be a COUNTER_LANE_HOUR#<set>#<YYYY-MM-DDTHH> COUNTER key');
+  requireWholeNumber('cap', request.cap, 1);
+  requireWholeNumber('expiresAt', request.expiresAt, 0);
+}
+
 export function assertUsage(usage: UsageRecord): void {
   assertCounterKeys(usage.incidentKey, usage.dayKey);
   requireWholeNumber('inputTokens', usage.inputTokens, 0);
@@ -217,6 +242,23 @@ export interface FixtureOptions {
   store?: FixtureTableState;
   /** The next N reservations cancel as a transaction conflict and change nothing, so a test can show the retry. */
   transactionConflicts?: number;
+  /** The fixture SES's sending state and scripts, shared like store so two roots see one SES. */
+  sesState?: FixtureSesState;
+  /** Off by default. Every store operation first yields a macrotask, never between its check and its set. */
+  yieldBetweenOperations?: boolean;
+}
+
+/**
+ * What the fixture SES holds between calls. The put moves sendingEnabled and the read-back follows it
+ * unless getAnswers scripts another answer for that set, so a test can make the two disagree (AC-3).
+ * calls records every issued and resolved SES write and read-back in order.
+ */
+export interface FixtureSesState {
+  sendingEnabled: Map<string, boolean>;
+  putFaults: Map<string, 'throw'>;
+  getAnswers: Map<string, boolean | 'missing' | 'throw'>;
+  sendAnswers: ('accept' | 'throw')[];
+  calls: string[];
 }
 
 // The composition-root contracts (D-05, D-06): a runtimeContext picks fixture over live wholesale,
@@ -318,10 +360,22 @@ export interface SendEmailRequest {
   subject: string;
   text: string;
   configurationSetName?: string;
+  /** Article 50(2): only ever the one marker header, on an email that shows the model paragraph (D-114). */
+  headers?: readonly { name: string; value: string }[];
 }
 
-/** The reads above plus the three operations that change what SES does, all gated by the live switch. */
+/** GetConfigurationSet's sending option; the key is absent when SES answered without it. */
+export interface ConfigurationSetSending {
+  readonly sendingEnabled?: boolean;
+}
+
+/**
+ * The reads above, the configuration-set read-back, and the three operations that change what SES
+ * does, all three gated by the live switch. The read-back sits here and not on SesReadPort, so the
+ * fact reads and detection can never reach it.
+ */
 export interface SesPort extends SesReadPort {
+  getConfigurationSetSending(configurationSet: string): Promise<ConfigurationSetSending>;
   pauseConfigurationSet(configurationSet: string): Promise<void>;
   reopenConfigurationSet(configurationSet: string): Promise<void>;
   sendEmail(request: SendEmailRequest): Promise<{ messageId: string }>;

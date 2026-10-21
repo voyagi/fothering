@@ -1,10 +1,12 @@
 import { App } from 'aws-cdk-lib';
 import { Template } from 'aws-cdk-lib/assertions';
 import { expect } from 'vitest';
+import { isStaticallyCloseable } from '@fothering/core/closeability';
 import { parseLaneMap, type LaneMap } from '@fothering/core/lanes';
 import lanesJson from '../../../../lanes.json' with { type: 'json' };
+import { ACCOUNT_SENDING_ACTIONS } from '../account-deny.js';
 import { cdkJsonContext } from '../cdk-context.js';
-import { addFotheringStacks, DETECTION_STACK_ID, RUNTIME_STACK_ID } from '../create-app.js';
+import { ACTION_STACK_ID, addFotheringStacks, DETECTION_STACK_ID, RUNTIME_STACK_ID } from '../create-app.js';
 import type { PermissionEntry } from '../permissions.js';
 import { createStubAssets } from '../stub-assets.js';
 
@@ -13,6 +15,7 @@ export interface SynthesizedStacks {
   readonly ingest: Template;
   readonly runtime: Template;
   readonly detection: Template;
+  readonly action: Template;
   /** The folder the synth wrote its assembly to. */
   readonly outdir: string;
   dispose(): void;
@@ -21,8 +24,8 @@ export interface SynthesizedStacks {
 type Resources = Record<string, { Type: string; Properties?: Record<string, unknown>; [key: string]: unknown }>;
 
 // The deployed context plus whatever a test adds, over stub bundles, so a synth loads aws-cdk-lib
-// and hashes a few small folders and nothing more. The detection function reuses the ingest stub
-// folder: a stub bundle only has to exist to be hashed. The assembly goes inside the stub folder: an
+// and hashes a few small folders and nothing more. The detection and action functions reuse the ingest
+// stub folder and the reopen function the forget one: a stub bundle only has to exist to be hashed. The assembly goes inside the stub folder: an
 // App with no outdir writes to a new temp folder of its own, which nothing ever removes. A synth that
 // throws returns no dispose to its caller, so the folder is removed here before the error goes on.
 export function synthStacks(extraContext: Record<string, unknown> = {}): SynthesizedStacks {
@@ -30,12 +33,19 @@ export function synthStacks(extraContext: Record<string, unknown> = {}): Synthes
   try {
     const laneMap = parseLaneMap(lanesJson);
     const app = new App({ context: { ...cdkJsonContext, ...extraContext }, outdir: assets.outdir });
-    const { ingest, runtime, detection } = addFotheringStacks(app, { laneMap, ...assets, detectAssetDir: assets.ingestAssetDir });
+    const { ingest, runtime, detection, action } = addFotheringStacks(app, {
+      laneMap,
+      ...assets,
+      detectAssetDir: assets.ingestAssetDir,
+      actionAssetDir: assets.ingestAssetDir,
+      reopenAssetDir: assets.forgetAssetDir,
+    });
     return {
       laneMap,
       ingest: Template.fromStack(ingest),
       runtime: Template.fromStack(runtime),
       detection: Template.fromStack(detection),
+      action: Template.fromStack(action),
       outdir: app.outdir,
       dispose: assets.remove,
     };
@@ -115,34 +125,133 @@ const NO_ROLE_MAY_HOLD = [
   'bedrock-agentcore:InvokeAgentRuntimeCommandShell',
   'bedrock-agentcore:CreateEvent',
 ];
-const SES_WRITES = [
-  'ses:PutConfigurationSetSendingOptions',
-  'ses:PutAccountSendingAttributes',
-  'ses:UpdateAccountSendingEnabled',
-  'ses:UpdateConfigurationSetSendingEnabled',
-  'ses:SendEmail',
-  'ses:SendRawEmail',
-  'ses:SendBulkEmail',
-];
+const PAUSE_ACTION = 'ses:PutConfigurationSetSendingOptions';
+// D-104 names both pausing roles by their id in the action stack, so the reopen role needs no rule of
+// its own when it joins.
+const PAUSING_ROLE_PREFIXES = ['ActionRole', 'ReopenRole'];
+const MODEL_SERVICES = ['bedrock', 'bedrock-agentcore'];
+// The operator email is the only send any role may make, and only the action role makes it; raw and
+// bulk sends stay refused everywhere.
+const SEND_EMAIL = 'ses:SendEmail';
+const SENDING_ROLE_PREFIX = 'ActionRole';
+const SES_WRITES = [...ACCOUNT_SENDING_ACTIONS, 'ses:SendRawEmail', 'ses:SendBulkEmail'];
+const CONFIGURATION_SET_ARN_TAIL = /:configuration-set\/([^*?]+)$/;
+const FROM_ADDRESS_REF = JSON.stringify({ Ref: 'FromAddress' });
+const FROM_DOMAIN = JSON.stringify({ 'Fn::Select': [1, { 'Fn::Split': ['@', { Ref: 'FromAddress' }] }] });
+
+function joinedParts(value: unknown): unknown[] {
+  if (typeof value !== 'object' || value === null) return [];
+  const join = (value as Record<string, unknown>)['Fn::Join'];
+  const parts: unknown = Array.isArray(join) ? join[1] : undefined;
+  return Array.isArray(parts) ? parts : [];
+}
+
+function lastJoinedPart(value: unknown): unknown {
+  return joinedParts(value).at(-1);
+}
+
+// The one configuration set a granted resource names, or undefined when it names anything wider (a *,
+// a wildcard in the name, a part only a deploy can resolve).
+function pausedSetName(resource: string | null): string | undefined {
+  if (resource === null) return undefined;
+  const value: unknown = JSON.parse(resource);
+  const tail = typeof value === 'string' ? value : lastJoinedPart(value);
+  return typeof tail === 'string' ? CONFIGURATION_SET_ARN_TAIL.exec(tail)?.[1] : undefined;
+}
+
+// The single operator-alert set's name, or undefined when the lane map holds none or several.
+function operatorAlertSet(laneMap: LaneMap): string | undefined {
+  const alerts = laneMap.lanes.filter((lane) => lane.operatorAlert);
+  return alerts.length === 1 ? alerts[0]?.configurationSet : undefined;
+}
+
+// Whether a granted resource is one of the three the operator email may use: the identity ARN whose
+// name is exactly the FromAddress parameter, the one whose name is that parameter's domain, or the
+// operator-alert set. A wildcard or any other name is something wider.
+function isOperatorEmailResource(resource: string | null, laneMap: LaneMap): boolean {
+  if (resource === null) return false;
+  const parts = joinedParts(JSON.parse(resource));
+  const [service] = parts;
+  const name = parts.at(-1);
+  const before = parts.at(-2);
+  const isSesArn = typeof service === 'string' && service.startsWith('arn:') && service.includes(':ses:');
+  if (isSesArn && typeof before === 'string' && before.endsWith(':identity/') && name !== undefined) {
+    const named = JSON.stringify(name);
+    return named === FROM_ADDRESS_REF || named === FROM_DOMAIN;
+  }
+  const alertSet = operatorAlertSet(laneMap);
+  return alertSet !== undefined && pausedSetName(resource) === alertSet;
+}
+
+function roleKey(entry: PermissionEntry): string {
+  return `${entry.stack}/${entry.role}`;
+}
+
+function sendViolations(entry: PermissionEntry, laneMap: LaneMap): string[] {
+  if (!grantsAction(entry.action, SEND_EMAIL)) return [];
+  const where = `${roleKey(entry)} ${entry.action}`;
+  const violations: string[] = [];
+  if (!(entry.stack === ACTION_STACK_ID && entry.role.startsWith(SENDING_ROLE_PREFIX))) {
+    violations.push(`${where}: only the action role may hold ${SEND_EMAIL}`);
+  }
+  if (!isOperatorEmailResource(entry.resource, laneMap)) {
+    violations.push(`${where}: ${SEND_EMAIL} reaches a resource other than the From identity, its domain or the operator-alert set`);
+  }
+  return violations;
+}
+
+// Every role holding the pause beside any action of a model service: the action must stay code's
+// alone, so no role a model drives may also be able to close a lane.
+function modelPairings(allows: readonly PermissionEntry[]): string[] {
+  const pausing = new Set(allows.filter((entry) => grantsAction(entry.action, PAUSE_ACTION)).map(roleKey));
+  const modelRoles = new Set(
+    allows.filter((entry) => MODEL_SERVICES.some((service) => reachesService(entry.action, service))).map(roleKey),
+  );
+  return [...pausing].filter((role) => modelRoles.has(role)).map((role) => `${role}: holds ${PAUSE_ACTION} beside a bedrock or bedrock-agentcore action`);
+}
 
 // Every Allow grant that breaks the boundaries the stacks promise: the runtime reaches no SES,
 // DynamoDB or S3 action, only the detection role may invoke the runtime, no role may invoke it for a
-// user or run commands in it or write AgentCore Memory, and no role may change or use SES sending.
-export function permissionViolations(entries: readonly PermissionEntry[]): string[] {
+// user or run commands in it or write AgentCore Memory, no role may change account-level sending or
+// send, only the action stack's pausing roles may pause a configuration set and only on a statically
+// closeable lane, and no role pairs the pause with a model action.
+export function permissionViolations(entries: readonly PermissionEntry[], laneMap: LaneMap): string[] {
+  const closeable = new Set(laneMap.lanes.filter(isStaticallyCloseable).map((lane) => lane.configurationSet));
+  const allows = entries.filter((entry) => entry.kind === 'permission' && entry.effect === 'Allow');
   const violations: string[] = [];
-  for (const entry of entries) {
-    if (entry.kind !== 'permission' || entry.effect !== 'Allow') continue;
-    const where = `${entry.stack}/${entry.role} ${entry.action}`;
+  for (const entry of allows) {
+    const where = `${roleKey(entry)} ${entry.action}`;
     const isDetectRole = entry.stack === DETECTION_STACK_ID && entry.role.startsWith('DetectRole');
+    const isPausingRole = entry.stack === ACTION_STACK_ID && PAUSING_ROLE_PREFIXES.some((prefix) => entry.role.startsWith(prefix));
+    if (grantsAction(entry.action, PAUSE_ACTION)) {
+      if (!isPausingRole) violations.push(`${where}: only a pausing role may hold ${PAUSE_ACTION}`);
+      const paused = pausedSetName(entry.resource);
+      if (paused === undefined || !closeable.has(paused)) {
+        violations.push(`${where}: ${PAUSE_ACTION} reaches a configuration set outside the statically closeable lanes`);
+      }
+    }
     for (const service of RUNTIME_FORBIDDEN_SERVICES) {
       if (entry.stack === RUNTIME_STACK_ID && reachesService(entry.action, service)) violations.push(`${where}: the runtime role reaches ${service}`);
     }
+    violations.push(...sendViolations(entry, laneMap));
     if (!isDetectRole && grantsAction(entry.action, INVOKE_RUNTIME)) violations.push(`${where}: only the detection role may invoke the runtime`);
     for (const probe of [...NO_ROLE_MAY_HOLD, ...SES_WRITES]) {
       if (grantsAction(entry.action, probe)) violations.push(`${where}: no role may hold ${probe}`);
     }
   }
-  return violations;
+  return [...violations, ...modelPairings(allows)];
+}
+
+// Every role, read from its trust entry so a role holding no permission at all is still seen, that
+// lacks an unconditional Deny on * for one of the account-level actions.
+export function denyViolations(entries: readonly PermissionEntry[]): string[] {
+  const roles = [...new Set(entries.filter((entry) => entry.kind === 'trust').map(roleKey))];
+  const denies = entries.filter((entry) => entry.kind === 'permission' && entry.effect === 'Deny' && entry.resource === '"*"' && entry.condition === null);
+  return roles.flatMap((role) =>
+    ACCOUNT_SENDING_ACTIONS.filter((action) => !denies.some((entry) => roleKey(entry) === role && grantsAction(entry.action, action))).map(
+      (action) => `${role}: no Deny on * for ${action}`,
+    ),
+  );
 }
 
 // Every statement each IAM role carries, from its inline policies and from the standalone

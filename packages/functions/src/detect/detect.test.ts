@@ -185,6 +185,7 @@ function withDecisionStore(deps: DetectDeps, overrides: Partial<DecisionStorePor
     updateIfVersion: (key, expectedVersion, attributes, nowMs, expected) => store.updateIfVersion(key, expectedVersion, attributes, nowMs, expected),
     reserveInvocation: (request) => store.reserveInvocation(request),
     recordUsage: (usage) => store.recordUsage(usage),
+    reserveLaneAttempt: (request) => store.reserveLaneAttempt(request),
     ...overrides,
   };
   return { ...deps, ports: { ...deps.ports, decisionStore: wrapped } };
@@ -294,6 +295,25 @@ describe('one spike is one incident across repeated cycles (D-53, D-54, D-55)', 
     expect(itemsWithSortKey(store, 'MARKER')[0]?.incidentId).toBe(opens ? laterId : INCIDENT_ID);
     expect((await storedItem(deps, laterId, 'EVIDENCE', laterNowMs)) !== undefined).toBe(opens);
     expect(summary.incidentsOpened).toBe(opens ? 1 : 0);
+  });
+
+  // The lane read and the lost claim's re-read each meet the item, so a spiking lane logs it twice a cycle.
+  it('logs marker-unreadable for a stored lane marker that does not parse, and opens nothing over it', async () => {
+    const { deps, store, lines } = await builtCycle({ runtime: closeRuntime });
+    await runDetectionCycle(deps);
+    const laterNowMs = NOW_MS + 2 * BUCKET_MS;
+    const markerKey = `${incidentLaneKey(BULK).pk}\u0000${incidentLaneKey(BULK).sk}`;
+    store.items.set(markerKey, { ...(store.items.get(markerKey) as object), status: 'half-written' });
+    await insert(deps, BAD_BATCH, laterNowMs);
+    lines.length = 0;
+
+    const summary = await runDetectionCycle(at(deps, laterNowMs));
+
+    expect(summary.incidentsOpened).toBe(0);
+    expect(parsedLines(lines).filter((line) => line.level === 'error')).toEqual([
+      { event: 'marker-unreadable', level: 'error', configurationSet: BULK },
+      { event: 'marker-unreadable', level: 'error', configurationSet: BULK },
+    ]);
   });
 
   // A cycle that read the marker before its expiry still holds that marker's version after another

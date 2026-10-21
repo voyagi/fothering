@@ -34,9 +34,67 @@ type Reasons = Readonly<Record<string, string>>;
 
 const LAMBDA_TRUST = 'Only the Lambda service may take on this role, to run the function the stack attaches it to.';
 
+// The account-level Deny every role carries (packages/infra/src/account-deny.ts), one reason per action.
+const DENY_ACCOUNT_SENDING =
+  'Turns sending off or on for the whole account, which Fothering never does. A Deny outranks every Allow, so no later grant or wildcard on the role can reach it.';
+const DENY_V1_ACCOUNT_SENDING = 'The SES v1 call that turns sending off or on for the whole account in the Region. A Deny outranks every Allow.';
+const DENY_V1_SET_SENDING =
+  'The SES v1 call that turns sending off or on for a configuration set, so the only pause left is the API v2 call granted on the closeable sets.';
+
+function accountDenyReasons(stackAndRole: string): Record<string, string> {
+  return {
+    [`${stackAndRole}/permission/Deny/ses:PutAccountSendingAttributes`]: DENY_ACCOUNT_SENDING,
+    [`${stackAndRole}/permission/Deny/ses:UpdateAccountSendingEnabled`]: DENY_V1_ACCOUNT_SENDING,
+    [`${stackAndRole}/permission/Deny/ses:UpdateConfigurationSetSendingEnabled`]: DENY_V1_SET_SENDING,
+  };
+}
+
 // One reason per `<stack>/<role without its 8-hex CDK suffix>/<kind>/<effect>/<action>`, so a
 // logical id that changes its hash keeps its reason, and a new grant fails the tests until it has one.
 export const PERMISSION_REASONS: Reasons = {
+  'FotheringAction/ActionRole/permission/Allow/dynamodb:GetItem':
+    "Reads an incident's evidence record, state, decision and closure, and a lane's incident marker and pause pointer, each by its key.",
+  'FotheringAction/ActionRole/permission/Allow/dynamodb:PutItem':
+    "Writes an incident's closure claim and a lane's pause pointer, each only where none is held yet, so two overlapping runs cannot both claim one closure or one lane.",
+  'FotheringAction/ActionRole/permission/Allow/dynamodb:Query':
+    "Reads the paused lane's stored events for the hold check, which counts any send the set still recorded after the pause had time to hold.",
+  'FotheringAction/ActionRole/permission/Allow/dynamodb:UpdateItem':
+    "Moves a closure on by versioned update (its pause, read-back and hold check results, and the operator email's state), moves a lane's pause pointer, and counts pause attempts per lane and hour against the cap.",
+  'FotheringAction/ActionRole/permission/Allow/logs:CreateLogStream': "Opens a log stream in the action function's own log group.",
+  'FotheringAction/ActionRole/permission/Allow/logs:PutLogEvents': "Writes the action function's log lines to its own log group.",
+  'FotheringAction/ActionRole/permission/Allow/secretsmanager:GetSecretValue':
+    'Reads the address key only so a dry-run send line shows the From and To addresses as pseudonyms.',
+  'FotheringAction/ActionRole/permission/Allow/ses:GetConfigurationSet':
+    "Reads a configuration set's sending switch back after the pause, to prove it took; granted only on the sets the lane map lets Fothering close.",
+  'FotheringAction/ActionRole/permission/Allow/ses:GetConfigurationSetEventDestinations':
+    'Reads where a configuration set publishes its events, for the closeability check the action repeats before it pauses; granted only on the sets the lane map names.',
+  'FotheringAction/ActionRole/permission/Allow/ses:GetEmailIdentity':
+    "Reads a sending identity's verification, DKIM and MAIL FROM settings, for the closeability check the action repeats before it pauses.",
+  'FotheringAction/ActionRole/permission/Allow/ses:ListConfigurationSets':
+    "Lists the account's configuration sets, for the closeability check the action repeats before it pauses. The action has no resource type, so it can only be granted on every resource.",
+  'FotheringAction/ActionRole/permission/Allow/ses:ListEmailIdentities':
+    "Lists the account's sending identities, for the closeability check the action repeats before it pauses. The action has no resource type, so it can only be granted on every resource.",
+  'FotheringAction/ActionRole/permission/Allow/ses:PutConfigurationSetSendingOptions':
+    "Turns sending off for the one configuration set an incident's evidence names; granted only on the sets the lane map lets Fothering close, so no other set can be paused.",
+  'FotheringAction/ActionRole/permission/Allow/ses:SendEmail':
+    'Sends the operator email, only from the From address or its domain and only through the operator-alert configuration set.',
+  'FotheringAction/ActionRole/trust/Allow/sts:AssumeRole': LAMBDA_TRUST,
+  ...accountDenyReasons('FotheringAction/ActionRole'),
+  'FotheringAction/ReopenRole/permission/Allow/dynamodb:GetItem': "Reads a lane's pause pointer and the closure it points at, by their keys.",
+  'FotheringAction/ReopenRole/permission/Allow/dynamodb:UpdateItem':
+    "Moves the closure's reopen record on by versioned update, and counts the attempt against the same lane-hour cap the pause counts against.",
+  'FotheringAction/ReopenRole/permission/Allow/logs:CreateLogStream': "Opens a log stream in the reopen function's own log group.",
+  'FotheringAction/ReopenRole/permission/Allow/logs:PutLogEvents': "Writes the reopen function's log lines to its own log group.",
+  'FotheringAction/ReopenRole/permission/Allow/ses:GetConfigurationSet':
+    "Reads the set's sending switch back after the reopen, to prove sending is on again; granted only on the sets the lane map lets Fothering close.",
+  'FotheringAction/ReopenRole/permission/Allow/ses:PutConfigurationSetSendingOptions':
+    'Turns sending back on for a set Fothering paused, when the operator runs the reopen command; granted only on the sets the lane map lets Fothering close.',
+  'FotheringAction/ReopenRole/trust/Allow/sts:AssumeRole': LAMBDA_TRUST,
+  ...accountDenyReasons('FotheringAction/ReopenRole'),
+  ...accountDenyReasons('FotheringDetection/DetectRole'),
+  ...accountDenyReasons('FotheringIngest/ForgetRole'),
+  ...accountDenyReasons('FotheringIngest/IngestRole'),
+  ...accountDenyReasons('FotheringRuntime/RuntimeRole'),
   'FotheringDetection/DetectRole/permission/Allow/bedrock-agentcore:InvokeAgentRuntime':
     'Invokes the agent runtime for an incident the stored events opened, within the per-incident and per-day caps; it may invoke this runtime and its endpoints only.',
   'FotheringDetection/DetectRole/permission/Allow/dynamodb:GetItem':

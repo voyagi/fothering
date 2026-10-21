@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join, relative, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { afterAll, describe, expect, it } from 'vitest';
-import { DETECTION_STACK_ID, INGEST_STACK_ID, RUNTIME_STACK_ID } from '../create-app.js';
+import { ACTION_STACK_ID, DETECTION_STACK_ID, INGEST_STACK_ID, RUNTIME_STACK_ID } from '../create-app.js';
 
 // This file lives at packages/infra/src/repo/, four levels below the repo root every path here
 // is read relative to.
@@ -33,13 +33,29 @@ interface LockFile {
   packages?: Record<string, { hasInstallScript?: boolean }>;
 }
 
-// The words after `cdk deploy` or `cdk destroy` up to the first option: none means the line must
-// select with --all, and each one given must be a stack the app builds.
-function namesOnlyBuiltStacks(line: string, builtStacks: ReadonlySet<string>): boolean {
+// The words after `cdk deploy` or `cdk destroy` up to the first option, and whether the line selects
+// with --all instead.
+function stackSelection(line: string): { names: string[]; all: boolean } {
   const words = (/\bcdk (?:deploy|destroy)((?:[ \t]+[^\s`]+)*)/.exec(line)?.[1] ?? '').trim().split(/\s+/).filter((word) => word !== '');
   const firstOption = words.findIndex((word) => word.startsWith('-'));
   const names = firstOption === -1 ? words : words.slice(0, firstOption);
-  return names.length === 0 ? words[0] === '--all' : names.every((name) => builtStacks.has(name));
+  return { names, all: names.length === 0 && words[0] === '--all' };
+}
+
+// None means the line must select with --all, and each one given must be a stack the app builds.
+function namesOnlyBuiltStacks(line: string, builtStacks: ReadonlySet<string>): boolean {
+  const { names, all } = stackSelection(line);
+  return names.length === 0 ? all : names.every((name) => builtStacks.has(name));
+}
+
+// Every stack the lines of one verb select between them, sorted.
+function stacksCovered(lines: readonly string[], verb: 'deploy' | 'destroy', builtStacks: ReadonlySet<string>): string[] {
+  const covered = new Set<string>();
+  for (const line of lines.filter((candidate) => new RegExp(`\\bcdk ${verb}\\b`).test(candidate))) {
+    const { names, all } = stackSelection(line);
+    for (const name of all ? builtStacks : names) covered.add(name);
+  }
+  return [...covered].sort();
 }
 
 // Every spelling the CDK CLI takes a context pair in: -c k=v, --context k=v, the = forms, quoted.
@@ -199,6 +215,8 @@ describe('repo hardening: every gate, config and document ships what it claims',
       'packages/providers/src/port-backed-model.ts',
       'packages/functions/src/*/root.ts',
       'packages/functions/src/detect/detect.ts',
+      'packages/functions/src/action/action.ts',
+      'packages/functions/src/reopen/reopen.ts',
       'packages/agent/src/root.ts',
       'packages/agent/src/listen-host.ts',
       'packages/agent/src/handler.ts',
@@ -426,22 +444,29 @@ describe('repo hardening: every gate, config and document ships what it claims',
 
   // The CDK CLI fails a stack list only when NO name matches (aws-cdk 2.1142.0: deploy's selector
   // goes through mustMatch, which throws only below one match), so a README naming one real stack
-  // and one the app lacks deploys the real one, skips the other and exits 0. --all cannot drift, and
-  // every name a line does give must be a stack the app builds.
-  it('the README deploys and destroys with --all, or names only stacks the app builds', () => {
-    const builtStacks = new Set([INGEST_STACK_ID, RUNTIME_STACK_ID, DETECTION_STACK_ID]);
+  // and one the app lacks deploys the real one, skips the other and exits 0. Every name a line gives
+  // must be a stack the app builds, and the deploy lines and the destroy lines must between them
+  // cover every stack, so a stack the app gains cannot be left out of the README unnoticed. The
+  // README names stacks rather than using --all because FotheringAction deploys last and is
+  // destroyed first, which --all does not order.
+  it('the README deploys and destroys every stack the app builds, and names no other', () => {
+    const builtStacks = new Set([INGEST_STACK_ID, RUNTIME_STACK_ID, DETECTION_STACK_ID, ACTION_STACK_ID]);
     const cdkLines = readText('README.md')
       .split('\n')
       .filter((line) => /\bcdk (deploy|destroy)\b/.test(line));
-    expect(cdkLines.some((line) => /\bcdk deploy --all(\s|`|$)/.test(line)), 'expected the README to deploy with --all').toBe(true);
-    expect(cdkLines.some((line) => /\bcdk destroy --all(\s|`|$)/.test(line)), 'expected the README to destroy with --all').toBe(true);
+    expect(stacksCovered(cdkLines, 'deploy', builtStacks)).toEqual([...builtStacks].sort());
+    expect(stacksCovered(cdkLines, 'destroy', builtStacks)).toEqual([...builtStacks].sort());
     for (const line of cdkLines) expect(namesOnlyBuiltStacks(line, builtStacks), line.trim()).toBe(true);
 
-    // Controls: a missing name beside a real one, a prefix of a real name and a bare deploy are refused.
+    // Controls: a missing name beside a real one, a prefix of a real name and a bare deploy are refused,
+    // and deploy lines that leave a built stack out do not cover the app.
     expect(namesOnlyBuiltStacks('npx cdk deploy FotheringRuntime FotheringMissing', builtStacks)).toBe(false);
     expect(namesOnlyBuiltStacks('npx cdk deploy Fothering -c fothering:live=live', builtStacks)).toBe(false);
     expect(namesOnlyBuiltStacks('npx cdk deploy', builtStacks)).toBe(false);
     expect(namesOnlyBuiltStacks('`npx cdk destroy FotheringRuntime`', builtStacks)).toBe(true);
+    expect(stacksCovered(['npx cdk deploy FotheringIngest FotheringRuntime FotheringDetection'], 'deploy', builtStacks)).not.toContain(ACTION_STACK_ID);
+    expect(stacksCovered(['npx cdk deploy --all -c fothering:live=live'], 'deploy', builtStacks)).toEqual([...builtStacks].sort());
+    expect(stacksCovered(['npx cdk deploy --all'], 'destroy', builtStacks)).toEqual([]);
   });
 
   it('every CDK context key the README passes is read by the CDK app', () => {

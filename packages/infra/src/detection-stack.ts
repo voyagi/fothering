@@ -9,7 +9,7 @@ import type { Construct } from 'constructs';
 import type { LaneMap } from '@fothering/core/lanes';
 import { DETECT_FUNCTION_TIMEOUT_MS } from '@fothering/core/model-values';
 import { liveSwitchEnvironment } from './live-switch.js';
-import { ALARM_PERIOD, alarmOnAny, alarmOnErrorLines, createFunctionRole, functionBase } from './log-statements.js';
+import { ALARM_PERIOD, alarmOnAny, alarmOnErrorLines, createFunctionRole, functionBase, sesFactReadStatements } from './log-statements.js';
 
 export interface DetectionStackProps extends StackProps {
   readonly laneMap: LaneMap;
@@ -38,20 +38,7 @@ export class DetectionStack extends Stack {
         actions: ['dynamodb:Query', 'dynamodb:GetItem', 'dynamodb:PutItem', 'dynamodb:UpdateItem'],
         resources: [props.table.tableArn],
       }),
-      // Neither list action has a resource type, so it can only be granted on every resource.
-      new PolicyStatement({ effect: Effect.ALLOW, actions: ['ses:ListEmailIdentities', 'ses:ListConfigurationSets'], resources: ['*'] }),
-      new PolicyStatement({
-        effect: Effect.ALLOW,
-        actions: ['ses:GetEmailIdentity'],
-        resources: [this.formatArn({ service: 'ses', resource: 'identity', resourceName: '*' })],
-      }),
-      new PolicyStatement({
-        effect: Effect.ALLOW,
-        actions: ['ses:GetConfigurationSetEventDestinations'],
-        resources: props.laneMap.lanes.map((lane) =>
-          this.formatArn({ service: 'ses', resource: 'configuration-set', resourceName: lane.configurationSet }),
-        ),
-      }),
+      ...sesFactReadStatements(this, props.laneMap),
     ]);
     // InvokeAgentRuntime alone, on the runtime and its endpoints; grantInvoke would add the
     // on-behalf-of-a-user action too.

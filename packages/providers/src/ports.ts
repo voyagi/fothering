@@ -46,6 +46,7 @@ import { createDynamoDecisionStore, createDynamoEventStore } from './live/event-
 import { createSecretsManagerAddressKey } from './live/address-key.js';
 import { createSqsDeadLetter } from './live/dead-letter.js';
 import { createSesReads } from './live/ses-reads.js';
+import { createSesWrites } from './live/ses-writes.js';
 
 const LIVE_REGION = 'eu-central-1';
 
@@ -138,10 +139,11 @@ export const PORT_TABLE = {
       ),
   },
   // Incident, evidence, decision and counter items in the event table (D-65, D-66). Like the event
-  // store, Fothering's own table: its writes mutate but never wait for the switch.
+  // store, Fothering's own table: its writes mutate but never wait for the switch, the lane-hour
+  // reservation included (D-99).
   decisionStore: {
-    operations: ['putIfAbsent', 'getItem', 'updateIfVersion', 'reserveInvocation', 'recordUsage'],
-    mutatingOperations: ['putIfAbsent', 'updateIfVersion', 'reserveInvocation', 'recordUsage'],
+    operations: ['putIfAbsent', 'getItem', 'updateIfVersion', 'reserveInvocation', 'recordUsage', 'reserveLaneAttempt'],
+    mutatingOperations: ['putIfAbsent', 'updateIfVersion', 'reserveInvocation', 'recordUsage', 'reserveLaneAttempt'],
     gatedOperations: [],
     fixture: (fixtures: FixtureOptions, dryRun: DryRunLog) => createFixtureDecisionStore(fixtures, dryRun),
     live: ({ liveConfig, liveClients }) =>
@@ -188,17 +190,22 @@ export const PORT_TABLE = {
       'listEmailIdentities',
       'listConfigurationSets',
       'getConfigurationSetEventDestinations',
+      'getConfigurationSetSending',
       'pauseConfigurationSet',
       'reopenConfigurationSet',
       'sendEmail',
     ],
+    // The read-back changes nothing, so it is neither mutating nor gated: once its live side exists it
+    // stays live in 'deployed' whatever the switch, as the four reads do (SAFE-01).
     mutatingOperations: ['pauseConfigurationSet', 'reopenConfigurationSet', 'sendEmail'],
     gatedOperations: ['pauseConfigurationSet', 'reopenConfigurationSet', 'sendEmail'],
     fixture: (fixtures: FixtureOptions, dryRun: DryRunLog) =>
-      createFixtureSes({ recordings: fixtures.recordings?.ses ?? [], dryRun }),
-    live: ({ liveClients }) =>
-      brandPort(createSesReads({ client: resolveLiveClient(liveClients.sesv2, () => new SESv2Client({ region: LIVE_REGION })) }), 'live'),
-    notBuiltOperations: { pauseConfigurationSet: 3, reopenConfigurationSet: 3, sendEmail: 4 },
+      createFixtureSes({ recordings: fixtures.recordings?.ses ?? [], dryRun, state: fixtures.sesState }),
+    // One client for the reads and the writes, built on the first call of either.
+    live: ({ liveClients }) => {
+      const client = resolveLiveClient(liveClients.sesv2, () => new SESv2Client({ region: LIVE_REGION }));
+      return brandPort({ ...createSesReads({ client }), ...createSesWrites({ client }) }, 'live');
+    },
     dryRun: (log: DryRunLog) => createSesDryRun(log),
   },
   // R6 reads the ROADMAP's "DNS behind the dry-run gate" as DNS behind this table: recorded answers in

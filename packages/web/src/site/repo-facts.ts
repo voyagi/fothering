@@ -191,7 +191,7 @@ const LIVE_KEY = 'fothering:live';
 const LIVE_VALUE = 'live';
 
 // The value a cdk line gives the live switch, read from a context flag spaced from its value (-c k=v,
-// --context k=v) or joined to it (--context=k=v), the forms stackScope reads. The CDK guide does not
+// --context k=v) or joined to it (--context=k=v), the forms stackSelection reads. The CDK guide does not
 // say which of two values for one key wins, so a line that sets the key twice is refused.
 function liveSwitchValue(command: string): string | undefined {
   const words = command.split(/\s+/);
@@ -228,35 +228,50 @@ const COMMAND_USES: Readonly<Record<DeployCommandUse, { test(command: string): b
 
 const STACK_USES: ReadonlySet<DeployCommandUse> = new Set(['deploy', 'go-live', 'destroy']);
 
-// How many stacks a cdk line selects: --all selects every one, otherwise each word that is neither
-// an option nor a context value names one. Any other option may take a value (--profile p) or not
-// (--exclusively), which no word count can tell apart, so such a line is refused rather than counted.
-function stackScope(command: string): number {
+type StackSelection = { all: true } | { all: false; names: ReadonlySet<string> };
+
+// The options a cdk line may hold beside its stack names, each followed by its value: a context
+// key (-c k=v, --context k=v) or a stack parameter (--parameters Stack:Key=v), spaced or joined with =.
+const VALUE_OPTIONS = ['-c', '--context', '--parameters'];
+const JOINED_VALUE_OPTIONS = ['--context=', '--parameters='];
+
+// The stacks a cdk line selects: --all selects every one, otherwise each word that is neither an
+// option nor an option's value names one. Any other option may take a value (--profile p) or not
+// (--exclusively), which no reading of the words can tell apart, so such a line is refused.
+function stackSelection(command: string): StackSelection {
   const words = command.split(/\s+/).slice(3);
-  if (words.includes('--all')) return Number.POSITIVE_INFINITY;
-  let named = 0;
+  if (words.includes('--all')) return { all: true };
+  const names = new Set<string>();
   for (let index = 0; index < words.length; index += 1) {
     const word = words[index] ?? '';
-    if (word === '-c' || word === '--context') index += 1;
-    else if (word.startsWith('--context=')) continue;
+    if (VALUE_OPTIONS.includes(word)) index += 1;
+    else if (JOINED_VALUE_OPTIONS.some((prefix) => word.startsWith(prefix))) continue;
     else if (word.startsWith('-')) {
-      throw new Error(`${README_PREFIX}: "${command}" holds the option ${word}, and the deploy sheet counts the stacks a line selects from its words. Keep only --all, -c or --context on that line, or name the stacks.`);
-    } else named += 1;
+      throw new Error(`${README_PREFIX}: "${command}" holds the option ${word}, and the deploy sheet reads the stacks a line selects from its words. Keep only --all, -c, --context or --parameters on that line, or name the stacks.`);
+    } else names.add(word);
   }
-  return named;
+  return { all: false, names };
 }
 
-// A cdk line that selects fewer stacks than another for the same use belongs to a narrower
+function covers(wide: StackSelection, narrow: StackSelection): boolean {
+  if (narrow.all) return false;
+  if (wide.all) return true;
+  return narrow.names.size < wide.names.size && [...narrow.names].every((name) => wide.names.has(name));
+}
+
+// A cdk line whose stacks another line for the same use already selects belongs to a narrower
 // procedure (the README's model trial deploys the runtime alone), not to the deploy sheet's step.
-function widestScope(found: readonly DeployCommand[]): DeployCommand[] {
-  const widest = Math.max(...found.map(({ command }) => stackScope(command)));
-  return found.filter(({ command }) => stackScope(command) === widest);
+// Lines that select different stacks are all kept, in README order, so a deploy split across two
+// lines (the action stack deployed last with its parameters, removed first) shows both.
+function withoutNarrowerRepeats(found: readonly DeployCommand[]): DeployCommand[] {
+  const selections = found.map(({ command }) => stackSelection(command));
+  return found.filter((_, index) => !selections.some((wide, other) => other !== index && covers(wide, selections[index] as StackSelection)));
 }
 
 function commandsFor(commands: readonly DeployCommand[], use: DeployCommandUse): DeployCommand[] {
   const found = commands.filter(({ command }) => COMMAND_USES[use].test(command));
   if (found.length === 0) throw new Error(`${README_PREFIX}: no ${use} command. Restore the ${use} line in its sh block.`);
-  return STACK_USES.has(use) ? widestScope(found) : found;
+  return STACK_USES.has(use) ? withoutNarrowerRepeats(found) : found;
 }
 
 export const fillRegion = (text: string, region: string): string => text.replaceAll('{region}', region);

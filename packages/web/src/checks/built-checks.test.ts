@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 import {
   accessibilityBody,
+  BARE_DEPLOY_FACTS,
   commandBlock,
   completeSite,
   handCheckRow,
@@ -53,7 +54,7 @@ import {
   type Statement,
 } from '../site/content.js';
 import { PROVENANCE_LABELS } from '../site/labels.js';
-import { PERMISSION_REASONS, permissionKey, permissionSchedules } from '../site/permissions-view.js';
+import { denyRows, hasPauseGrant, permissionKey, permissionSchedules } from '../site/permissions-view.js';
 import { removedByText } from '../site/repo-facts.js';
 import { resourceRows } from '../site/resources-view.js';
 import { renderRobots, renderSitemap, SITE_ORIGIN } from '../site/route-list.js';
@@ -1391,7 +1392,7 @@ describe('the deploy commands rule (AC-32)', () => {
   });
 
   it('fails only the line the README lacks in a block of several', () => {
-    const found = deployTexts(deployCommandsRule, deployBody({ commands: commandBlock(['npm run build', 'npx cdk synth', 'npx cdk deploy --all']) }));
+    const found = deployTexts(deployCommandsRule, deployBody({ commands: commandBlock(['npm run build', 'npx cdk synth', 'npx cdk bootstrap']) }));
     expect(found.map((text) => NOT_IN_README.exec(text)?.[1])).toEqual(['npx cdk synth']);
   });
 
@@ -1483,55 +1484,71 @@ describe('the deploy resources rule (AC-35)', () => {
 describe('the deploy Deny rule (AC-37, AC-E27)', () => {
   // One Deny of the action on every role, the way phase 3's template denies it, so the box's heading
   // "Denied on every role" holds.
-  const roleEntries = [...new Map((DEPLOY_FACTS.permissions as SnapshotEntry[]).map((entry) => [`${entry.stack}/${entry.role}`, entry])).values()];
+  const roleEntries = [...new Map((BARE_DEPLOY_FACTS.permissions as SnapshotEntry[]).map((entry) => [`${entry.stack}/${entry.role}`, entry])).values()];
   const denied = roleEntries.map((entry) => plantedEntry({ stack: entry.stack, role: entry.role, effect: 'Deny', action: 'ses:UpdateAccountSendingEnabled', resource: '*' }));
   const deniedFacts = {
-    permissions: [...DEPLOY_FACTS.permissions, ...denied],
-    reasons: { ...PERMISSION_REASONS, ...Object.fromEntries(denied.map((entry) => [permissionKey(entry), 'Stops a pause of the whole account.'])) },
+    permissions: [...BARE_DEPLOY_FACTS.permissions, ...denied],
+    reasons: { ...BARE_DEPLOY_FACTS.reasons, ...Object.fromEntries(denied.map((entry) => [permissionKey(entry), 'Stops a pause of the whole account.'])) },
   };
 
-  it('passes the shipped snapshot, which holds no Deny entry, with no Deny box', () => {
+  it('passes the shipped snapshot, which denies account-level sending on every role, with its Deny box', () => {
+    expect(denyRows(DEPLOY_FACTS.permissions).length).toBeGreaterThan(1);
     expect(deployTexts(deployDenyRule, deployBody())).toEqual([]);
   });
 
+  it('passes a snapshot holding no Deny entry with no Deny box', () => {
+    expect(denyRows(BARE_DEPLOY_FACTS.permissions, BARE_DEPLOY_FACTS.reasons)).toEqual([]);
+    expect(deployTexts(deployDenyRule, deployBody({}, BARE_DEPLOY_FACTS), withDeploy(BARE_DEPLOY_FACTS))).toEqual([]);
+  });
+
   it('fails a Deny box while the snapshot holds no Deny entry', () => {
-    expect(deployTexts(deployDenyRule, deployBody({ deny: '<div data-deny><h3>Denied on every role</h3></div>' }))).toEqual([
+    expect(deployTexts(deployDenyRule, deployBody({ deny: '<div data-deny><h3>Denied on every role</h3></div>' }, BARE_DEPLOY_FACTS), withDeploy(BARE_DEPLOY_FACTS))).toEqual([
       'the snapshot holds no Deny entry, and the deploy page shows a Deny box',
     ]);
   });
 
   it('fails a Deny row while the snapshot holds no Deny entry', () => {
     const planted = FIRST_ROW === undefined ? '' : permissionRow({ ...FIRST_ROW, effect: 'Deny' });
-    expect(deployTexts(deployDenyRule, deployBody({ extra: `<table>${planted}</table>` }))).toEqual([expect.stringMatching(/^the snapshot holds no Deny entry, and the deploy page shows the Deny row /)]);
+    expect(deployTexts(deployDenyRule, deployBody({ extra: `<table>${planted}</table>` }, BARE_DEPLOY_FACTS), withDeploy(BARE_DEPLOY_FACTS))).toEqual([
+      expect.stringMatching(/^the snapshot holds no Deny entry, and the deploy page shows the Deny row /),
+    ]);
   });
 
   it('renders a planted Deny entry as a row in the Deny box, and fails a page without it', () => {
-    expect(deployTexts(deployDenyRule, deployBody({}, { ...DEPLOY_FACTS, ...deniedFacts }), withDeploy(deniedFacts))).toEqual([]);
+    expect(deployTexts(deployDenyRule, deployBody({}, { ...BARE_DEPLOY_FACTS, ...deniedFacts }), withDeploy(deniedFacts))).toEqual([]);
     expect(denied.length).toBeGreaterThan(1);
-    expect(deployTexts(deployDenyRule, deployBody(), withDeploy(deniedFacts))).toEqual([`the snapshot holds ${String(denied.length)} Deny entries, and the deploy page has no Deny box`]);
+    expect(deployTexts(deployDenyRule, deployBody({}, BARE_DEPLOY_FACTS), withDeploy(deniedFacts))).toEqual([
+      `the snapshot holds ${String(denied.length)} Deny entries, and the deploy page has no Deny box`,
+    ]);
   });
 });
 
 describe('the deploy notice rule (UI-SPEC Q16)', () => {
   const pause = plantedEntry({ action: 'ses:PutConfigurationSetSendingOptions', resource: '*' });
   const pausing = {
-    permissions: [...DEPLOY_FACTS.permissions, pause],
-    reasons: { ...PERMISSION_REASONS, [permissionKey(pause)]: 'Pauses the one lane code approved.' },
+    permissions: [...BARE_DEPLOY_FACTS.permissions, pause],
+    reasons: { ...BARE_DEPLOY_FACTS.reasons, [permissionKey(pause)]: 'Pauses the one lane code approved.' },
   };
 
-  it('passes the NOT YET notice while no role may pause a lane', () => {
+  it('passes the shipped snapshot, whose action role may pause a lane, with no NOT YET notice', () => {
+    expect(hasPauseGrant(DEPLOY_FACTS.permissions)).toBe(true);
     expect(deployTexts(deployNoticeRule, deployBody())).toEqual([]);
   });
 
+  it('passes the NOT YET notice while no role may pause a lane', () => {
+    expect(hasPauseGrant(BARE_DEPLOY_FACTS.permissions)).toBe(false);
+    expect(deployTexts(deployNoticeRule, deployBody({}, BARE_DEPLOY_FACTS), withDeploy(BARE_DEPLOY_FACTS))).toEqual([]);
+  });
+
   it('fails a page without the notice while no role may pause a lane', () => {
-    expect(deployTexts(deployNoticeRule, deployBody({ notice: '' }))).toEqual([
+    expect(deployTexts(deployNoticeRule, deployBody({ notice: '' }, BARE_DEPLOY_FACTS), withDeploy(BARE_DEPLOY_FACTS))).toEqual([
       'the template holds no ses:PutConfigurationSetSendingOptions grant, and the deploy page shows no NOT YET notice',
     ]);
   });
 
   it('fails the notice once a role may pause a lane, and passes the page without it', () => {
-    expect(deployTexts(deployNoticeRule, deployBody(), withDeploy(pausing))).toEqual(['the template holds a pause grant, and the deploy page still shows the NOT YET notice']);
-    expect(deployTexts(deployNoticeRule, deployBody({}, { ...DEPLOY_FACTS, ...pausing }), withDeploy(pausing))).toEqual([]);
+    expect(deployTexts(deployNoticeRule, deployBody({}, BARE_DEPLOY_FACTS), withDeploy(pausing))).toEqual(['the template holds a pause grant, and the deploy page still shows the NOT YET notice']);
+    expect(deployTexts(deployNoticeRule, deployBody({}, { ...BARE_DEPLOY_FACTS, ...pausing }), withDeploy(pausing))).toEqual([]);
   });
 });
 
