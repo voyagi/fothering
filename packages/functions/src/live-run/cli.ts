@@ -1,7 +1,8 @@
-import { MIN_SEND_GAP_MS } from '@fothering/core/live-run';
-import { stepPlan, type StepPlanEntry } from '@fothering/core/scenarios';
+import { MAX_RATE_MILLI, MIN_SEND_GAP_MS, parseRate, refusalMessage, resolveStep } from '@fothering/core/live-run';
+import { resolveProviderMode } from '@fothering/core/mode';
+import type { StepPlanEntry } from '@fothering/core/scenarios';
 import type { LiveRunDeps } from './root.js';
-import { runSendStep } from './send.js';
+import { refuse, runSendStep } from './send.js';
 
 export const LIVE_RUN_MESSAGES = {
   usage:
@@ -53,38 +54,54 @@ function laneProfilesOf(values: readonly string[]): Map<string, string> | undefi
 }
 
 function usage(deps: LiveRunDeps): number {
+  deps.io.err(refusalMessage('usage'));
   deps.io.err(LIVE_RUN_MESSAGES.usage);
   return 1;
+}
+
+// The From address is checked for shape only; SES decides whether the identity may send.
+const ADDRESS_SHAPE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
+
+/** An absent flag means the cap itself; a flag that does not read as a positive rate is a usage error. */
+function rateOf(parsed: ParsedArgs): number | undefined {
+  if (!parsed.options.has('--rate')) return MAX_RATE_MILLI;
+  const text = single(parsed, '--rate');
+  return text === undefined ? undefined : parseRate(text);
 }
 
 function plan(args: readonly string[], deps: LiveRunDeps): number {
   const [scenarioName, stepName, runId, ...extra] = args;
   if (scenarioName === undefined || stepName === undefined || runId === undefined || extra.length > 0) return usage(deps);
-  const entries = stepPlan(deps.scenarios, scenarioName, stepName, runId);
-  deps.io.out(LIVE_RUN_MESSAGES.planHeader(scenarioName, stepName, entries.length));
-  for (const entry of entries) deps.io.out(LIVE_RUN_MESSAGES.planLine(entry));
+  const step = resolveStep(deps.scenarios, scenarioName, stepName, runId);
+  if (!step.ok) return refuse(deps, step.refusal);
+  deps.io.out(LIVE_RUN_MESSAGES.planHeader(scenarioName, stepName, step.entries.length));
+  for (const entry of step.entries) deps.io.out(LIVE_RUN_MESSAGES.planLine(entry));
   return 0;
 }
 
 async function send(args: readonly string[], deps: LiveRunDeps): Promise<number> {
+  if (resolveProviderMode(deps.switchValue) !== 'live') return refuse(deps, { code: 'switch-not-live' });
   const parsed = parseArgs(args);
   if (parsed === undefined) return usage(deps);
   const [runId, scenarioName, stepName, ...extra] = parsed.positionals;
   const from = single(parsed, '--from');
   const accountProfile = single(parsed, '--account-profile');
   const laneProfiles = laneProfilesOf(parsed.options.get('--lane-profile') ?? []);
+  const rateMilli = rateOf(parsed);
   if (
     runId === undefined ||
     scenarioName === undefined ||
     stepName === undefined ||
     extra.length > 0 ||
     from === undefined ||
+    !ADDRESS_SHAPE.test(from) ||
     accountProfile === undefined ||
-    laneProfiles === undefined
+    laneProfiles === undefined ||
+    rateMilli === undefined
   ) {
     return usage(deps);
   }
-  return runSendStep(deps, { runId, scenarioName, stepName, from, accountProfile, laneProfiles });
+  return runSendStep(deps, { runId, scenarioName, stepName, from, accountProfile, laneProfiles, rateMilli });
 }
 
 /** Returns the process exit code; every refusal is one line on io.err and exit 1. */

@@ -40,15 +40,64 @@ const scenarioSchema = z.strictObject({
   steps: z.array(stepSchema).min(1),
 });
 
-export const scenarioSourceSchema = z.strictObject({
+// The recipient domain is any hostname here on purpose: the command's recipient guard, not the
+// schema, is what refuses a domain outside the simulator, so that guard is what the tests reach.
+const sourceShape = z.strictObject({
   recipientDomain: z.string().regex(HOSTNAME_PATTERN),
   minGapMs: z.number().int().min(1),
   scenarios: z.array(scenarioSchema).min(1),
 });
 
-export type ScenarioSource = z.infer<typeof scenarioSourceSchema>;
+export type ScenarioSource = z.infer<typeof sourceShape>;
 export type Scenario = ScenarioSource['scenarios'][number];
 export type ScenarioStep = Scenario['steps'][number];
+
+interface SourceIssue {
+  message: string;
+  path: (string | number)[];
+}
+
+function duplicates(values: readonly (string | number)[]): (string | number)[] {
+  return [...new Set(values.filter((value, index) => values.indexOf(value) !== index))];
+}
+
+function stepIssues(step: ScenarioStep, path: (string | number)[]): SourceIssue[] {
+  const names = new Set(step.groups.map((group) => group.name));
+  const issues: SourceIssue[] = duplicates(step.groups.map((group) => group.name)).map((name) => ({
+    message: `group name "${String(name)}" is used twice in step "${step.name}"`,
+    path: [...path, 'groups'],
+  }));
+  for (const slot of step.cycle) {
+    if (!names.has(slot.group)) issues.push({ message: `cycle group "${slot.group}" is not a group of step "${step.name}"`, path: [...path, 'cycle'] });
+  }
+  if (step.interleave !== undefined && !names.has(step.interleave.group)) {
+    issues.push({ message: `interleave group "${step.interleave.group}" is not a group of step "${step.name}"`, path: [...path, 'interleave'] });
+  }
+  const total = step.groups.reduce((sum, group) => sum + group.count, 0);
+  const placed = orderOf(step).length;
+  if (total === 0) issues.push({ message: `step "${step.name}" has no messages`, path });
+  else if (placed !== total) issues.push({ message: `step "${step.name}" places ${placed} of its ${total} messages`, path });
+  return issues;
+}
+
+function sourceIssues(source: ScenarioSource): SourceIssue[] {
+  const issues: SourceIssue[] = [
+    ...duplicates(source.scenarios.map((scenario) => scenario.name)).map((name) => ({ message: `scenario name "${String(name)}" is used twice`, path: ['scenarios'] })),
+    ...duplicates(source.scenarios.map((scenario) => scenario.run)).map((run) => ({ message: `run ${String(run)} is used twice`, path: ['scenarios'] })),
+  ];
+  source.scenarios.forEach((scenario, scenarioIndex) => {
+    const path = ['scenarios', scenarioIndex, 'steps'];
+    for (const name of duplicates(scenario.steps.map((step) => step.name))) {
+      issues.push({ message: `step name "${String(name)}" is used twice in scenario "${scenario.name}"`, path });
+    }
+    scenario.steps.forEach((step, stepIndex) => issues.push(...stepIssues(step, [...path, stepIndex])));
+  });
+  return issues;
+}
+
+export const scenarioSourceSchema = sourceShape.superRefine((source, ctx) => {
+  for (const issue of sourceIssues(source)) ctx.addIssue({ code: 'custom', ...issue });
+});
 
 export interface StepPlanEntry {
   index: number;
@@ -112,14 +161,17 @@ function withInterleave(step: ScenarioStep, remaining: ReadonlyMap<string, Group
   );
 }
 
+function orderOf(step: ScenarioStep): ScenarioGroup[] {
+  const remaining = new Map(step.groups.map((group) => [group.name, { group, left: group.count }]));
+  return withInterleave(step, remaining, cycleOrder(step, remaining));
+}
+
 /** The step's sends in the order the command makes them; empty when the scenario or step is absent. */
 export function stepPlan(source: ScenarioSource, scenarioName: string, stepName: string, runId: string): StepPlanEntry[] {
   const found = findStep(source, scenarioName, stepName);
   if (found === undefined) return [];
   const { step } = found;
-  const remaining = new Map(step.groups.map((group) => [group.name, { group, left: group.count }]));
-  const order = withInterleave(step, remaining, cycleOrder(step, remaining));
-  return order.map((group, index) => {
+  return orderOf(step).map((group, index) => {
     const counter = String(index + 1).padStart(3, '0');
     return {
       index,

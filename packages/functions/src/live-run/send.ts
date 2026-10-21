@@ -1,7 +1,18 @@
-import { appendFileSync, mkdirSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
-import { buildLiveRunRequest, callerKeyOf, MIN_SEND_GAP_MS, type AttemptRecord } from '@fothering/core/live-run';
-import { findStep, stepPlan, type Scenario } from '@fothering/core/scenarios';
+import { appendFileSync, closeSync, existsSync, mkdirSync, openSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { basename, dirname, isAbsolute, join, relative } from 'node:path';
+import {
+  callerKeyOf,
+  isSimulatorRecipient,
+  MAX_RATE_MILLI,
+  planRequests,
+  refusalMessage,
+  resolveStep,
+  sendGapMs,
+  type AttemptRecord,
+  type LiveRunRefusal,
+  type LiveRunRequest,
+} from '@fothering/core/live-run';
+import type { Scenario, StepPlanEntry } from '@fothering/core/scenarios';
 import type { LiveRunPortFactory, LiveRunSesPort } from '@fothering/providers/live-run-port-types';
 import type { LiveRunDeps } from './root.js';
 
@@ -12,6 +23,93 @@ export interface SendStepRequest {
   from: string;
   accountProfile: string;
   laneProfiles: ReadonlyMap<string, string>;
+  /** Sends per thousand seconds, already parsed from --rate (MAX_RATE_MILLI when the flag is absent). */
+  rateMilli: number;
+}
+
+const LIVE_RUNS = 'reports/live-runs';
+const LOCK_FILE = `${LIVE_RUNS}/.lock`;
+
+interface StepPaths {
+  liveRuns: string;
+  folder: string;
+  folderRelative: string;
+  attempts: string;
+  attemptsRelative: string;
+  lock: string;
+}
+
+interface CheckedStep {
+  scenario: Scenario;
+  entries: StepPlanEntry[];
+  requests: LiveRunRequest[];
+  paths: StepPaths;
+}
+
+export function refuse(deps: LiveRunDeps, refusal: LiveRunRefusal): number {
+  deps.io.err(refusalMessage(refusal.code, refusal.subject));
+  return 1;
+}
+
+function stepPaths(repoRoot: string, request: SendStepRequest): StepPaths {
+  const folderRelative = `${LIVE_RUNS}/${request.runId}/run`;
+  const attemptsRelative = `${folderRelative}/${request.stepName}.attempts.jsonl`;
+  return {
+    liveRuns: join(repoRoot, ...LIVE_RUNS.split('/')),
+    folder: join(repoRoot, ...folderRelative.split('/')),
+    folderRelative,
+    attempts: join(repoRoot, ...attemptsRelative.split('/')),
+    attemptsRelative,
+    lock: join(repoRoot, ...LOCK_FILE.split('/')),
+  };
+}
+
+// The real path of the deepest part that exists, with the rest appended, so a junction or link
+// anywhere under the root is followed before the containment test, not after the first write.
+function resolvedPath(path: string): string {
+  const rest: string[] = [];
+  let existing = path;
+  while (!existsSync(existing) && dirname(existing) !== existing) {
+    rest.unshift(basename(existing));
+    existing = dirname(existing);
+  }
+  return join(realpathSync.native(existing), ...rest);
+}
+
+function outputRefusal(deps: LiveRunDeps, paths: StepPaths): LiveRunRefusal | undefined {
+  const fromRoot = relative(join(resolvedPath(deps.repoRoot), ...LIVE_RUNS.split('/')), resolvedPath(paths.folder));
+  if (fromRoot === '' || fromRoot.startsWith('..') || isAbsolute(fromRoot)) return { code: 'output-outside-root', subject: paths.folderRelative };
+  try {
+    deps.gitCheckIgnore(paths.folder);
+  } catch {
+    return { code: 'output-not-ignored', subject: paths.folderRelative };
+  }
+  if (existsSync(paths.attempts)) return { code: 'step-already-run', subject: paths.attemptsRelative };
+  return undefined;
+}
+
+/** Every check that needs no port, in the command's fixed order. */
+function localChecks(deps: LiveRunDeps, request: SendStepRequest): CheckedStep | LiveRunRefusal {
+  const step = resolveStep(deps.scenarios, request.scenarioName, request.stepName, request.runId);
+  if (!step.ok) return step.refusal;
+  const planned = planRequests(step.entries, deps.laneMap, request.runId, request.from);
+  if (!planned.ok) return planned.refusal;
+  if (request.rateMilli > MAX_RATE_MILLI) return { code: 'rate-too-high' };
+  const paths = stepPaths(deps.repoRoot, request);
+  const refusal = outputRefusal(deps, paths);
+  if (refusal !== undefined) return refusal;
+  return { scenario: step.scenario, entries: step.entries, requests: planned.requests, paths };
+}
+
+/** Exclusive create: a lock this run did not make is never removed, however old. */
+function takeLock(paths: StepPaths): number | undefined {
+  mkdirSync(paths.liveRuns, { recursive: true });
+  try {
+    return openSync(paths.lock, 'wx');
+  } catch (error) {
+    if (error instanceof Error && 'code' in error && error.code === 'EEXIST') return undefined;
+    throw error;
+  }
 }
 
 /** Every lane any step of the scenario sends on, since each needs its own caller. */
@@ -44,30 +142,25 @@ function utc(ms: number): string {
   return new Date(ms).toISOString();
 }
 
-export async function runSendStep(deps: LiveRunDeps, request: SendStepRequest): Promise<number> {
-  const found = findStep(deps.scenarios, request.scenarioName, request.stepName);
-  if (found === undefined) return 1;
-  const plan = stepPlan(deps.scenarios, request.scenarioName, request.stepName, request.runId);
-  const requests = plan.map((entry) => buildLiveRunRequest(entry, deps.laneMap, request.runId, request.from));
-  const folder = join(deps.repoRoot, 'reports', 'live-runs', request.runId, 'run');
-  mkdirSync(folder, { recursive: true });
-
+async function sendStep(deps: LiveRunDeps, request: SendStepRequest, step: CheckedStep): Promise<number> {
   const factory = deps.portFactory();
-  const callers = await readCallers(factory, scenarioLanes(found.scenario), request);
+  const callers = await readCallers(factory, scenarioLanes(step.scenario), request);
   const account = await factory.ses(request.accountProfile).getAccount();
-  writeFileSync(join(folder, `${request.stepName}.callers.json`), `${JSON.stringify(callers, null, 2)}\n`);
-  writeFileSync(join(folder, `${request.stepName}.account.json`), `${JSON.stringify(account, null, 2)}\n`);
+  mkdirSync(step.paths.folder, { recursive: true });
+  writeFileSync(join(step.paths.folder, `${request.stepName}.callers.json`), `${JSON.stringify(callers, null, 2)}\n`);
+  writeFileSync(join(step.paths.folder, `${request.stepName}.account.json`), `${JSON.stringify(account, null, 2)}\n`);
 
-  const attemptsFile = join(folder, `${request.stepName}.attempts.jsonl`);
+  const gapMs = sendGapMs(request.rateMilli);
   const ports = new Map<string, LiveRunSesPort>();
   let previousStart: number | undefined;
-  for (const [index, entry] of plan.entries()) {
-    const sendRequest = requests[index];
-    if (sendRequest === undefined) break;
+  for (const [index, entry] of step.entries.entries()) {
+    const sendRequest = step.requests[index];
+    // Checked for the whole step already; checked again here so no mode can send off the simulator.
+    if (sendRequest === undefined || !isSimulatorRecipient(sendRequest.to)) return refuse(deps, { code: 'recipient-not-simulator', subject: entry.lane });
     const profile = request.laneProfiles.get(entry.lane) ?? '';
     const port = ports.get(profile) ?? factory.ses(profile);
     ports.set(profile, port);
-    previousStart = await waitForGap(deps, previousStart, MIN_SEND_GAP_MS);
+    previousStart = await waitForGap(deps, previousStart, gapMs);
     const startUtc = utc(deps.nowUtc());
     const result = await port.sendEmail(sendRequest);
     const record: AttemptRecord = {
@@ -79,7 +172,20 @@ export async function runSendStep(deps: LiveRunDeps, request: SendStepRequest): 
       messageId: result.messageId,
       requestId: result.requestId,
     };
-    appendFileSync(attemptsFile, `${JSON.stringify(record)}\n`);
+    appendFileSync(step.paths.attempts, `${JSON.stringify(record)}\n`);
   }
   return 0;
+}
+
+export async function runSendStep(deps: LiveRunDeps, request: SendStepRequest): Promise<number> {
+  const step = localChecks(deps, request);
+  if ('code' in step) return refuse(deps, step);
+  const lock = takeLock(step.paths);
+  if (lock === undefined) return refuse(deps, { code: 'lock-held', subject: LOCK_FILE });
+  try {
+    return await sendStep(deps, request, step);
+  } finally {
+    closeSync(lock);
+    rmSync(step.paths.lock, { force: true });
+  }
 }
