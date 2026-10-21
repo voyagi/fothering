@@ -303,6 +303,69 @@ describe('an unknown-decision run', () => {
   });
 });
 
+const AFTER_REMOVAL_PATHS = [
+  ...['FotheringIngest', 'FotheringRuntime', 'FotheringDetection', 'FotheringAction'].flatMap((stack) => [
+    `aws/after-removal/stack-${stack}.json`,
+    `aws/after-removal/resources-${stack}.json`,
+  ]),
+  'aws/after-removal/log-groups.json',
+  'aws/after-removal/roles.json',
+];
+
+describe('check-saved --after-removal (AC-E47, AC-E51)', () => {
+  it('passes the image with its after-removal reads, all 32 files checked', () => {
+    const result = checkSavedFolder(inputOf({ afterRemoval: true }));
+    expect(result.findings.join('; ')).toBe('');
+    expect(result.checked).toBe(32);
+  });
+
+  it('does not ask for the after-removal reads or destroy-started before removal', () => {
+    const plant: Plant = {
+      image: (image) => {
+        for (const path of AFTER_REMOVAL_PATHS) Reflect.deleteProperty(image, path);
+        const lines = savedLog(image);
+        lines.splice(0, lines.length, ...lines.filter((line) => line.event !== 'destroy-started' && !String(line.file).startsWith('aws/after-removal/')));
+      },
+    };
+    expect(findingsOf(plant)).toBe('');
+  });
+
+  it('fails a missing after-removal read by its name', () => {
+    expect(findingsOf({ afterRemoval: true, files: (files) => files.delete('aws/after-removal/log-groups.json') })).toBe('aws/after-removal/log-groups.json: is missing');
+  });
+
+  it('accepts empty log group and role lists, which is what a clean removal reads', () => {
+    const plant: Plant = {
+      afterRemoval: true,
+      image: (image) => {
+        image['aws/after-removal/log-groups.json'] = { logGroups: [] };
+        image['aws/after-removal/roles.json'] = { Roles: [] };
+      },
+    };
+    expect(findingsOf(plant)).toBe('');
+  });
+
+  it('fails a save log with no destroy-started line', () => {
+    const plant: Plant = { afterRemoval: true, image: (image) => savedLog(image).splice(savedLog(image).findIndex((line) => line.event === 'destroy-started'), 1) };
+    expect(findingsOf(plant)).toBe('aws/saved.jsonl: has no destroy-started line');
+  });
+
+  it('fails destroy-started logged before the last pre-removal save', () => {
+    const plant: Plant = { afterRemoval: true, image: (image) => moveSave(image, 'aws/sets-before-removal/fothering-alerts.json', 'aws/after-removal/stack-FotheringAction.json') };
+    expect(findingsOf(plant)).toBe('aws/saved.jsonl: aws/sets-before-removal/fothering-alerts.json was saved after destroy-started');
+  });
+
+  it('fails an after-removal read saved before destroy-started', () => {
+    const plant: Plant = { afterRemoval: true, image: (image) => moveSave(image, 'aws/after-removal/roles.json', 'destroy-started') };
+    expect(findingsOf(plant)).toBe('aws/saved.jsonl: aws/after-removal/roles.json was saved before destroy-started');
+  });
+
+  it('fails an after-removal read with no line in the save log', () => {
+    const plant: Plant = { afterRemoval: true, image: (image) => savedLog(image).splice(savedLog(image).findIndex((line) => line.file === 'aws/after-removal/resources-FotheringIngest.json'), 1) };
+    expect(findingsOf(plant)).toBe('aws/saved.jsonl: has no line for aws/after-removal/resources-FotheringIngest.json');
+  });
+});
+
 describe('findings name files and parts, never a value read from a file', () => {
   it('holds no address, account id, incident id, function name or run id in any finding', () => {
     const plants: Plant[] = [

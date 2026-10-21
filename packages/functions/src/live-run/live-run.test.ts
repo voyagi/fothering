@@ -360,6 +360,24 @@ describe('check-saved over a run folder, end to end', () => {
     expect(outcome.line).toBe('exit 0, ports 0, check-saved: 17 files checked, no findings');
   });
 
+  it('with --after-removal reads the removal files too, and exits 0 over the whole image', async () => {
+    const root = plantRoot();
+    materializeImage(root);
+
+    const outcome = await checkSaved(root, [IMAGE_RUN_ID, '--after-removal']);
+
+    expect(outcome.line).toBe('exit 0, ports 0, check-saved: 32 files checked, no findings');
+  });
+
+  it('with --after-removal exits 1 naming a missing removal read', async () => {
+    const root = plantRoot();
+    rmSync(join(materializeImage(root), 'aws', 'after-removal', 'roles.json'), { force: true });
+
+    const outcome = await checkSaved(root, [IMAGE_RUN_ID, '--after-removal']);
+
+    expect(outcome.line).toBe('exit 1, ports 0, check-saved: aws/after-removal/roles.json: is missing | check-saved: 32 files checked, 1 finding');
+  });
+
   it('exits 1 naming a run folder that does not exist, and creates nothing', async () => {
     const root = plantRoot();
 

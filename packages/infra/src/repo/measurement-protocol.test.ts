@@ -6,6 +6,7 @@ import { closureItemSchema } from '@fothering/core/closure';
 import { MIN_SEND_GAP_MS } from '@fothering/core/live-run';
 import { MODEL_VALUES, TOKEN_RESERVATION_PER_INVOCATION } from '@fothering/core/model-values';
 import { incidentLimitSentence } from '@fothering/core/reopen';
+import { FOTHERING_STACK_NAMES, RUN_FOLDER_FILES, RUN_FOLDER_ROOT } from '@fothering/core/run-folder';
 import { parseScenarioSource, RECIPIENT_KINDS, SCENARIO_TAG_KINDS, type Scenario, type ScenarioSource } from '@fothering/core/scenarios';
 import {
   COMPLAINT_THRESHOLD,
@@ -16,6 +17,7 @@ import {
   ROW_MIN_RECIPIENT_SENDS,
   type Rational,
 } from '@fothering/core/verdicts';
+import { ACTION_STACK_ID, DETECTION_STACK_ID, INGEST_STACK_ID, RUNTIME_STACK_ID } from '../create-app.js';
 
 // This file lives at packages/infra/src/repo/, four levels below the repo root.
 const REPO_ROOT = fileURLToPath(new URL('../../../../', import.meta.url));
@@ -455,30 +457,37 @@ describe('the removal order puts every reopen and save before the first destroy'
   });
 });
 
-const SAVED_PATHS = [
-  'run/<step>.account.json',
-  'run/<step>.callers.json',
-  'run/<step>.attempts.jsonl',
-  'aws/saved.jsonl',
-  'aws/stacks.json',
-  'aws/templates/<StackName>.json',
-  'aws/reopen-function.json',
-  'aws/items-pointers.json',
-  'aws/items-incident.json',
-  'aws/items-lane-<set>.json',
-  'aws/reopen-result.json',
-  'aws/sets-before-removal/<set>.json',
-  'aws/after-removal/stack-<StackName>.json',
-  'aws/after-removal/resources-<StackName>.json',
-  'aws/after-removal/log-groups.json',
-  'aws/after-removal/roles.json',
-] as const;
+const CONTRACT_PATHS = RUN_FOLDER_FILES.map((file) => file.path);
 
-describe('the saved files section lists every file of a run folder', () => {
-  it('names each run and aws path under reports/live-runs/<runId>/', () => {
-    const saved = sectionProse(protocolText(), 'Saved files');
-    expect(saved).toContain('`reports/live-runs/<runId>/`');
-    for (const path of SAVED_PATHS) expect(saved).toContain(`\`${path}\``);
+// Both directions: a path the contract lists and the protocol leaves out would never be saved by an
+// operator following the protocol, and one the protocol lists beyond the contract is never checked.
+function savedFilesFindings(text: string): string[] {
+  const saved = sectionProse(text, 'Saved files');
+  const listed = new Set([...saved.matchAll(/`((?:run|aws)\/[^`]+)`/g)].map((match) => match[1] ?? ''));
+  return [
+    ...(saved.includes(`\`${RUN_FOLDER_ROOT}/<runId>/\``) ? [] : [`the section does not name ${RUN_FOLDER_ROOT}/<runId>/`]),
+    ...CONTRACT_PATHS.filter((path) => !listed.has(path)).map((path) => `the section leaves out ${path}`),
+    ...[...listed].filter((path) => !CONTRACT_PATHS.includes(path)).map((path) => `the section lists ${path}, which the contract does not`),
+  ];
+}
+
+describe('the saved files section lists exactly the files of the run-folder contract', () => {
+  it('names every contract path under the run folder root, and no other run or aws path', () => {
+    expect(savedFilesFindings(protocolText()).join('; ')).toBe('');
+    expect(CONTRACT_PATHS.filter((path) => path.startsWith('run/'))).toHaveLength(3);
+    expect(CONTRACT_PATHS.filter((path) => path.startsWith('aws/'))).toHaveLength(13);
+  });
+
+  it('reports a path left out and a path the contract does not list (control)', () => {
+    const planted = protocolText().replace('`aws/reopen-result.json`', '`aws/reopen-output.json`');
+    expect(savedFilesFindings(planted)).toEqual([
+      'the section leaves out aws/reopen-result.json',
+      'the section lists aws/reopen-output.json, which the contract does not',
+    ]);
+  });
+
+  it('names the same four stacks the CDK app creates', () => {
+    expect([...FOTHERING_STACK_NAMES]).toEqual([INGEST_STACK_ID, RUNTIME_STACK_ID, DETECTION_STACK_ID, ACTION_STACK_ID]);
   });
 });
 
