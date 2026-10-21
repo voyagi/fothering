@@ -79,7 +79,18 @@
     { "file": "aws/items-incident.json", "savedAtUtc": "2026-10-21T10:06:00.000Z" },
     { "file": "aws/sets-before-removal/fothering-transactional.json", "savedAtUtc": "2026-10-21T10:07:00.000Z" },
     { "file": "aws/sets-before-removal/fothering-bulk.json", "savedAtUtc": "2026-10-21T10:07:10.000Z" },
-    { "file": "aws/sets-before-removal/fothering-alerts.json", "savedAtUtc": "2026-10-21T10:07:20.000Z" }
+    { "file": "aws/sets-before-removal/fothering-alerts.json", "savedAtUtc": "2026-10-21T10:07:20.000Z" },
+    { "event": "destroy-started", "savedAtUtc": "2026-10-21T10:10:00.000Z" },
+    { "file": "aws/after-removal/stack-FotheringIngest.json", "savedAtUtc": "2026-10-21T10:40:00.000Z" },
+    { "file": "aws/after-removal/stack-FotheringRuntime.json", "savedAtUtc": "2026-10-21T10:40:10.000Z" },
+    { "file": "aws/after-removal/stack-FotheringDetection.json", "savedAtUtc": "2026-10-21T10:40:20.000Z" },
+    { "file": "aws/after-removal/stack-FotheringAction.json", "savedAtUtc": "2026-10-21T10:40:30.000Z" },
+    { "file": "aws/after-removal/resources-FotheringIngest.json", "savedAtUtc": "2026-10-21T10:41:00.000Z" },
+    { "file": "aws/after-removal/resources-FotheringRuntime.json", "savedAtUtc": "2026-10-21T10:41:10.000Z" },
+    { "file": "aws/after-removal/resources-FotheringDetection.json", "savedAtUtc": "2026-10-21T10:41:20.000Z" },
+    { "file": "aws/after-removal/resources-FotheringAction.json", "savedAtUtc": "2026-10-21T10:41:30.000Z" },
+    { "file": "aws/after-removal/log-groups.json", "savedAtUtc": "2026-10-21T10:42:00.000Z" },
+    { "file": "aws/after-removal/roles.json", "savedAtUtc": "2026-10-21T10:42:10.000Z" }
   ],
   "aws/stacks.json": {
     "Stacks": [
@@ -176,5 +187,36 @@
     "ConfigurationSetName": "fothering-alerts",
     "SendingOptions": { "SendingEnabled": true },
     "ReputationOptions": { "ReputationMetricsEnabled": true }
-  }
+  },
+  "aws/after-removal/stack-FotheringIngest.json": {
+    "Stacks": [{ "StackId": "arn:aws:cloudformation:eu-central-1:<ACCOUNT_ID>:stack/FotheringIngest/5e1f0a2b-7c3d-4e8f-9a6b-c1d2e3f4a5b6", "StackName": "FotheringIngest", "StackStatus": "DELETE_COMPLETE" }]
+  },
+  "aws/after-removal/stack-FotheringRuntime.json": {
+    "Stacks": [{ "StackId": "arn:aws:cloudformation:eu-central-1:<ACCOUNT_ID>:stack/FotheringRuntime/6f2a1b3c-8d4e-4f9a-ab7c-d2e3f4a5b6c7", "StackName": "FotheringRuntime", "StackStatus": "DELETE_COMPLETE" }]
+  },
+  "aws/after-removal/stack-FotheringDetection.json": {
+    "Stacks": [{ "StackId": "arn:aws:cloudformation:eu-central-1:<ACCOUNT_ID>:stack/FotheringDetection/7a3b2c4d-9e5f-4a0b-bc8d-e3f4a5b6c7d8", "StackName": "FotheringDetection", "StackStatus": "DELETE_COMPLETE" }]
+  },
+  "aws/after-removal/stack-FotheringAction.json": {
+    "Stacks": [{ "StackId": "arn:aws:cloudformation:eu-central-1:<ACCOUNT_ID>:stack/FotheringAction/8b4c3d5e-af6a-4b1c-cd9e-f4a5b6c7d8e9", "StackName": "FotheringAction", "StackStatus": "DELETE_COMPLETE" }]
+  },
+  "aws/after-removal/resources-FotheringIngest.json": {
+    "StackResourceSummaries": [
+      { "LogicalResourceId": "EventsTable", "ResourceType": "AWS::DynamoDB::Table", "ResourceStatus": "DELETE_COMPLETE" },
+      { "LogicalResourceId": "IngestFunctionLogs", "ResourceType": "AWS::Logs::LogGroup", "ResourceStatus": "DELETE_COMPLETE" }
+    ]
+  },
+  "aws/after-removal/resources-FotheringRuntime.json": {
+    "StackResourceSummaries": [{ "LogicalResourceId": "AgentRuntime", "ResourceType": "AWS::BedrockAgentCore::Runtime", "ResourceStatus": "DELETE_COMPLETE" }]
+  },
+  "aws/after-removal/resources-FotheringDetection.json": {
+    "StackResourceSummaries": [{ "LogicalResourceId": "DetectionFunction", "ResourceType": "AWS::Lambda::Function", "ResourceStatus": "DELETE_COMPLETE" }]
+  },
+  "aws/after-removal/resources-FotheringAction.json": {
+    "StackResourceSummaries": [{ "LogicalResourceId": "ReopenFunction", "ResourceType": "AWS::Lambda::Function", "ResourceStatus": "DELETE_COMPLETE" }]
+  },
+  "aws/after-removal/log-groups.json": {
+    "logGroups": [{ "logGroupName": "/aws/lambda/unrelated-function", "retentionInDays": 7 }]
+  },
+  "aws/after-removal/roles.json": { "Roles": [] }
 }

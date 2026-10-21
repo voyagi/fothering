@@ -337,19 +337,28 @@ function saveOrderOf(values: readonly unknown[]): SaveOrder {
   return { lines, lastSave };
 }
 
-function lastEventIndex(lines: readonly SavedLogLine[], event: 'deploy-finished' | 'destroy-started'): number {
-  return lines.findLastIndex((line) => 'event' in line && line.event === event);
+function eventIndex(lines: readonly SavedLogLine[], event: 'deploy-finished' | 'destroy-started', which: 'first' | 'last'): number {
+  const isEvent = (line: SavedLogLine): boolean => 'event' in line && line.event === event;
+  return which === 'first' ? lines.findIndex(isEvent) : lines.findLastIndex(isEvent);
 }
 
+function unsavedFindings(order: SaveOrder, paths: readonly string[]): string[] {
+  return paths.filter((path) => !order.lastSave.has(path)).map((path) => `${SAVED_LOG_PATH}: has no line for ${path}`);
+}
+
+function savedBefore(order: SaveOrder, paths: readonly string[], index: number, mark: string): string[] {
+  return paths.filter((path) => (order.lastSave.get(path) ?? index) < index).map((path) => `${SAVED_LOG_PATH}: ${path} was saved before ${mark}`);
+}
+
+function savedAfter(order: SaveOrder, paths: readonly string[], index: number, mark: string): string[] {
+  return paths.filter((path) => (order.lastSave.get(path) ?? index) > index).map((path) => `${SAVED_LOG_PATH}: ${path} was saved after ${mark}`);
+}
+
+// The last deploy-finished counts: a read taken before a redeploy describes stacks that changed.
 function deployOrderFindings(order: SaveOrder, reads: readonly string[]): string[] {
-  const deploy = lastEventIndex(order.lines, 'deploy-finished');
-  const findings = deploy < 0 ? [`${SAVED_LOG_PATH}: has no deploy-finished line`] : [];
-  for (const path of reads) {
-    const at = order.lastSave.get(path);
-    if (at === undefined) findings.push(`${SAVED_LOG_PATH}: has no line for ${path}`);
-    else if (at < deploy) findings.push(`${SAVED_LOG_PATH}: ${path} was saved before deploy-finished`);
-  }
-  return findings;
+  const deploy = eventIndex(order.lines, 'deploy-finished', 'last');
+  if (deploy < 0) return [`${SAVED_LOG_PATH}: has no deploy-finished line`, ...unsavedFindings(order, reads)];
+  return [...unsavedFindings(order, reads), ...savedBefore(order, reads, deploy, 'deploy-finished')];
 }
 
 // RESEARCH Pitfall 9: incident items or a set read taken before the reopen hold the pre-reopen
@@ -357,17 +366,35 @@ function deployOrderFindings(order: SaveOrder, reads: readonly string[]): string
 function reopenOrderFindings(order: SaveOrder, reads: readonly string[]): string[] {
   const reopen = order.lastSave.get(REOPEN_RESULT_PATH);
   if (reopen === undefined) return [];
-  return reads
-    .filter((path) => path === INCIDENT_PATH || path.startsWith(SETS_BEFORE_REMOVAL_PREFIX))
-    .filter((path) => (order.lastSave.get(path) ?? reopen) < reopen)
-    .map((path) => `${SAVED_LOG_PATH}: ${path} was saved before ${REOPEN_RESULT_PATH}`);
+  const afterReopen = reads.filter((path) => path === INCIDENT_PATH || path.startsWith(SETS_BEFORE_REMOVAL_PREFIX));
+  return savedBefore(order, afterReopen, reopen, REOPEN_RESULT_PATH);
+}
+
+// The first destroy-started counts: from it on the table and the log groups start to go, so every
+// pre-removal read must come before it and every after-removal read after it (AC-E47, AC-E51).
+function destroyOrderFindings(order: SaveOrder, preRemoval: readonly string[], afterRemoval: readonly string[]): string[] {
+  const destroy = eventIndex(order.lines, 'destroy-started', 'first');
+  if (destroy < 0) return [`${SAVED_LOG_PATH}: has no destroy-started line`, ...unsavedFindings(order, afterRemoval)];
+  return [
+    ...savedAfter(order, preRemoval, destroy, 'destroy-started'),
+    ...unsavedFindings(order, afterRemoval),
+    ...savedBefore(order, afterRemoval, destroy, 'destroy-started'),
+  ];
+}
+
+function awsReads(expected: readonly ExpectedRunFolderFile[], phase: RunFolderFile['phase']): string[] {
+  return expected.filter(({ path, file }) => file.phase === phase && path.startsWith('aws/') && path !== SAVED_LOG_PATH).map(({ path }) => path);
 }
 
 function saveLogFindings(input: CheckSavedInput, expected: readonly ExpectedRunFolderFile[], values: readonly unknown[] | undefined): string[] {
   if (values === undefined) return [];
   const order = saveOrderOf(values);
-  const reads = expected.filter(({ path, file }) => file.phase === 'pre-removal' && path.startsWith('aws/') && path !== SAVED_LOG_PATH).map(({ path }) => path);
-  return [...deployOrderFindings(order, reads), ...(input.scenario.outcome === 'close' ? reopenOrderFindings(order, reads) : [])];
+  const preRemoval = awsReads(expected, 'pre-removal');
+  return [
+    ...deployOrderFindings(order, preRemoval),
+    ...(input.scenario.outcome === 'close' ? reopenOrderFindings(order, preRemoval) : []),
+    ...(input.afterRemoval ? destroyOrderFindings(order, preRemoval, awsReads(expected, 'after-removal')) : []),
+  ];
 }
 
 export function checkSavedFolder(input: CheckSavedInput): CheckSavedResult {
