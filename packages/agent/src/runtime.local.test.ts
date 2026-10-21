@@ -217,14 +217,16 @@ describe('the agent bundle answers the AgentCore contract with the real handler 
   it(
     'names the handler bundle that throws while loading',
     () => {
-      const plantedRoot = join(workDir, 'planted-handler-root');
+      // Planted under plantDir for the reason PLANT_PARENT gives: this build resolves from the planted
+      // root, and from under a large system temp folder it took about 60 s alone (measured 2026-10-21).
+      const plantedRoot = join(plantDir, 'planted-handler-root');
       const handlerDir = join(plantedRoot, 'packages', 'functions', 'src', 'planted');
       mkdirSync(handlerDir, { recursive: true });
       writeFileSync(
         join(handlerDir, 'handler.ts'),
         "throw new Error('planted load failure');\nexport const handler = (): void => {};\n",
       );
-      const out = join(workDir, 'planted-handler-out');
+      const out = join(plantDir, 'planted-handler-out');
       const { status, combined } = runBuild(['--only', 'planted', '--outdir', out], plantedRoot);
       expect(status, combined).toBe(1);
       expect(combined).toContain(`${join(out, 'index.js')} failed to load: planted load failure`);
