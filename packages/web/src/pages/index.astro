@@ -67,9 +67,10 @@ const refusals = [
   'Close a lane on a guess. When the evidence does not settle the cause, nothing closes, and the email says what code found.',
   'Pause your whole account. The smallest closure that stops the damage is one configuration set.',
   'Reopen on its own, or report a closure the read-back did not confirm. A lane reopens only when you run the reopen command.',
-  `Keep recipient addresses. Event records hold the receiving domain and a keyed hash, in ${region}, and expire 30 days after the send; deletion follows within a few days.`,
+  `Keep recipient addresses. Event records hold the receiving domain and a keyed hash, in \`${region}\`, and expire 30 days after the send; deletion follows within a few days.`,
 ];
-// The refusal is its first sentence and the reason the rest, split so the text reads unchanged.
+// The refusal is its first sentence and the reason the rest, split so the text reads unchanged. A
+// code span in a reason (the Region) renders as an identifier, so it never breaks at its hyphens.
 const refusalParts = refusals.map((refusal) => {
   const end = refusal.indexOf('. ') + 1;
   return { refusal: refusal.slice(0, end), reason: refusal.slice(end + 1) };
@@ -191,16 +192,18 @@ const limitsRows = [
       <h2 id="refusals-title" class="keycap bank-2">{heading('refusals')}</h2>
     </div>
     <ul class="refuse">
-      {refusalParts.map((part) => <li><b>{part.refusal}</b> <span>{part.reason}</span></li>)}
+      {refusalParts.map((part) => <li><b>{part.refusal}</b> <span>{textSegments(part.reason, terms).map((segment) => (segment.kind === 'text' ? segment.text : <Identifier value={segment.text} face={faceOf(segment)} />))}</span></li>)}
     </ul>
   </section>
 
-  <section class="band" aria-labelledby="limits-title" data-limits>
+  <section class="band fit-limits" aria-labelledby="limits-title" data-limits>
     <div class="band-head">
       <h2 id="limits-title" class="keycap bank-3">{heading('limits')}</h2>
       <p>This is a hackathon build. {NO_MEASURED_NUMBER_SENTENCE}</p>
     </div>
-    <Schedule variant="ruled" columns={['Part', 'State', 'Note']} narrowHidden={[2]} rows={limitsRows} />
+    <div class="fit-form">
+      <Schedule variant="ruled" fit columns={['Part', 'State', 'Note']} rows={limitsRows} />
+    </div>
   </section>
 
   <section class="close-band" aria-labelledby="close-title">

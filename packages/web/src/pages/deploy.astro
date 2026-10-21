@@ -97,7 +97,7 @@ const intro = textSegments(fillRegion(DEPLOY_COPY.intro, region), NO_TERMS);
       {roles.map((role) => (
         <section class="role" data-permission-role={role.id} aria-labelledby={`role-${role.name}`}>
           <div class="role-head">
-            <h3 id={`role-${role.name}`}>{role.name}</h3>
+            <h3 id={`role-${role.name}`}><Identifier value={role.name} /></h3>
             <p class="role-stack"><span>Stack</span> <Identifier value={role.stack} /></p>
           </div>
           <Schedule fit columns={PERMISSION_COLUMNS} rows={role.rows} wordColumns={[ACTION_COLUMN]} caption={DEPLOY_COPY.permissionsCaption} />

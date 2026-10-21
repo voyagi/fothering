@@ -32,8 +32,6 @@ interface Row {
 interface Props {
   columns: readonly string[];
   rows: readonly Row[];
-  // Column indexes hidden at 620px and below.
-  narrowHidden?: readonly number[];
   // Column indexes set in mono, 0 being the row header.
   monoColumns?: readonly number[];
   caption?: string;
@@ -54,12 +52,10 @@ interface Props {
   terms?: IdentifierTerms;
 }
 
-const { columns, rows, narrowHidden = [], monoColumns = [], caption, captionAttrs = {}, variant = 'schedule', compact = false, stack = false, fit = false, wordColumns = [], terms = { names: [], values: [] } } = Astro.props;
+const { columns, rows, monoColumns = [], caption, captionAttrs = {}, variant = 'schedule', compact = false, stack = false, fit = false, wordColumns = [], terms = { names: [], values: [] } } = Astro.props;
 const segmentsOf = (text: string): Segment[] => textSegments(text, terms);
-const classes = (column: number): string | undefined =>
-  [narrowHidden.includes(column) ? 'hide-narrow' : '', monoColumns.includes(column) ? 'mono' : ''].filter((name) => name !== '').join(' ') || undefined;
 // A column header is a label like its siblings; only the column's values are set in mono.
-const headClass = (column: number): string | undefined => (narrowHidden.includes(column) ? 'hide-narrow' : undefined);
+const classes = (column: number): string | undefined => (monoColumns.includes(column) ? 'mono' : undefined);
 const tableClass = [variant, compact ? 'compact' : '', stack ? 'stack' : '', fit ? 'fit' : ''].filter((name) => name !== '').join(' ');
 // display: block or grid drops table semantics in some engines, so a table that stacks or whose rows
 // become grids states its roles.
@@ -75,7 +71,7 @@ const isEmpty = (cell: Cell): boolean => cell.text === '' && (cell.commands ?? [
 <table class={tableClass} role={role('table')}>
   {caption !== undefined && <caption {...captionAttrs}>{segmentsOf(caption).map((segment) => (segment.kind === 'text' ? segment.text : <Identifier value={segment.text} face={faceOf(segment)} />))}</caption>}
   <thead role={role('rowgroup')}>
-    <tr role={role('row')}>{columns.map((column, index) => <th scope="col" class={headClass(index)} role={role('columnheader')}>{column}</th>)}</tr>
+    <tr role={role('row')}>{columns.map((column) => <th scope="col" role={role('columnheader')}>{column}</th>)}</tr>
   </thead>
   <tbody role={role('rowgroup')}>
     {rows.map((row) => (

@@ -185,6 +185,9 @@ code { font-size: var(--text-mono-value); font-weight: 500; }
 /* The first band: the claim, and beside it on the landing the readout module. */
 .first-band { display: grid; grid-template-columns: minmax(0, 1fr) minmax(320px, 400px); gap: var(--space-xl) var(--space-40); align-items: start; padding: var(--space-40) var(--gutter) var(--space-xl); }
 .first-band.solo { grid-template-columns: minmax(0, 1fr); }
+/* Beside the readout, 24px tighter, so at 1280 x 800 the landing's whole pattern and its provenance
+   caption sit in the first viewport. */
+@media (min-width: 961px) { .first-band { padding-block: var(--space-lg); } }
 /* The deploy steps close the first band under a 2px rule, their heading set plain. */
 .steps-block { display: grid; gap: var(--space-lg); padding-top: var(--space-lg); border-top: 2px solid var(--ink); }
 .steps-head { display: grid; gap: var(--space-sm); }
@@ -223,7 +226,7 @@ code { font-size: var(--text-mono-value); font-weight: 500; }
 /* The step pattern: each lane a track of pads, one pad per recorded event, banked by replay step.
    A row is its own grid, so on a narrow screen the lane's name and mute key restack above its pads
    and no pad is ever cropped. */
-.pattern, .board { margin: 0; padding: 0 var(--gutter) var(--space-xl); }
+.pattern, .board { margin: 0; padding: 0 var(--gutter) var(--space-xl); container: pattern / inline-size; }
 .tracks { --pad-h: 44px; display: grid; gap: var(--space-sm); padding-top: var(--space-12); border-top: 2px solid var(--ink); }
 .track { display: grid; grid-template-columns: 13rem minmax(0, 1fr) 5.5rem; gap: 0 var(--space-md); align-items: center; }
 .pads { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: var(--space-sm); }
@@ -241,7 +244,10 @@ code { font-size: var(--text-mono-value); font-weight: 500; }
 .pad.lit::before { background: var(--key-white); outline: 1.5px solid var(--key-ink); }
 /* A bounce lamp is a red core in a white bezel, so it holds on the red bank. */
 .pad.bounce::before { border: 3px solid var(--key-white); background: var(--led); outline: 1.5px solid var(--key-ink); }
-.mute { display: flex; align-items: center; justify-content: center; gap: var(--space-sm); block-size: var(--pad-h); border: 2px solid var(--ink); border-radius: 4px; font: 700 var(--text-silk-small)/1 var(--font-silk); font-stretch: 85%; letter-spacing: 0.14em; text-transform: uppercase; }
+/* A track's mute is a state, not a control: unlit it is a silkscreen label printed into a recessed well,
+   with no raised edge, so it never reads as a key to press. The transparent border keeps the box the
+   lit key fills. */
+.mute { display: flex; align-items: center; justify-content: center; gap: var(--space-sm); block-size: var(--pad-h); border: 2px solid transparent; border-radius: 4px; background: var(--well); color: var(--ink-2); cursor: default; font: 700 var(--text-silk-small)/1 var(--font-silk); font-stretch: 85%; letter-spacing: 0.14em; text-transform: uppercase; }
 /* The one key lit at full strength: the muted track's. */
 .mute.on { border-color: var(--key-red); background: var(--key-red); color: var(--key-ink); }
 .mute.on .lamp { background: var(--led); outline: 2px solid var(--key-ink); }
@@ -269,7 +275,7 @@ code { font-size: var(--text-mono-value); font-weight: 500; }
 .at-11 { --at: 11; } .at-12 { --at: 12; } .at-13 { --at: 13; } .at-14 { --at: 14; } .at-15 { --at: 15; }
 @keyframes lamp-on { from { border-color: transparent; background: var(--lamp-dark); outline-color: transparent; } }
 @keyframes pad-mute { from { background: var(--bank); } }
-@keyframes mute-on { from { border-color: var(--ink); background: transparent; color: var(--ink); } }
+@keyframes mute-on { from { border-color: transparent; background: var(--well); color: var(--ink-2); } }
 @media (prefers-reduced-motion: no-preference) {
   .pattern :is(.pad.lit, .pad.bounce)::before { animation: lamp-on 160ms cubic-bezier(0.16, 1, 0.3, 1) calc(400ms + var(--at, 0) * 90ms) backwards; }
   .pattern .pad.muted { animation: pad-mute 240ms cubic-bezier(0.16, 1, 0.3, 1) calc(400ms + var(--at, 0) * 90ms) backwards; }
@@ -325,8 +331,12 @@ p.command-note { margin: var(--space-sm) 0 0; font: 400 var(--text-silk)/1.4 var
 .identifier { white-space: normal; overflow-wrap: normal; word-break: normal; hyphens: none; }
 .identifier > span { white-space: nowrap; }
 /* A copyable value keeps the exact spelling AWS gives it, inside silkscreen caps too (eu-central-1 in a
-   readout head, never EU-CENTRAL-1). */
+   readout head, never EU-CENTRAL-1). A name set in the face around it keeps its own case as well, so
+   the replay title reads fothering-bulk in Saira, never FOTHERING-BULK. */
 code.identifier { text-transform: none; letter-spacing: 0; }
+.identifier[data-identifier-face="inherit"] { text-transform: none; }
+/* A role's name is its heading, an identifier at the heading's size. */
+.role-head h3 code.identifier { font-size: inherit; }
 /* A value a reader may copy or cite whole, a date or a legal reference, keeps one line. */
 .keep-whole { white-space: nowrap; }
 /* A resource expression or a principal is a long value: it ends a line at its <wbr>s, after a slash,
@@ -348,7 +358,7 @@ code.identifier { text-transform: none; letter-spacing: 0; }
 ul.refuse { margin: 0; padding: 0; list-style: none; border-top: 2px solid var(--ink); }
 .refuse li { max-inline-size: none; padding: var(--space-lg) 0; border-bottom: var(--w-rule) solid var(--rule); }
 .refuse b { display: block; margin-bottom: var(--space-xs); font: 700 var(--text-title)/1.3 var(--font-silk); font-stretch: 85%; letter-spacing: 0.04em; text-transform: uppercase; }
-.refuse span { display: block; max-inline-size: var(--measure); color: var(--ink-2); }
+.refuse li > span { display: block; max-inline-size: var(--measure); color: var(--ink-2); }
 
 /* Schedules: the head in silkscreen caps on a recessed strip under a 2px ink rule, the rows divided
    by rules. */
@@ -367,7 +377,7 @@ table.schedule, table.ruled { width: 100%; border-collapse: collapse; font: 400 
 .schedule.compact tbody th code { display: block; margin-top: var(--space-xs); }
 .cell-text { display: block; max-inline-size: var(--measure); }
 /* The column name a stacked cell prints above itself; only the stacked rules give it content. */
-.schedule :is(th, td)::before { display: block; font: 700 var(--text-silk-small)/1.4 var(--font-silk); font-stretch: 85%; letter-spacing: 0.12em; text-transform: uppercase; color: var(--label); }
+:is(.schedule, .ruled) :is(th, td)::before { display: block; font: 700 var(--text-silk-small)/1.4 var(--font-silk); font-stretch: 85%; letter-spacing: 0.12em; text-transform: uppercase; color: var(--label); }
 
 /* The landing's close band: the readout's black glass, carrying the red key. */
 .close-band { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-lg) var(--space-40); padding: clamp(40px, 5vw, 64px) var(--gutter); background: var(--window); color: var(--window-ink); }
@@ -702,6 +712,25 @@ ul.site { display: grid; gap: var(--space-12); margin: 0; padding-left: var(--sp
   .fit-checks .fit .state-mark-none { display: none; }
 }
 
+/* The landing's limits table keeps every column at every width: in table form its note keeps a
+   readable column, and where its section is narrower than the table needs, and at 620px and below,
+   each row becomes a block with its note under it. Measured 2026-10-21 at 1440 with the 12em note
+   column: the table needs 499px. */
+.fit-limits { container: limits / inline-size; }
+.fit-limits td[data-col="Note"] .cell-text { min-inline-size: 12em; }
+.fit-limits .fit-form { container-type: inline-size; }
+@container limits (width < 503px) { .fit-limits .fit-form { container-name: limits-stacked; } }
+@media (max-width: 620px) { .fit-limits .fit-form { container-name: limits-stacked; } }
+@container limits-stacked (width >= 0px) {
+  .fit-limits .fit, .fit-limits .fit :is(thead, tbody, tr, th, td) { display: block; width: auto; }
+  .fit-limits .fit thead { display: none; }
+  .fit-limits .fit tbody { border-top: 2px solid var(--ink); }
+  .fit-limits .fit tbody tr { padding: var(--space-xs) 0 var(--space-sm); border-bottom: var(--w-rule) solid var(--rule); }
+  .fit-limits .fit :is(th, td) { padding: var(--space-sm) 0; border: 0; }
+  .fit-limits .fit :is(th, td)::before { content: attr(data-col); }
+  .fit-limits .fit :is(th, td) .cell-text { min-inline-size: 0; }
+}
+
 /* The marks legend on the accessibility statement: each mark drawn small beside its name, the
    meaning under it, in as many columns as the band holds. */
 .marks dl { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(16rem, 100%), 1fr)); gap: 0 var(--space-lg); }
@@ -725,9 +754,14 @@ ul.site { display: grid; gap: var(--space-12); margin: 0; padding-left: var(--sp
   .index { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
   .index .project { grid-column: 1 / -1; }
 }
-/* Under about 720px the column heads give way: each track's name and mute key sit above its pads,
-   and the bank labels under the pattern keep each step's name and time. */
-@media (max-width: 720px) {
+/* Where the pattern's own width gives a column less room than its widest head needs, the column
+   heads give way: each track's name and mute sit above its pads, and the bank labels under the
+   pattern keep each step's name and time. The pattern is the container, not the viewport, so the
+   heads never overlap at any width. Measured 2026-10-21 at 1440: the widest head (a mono time, or
+   "Reopen command") is 53.91px at min-content, so the replay board's twelve columns need 1063px of
+   pattern (208 + 88 + 2 x 16 for the name, mute and gaps, plus 12 x 53.91 + 11 x 8) and the landing's
+   nine need 868px; both take the board's switch. */
+@container pattern (width < 1067px) {
   .tracks { --pad-h: 40px; }
   .track { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "name mute" "pads pads"; gap: var(--space-sm) var(--space-md); }
   .track .lane-name { grid-area: name; }
@@ -744,7 +778,6 @@ ul.site { display: grid; gap: var(--space-12); margin: 0; padding-left: var(--sp
   .top-strip nav { order: 3; flex-basis: 100%; }
   .dwg-wide { display: none; }
   .dwg-narrow { display: block; }
-  .ruled .hide-narrow { display: none; }
   ol.procedure { grid-template-columns: minmax(0, 1fr); }
   .procedure li { display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: var(--space-md); }
   .step-key, .procedure.removal .step-key { block-size: 64px; }
