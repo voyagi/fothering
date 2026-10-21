@@ -445,7 +445,7 @@ table.schedule, table.ruled { width: 100%; border-collapse: collapse; font: 400 
   :root.js[data-step="4"] .board .pad.bank-4:is(.lit, .bounce)::before { animation: lamp-on 160ms cubic-bezier(0.16, 1, 0.3, 1) calc(120ms + var(--at, 0) * 90ms) backwards; }
   :root.js[data-step="3"] .board .pad.muted.bank-3,
   :root.js[data-step="4"] .board .pad.muted.bank-4 { animation: pad-mute 240ms cubic-bezier(0.16, 1, 0.3, 1) calc(120ms + var(--at, 0) * 90ms) backwards; }
-  .board .mute.on { animation: mute-on 200ms cubic-bezier(0.16, 1, 0.3, 1) calc(120ms + var(--at, 0) * 90ms) backwards; }
+  :root.js[data-step="3"] .board .mute.on { animation: mute-on 200ms cubic-bezier(0.16, 1, 0.3, 1) calc(120ms + var(--at, 0) * 90ms) backwards; }
 }
 .board .track-banks { margin-top: var(--space-sm); }
 .story { display: grid; gap: var(--space-lg); padding: 0 var(--gutter) var(--band-block); }
