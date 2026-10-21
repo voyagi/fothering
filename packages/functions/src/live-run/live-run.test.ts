@@ -284,6 +284,103 @@ describe('check-saved over a run folder, end to end', () => {
 
     expect(outcome.line).toBe('exit 0, ports 0, check-saved: 22 files checked, no findings');
   });
+
+  it.each<[string, (folder: string) => void, string]>([
+    ['a deleted read', (folder) => rmSync(join(folder, 'aws', 'stacks.json')), 'aws/stacks.json: is missing'],
+    [
+      'an AWS CLI error saved in place of a read',
+      (folder) => writeFileSync(join(folder, 'aws', 'templates', 'FotheringIngest.json'), '\nAn error occurred (ValidationError) when calling the GetTemplate operation\n'),
+      'aws/templates/FotheringIngest.json: is not JSON',
+    ],
+    ['an emptied read', (folder) => writeFileSync(join(folder, 'aws', 'sets-before-removal', 'fothering-bulk.json'), ''), 'aws/sets-before-removal/fothering-bulk.json: is empty'],
+    [
+      'an items file the reader refuses',
+      (folder) => writeFileSync(join(folder, 'aws', 'items-lane-fothering-transactional.json'), '{"Items":[{"pk":"LANE#fothering-transactional"}]}\n'),
+      'aws/items-lane-fothering-transactional.json: the items reader refused it (SavedItemsError)',
+    ],
+    [
+      'a save log whose last line lost its newline',
+      (folder) => {
+        const path = join(folder, 'aws', 'saved.jsonl');
+        writeFileSync(path, readFileSync(path, 'utf8').replace(/\n$/, ''));
+      },
+      'aws/saved.jsonl: the last line has no newline',
+    ],
+  ])('exits 1 on %s, naming the file', async (_label, plant, finding) => {
+    const root = plantRoot();
+    plant(materializeImage(root));
+
+    const outcome = await checkSaved(root, [IMAGE_RUN_ID]);
+
+    expect(outcome.line).toBe(`exit 1, ports 0, check-saved: ${finding} | check-saved: 22 files checked, 1 finding`);
+  });
+
+  it.each<[string, (image: RunFolderImage) => void, string]>([
+    [
+      'lane items holding only another run',
+      (image) => {
+        const lane = image['aws/items-lane-fothering-bulk.json'] as { Items: { runId: { S: string } }[] };
+        for (const item of lane.Items) item.runId = { S: 'live-20261021-s1-2' };
+      },
+      'aws/items-lane-fothering-bulk.json: holds no record of the run',
+    ],
+    [
+      'incident items saved before the reopen result',
+      (image) => {
+        const lines = image['aws/saved.jsonl'] as { file?: string }[];
+        const [incident] = lines.splice(lines.findIndex((line) => line.file === 'aws/items-incident.json'), 1);
+        if (incident !== undefined) lines.splice(lines.findIndex((line) => line.file === 'aws/reopen-result.json'), 0, incident);
+      },
+      'aws/saved.jsonl: aws/items-incident.json was saved before aws/reopen-result.json',
+    ],
+  ])('exits 1 on %s, naming the file', async (_label, edit, finding) => {
+    const root = plantRoot();
+    const image = readImage();
+    edit(image);
+    materializeImage(root, IMAGE_RUN_ID, image);
+
+    const outcome = await checkSaved(root, [IMAGE_RUN_ID]);
+
+    expect(outcome.line).toBe(`exit 1, ports 0, check-saved: ${finding} | check-saved: 22 files checked, 1 finding`);
+  });
+
+  it('passes run 2, an unknown decision, without the reopen files, the pause pointer or a closure', async () => {
+    const root = plantRoot();
+    const image = readImage();
+    for (const path of ['aws/reopen-function.json', 'aws/reopen-result.json', 'run/after-pause.account.json', 'run/after-pause.callers.json', 'run/after-pause.attempts.jsonl']) {
+      Reflect.deleteProperty(image, path);
+    }
+    image['aws/saved.jsonl'] = (image['aws/saved.jsonl'] as { file?: string }[]).filter((line) => line.file !== 'aws/reopen-function.json' && line.file !== 'aws/reopen-result.json');
+    image['aws/items-pointers.json'] = { Items: [{ pk: { S: 'INCIDENT_LANE#fothering-transactional' }, sk: { S: 'MARKER' }, incidentId: { S: 'incident-fixture-two' } }] };
+    image['aws/items-incident.json'] = { Items: ['STATE', 'EVIDENCE', 'DECISION'].map((part) => ({ pk: { S: 'INCIDENT#incident-fixture-two' }, sk: { S: part } })) };
+    materializeImage(root, 'live-20261021-s2-1', image);
+
+    const outcome = await checkSaved(root, ['live-20261021-s2-1']);
+
+    expect(outcome.line).toBe('exit 0, ports 0, check-saved: 17 files checked, no findings');
+  });
+
+  it('exits 1 naming a run folder that does not exist, and creates nothing', async () => {
+    const root = plantRoot();
+
+    const outcome = await checkSaved(root, [RUN_ID]);
+
+    expect(outcome.line).toBe(`exit 1, ports 0, check-saved: reports/live-runs/${RUN_ID}: the run folder is missing | check-saved: 0 files checked, 1 finding`);
+    expect(existsSync(join(root, 'reports'))).toBe(false);
+  });
+
+  it('refuses a run id of no known shape before reading anything', async () => {
+    const outcome = await checkSaved(plantRoot(), ['run-one']);
+    expect(outcome.line).toBe(`exit 1, ports 0, ${refusalMessage('run-id-invalid')}`);
+  });
+
+  it.each([[[]], [['--after-removal']], [[RUN_ID, '--after']], [[RUN_ID, '--after-removal', 'extra']], [[RUN_ID, 'extra']]])(
+    'refuses the arguments %j as a usage error',
+    async (args) => {
+      const outcome = await checkSaved(plantRoot(), args);
+      expect(outcome.line).toBe(`exit 1, ports 0, ${refusalMessage('usage')} | ${LIVE_RUN_MESSAGES.usage}`);
+    },
+  );
 });
 
 interface Outcome {
