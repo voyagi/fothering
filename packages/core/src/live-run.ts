@@ -45,7 +45,69 @@ export function buildLiveRunRequest(entry: StepPlanEntry, laneMap: LaneMap, runI
   };
 }
 
-const ASSUMED_ROLE_ARN = /^arn:aws[a-z-]*:sts::\d{12}:assumed-role\/([^/]+)\/[^/]+$/;
+export const LIVE_RUN_REFUSALS = [
+  'usage',
+  'switch-not-live',
+  'unknown-scenario',
+  'unknown-step',
+  'run-id-invalid',
+  'empty-step',
+  'recipient-not-simulator',
+  'tag-invalid',
+  'rate-too-high',
+  'output-not-ignored',
+  'output-outside-root',
+  'step-already-run',
+  'lock-held',
+  'lane-profile-missing',
+  'caller-not-role',
+  'caller-shared',
+  'account-mismatch',
+  'send-rate-low',
+] as const;
+export type LiveRunRefusalCode = (typeof LIVE_RUN_REFUSALS)[number];
+
+export interface LiveRunRefusal {
+  code: LiveRunRefusalCode;
+  subject?: string;
+}
+
+export const MAX_RATE_MILLI = 800;
+
+export function refusalMessage(code: LiveRunRefusalCode, _subject?: string): string {
+  return `refused ${code}`;
+}
+
+export function parseRunId(_runId: string): { date: string; run: number; attempt: number } | undefined {
+  return undefined;
+}
+
+export function parseRate(_text: string): number | undefined {
+  return undefined;
+}
+
+export function sendGapMs(_rateMilli: number): number {
+  return MIN_SEND_GAP_MS;
+}
+
+export function spacingViolations(_startsMs: readonly number[], _minGapMs: number): number[] {
+  return [];
+}
+
+export function isSimulatorRecipient(_address: string): boolean {
+  return true;
+}
+
+export function planRequests(
+  entries: readonly StepPlanEntry[],
+  laneMap: LaneMap,
+  runId: string,
+  from: string,
+): { ok: true; requests: LiveRunRequest[] } | { ok: false; refusal: LiveRunRefusal } {
+  return { ok: true, requests: entries.map((entry) => buildLiveRunRequest(entry, laneMap, runId, from)) };
+}
+
+const ASSUMED_ROLE_ARN =/^arn:aws[a-z-]*:sts::\d{12}:assumed-role\/([^/]+)\/[^/]+$/;
 
 /** SES records a role sender's caller identity as the role name, so two sessions of one role are one caller. */
 export function callerKeyOf(arn: string): string | undefined {
