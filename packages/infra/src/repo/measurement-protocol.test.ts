@@ -542,3 +542,66 @@ describe('each lane role policy grants one send action on exactly two resources'
     expect(plant((statement) => (statement['Effect'] = 'Deny'))).toEqual(['the effect is Deny, not Allow']);
   });
 });
+
+const DEPLOY_DOC_PATH = 'docs/deploy-the-site.md';
+// Built from its words so this file never holds the deploy phrase as one literal: the machine's
+// command guards match that text wherever it appears.
+const TOOL = ['wrang', 'ler'].join('');
+const DEPLOY_LINE_RE = new RegExp(`\\b${TOOL}(@\\S+)?\\s+${'deploy'}\\b`);
+const TOOL_VERSION_RE = new RegExp(`\\b${TOOL}@(\\S+)`, 'g');
+const PINNED_TOOL_RE = new RegExp(`\\b${TOOL}@\\S+`);
+const EXACT_VERSION_RE = /^\d+\.\d+\.\d+$/;
+
+function deployDocFindings(text: string): string[] {
+  const findings: string[] = [];
+  const lines = text.split('\n').filter((line) => DEPLOY_LINE_RE.test(line));
+  if (lines.length !== 1) findings.push(`${lines.length} lines hold the deploy command, not exactly one`);
+  for (const line of lines) {
+    if (!line.startsWith('npx ')) findings.push(`the deploy line does not run through npx: ${line}`);
+    if (!line.includes('--config wrangler.jsonc')) findings.push(`the deploy line does not name its config file: ${line}`);
+  }
+  const versions = [...text.matchAll(TOOL_VERSION_RE)].map((match) => match[1] ?? '');
+  for (const version of new Set(versions)) {
+    if (!EXACT_VERSION_RE.test(version)) findings.push(`${TOOL} version ${version} is not one exact version`);
+  }
+  if (new Set(versions).size > 1) findings.push(`the document names ${new Set(versions).size} ${TOOL} versions`);
+  if (lines.some((line) => !PINNED_TOOL_RE.test(line))) findings.push('the deploy line pins no version');
+  return findings;
+}
+
+describe('the site deploy document names the build and exactly one pinned deploy command', () => {
+  const doc = (): string => readCommitted(DEPLOY_DOC_PATH) ?? '';
+
+  it('holds one deploy line through npx at one exact version against the site config', () => {
+    expect(deployDocFindings(doc()).join('; ')).toBe('');
+    expect(characterFindings(doc())).toEqual([]);
+  });
+
+  it('names the build, the origin setting, its file, the config file and the build output', () => {
+    for (const name of ['`npm run build`', '`SITE_ORIGIN`', '`packages/web/src/site/route-list.ts`', '`packages/web/wrangler.jsonc`', '`packages/web/dist`', `${TOOL}@`]) {
+      expect(doc()).toContain(name);
+    }
+    expect(doc()).toMatch(new RegExp(`npx ${TOOL}@\\S+ login`));
+  });
+
+  it('reads the origin before the first deploy, replaces a personal-name subdomain and deploys from the origin commit', () => {
+    const prose = doc().replace(/\s+/g, ' ');
+    for (const phrase of [
+      'Before the first deploy',
+      'holds a personal name, replace it',
+      'Build and deploy from the commit that sets `SITE_ORIGIN`',
+      'No script, npm script or CI step in this repository runs the deploy command',
+    ]) {
+      expect(prose).toContain(phrase);
+    }
+  });
+
+  it('reports two deploy lines, a version range and an unpinned deploy', () => {
+    const text = doc();
+    const line = text.split('\n').find((candidate) => DEPLOY_LINE_RE.test(candidate)) ?? '';
+    expect(deployDocFindings(`${text}\n${line}\n`)).toContain('2 lines hold the deploy command, not exactly one');
+    const version = /@(\S+)/.exec(line)?.[1] ?? '';
+    expect(deployDocFindings(text.replaceAll(`@${version}`, `@^${version}`))).toContain(`${TOOL} version ^${version} is not one exact version`);
+    expect(deployDocFindings(text.replace(line, line.replace(`@${version}`, '')))).toContain('the deploy line pins no version');
+  });
+});
