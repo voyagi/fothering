@@ -33,6 +33,9 @@ for (const route of JOB.routes) {
     dataTheme: document.documentElement.getAttribute('data-theme'),
     ground: getComputedStyle(document.documentElement).getPropertyValue('--ground').trim(),
   }));
+  // Under reduced motion every lamp and key is placed in its final state, so the page holds no
+  // animation at all: neither a running one nor a finished one kept by its fill.
+  const motion = await page.evaluate(() => ({ animations: document.getAnimations().length }));
 
   await page.evaluate(axeSource);
   const axe = await page.evaluate(async (cfg) => {
@@ -111,6 +114,7 @@ for (const route of JOB.routes) {
     axe,
     keyboard: { focusables: candidates.focusables, positiveTabindex: candidates.positiveTabindex, walk },
     overflow,
+    motion,
   }));
 }
 

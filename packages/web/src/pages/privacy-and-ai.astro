@@ -1,5 +1,4 @@
 ---
-import Flag from '../components/Flag.astro';
 import Identifier from '../components/Identifier.astro';
 import Schedule from '../components/Schedule.astro';
 import Sheet from '../layouts/Sheet.astro';
@@ -20,6 +19,7 @@ import { textSegments } from '../site/identifier-text.ts';
 import { loadPermissionSnapshot, runtimeRoleHoldsNoDataAction } from '../site/permissions-view.ts';
 import { fillRegion, loadRepoFacts, readDeployRegion, readForgetCommand, readRepoText, repoRoot } from '../site/repo-facts.ts';
 import { routeFor } from '../site/route-list.ts';
+import { segmentNumber } from '../site/seven-segment.ts';
 import { identifyingFields } from '../site/stored-fields.ts';
 
 // Every statement the built checks hold this page to is read from the committed lists, the stored
@@ -76,6 +76,13 @@ const neverItems = [
   `Overrides a refusal. ${model('refusals')}`,
 ];
 
+// The readout draws the retention figure from the retention statement itself, so the two can never
+// disagree.
+const retention = privacy('retention');
+const days = /expires (\d+) days/.exec(retention)?.[1];
+if (days === undefined) throw new Error(`privacy page: the retention statement no longer says "expires N days" (${retention}), and the readout reads its figure from there. Update the pattern here or the statement.`);
+const daysDigits = segmentNumber(days);
+
 const FILTER_TITLE = 'Event filter drawing';
 const FILTER_DESC = 'An SES event enters the ingest filter. The subject, the headers and the addresses leave through a drain line and are not stored. The receiving domain, a keyed hash, the tags and the bounce details continue to the table.';
 const INTERLOCK_TITLE = 'Interlock drawing';
@@ -88,27 +95,35 @@ const INTERLOCK_DESC = 'Stored events, which hold no addresses, go to detection 
       <p class="intro">Two things are covered here: a Fothering deployment, which runs in its operator's own AWS account, and this website. The second half says what the AI model decides and what code decides.</p>
       <p class="jump"><a href="#privacy">Privacy</a><a href="#ai">AI</a></p>
     </div>
-    <div class="sea sea-col">
-      <div class="hoist hoist-answer">
-        <Flag code="answer" />
-        <div class="decode">
-          <p class="k">Answering pennant, close up</p>
-          <p class="v">Close, with the option id code approved.</p>
+    <aside class="readout" aria-labelledby="readout-title">
+      <p class="readout-head" id="readout-title"><span>Event records</span> <Identifier value={region} /></p>
+      <p class="window">
+        <svg viewBox={daysDigits.viewBox} aria-hidden="true" focusable="false">
+          {daysDigits.digits.map((digit) => <g transform={digit.transform}>{digit.segments.map((segment) => <polygon class={segment.lit ? 'seg lit' : 'seg'} points={segment.points} />)}</g>)}
+        </svg>
+        <span class="visually-hidden">Each event record expires {days} days after its mail was sent</span>
+        <span class="unit" aria-hidden="true"><b>Days</b><span>until a record expires</span></span>
+      </p>
+      <dl>
+        <div>
+          <dt>Kept</dt>
+          <dd>The receiving domain, a keyed hash, the tags and the bounce details</dd>
         </div>
-      </div>
-      <div class="hoist">
-        <Flag code="answer" />
-        <div class="decode">
-          <p class="k">Answering pennant, at the dip</p>
-          <p class="v">Unknown: nothing closes.</p>
+        <div>
+          <dt>Never kept</dt>
+          <dd>Addresses, subjects and headers</dd>
         </div>
-      </div>
-    </div>
+        <div>
+          <dt>Model returns</dt>
+          <dd>Close, with the option id code approved, or unknown: nothing closes.</dd>
+        </div>
+      </dl>
+    </aside>
   </section>
 
   <section class="band fit-fields" aria-labelledby="privacy">
     <div class="band-head">
-      <h2 id="privacy">Every event passes one filter before it is stored</h2>
+      <h2 id="privacy" class="keycap bank-1">Every event passes one filter before it is stored</h2>
       <p>The ingest function sits between SES and the table. It keeps a closed list of fields and nothing else, so the table never holds an address, a subject or a header.</p>
     </div>
     <figure class="filter">
@@ -163,7 +178,7 @@ const INTERLOCK_DESC = 'Stored events, which hold no addresses, go to detection 
 
   <section class="band" aria-labelledby="facts-title">
     <div class="band-head">
-      <h2 id="facts-title">Where, how long, and how to delete</h2>
+      <h2 id="facts-title" class="keycap bank-2">Where, how long, and how to delete</h2>
       <p>What a deployment keeps lives in its operator's own account, for a fixed time, and one command removes a recipient from it.</p>
     </div>
     <div class="facts">
@@ -190,7 +205,7 @@ const INTERLOCK_DESC = 'Stored events, which hold no addresses, go to detection 
 
   <section class="band" aria-labelledby="site-title">
     <div class="band-head">
-      <h2 id="site-title">This website</h2>
+      <h2 id="site-title" class="keycap bank-3">This website</h2>
       <p>These pages are static files. {website('no-cookie')}, {website('no-analytics')} and have no form.</p>
     </div>
     <ul class="site">
@@ -207,7 +222,7 @@ const INTERLOCK_DESC = 'Stored events, which hold no addresses, go to detection 
 
   <section class="band" aria-labelledby="ai">
     <div class="band-head">
-      <h2 id="ai">What the model decides, and what it cannot</h2>
+      <h2 id="ai" class="keycap bank-4">What the model decides, and what it cannot</h2>
       <p data-model-role>{model('evidence-record')} {model('receives-only')}, explains it in the operator email, and returns close with the option id code approved, or unknown. {model('no-tool')}</p>
     </div>
     <figure class="interlock">
@@ -271,7 +286,7 @@ const INTERLOCK_DESC = 'Stored events, which hold no addresses, go to detection 
 
   <section class="band" aria-labelledby="does-title">
     <div class="band-head">
-      <h2 id="does-title">What the model does, and what it never does</h2>
+      <h2 id="does-title" class="keycap bank-1">What the model does, and what it never does</h2>
       <p>The split is enforced by permissions and code, not by instructions in a prompt.</p>
     </div>
     <div class="split">
@@ -295,7 +310,7 @@ const INTERLOCK_DESC = 'Stored events, which hold no addresses, go to detection 
 
   <section class="band fit-model" aria-labelledby="model-title">
     <div class="band-head">
-      <h2 id="model-title">Which model, and where it runs</h2>
+      <h2 id="model-title" class="keycap bank-2">Which model, and where it runs</h2>
       <p>One model, called from the operator's own AWS account, in the EU.</p>
     </div>
     <Schedule fit columns={['Item', 'Value']} rows={modelRows} caption="Model record for this build, read from the repository's model pin." />
@@ -303,7 +318,7 @@ const INTERLOCK_DESC = 'Stored events, which hold no addresses, go to detection 
 
   <section class="band" aria-labelledby="wrong-title">
     <div class="band-head">
-      <h2 id="wrong-title">Where it can be wrong</h2>
+      <h2 id="wrong-title" class="keycap bank-3">Where it can be wrong</h2>
       <p>The model's part is small on purpose. It can still get that part wrong, and so can the code around it.</p>
     </div>
     <div class="wrong">

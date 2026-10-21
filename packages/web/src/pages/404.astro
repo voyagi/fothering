@@ -1,11 +1,14 @@
 ---
-import Flag from '../components/Flag.astro';
 import Sheet from '../layouts/Sheet.astro';
 import { NOT_FOUND_ROUTE, ROUTES } from '../site/route-list.ts';
+import { segmentNumber } from '../site/seven-segment.ts';
 
 // The copy names the page count in words (UI-SPEC 11.1), so a page added or removed stops the build
 // rather than leaving the sentence wrong.
 if (ROUTES.length !== 5) throw new Error(`404 page: the copy says five pages and the route list holds ${String(ROUTES.length)}. Reword the paragraph.`);
+// Workers serves this page with a 404 status (not_found_handling "404-page" in wrangler.jsonc), so
+// the readout's figure is the status the browser received.
+const status = segmentNumber('404');
 ---
 <Sheet route={NOT_FOUND_ROUTE}>
   <section class="first-band not-found" aria-labelledby="page-title">
@@ -18,14 +21,15 @@ if (ROUTES.length !== 5) throw new Error(`404 page: the copy says five pages and
         </a>
       </p>
     </div>
-    <div class="sea sea-col">
-      <div class="hoist">
-        <Flag code="answer" />
-        <div class="decode">
-          <p class="k">Answering pennant, at the dip</p>
-          <p class="v">Seen, not yet understood.</p>
-        </div>
-      </div>
-    </div>
+    <aside class="readout" aria-labelledby="status-title">
+      <p class="readout-head" id="status-title"><span>Status</span></p>
+      <p class="window">
+        <svg viewBox={status.viewBox} aria-hidden="true" focusable="false">
+          {status.digits.map((digit) => <g transform={digit.transform}>{digit.segments.map((segment) => <polygon class={segment.lit ? 'seg lit' : 'seg'} points={segment.points} />)}</g>)}
+        </svg>
+        <span class="visually-hidden">Status 404, not found</span>
+        <span class="unit" aria-hidden="true"><b>Not found</b></span>
+      </p>
+    </aside>
   </section>
 </Sheet>

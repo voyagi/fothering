@@ -207,6 +207,7 @@ code { font-size: var(--text-mono-value); font-weight: 500; }
 .window .unit { display: grid; gap: var(--space-xs); padding-bottom: var(--space-xs); }
 .window .unit b { font: 600 var(--text-segment-unit)/1 var(--font-silk); font-stretch: 85%; letter-spacing: 0.14em; }
 .window code { color: var(--window-ink); }
+.window .unit > span { font-size: var(--text-small); line-height: 1.3; }
 .readout dl { margin: 0; }
 .readout dl > div { display: grid; grid-template-columns: 88px minmax(0, 1fr); gap: var(--space-12); align-items: baseline; padding: var(--space-sm) 0; border-top: var(--w-rule) solid var(--ink); }
 .readout dd { margin: 0; max-inline-size: none; font-size: var(--text-small); line-height: 1.45; color: var(--ink-2); }
@@ -222,7 +223,7 @@ code { font-size: var(--text-mono-value); font-weight: 500; }
 /* The step pattern: each lane a track of pads, one pad per recorded event, banked by replay step.
    A row is its own grid, so on a narrow screen the lane's name and mute key restack above its pads
    and no pad is ever cropped. */
-.pattern { margin: 0; padding: 0 var(--gutter) var(--space-xl); }
+.pattern, .board { margin: 0; padding: 0 var(--gutter) var(--space-xl); }
 .tracks { --pad-h: 44px; display: grid; gap: var(--space-sm); padding-top: var(--space-12); border-top: 2px solid var(--ink); }
 .track { display: grid; grid-template-columns: 13rem minmax(0, 1fr) 5.5rem; gap: 0 var(--space-md); align-items: center; }
 .pads { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: var(--space-sm); }
@@ -251,7 +252,7 @@ code { font-size: var(--text-mono-value); font-weight: 500; }
 .cols-9 { grid-column: span 9; } .cols-10 { grid-column: span 10; } .cols-11 { grid-column: span 11; } .cols-12 { grid-column: span 12; }
 .cols-13 { grid-column: span 13; } .cols-14 { grid-column: span 14; } .cols-15 { grid-column: span 15; } .cols-16 { grid-column: span 16; }
 .track-banks time { font: 500 var(--text-silk-small)/1.3 var(--font-mono); letter-spacing: 0; color: var(--label); }
-.pattern figcaption { margin-top: var(--space-md); font: 400 var(--text-silk)/1.4 var(--font-text); color: var(--ink-2); }
+:is(.pattern, .board) figcaption { margin-top: var(--space-md); font: 400 var(--text-silk)/1.4 var(--font-text); color: var(--ink-2); }
 
 /* The readout's detail, under the pattern: what the cause rests on, what was ruled out, and what
    reopens the lane. */
@@ -377,50 +378,99 @@ table.schedule, table.ruled { width: 100%; border-collapse: collapse; font: 400 
 
 /* Replay. Which step shows is CSS alone: the root's data-step (written before first paint from a
    valid hash, then by replay.ts) against each part's data-steps list; no data-step means step 1. */
-:root.js:not([data-step]) [data-steps]:not([data-steps~="1"]),
-:root.js[data-step="1"] [data-steps]:not([data-steps~="1"]),
-:root.js[data-step="2"] [data-steps]:not([data-steps~="2"]),
-:root.js[data-step="3"] [data-steps]:not([data-steps~="3"]),
-:root.js[data-step="4"] [data-steps]:not([data-steps~="4"]) { display: none; }
-/* Without JavaScript every panel and log row reads in order, the board holds the paused step, and
-   no control that would do nothing is shown. */
-:root:not(.js) .board [data-steps]:not([data-steps~="3"]),
+:root.js:not([data-step]) [data-steps]:not([data-steps~="1"], :is(.board, .readout) *),
+:root.js[data-step="1"] [data-steps]:not([data-steps~="1"], :is(.board, .readout) *),
+:root.js[data-step="2"] [data-steps]:not([data-steps~="2"], :is(.board, .readout) *),
+:root.js[data-step="3"] [data-steps]:not([data-steps~="3"], :is(.board, .readout) *),
+:root.js[data-step="4"] [data-steps]:not([data-steps~="4"], :is(.board, .readout) *) { display: none; }
+/* On the board and the readout a part's step variants share one cell, and the ones another step
+   shows are hidden but keep their room, so the board, its step keys and the controls under it hold
+   still from step to step. */
+:root.js:not([data-step]) :is(.board, .readout) [data-steps]:not([data-steps~="1"]),
+:root.js[data-step="1"] :is(.board, .readout) [data-steps]:not([data-steps~="1"]),
+:root.js[data-step="2"] :is(.board, .readout) [data-steps]:not([data-steps~="2"]),
+:root.js[data-step="3"] :is(.board, .readout) [data-steps]:not([data-steps~="3"]),
+:root.js[data-step="4"] :is(.board, .readout) [data-steps]:not([data-steps~="4"]) { visibility: hidden; }
+.board .lane-name > [data-steps] { grid-area: 2 / 1; }
+.board .mute { grid-area: 1 / 3; }
+.readout dd[data-steps] { grid-area: 1 / 2; }
+/* Without JavaScript every panel and log row reads in order, the board and the readout hold the
+   paused step, and no control that would do nothing is shown. */
+:root:not(.js) :is(.board, .readout) [data-steps]:not([data-steps~="3"]),
 :root:not(.js) .steps, :root:not(.js) .controls, :root:not(.js) .needs-js { display: none; }
 
-/* One grid: the intro and the story beside the board, the board itself sticky beside the story. */
-.replay { display: grid; grid-template-columns: minmax(0, 1fr) minmax(320px, 520px); grid-template-rows: auto 1fr; grid-template-areas: "intro board" "story board"; gap: 0 var(--space-40); padding: 0 var(--gutter); }
-.replay-intro { grid-area: intro; display: grid; gap: var(--space-md); padding: var(--space-40) 0 var(--space-lg); }
-.replay-intro .intro { margin: 0; }
-.board-col { grid-area: board; }
-.board { position: sticky; top: 0; display: flex; flex-direction: column; gap: var(--space-lg); padding: var(--space-40) var(--space-lg) var(--space-xl); }
-.board p { margin: 0; }
-.no-signal { font: 800 var(--text-headline)/1 var(--font-silk); font-stretch: 75%; text-transform: uppercase; }
-.board .hoist.dip { margin-top: var(--space-3xl); }
-.hauled { font-size: var(--text-small); color: var(--ink-2); }
-.story { grid-area: story; display: grid; gap: var(--space-lg); align-content: start; padding: 0 0 var(--band-block); }
+/* The board is the landing's pattern played through the reopen. A bank the replay has not reached
+   yet is drawn unplayed, a dashed outline with its lamps out, so the pattern keeps every column from
+   the first step and never grows. */
+:root.js:is(:not([data-step]), [data-step="1"]) .board .pad:is(.bank-2, .bank-3, .bank-4),
+:root.js[data-step="2"] .board .pad:is(.bank-3, .bank-4),
+:root.js[data-step="3"] .board .pad.bank-4,
+:root:not(.js) .board .pad.bank-4,
+.pad.unplayed { border-style: dashed; border-color: var(--label); background: transparent; }
+:root.js:is(:not([data-step]), [data-step="1"]) .board .pad:is(.bank-2, .bank-3, .bank-4)::before,
+:root.js:is(:not([data-step]), [data-step="1"]) .board .pad:is(.bank-2, .bank-3, .bank-4)::after,
+:root.js[data-step="2"] .board .pad:is(.bank-3, .bank-4)::before,
+:root.js[data-step="2"] .board .pad:is(.bank-3, .bank-4)::after,
+:root.js[data-step="3"] .board .pad.bank-4::before,
+:root.js[data-step="3"] .board .pad.bank-4::after,
+:root:not(.js) .board .pad.bank-4::before,
+:root:not(.js) .board .pad.bank-4::after,
+.pad.unplayed::before, .pad.unplayed::after { border: 0; background: var(--rule); outline: 0; }
+/* Each step plays its own bank when it shows: the playhead runs from the bank's first column, its
+   lamps lighting in turn, and on the paused step the muted pads drop to grey and the mute key
+   lights on the column the pause took. Nothing loops; reduced motion places the final state. */
+@media (prefers-reduced-motion: no-preference) {
+  :root.js:is(:not([data-step]), [data-step="1"]) .board .pad.bank-1:is(.lit, .bounce)::before,
+  :root.js[data-step="2"] .board .pad.bank-2:is(.lit, .bounce)::before,
+  :root.js[data-step="3"] .board .pad.bank-3:is(.lit, .bounce)::before,
+  :root.js[data-step="4"] .board .pad.bank-4:is(.lit, .bounce)::before { animation: lamp-on 160ms cubic-bezier(0.16, 1, 0.3, 1) calc(120ms + var(--at, 0) * 90ms) backwards; }
+  :root.js[data-step="3"] .board .pad.muted.bank-3,
+  :root.js[data-step="4"] .board .pad.muted.bank-4 { animation: pad-mute 240ms cubic-bezier(0.16, 1, 0.3, 1) calc(120ms + var(--at, 0) * 90ms) backwards; }
+  .board .mute.on { animation: mute-on 200ms cubic-bezier(0.16, 1, 0.3, 1) calc(120ms + var(--at, 0) * 90ms) backwards; }
+}
+.board .track-banks { margin-top: var(--space-sm); }
+.story { display: grid; gap: var(--space-lg); padding: 0 var(--gutter) var(--band-block); }
 
 ol.summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); margin: var(--space-sm) 0 0; padding: 0; list-style: none; border-top: 2px solid var(--ink); }
 .summary li { padding: var(--space-12) var(--space-md) 0 0; font-size: var(--text-small); line-height: 1.45; }
 .summary li + li { padding-left: var(--space-md); border-left: var(--w-rule) solid var(--rule); }
 .summary time { display: block; font: 600 var(--text-mono-value)/1.4 var(--font-mono); font-feature-settings: "tnum" 1; color: var(--label); }
 
-/* The step strip: each step's number, the current one in ink and the others a value step down, the
-   current label bold over a bar. */
-ol.steps { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--space-sm); margin: 0; padding: 0; list-style: none; border-bottom: var(--w-rule) solid var(--rule); }
-.steps li { max-inline-size: none; }
-.steps .step { display: flex; flex-direction: column; align-items: flex-start; gap: var(--space-sm); inline-size: 100%; min-block-size: 44px; padding: var(--space-md) var(--space-sm) var(--space-md) 0; border: 0; background: none; color: var(--ink); font: 400 var(--text-small)/1.3 var(--font-text); text-align: left; cursor: pointer; }
-.steps .numeral { color: var(--label); }
-.steps .step[aria-current="step"] .numeral { color: var(--ink); }
-.steps .step:hover .step-label { text-decoration: underline 1px; text-underline-offset: 6px; }
-.steps .step[aria-current="step"] .step-label { font-weight: 700; text-decoration: underline 2px; text-underline-offset: 6px; }
-.steps .t { font: 500 var(--text-silk)/1 var(--font-mono); font-feature-settings: "tnum" 1; color: var(--label); }
+/* The step keys are the bank row under the pattern: each step a key in its bank's colour under the
+   rule that spans its bank, the number printed top left and the lamp top right. The current step
+   lights its lamp and sets its label in ink over a bar, so the mark is not colour alone. Where the
+   row is narrow each step stacks its time and label under its key. */
+ol.steps { margin: 0; padding: 0; list-style: none; container: steps / inline-size; }
+.steps li { display: flex; max-inline-size: none; padding-top: var(--space-sm); border-top: 2px solid var(--ink); }
+.steps .step { display: flex; flex-direction: column; align-items: flex-start; gap: var(--space-xs); inline-size: 100%; min-block-size: 44px; margin: 0; padding: 0 0 var(--space-xs); border: 0; background: none; color: var(--ink-2); text-align: left; cursor: pointer; }
+.step .key { position: relative; display: block; flex: none; inline-size: 44px; block-size: 44px; border: var(--w-rule) solid var(--key-edge); border-radius: 4px; background: var(--bank); color: var(--key-ink); }
+.step .key .numeral { position: absolute; top: var(--space-xs); left: var(--space-sm); font-size: var(--text-title); }
+.step .key .lamp { position: absolute; top: var(--space-sm); right: var(--space-sm); background: var(--lamp-dark); }
+.steps .t { font: 500 var(--text-silk)/1.2 var(--font-mono); font-feature-settings: "tnum" 1; color: var(--label); }
+.steps .step-label { font: 600 var(--text-silk)/1.3 var(--font-silk); font-stretch: 85%; letter-spacing: 0.12em; text-transform: uppercase; }
+.steps .step:hover .key { border-color: var(--ink); }
+.steps .step:hover .step-label { text-decoration: underline 1px; text-underline-offset: 4px; }
+.steps .step[aria-current="step"] { color: var(--ink); }
+/* The current step's lamp is built like a bounce lamp, an LED core in a key-white bezel, because a
+   bare LED disappears on the red bank's key. */
+.steps .step[aria-current="step"] .lamp { inline-size: 12px; block-size: 12px; border: 2px solid var(--key-white); background: var(--led); outline: 1.5px solid var(--key-ink); }
+/* The weight stays put, so the current label never rewraps and moves the keys. */
+.steps .step[aria-current="step"] .step-label { text-decoration: underline 2px; text-underline-offset: 4px; }
+@container steps (width >= 820px) {
+  .steps .step { display: grid; grid-template-columns: 44px minmax(0, 1fr); align-content: start; gap: var(--space-xs) var(--space-12); }
+  .step .key { grid-row: span 2; }
+}
 
-.controls { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-12) var(--space-lg); }
+.controls { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-12) var(--space-lg); padding: var(--space-md) var(--gutter) var(--space-lg); }
 .controls .clock { margin: 0 0 0 auto; font: 600 var(--text-mono-value)/1.4 var(--font-mono); font-feature-settings: "tnum" 1; color: var(--label); }
-.panel { display: flex; flex-direction: column; gap: var(--space-md); container-type: inline-size; }
+/* A step's panel: its title on the step's keycap beside the story, under a 2px rule. The body is the
+   container the compact schedule measures. */
+.panel { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: var(--space-lg) var(--space-40); align-items: start; padding-top: var(--space-lg); border-top: 2px solid var(--ink); }
 .panel h2 { font-size: var(--text-narrative-headline); }
-.panel > p { margin: 0; color: var(--ink-2); }
+.panel-body { display: flex; flex-direction: column; gap: var(--space-md); min-inline-size: 0; container-type: inline-size; }
+.panel-body > p { margin: 0; color: var(--ink-2); }
 .panel .lanes { color: var(--ink); font-weight: 600; }
+.panel .lanes .lamp { margin-right: var(--space-sm); vertical-align: 1px; }
 
 /* Beside the board, and on a narrow screen, the story column can be narrower than four columns of
    evidence and an unbroken tag value. There each row's dimension spans its row as a heading over its
@@ -454,9 +504,10 @@ ol.steps { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap:
 
 /* A stacking schedule holds identifiers in several columns (the log's lane and its tag values),
    which never break, so it becomes one block per row only where its own column is narrower than
-   the table needs (600px measured on the replay log, 2026-10-18), never by the viewport alone. */
+   the table needs (591px measured on the replay log with Saira heads and Public Sans cells,
+   2026-10-21), never by the viewport alone. */
 .log { container-type: inline-size; }
-@container (width < 604px) {
+@container (width < 595px) {
   table.schedule.stack, .schedule.stack thead, .schedule.stack tbody, .schedule.stack tr, .schedule.stack th, .schedule.stack td { display: block; width: auto; }
   .schedule.stack thead { display: none; }
   .schedule.stack caption { display: block; padding: var(--space-sm) 0; }
@@ -492,11 +543,9 @@ ol.steps { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap:
    matches these minimums' specificity and, later in the file, wins over them (here and below). */
 .fit td[data-col="Why"] .cell-text { min-inline-size: 12em; }
 .fit td[data-col="On removal"] .cell-text { min-inline-size: 12em; }
-/* Measured 2026-10-20 on the rendered tables with the minimums above, after the phase 2 merge: the
-   resource table needs 777px and the widest role table, the runtime role's, 937px. These are the
-   old faces' figures; the new faces move them, so they are measured again before the redesign
-   lands. */
-@container resources (width < 780px) {
+/* Measured 2026-10-21 on the rendered tables with the minimums above and the Saira, Public Sans and
+   Source Code Pro faces: the resource table needs 756px and the widest role table 907px. */
+@container resources (width < 760px) {
   .fit-resources .fit, .fit-resources .fit :is(thead, tbody, tr, th, td) { display: block; width: auto; }
   .fit-resources .fit :is(thead, td[data-empty]) { display: none; }
   .fit-resources .fit tbody tr { padding: var(--space-xs) 0 var(--space-sm); }
@@ -511,7 +560,7 @@ ol.steps { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap:
 @container resources (width < 286px) {
   .fit-resources .fit code { font-size: var(--text-silk); }
 }
-@container permissions (width < 940px) {
+@container permissions (width < 911px) {
   .fit-permissions .fit, .fit-permissions .fit :is(thead, tbody, tr, th, td) { display: block; width: auto; }
   .fit-permissions .fit :is(thead, td[data-empty]) { display: none; }
   .fit-permissions .fit tbody tr { padding: var(--space-xs) 0 var(--space-sm); }
@@ -582,13 +631,15 @@ ul.site { display: grid; gap: var(--space-12); margin: 0; padding-left: var(--sp
 .fit-fields .fit tbody th wbr { display: none; }
 /* A model record value is prose, so in table form it keeps a readable column. */
 .fit-model td[data-col="Value"] .cell-text { min-inline-size: 16em; }
-/* Measured 2026-10-18 on the rendered tables, with the old faces: the stored-field table needs 536px
-   with its paths on one line, the model record 391px with its 16em value column. */
-/* The stored-field table also stacks at 620px and below: there its section is wider than at 657px
-   and would otherwise switch form three times. Either condition names the wrapper fields-stacked,
-   and the stacked rules below query that name, so they are written once for both. */
+/* Measured 2026-10-21 on the rendered tables with the Saira, Public Sans and Source Code Pro faces:
+   the stored-field table needs 508px with its paths on one line, the model record 366px with its
+   16em value column. */
+/* The stored-field table also stacks at 620px and below, like the statement schedules, so on a phone
+   it reads as blocks even where its section is just wide enough (a 320 to 1440 sweep on 2026-10-21:
+   one change of form, at 624px). Either condition names the wrapper fields-stacked, and the stacked
+   rules below query that name, so they are written once for both. */
 .fit-fields .fit-form { container-type: inline-size; }
-@container fields (width < 540px) { .fit-fields .fit-form { container-name: fields-stacked; } }
+@container fields (width < 512px) { .fit-fields .fit-form { container-name: fields-stacked; } }
 @media (max-width: 620px) { .fit-fields .fit-form { container-name: fields-stacked; } }
 @container fields-stacked (width >= 0px) {
   .fit-fields .fit, .fit-fields .fit :is(thead, tbody, tr, th, td) { display: block; width: auto; }
@@ -601,7 +652,7 @@ ul.site { display: grid; gap: var(--space-12); margin: 0; padding-left: var(--sp
   .fit-fields .fit :is(th, td) .cell-text { min-inline-size: 0; }
   .fit-fields .fit tbody th wbr { display: inline; }
 }
-@container model (width < 394px) {
+@container model (width < 370px) {
   .fit-model .fit, .fit-model .fit :is(thead, tbody, tr, th, td) { display: block; width: auto; }
   .fit-model .fit thead { display: none; }
   .fit-model .fit tbody tr { padding: var(--space-xs) 0 var(--space-sm); }
@@ -623,10 +674,11 @@ ul.site { display: grid; gap: var(--space-12); margin: 0; padding-left: var(--sp
 .fit-checks .fit tbody th { min-inline-size: calc(11em + 32px); }
 .fit-record .fit-form, .fit-checks .fit-form { container-type: inline-size; }
 /* Either condition names the wrapper statement-stacked, so the stacked rules are written once for
-   both schedules; each schedule's own section decides its own form. Measured 2026-10-18 with the old
-   faces: the record needs 409px and the hand-check schedule 672px. */
-@container record (width < 412px) { .fit-record .fit-form { container-name: statement-stacked; } }
-@container checks (width < 676px) { .fit-checks .fit-form { container-name: statement-stacked; } }
+   both schedules; each schedule's own section decides its own form. Measured 2026-10-21 with the
+   Saira, Public Sans and Source Code Pro faces: the record needs 381px and the hand-check schedule
+   634px. */
+@container record (width < 385px) { .fit-record .fit-form { container-name: statement-stacked; } }
+@container checks (width < 638px) { .fit-checks .fit-form { container-name: statement-stacked; } }
 @media (max-width: 620px) {
   :is(.fit-record, .fit-checks) .fit-form { container-name: statement-stacked; }
 }
@@ -644,38 +696,20 @@ ul.site { display: grid; gap: var(--space-12); margin: 0; padding-left: var(--sp
   .fit-checks .fit .state-mark-none { display: none; }
 }
 
-/* Interim, until the replay board and the privacy, accessibility and 404 first bands are rebuilt
-   in this world: the previous direction's flag parts, recoloured from these tokens so those pages
-   stay legible. Delete this block with Flag.astro. */
-.sea { position: relative; border-radius: 6px; background: var(--well); color: var(--ink); container-type: inline-size; }
-.sea-col { display: flex; flex-direction: column; gap: var(--space-lg); margin: 0; padding: var(--space-lg); }
-.hoist { display: flex; align-items: flex-start; gap: var(--space-lg); }
-.hoist .flag-letter { inline-size: min(160px, 40cqi); }
-.hoist .flag-pennant { inline-size: min(120px, 30cqi); }
-@container (width < 420px) { .hoist { flex-direction: column; gap: var(--space-md); } }
-.flag { display: block; flex: none; block-size: auto; overflow: visible; }
-.f-red { fill: var(--key-red); }
-.f-yellow { fill: var(--key-yellow); }
-.f-blue { fill: var(--ink); }
-.f-black { fill: var(--key-ink); }
-.f-white { fill: var(--key-white); }
-.f-edge { fill: none; stroke: var(--key-ink); stroke-width: 1.5px; vector-effect: non-scaling-stroke; }
-.decode { display: flex; flex-direction: column; gap: var(--space-xs); min-inline-size: 0; }
-.decode p { margin: 0; }
-.decode .v, .meaning, .lane { font-size: var(--text-small); line-height: 1.4; color: var(--ink-2); }
-.letter { font: 800 var(--text-headline)/1 var(--font-silk); font-stretch: 75%; }
-.decode .legend { margin-top: var(--space-sm); font: 800 var(--text-title)/1 var(--font-silk); font-stretch: 85%; letter-spacing: 0.06em; }
-.quiet-lanes { display: grid; gap: var(--space-sm); margin: 0; padding: 0; list-style: none; font-size: var(--text-small); line-height: 1.4; color: var(--ink-2); }
-.quiet-lanes code { margin-right: var(--space-sm); }
-.sea .caption { margin: auto 0 0; font: 400 var(--text-silk)/1.4 var(--font-text); color: var(--ink-2); }
-.flag-mark { display: inline-block; inline-size: 18px; margin-right: var(--space-sm); vertical-align: -2px; }
-.key { display: grid; gap: var(--space-lg); margin: 0; padding: 0; list-style: none; }
-.key li { max-inline-size: none; }
+/* The marks legend on the accessibility statement: each mark drawn small beside its name, the
+   meaning under it, in as many columns as the band holds. */
+.marks dl { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(16rem, 100%), 1fr)); gap: 0 var(--space-lg); }
+.readout.marks dl > div { grid-template-columns: minmax(0, 1fr); gap: var(--space-sm); align-content: start; padding: var(--space-12) 0; }
+.marks dt { display: flex; align-items: center; gap: var(--space-12); }
+.marks .sample { display: flex; align-items: center; gap: var(--space-xs); flex: none; min-block-size: 28px; }
+.marks .pad { display: block; flex: none; inline-size: 24px; block-size: 28px; }
+.marks .pad::before { top: 5px; inline-size: 12px; block-size: 8px; }
+.marks .pad::after { bottom: 5px; inline-size: 8px; block-size: 3px; }
+.marks .pad.bounce::before { border-width: 2px; }
+.marks .sq { margin-right: 0; }
 
 @media (max-width: 960px) {
-  .first-band, .replay { grid-template-columns: minmax(0, 1fr); }
-  .replay { grid-template-rows: none; grid-template-areas: "intro" "board" "story"; }
-  .board { position: static; }
+  .first-band, .panel { grid-template-columns: minmax(0, 1fr); }
   .band-head, .band-split { grid-template-columns: minmax(0, 1fr); }
   ol.procedure { grid-auto-flow: row; grid-template-columns: repeat(2, minmax(0, 1fr)); }
   ol.summary { grid-template-columns: repeat(2, minmax(0, 1fr)); row-gap: var(--space-12); }
@@ -712,8 +746,7 @@ ul.site { display: grid; gap: var(--space-12); margin: 0; padding-left: var(--sp
   .index { grid-template-columns: minmax(0, 1fr); }
   /* The sticky controls cover the top of the viewport, so focus scrolled into view lands below them. */
   :root:has(.controls) { scroll-padding-top: 120px; }
-  ol.steps { grid-template-columns: repeat(2, minmax(0, 1fr)); row-gap: var(--space-xs); }
-  .controls { position: sticky; top: 0; z-index: 2; margin: -12px 0 0; padding: var(--space-12) 0; background: var(--ground); border-bottom: var(--w-rule) solid var(--rule); }
+  .controls { position: sticky; top: 0; z-index: 2; padding: var(--space-12) var(--gutter); background: var(--ground); border-bottom: var(--w-rule) solid var(--rule); }
   .controls .keybtn, .controls .button { flex: 1 1 40%; justify-content: center; }
   .controls .clock { width: 100%; margin-left: 0; }
   ol.summary { grid-template-columns: minmax(0, 1fr); }

@@ -87,7 +87,7 @@ export const ACCEPTED_INCOMPLETE: readonly AcceptedIncomplete[] = Object.freeze(
     ruleId: 'color-contrast',
     // An SVG text element (axe names it by tag) or a drawing part (every drawing class starts dwg-).
     targetPattern: '^(?:text(?:$|[[.:#])|[.]dwg-)',
-    reason: 'text inside the inline SVG drawings: axe-core cannot compute the background behind SVG text, and the drawings set it only in the ink and label colours on the sheet colour, the pairs the page text uses',
+    reason: 'text inside the inline SVG drawings: axe-core cannot compute the background behind SVG text, and the drawings set it only in the ink and label colours on the ground colour, the pairs the page text uses',
   },
 ]);
 
@@ -145,6 +145,9 @@ export interface AuditLine {
   readonly axe?: AxeReport;
   readonly keyboard?: KeyboardReport;
   readonly overflow?: { readonly scrollWidth: number; readonly innerWidth: number };
+  // document.getAnimations() right after load: under reduced motion every lamp and key is placed in
+  // its final state, so nothing may be animating or held by an animation's fill.
+  readonly motion?: { readonly animations: number };
 }
 
 const describeStop = (stop: FocusStop): string => `<${stop.tag}> at DOM index ${stop.domIndex}`;
@@ -178,7 +181,7 @@ export const A11Y_MESSAGES = Object.freeze({
   malformedAudit: (run: string, text: string) => `${run}: an AUDIT line is not a valid audit record: ${text.slice(0, 120)}`,
   missingRoute: (run: string, route: string) => `${run}: no AUDIT line for ${route}, so it was not run`,
   status: (status: number, expected: number) => `the route answered ${status}, not ${expected}`,
-  axeAbsent: () => 'the record carries no axe, keyboard or overflow result',
+  axeAbsent: () => 'the record carries no axe, keyboard, overflow or motion result',
   axeVersionRan: (version: string) => `axe-core ${version} ran, ${AXE_VERSION} expected`,
   noSelectedRules: () => 'the five tags selected no axe rule',
   ruleNotSelected: (ruleId: string) => `${ruleId} is not among the rules the five tags select`,
@@ -187,6 +190,7 @@ export const A11Y_MESSAGES = Object.freeze({
   incomplete: (id: string, nodes: number, target: string) => `axe incomplete ${id} on ${nodes} element(s), first ${target}, and ${id} is not on the accepted list`,
   overflow: (scrollWidth: number, viewportWidth: number) => `the page is ${scrollWidth} px wide in a ${viewportWidth} px viewport`,
   viewport: (innerWidth: number, width: number) => `the viewport measured ${innerWidth} px, ${width} px expected`,
+  motion: (animations: number) => `${animations} animation(s) on the page under reduced motion, where every lamp and key is placed in its final state with none`,
   positiveTabindex: (count: number, first: string) => `${count} element(s) carry a positive tabindex, first ${first}`,
   noFocus: () => 'the first Tab focused nothing',
   firstNotSkipLink: (stop: string) => `the first Tab focused ${stop}, not the skip link`,
@@ -302,7 +306,7 @@ export interface StorageReading {
   readonly session: readonly string[];
 }
 
-export const SITE_FAMILIES = Object.freeze(['Red Hat Display', 'Red Hat Text', 'Red Hat Mono']);
+export const SITE_FAMILIES = Object.freeze(['Saira', 'Public Sans', 'Source Code Pro']);
 
 const THEME_ORDER = ['device', 'light', 'dark'];
 const PINNED_CHOICES = ['light', 'dark'];
@@ -460,115 +464,53 @@ export interface DrawingReading {
 }
 
 export interface OverlapReading {
-  readonly tag: Box | null;
   readonly drawings: readonly DrawingReading[];
 }
 
-// Boxes that only touch do not overlap; a text box may sit half a pixel past its drawing for
-// sub-pixel rounding, and a whole pixel past it fails.
-const overlaps = (first: Box, second: Box): boolean =>
-  first.left < second.right && first.right > second.left && first.top < second.bottom && first.bottom > second.top;
+// A text box may sit half a pixel past its drawing for sub-pixel rounding, and a whole pixel past
+// it fails.
 const EDGE_TOLERANCE = 0.5;
 const outside = (inner: Box, outer: Box): boolean =>
   inner.left < outer.left - EDGE_TOLERANCE || inner.top < outer.top - EDGE_TOLERANCE || inner.right > outer.right + EDGE_TOLERANCE || inner.bottom > outer.bottom + EDGE_TOLERANCE;
 
-// AC-65: the hung tag covers no drawing text, and no drawing text leaves its drawing.
+// AC-65: no drawing text leaves its drawing.
 export function overlapVerdict(reading: OverlapReading): Verdict {
-  const reasons = reading.drawings.flatMap((drawing) => drawing.texts.flatMap((text) => [
-    ...(reading.tag !== null && overlaps(reading.tag, text.box) ? [E2E_MESSAGES.tagOverlap(text.text)] : []),
-    ...(outside(text.box, drawing.box) ? [E2E_MESSAGES.textOutside(text.text)] : []),
-  ]));
+  const reasons = reading.drawings.flatMap((drawing) => drawing.texts.flatMap((text) => (outside(text.box, drawing.box) ? [E2E_MESSAGES.textOutside(text.text)] : [])));
   return verdictOf(reasons);
 }
 
-export interface FlowControlBox {
-  readonly label: string;
-  readonly width: number;
-  readonly height: number;
+export interface MotionTiming {
+  // Every animation document.getAnimations() returns a few frames after load.
+  readonly count: number;
+  // Of those, the ones whose iteration count is Infinity.
+  readonly infinite: number;
+  // The latest endTime of the finite ones in milliseconds, its delay included; 0 when none.
+  readonly longestEnd: number;
 }
 
-export interface FlowState {
-  readonly running: number;
-  readonly labels: readonly string[];
-}
-
-export interface FlowReading {
+export interface MotionReading {
   readonly route: string;
   readonly width: number;
-  readonly movingOnLoad: boolean;
-  readonly controls: readonly FlowControlBox[];
-  readonly afterClick: FlowState;
-  readonly afterReload: FlowState;
+  // Loaded with motion allowed.
+  readonly onLoad: MotionTiming;
+  // The same route loaded again under reduced motion: how many animations it holds.
   readonly reduced: number;
-  readonly storedRunningReduced: number;
-  readonly storedStopped: number;
 }
 
-const MIN_CONTROL = 44;
-const RUN_FLOW = 'Run flow';
+// WCAG 2.2.2: motion that starts on load and ends within five seconds needs no control to stop it.
+export const MOTION_LIMIT_MS = 5000;
 
-function stopReasons(reading: FlowReading): string[] {
-  const { width, afterClick, afterReload } = reading;
+// The playhead run plays once on load and settles: nothing loops, the last animation ends within
+// five seconds, and under reduced motion every lamp and key is placed with no animation at all. A
+// route that carries the playhead run (mustMove) fails when nothing moved there, so a run that
+// measured no motion never passes as calm.
+export function motionVerdict(reading: MotionReading, mustMove = false): Verdict {
+  const { width, onLoad } = reading;
   const reasons: string[] = [];
-  if (afterClick.running > 0) reasons.push(E2E_MESSAGES.flowStillRunning(width, afterClick.running));
-  if (afterClick.labels.length === 0 || afterClick.labels.some((label) => label !== RUN_FLOW)) reasons.push(E2E_MESSAGES.flowLabel(width, afterClick.labels));
-  if (afterReload.running > 0) reasons.push(E2E_MESSAGES.flowReloadRuns(width, afterReload.running));
-  return reasons;
-}
-
-// AC-43, AC-44, AC-E31, AC-E32 and WCAG 2.2.2. Whether a route moves is read from the page's running
-// animations, never from a marker, so a moving drawing with no visible Stop flow cannot pass.
-export function flowVerdict(reading: FlowReading): Verdict {
-  const { width, movingOnLoad, controls } = reading;
-  const reasons: string[] = [];
-  if (movingOnLoad && controls.length === 0) reasons.push(E2E_MESSAGES.flowNoControl(width));
-  if (!movingOnLoad && controls.length > 0) reasons.push(E2E_MESSAGES.flowControlWithoutMotion(width));
-  for (const control of controls) {
-    if (control.width < MIN_CONTROL || control.height < MIN_CONTROL) reasons.push(E2E_MESSAGES.flowSmallControl(width, control.width, control.height));
-  }
-  if (movingOnLoad && controls.length > 0) reasons.push(...stopReasons(reading));
-  if (reading.reduced > 0) reasons.push(E2E_MESSAGES.flowReduced(width, reading.reduced));
-  if (movingOnLoad && reading.storedRunningReduced === 0) reasons.push(E2E_MESSAGES.flowStoredRunning(width));
-  if (reading.storedStopped > 0) reasons.push(E2E_MESSAGES.flowStoredStopped(width, reading.storedStopped));
-  return verdictOf(reasons);
-}
-
-export interface FlowTabReading {
-  readonly width: number;
-  readonly flows: readonly { readonly flowStep: number | null; readonly nextStep: number | null }[];
-}
-
-// AC-E33: a Stop flow control is reached by Tab before the first focusable of the next section.
-export function flowTabVerdict(reading: FlowTabReading): Verdict {
-  const reasons = reading.flows.flatMap(({ flowStep, nextStep }) => {
-    if (flowStep === null) return [E2E_MESSAGES.flowTabUnreached(reading.width)];
-    return nextStep !== null && flowStep > nextStep ? [E2E_MESSAGES.flowTabLate(reading.width)] : [];
-  });
-  return verdictOf(reasons);
-}
-
-// The tag's stem is checked across the 5:7 range as well as at the audit widths, since the drawing
-// is narrowest just above 960.
-export const HANG_WIDTHS = Object.freeze([320, 961, 1280, 1440]);
-
-export interface HangReading {
-  readonly route: string;
-  readonly width: number;
-  readonly hanging: boolean;
-  readonly visibleStem: number;
-  readonly tagTop: number;
-  readonly valveBottom: number;
-}
-
-const MIN_STEM = 12;
-
-// UI-SPEC 8.1: the tag hangs from the closed valve's stem, so a clear stretch of stem shows between
-// the valve and the card, and no corner of the tilted card reaches the valve.
-export function hangVerdict(reading: HangReading): Verdict {
-  if (!reading.hanging) return { ok: true };
-  const reasons: string[] = [];
-  if (reading.visibleStem < MIN_STEM) reasons.push(E2E_MESSAGES.tagStuck(reading.width, reading.visibleStem));
-  if (reading.tagTop <= reading.valveBottom) reasons.push(E2E_MESSAGES.tagMeetsValve(reading.width));
+  if (mustMove && onLoad.count === 0) reasons.push(E2E_MESSAGES.motionStill(width));
+  if (onLoad.infinite > 0) reasons.push(E2E_MESSAGES.motionLoops(width, onLoad.infinite));
+  if (onLoad.longestEnd > MOTION_LIMIT_MS) reasons.push(E2E_MESSAGES.motionLong(width, onLoad.longestEnd));
+  if (reading.reduced > 0) reasons.push(E2E_MESSAGES.motionReduced(width, reading.reduced));
   return verdictOf(reasons);
 }
 
@@ -664,14 +606,16 @@ export interface NoScriptReading {
   // The steps of the panels displayed, in DOM order.
   readonly panels: readonly string[];
   readonly controls: number;
+  // Every per-step part of the board and the readout, and whether it shows.
   readonly boardParts: readonly { readonly steps: string; readonly displayed: boolean }[];
+  // The readout's closure row (the Muted row, data-wordcount tag) shows.
   readonly tagShown: boolean;
 }
 
 const PAUSED_STEP = '3';
 
 // AC-10 and AC-E7: with the js class gone the stylesheet alone shows every panel in order, hides
-// every step control, and holds the board at the paused step with its tag.
+// every step control, and holds the board and the readout at the paused step, closure row included.
 export function noScriptVerdict(reading: NoScriptReading): Verdict {
   const { width } = reading;
   const reasons: string[] = [];
@@ -685,25 +629,20 @@ export function noScriptVerdict(reading: NoScriptReading): Verdict {
   return verdictOf(reasons);
 }
 
-// The replay's layout where its arrangements meet: the board stacks above the story at 960 px and
-// below and sits beside it from 961 px up (where the story column is narrowest); the log stacks only
-// where its own width is under its table's need, so it is a table from 760 px and blocks at 620 px
-// and below, with 740 and 760 bracketing the change.
+// The replay's layout where its arrangements meet: each step panel splits 5:7 from 961 px and stacks
+// at 960 px and below; the log stacks only where its own width is under its table's need, so it is a
+// table from 760 px and blocks at 620 px and below, with 740 and 760 bracketing the change.
 export const REPLAY_LAYOUT_WIDTHS = Object.freeze([320, 620, 740, 760, 800, 960, 961, 1024, 1280, 1440]);
 
 export interface ReplayLayoutStep {
   readonly step: number;
   readonly boardHeight: number;
-  // The tag's drawn place is rendered and visible on this step.
-  readonly phantom: boolean;
 }
 
 export interface ReplayLayoutReading {
   readonly route: string;
   readonly width: number;
   readonly steps: readonly ReplayLayoutStep[];
-  // Drawn tag places outside an aria-hidden subtree, so in the accessibility tree.
-  readonly phantomExposed: number;
   // On step 2, the right edges of the evidence schedule and of the panel holding it.
   readonly evidence: { readonly tableRight: number; readonly panelRight: number } | null;
   // On step 4, with every row shown, the first baseline of each cell of each log row.
@@ -734,29 +673,19 @@ export interface ReplayLayoutReading {
   readonly logHeaders: readonly { readonly text: string; readonly type: string }[];
 }
 
-const STACKED_BOARD_WIDTH = 960;
 const LOG_TABLE_FROM = 760;
 const LOG_STACKED_TO = 620;
 const IDENTIFIER_WEIGHT = '500';
-const IDENTIFIER_FAMILY = 'Red Hat Mono';
+const IDENTIFIER_FAMILY = 'Source Code Pro';
 const spread = (values: readonly number[]): number => Math.max(...values) - Math.min(...values);
 
-// UI-SPEC 10.3 and AC-6: stacked, the board keeps one height and the reserved slot draws where the
-// tag will hang on every step but the paused one; beside the story the tag comes off and nothing
-// marks its place.
+// AC-6: the board sits above the step keys and the story at every width, so it keeps one height on
+// all four steps, or the keys and the controls under it would move as the replay steps.
 function boardReasons(reading: ReplayLayoutReading): string[] {
   const { width, steps } = reading;
   if (steps.map((item) => item.step).join(',') !== '1,2,3,4') return [E2E_MESSAGES.layoutStepsMissing(width)];
-  const stacked = width <= STACKED_BOARD_WIDTH;
   const heights = steps.map((item) => item.boardHeight);
-  const reasons = stacked && spread(heights) > BOX_TOLERANCE ? [E2E_MESSAGES.layoutBoardHeight(width, heights)] : [];
-  for (const { step, phantom } of steps) {
-    const expected = stacked && String(step) !== PAUSED_STEP;
-    if (expected && !phantom) reasons.push(E2E_MESSAGES.layoutPhantomMissing(width, step));
-    if (!expected && phantom) reasons.push(E2E_MESSAGES.layoutPhantomShown(width, step));
-  }
-  if (reading.phantomExposed > 0) reasons.push(E2E_MESSAGES.layoutPhantomExposed(width, reading.phantomExposed));
-  return reasons;
+  return spread(heights) > BOX_TOLERANCE ? [E2E_MESSAGES.layoutBoardHeight(width, heights)] : [];
 }
 
 // UI-SPEC 6: the log's cells share their first baseline wherever the log is a table, and every
@@ -784,9 +713,10 @@ function typeReasons(reading: ReplayLayoutReading): string[] {
   return reasons;
 }
 
-// UI-SPEC 6, --text-label: every column header is mono 600 at 12px, uppercase, tracked 0.05em. The
-// style is named, not voted, since two odd headers would tie with two right ones.
-export const LOG_HEADER_TYPE = '600 12px 0.6px uppercase';
+// The schedule head, --text-silk: every column header is Saira 700 at 12px, uppercase, tracked
+// 0.12em (read in the browser on 2026-10-21 at 1280). The style is named, not voted, since two odd
+// headers would tie with two right ones.
+export const LOG_HEADER_TYPE = '700 12px 1.44px uppercase';
 
 function headerReasons(reading: ReplayLayoutReading): string[] {
   return reading.logHeaders.filter(({ type }) => type !== LOG_HEADER_TYPE).map(({ text, type }) => E2E_MESSAGES.layoutHeaderType(reading.width, text, type, LOG_HEADER_TYPE));
@@ -923,7 +853,7 @@ export function axeReasons(axe: AxeReport, accepted: readonly AcceptedIncomplete
 
 export function auditReasons(line: AuditLine, width: number, accepted: readonly AcceptedIncomplete[], expectedStatus = 200, expectedTheme: ThemeName = 'light'): string[] {
   if (line.status !== expectedStatus) return [A11Y_MESSAGES.status(line.status, expectedStatus)];
-  if (line.axe === undefined || line.keyboard === undefined || line.overflow === undefined) return [A11Y_MESSAGES.axeAbsent()];
+  if (line.axe === undefined || line.keyboard === undefined || line.overflow === undefined || line.motion === undefined) return [A11Y_MESSAGES.axeAbsent()];
   const reasons: string[] = [];
   const held: Verdict = line.theme === undefined ? { ok: false, reason: A11Y_MESSAGES.themeAbsent() } : tookHoldVerdict(line.theme, expectedTheme);
   if (!held.ok) reasons.push(held.reason);
@@ -931,6 +861,7 @@ export function auditReasons(line: AuditLine, width: number, accepted: readonly 
   if (line.overflow.innerWidth !== width) reasons.push(A11Y_MESSAGES.viewport(line.overflow.innerWidth, width));
   const overflow = overflowVerdict(line.overflow.scrollWidth, width);
   if (!overflow.ok) reasons.push(overflow.reason);
+  if (line.motion.animations > 0) reasons.push(A11Y_MESSAGES.motion(line.motion.animations));
   const keyboard = keyboardVerdict(line.keyboard);
   if (!keyboard.ok) reasons.push(keyboard.reason);
   return reasons;
@@ -952,11 +883,12 @@ function isAxeReport(value: unknown): boolean {
 // full record when it audited the page, whatever its status: the 404 page is audited at 404.
 function isAuditLine(value: unknown): value is AuditLine {
   if (!isObject(value) || typeof value.route !== 'string' || typeof value.status !== 'number') return false;
-  const { keyboard, overflow } = value;
-  if (value.axe === undefined && keyboard === undefined && overflow === undefined) return true;
+  const { keyboard, overflow, motion } = value;
+  if (value.axe === undefined && keyboard === undefined && overflow === undefined && motion === undefined) return true;
   return isAxeReport(value.axe) && (value.theme === undefined || isReading(value.theme))
     && isObject(keyboard) && isStopList(keyboard.focusables) && isStopList(keyboard.walk) && isStopList(keyboard.positiveTabindex)
-    && isObject(overflow) && typeof overflow.scrollWidth === 'number' && typeof overflow.innerWidth === 'number';
+    && isObject(overflow) && typeof overflow.scrollWidth === 'number' && typeof overflow.innerWidth === 'number'
+    && isObject(motion) && typeof motion.animations === 'number';
 }
 
 // Every *.html under dist except 404.html is a route; Workers serves folder/index.html at /folder/
@@ -1264,26 +1196,15 @@ export const E2E_MESSAGES = Object.freeze({
   noProseBlocks: () => 'the line test measured zero prose blocks across the site, so no line was checked',
   lineTooLong: (route: string, characters: number, line: string) => `${route}: a rendered line holds ${characters} characters, at most 80 allowed: "${line.slice(0, 60)}"`,
   identifierBreak: (text: string, lines: readonly string[]) => `the identifier ${text} breaks as ${lines.map((line) => JSON.stringify(line)).join(' / ')}, and may break only right after a dot`,
-  tagOverlap: (text: string) => `the lockout tag covers the drawing text "${text}"`,
   textOutside: (text: string) => `the drawing text "${text}" extends past its drawing's box`,
-  noDrawingText: () => 'no route measured a drawing text at 320, so the tag and label check proved nothing',
-  flowNoControl: (width: number) => `at ${width} px a flow animation runs on load and no Stop flow control is visible`,
-  flowControlWithoutMotion: (width: number) => `at ${width} px a Stop flow control is visible and no flow animation runs on load`,
-  flowSmallControl: (width: number, controlWidth: number, controlHeight: number) => `at ${width} px a Stop flow control measures ${controlWidth} by ${controlHeight} px, 44 by 44 at least`,
-  flowStillRunning: (width: number, running: number) => `at ${width} px ${running} flow animation(s) still run after every Stop flow control was used`,
-  flowLabel: (width: number, labels: readonly string[]) => `at ${width} px the flow controls read ${labels.join(', ') || 'nothing'} after the stop, Run flow expected`,
-  flowReloadRuns: (width: number, running: number) => `at ${width} px the stopped flow runs again after a reload (${running} running animation(s))`,
-  flowReduced: (width: number, running: number) => `at ${width} px ${running} flow animation(s) run under reduced motion with no stored choice`,
-  flowStoredRunning: (width: number) => `at ${width} px a stored running choice runs no flow under reduced motion`,
-  flowStoredStopped: (width: number, running: number) => `at ${width} px a stored stopped choice leaves ${running} flow animation(s) running`,
-  flowTabUnreached: (width: number) => `at ${width} px Tab never reaches a visible Stop flow control`,
-  flowTabLate: (width: number) => `at ${width} px Tab reaches a Stop flow control after the next section's first focusable element`,
+  noDrawingText: () => 'no route measured a drawing text at 320, so the drawing label check proved nothing',
+  motionStill: (width: number) => `at ${width} px nothing moved on load, where the playhead run plays`,
+  motionLoops: (width: number, count: number) => `at ${width} px ${count} animation(s) repeat forever, and nothing on the site may loop`,
+  motionLong: (width: number, endTime: number) => `at ${width} px an animation runs until ${endTime} ms, past the ${MOTION_LIMIT_MS} ms a page may move with no control to stop it`,
+  motionReduced: (width: number, count: number) => `at ${width} px ${count} animation(s) are on the page under reduced motion, where every lamp and key is placed in its final state`,
   copyBuildPassed: () => 'the project copy with an artifact whose provenance is measured built, and a broken artifact must fail the build',
   copyBuildUnnamed: (tail: string) => `the project copy with a broken artifact failed without naming the artifact file and its events or provenance field: ${tail}`,
   copyBuildLeft: (folder: string) => `the project copy folder ${folder} is still on disk after the build`,
-  tagStuck: (width: number, stem: number) => `at ${width} px the lockout tag shows ${stem} px of stem below the closed valve, 12 at least, so it reads as stuck, not hung`,
-  tagMeetsValve: (width: number) => `at ${width} px the lockout tag's tilted top edge reaches the closed valve`,
-  noHungTag: () => 'no route hung a lockout tag from a closed valve, so the stem check measured nothing',
   replayNext: (width: number, shown: readonly number[]) => `at ${width} px three Next activations from step 1 showed ${shown.join(', ') || 'nothing'}; 2, 3, 4 expected`,
   replayFourth: (width: number, shown: number) => `at ${width} px a fourth Next activation from step 1 showed step ${shown}, 4 expected`,
   replayButtons: (width: number, shown: readonly number[]) => `at ${width} px the four step buttons showed ${shown.join(', ') || 'nothing'}; 1, 2, 3, 4 expected`,
@@ -1301,14 +1222,11 @@ export const E2E_MESSAGES = Object.freeze({
   replayArrowModifier: (width: number, modifier: string, before: number, after: number) => `at ${width} px ${modifier}+ArrowRight moved the replay from step ${before} to ${after}`,
   noScriptPanels: (width: number, panels: readonly string[]) => `at ${width} px with the js class removed the panels shown read ${panels.join(', ') || 'none'}; 1, 2, 3, 4 expected`,
   noScriptControls: (width: number, count: number) => `at ${width} px with the js class removed ${count} step control(s) still show`,
-  noScriptBoard: (width: number, steps: string, displayed: boolean) => `at ${width} px with the js class removed the board part for steps ${steps} is ${displayed ? 'shown' : 'hidden'}, against the paused step`,
-  noScriptNoBoard: (width: number) => `at ${width} px with the js class removed the run measured no board part`,
-  noScriptTag: (width: number) => `at ${width} px with the js class removed the lockout tag does not show`,
+  noScriptBoard: (width: number, steps: string, displayed: boolean) => `at ${width} px with the js class removed the board or readout part for steps ${steps} is ${displayed ? 'shown' : 'hidden'}, against the paused step`,
+  noScriptNoBoard: (width: number) => `at ${width} px with the js class removed the run measured no board or readout part`,
+  noScriptTag: (width: number) => `at ${width} px with the js class removed the closure row of the readout does not show`,
   layoutStepsMissing: (width: number) => `at ${width} px the layout run did not measure the board on all four steps`,
   layoutBoardHeight: (width: number, heights: readonly number[]) => `at ${width} px the board measures ${heights.join(', ')} px tall on steps 1 to 4, one height within 1 px expected`,
-  layoutPhantomMissing: (width: number, step: number) => `at ${width} px the reserved tag slot shows no drawn place for the tag on step ${step}`,
-  layoutPhantomShown: (width: number, step: number) => `at ${width} px the tag's drawn place shows on step ${step}, where the board ${step === 3 ? 'hangs the tag itself' : 'reserves no slot'}`,
-  layoutPhantomExposed: (width: number, count: number) => `at ${width} px ${count} drawn tag place(s) sit outside aria-hidden, in the accessibility tree`,
   layoutEvidenceMissing: (width: number) => `at ${width} px the run measured no evidence schedule on step 2`,
   layoutEvidenceSpill: (width: number, tableRight: number, panelRight: number) => `at ${width} px the step 2 evidence schedule ends at x ${tableRight}, past its panel's edge at x ${panelRight}`,
   layoutLogMissing: (width: number) => `at ${width} px the run measured no event log row`,
@@ -1319,7 +1237,7 @@ export const E2E_MESSAGES = Object.freeze({
   layoutPlainTerm: (width: number, where: string) => `at ${width} px the identifier ${where} is plain text, so it can break mid-name`,
   layoutScroll: (width: number, step: number, scrollWidth: number) => `at ${width} px step ${step} scrolls sideways: the page is ${scrollWidth} px wide`,
   layoutPlainApiName: (width: number, text: string) => `at ${width} px the log names the API operation ${text} as plain text, not as a mono identifier`,
-  layoutIdentifierFamily: (width: number, text: string, family: string) => `at ${width} px the identifier ${text} is set in ${family}, Red Hat Mono expected`,
+  layoutIdentifierFamily: (width: number, text: string, family: string) => `at ${width} px the identifier ${text} is set in ${family}, ${IDENTIFIER_FAMILY} expected`,
   layoutHeaderType: (width: number, text: string, type: string, expected: string) => `at ${width} px the log header ${text} is set ${type}, where column headers are set ${expected}`,
   layoutIdentifierBreak: (width: number, text: string, lines: readonly string[]) => `at ${width} px ${E2E_MESSAGES.identifierBreak(text, lines)}`,
   copyStampMissing: (route: string) => `${route} carries no provenance stamp in the project copy`,
@@ -1689,9 +1607,9 @@ const isRequestsReading = (value: unknown): value is RequestsReading => isObject
 const isStorageReading = (value: unknown): value is StorageReading => isObject(value) && isStringList(value.local) && isStringList(value.session);
 
 const ROUTE_CHECKS = ['SWITCH', 'FONTS', 'REQUESTS'] as const;
-// Measured over every route: the flow and Tab walk at both widths, prose lines at 1440, the tag and
-// drawing labels at 320.
-const MEASURE_CHECKS = ['FLOW', 'TABFLOW', 'LINES', 'NARROW', 'HANG'] as const;
+// Measured over every route: motion on load and under reduced motion at both widths, prose lines at
+// 1440, drawing labels and identifier breaks at 320.
+const MEASURE_CHECKS = ['MOTION', 'LINES', 'NARROW'] as const;
 const REPLAY_CHECKS = ['REPLAY', 'NOSCRIPT', 'LAYOUT'] as const;
 type ReplayCheck = (typeof REPLAY_CHECKS)[number];
 // dev-browser 0.2.9's newPage takes no context options, so JavaScript cannot be turned off for one
@@ -1753,7 +1671,6 @@ function judgeStorage(text: string | undefined, privacyText: string | null): { v
 
 const isNumber = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value);
 const isBox = (value: unknown): value is Box => isObject(value) && isNumber(value.left) && isNumber(value.top) && isNumber(value.right) && isNumber(value.bottom);
-const isFlowState = (value: unknown): value is FlowState => isObject(value) && isNumber(value.running) && isStringList(value.labels);
 const isLinesReading = (value: unknown): value is LinesReading => isObject(value) && typeof value.route === 'string' && isNumber(value.blocks) && isStringList(value.lines);
 const isDrawing = (value: unknown): value is DrawingReading => isObject(value) && isBox(value.box)
   && Array.isArray(value.texts) && value.texts.every((text) => isObject(text) && typeof text.text === 'string' && isBox(text.box));
@@ -1765,14 +1682,11 @@ interface NarrowReading extends OverlapReading {
   readonly identifiers: readonly IdentifierReading[];
 }
 
-const isNarrowReading = (value: unknown): value is NarrowReading => isObject(value) && typeof value.route === 'string' && (value.tag === null || isBox(value.tag))
+const isNarrowReading = (value: unknown): value is NarrowReading => isObject(value) && typeof value.route === 'string'
   && Array.isArray(value.drawings) && value.drawings.every(isDrawing) && Array.isArray(value.identifiers) && value.identifiers.every(isIdentifier);
-const isFlowReading = (value: unknown): value is FlowReading => isObject(value) && typeof value.route === 'string' && isNumber(value.width)
-  && typeof value.movingOnLoad === 'boolean' && Array.isArray(value.controls)
-  && value.controls.every((control) => isObject(control) && typeof control.label === 'string' && isNumber(control.width) && isNumber(control.height))
-  && isFlowState(value.afterClick) && isFlowState(value.afterReload) && isNumber(value.reduced) && isNumber(value.storedRunningReduced) && isNumber(value.storedStopped);
-const isFlowTabReading = (value: unknown): value is FlowTabReading & { readonly route: string } => isObject(value) && typeof value.route === 'string' && isNumber(value.width)
-  && Array.isArray(value.flows) && value.flows.every((flow) => isObject(flow) && (flow.flowStep === null || isNumber(flow.flowStep)) && (flow.nextStep === null || isNumber(flow.nextStep)));
+const isMotionTiming = (value: unknown): value is MotionTiming => isObject(value) && isNumber(value.count) && isNumber(value.infinite) && isNumber(value.longestEnd);
+const isMotionReading = (value: unknown): value is MotionReading => isObject(value) && typeof value.route === 'string' && isNumber(value.width)
+  && isMotionTiming(value.onLoad) && isNumber(value.reduced);
 
 type CheckResult = { verdict: Verdict; detail: string };
 
@@ -1822,11 +1736,11 @@ function judgeNarrow(lines: readonly string[], routes: readonly string[]): Check
     }
   }
   if (texts === 0 && byKey.size > 0) reasons.push(E2E_MESSAGES.noDrawingText());
-  return { verdict: verdictOf(reasons), detail: `${texts} drawing text(s) and ${identifiers} identifier(s) measured at 320 px, the tag clear of every drawing text` };
+  return { verdict: verdictOf(reasons), detail: `${texts} drawing text(s) and ${identifiers} identifier(s) measured at 320 px, every drawing text inside its drawing` };
 }
 
 function judgeByWidth<T extends { readonly route: string; readonly width: number }>(
-  check: 'FLOW' | 'TABFLOW' | 'HANG' | ReplayCheck, lines: readonly string[], routes: readonly string[], accept: (value: unknown) => value is T, verdictFor: (value: T) => Verdict,
+  check: 'MOTION' | ReplayCheck, lines: readonly string[], routes: readonly string[], accept: (value: unknown) => value is T, verdictFor: (value: T) => Verdict,
   widths: readonly number[] = AXE_CONFIG.widths,
 ): { verdict: Verdict; readings: T[] } {
   const { byKey, reasons } = readKeyed(check, lines, accept, (value) => widthKey(value.route, value.width));
@@ -1846,20 +1760,14 @@ function judgeByWidth<T extends { readonly route: string; readonly width: number
   return { verdict: verdictOf(reasons), readings };
 }
 
-function judgeFlow(lines: readonly string[], routes: readonly string[]): CheckResult {
-  const { verdict, readings } = judgeByWidth('FLOW', lines, routes, isFlowReading, flowVerdict);
-  return { verdict, detail: readings.map((reading) => `${widthKey(reading.route, reading.width)} movingOnLoad ${String(reading.movingOnLoad)}`).join(', ') };
-}
+// The landing and the replay carry the playhead run, so each must move on load at every width.
+const MOVING_ROUTES: ReadonlySet<string> = new Set([LANDING, REPLAY]);
 
-const isHangReading = (value: unknown): value is HangReading => isObject(value) && typeof value.route === 'string' && isNumber(value.width)
-  && typeof value.hanging === 'boolean' && isNumber(value.visibleStem) && isNumber(value.tagTop) && isNumber(value.valveBottom);
-
-function judgeHang(lines: readonly string[], routes: readonly string[]): CheckResult {
-  const { verdict, readings } = judgeByWidth('HANG', lines, routes, isHangReading, hangVerdict, HANG_WIDTHS);
-  const hung = readings.filter((reading) => reading.hanging).map((reading) => `${widthKey(reading.route, reading.width)} ${String(reading.visibleStem)} px of stem`);
-  // A run in which no route hung a tag measured nothing, so it fails rather than passing empty.
-  if (hung.length === 0 && readings.length > 0) return { verdict: { ok: false, reason: E2E_MESSAGES.noHungTag() }, detail: '' };
-  return { verdict, detail: hung.join(', ') };
+function judgeMotion(lines: readonly string[], routes: readonly string[]): CheckResult {
+  const { verdict, readings } = judgeByWidth('MOTION', lines, routes, isMotionReading, (reading) => motionVerdict(reading, MOVING_ROUTES.has(reading.route)));
+  const moved = readings.filter((reading) => reading.onLoad.count > 0)
+    .map((reading) => `${widthKey(reading.route, reading.width)} ${String(reading.onLoad.count)} animation(s) ending by ${String(Math.round(reading.onLoad.longestEnd))} ms`);
+  return { verdict, detail: `${moved.join(', ') || 'nothing moved on load'}; no animation under reduced motion on any route` };
 }
 
 const isMove = (value: unknown): value is StepMove => isObject(value) && isNumber(value.before) && isNumber(value.after);
@@ -1876,8 +1784,7 @@ const isNoScriptReading = (value: unknown): value is NoScriptReading => isObject
   && isStringList(value.panels) && isNumber(value.controls) && typeof value.tagShown === 'boolean'
   && Array.isArray(value.boardParts) && value.boardParts.every((part) => isObject(part) && typeof part.steps === 'string' && typeof part.displayed === 'boolean');
 const isReplayLayoutReading = (value: unknown): value is ReplayLayoutReading => isObject(value) && typeof value.route === 'string' && isNumber(value.width)
-  && Array.isArray(value.steps) && value.steps.every((item) => isObject(item) && isNumber(item.step) && isNumber(item.boardHeight) && typeof item.phantom === 'boolean')
-  && isNumber(value.phantomExposed)
+  && Array.isArray(value.steps) && value.steps.every((item) => isObject(item) && isNumber(item.step) && isNumber(item.boardHeight))
   && (value.evidence === null || (isObject(value.evidence) && isNumber(value.evidence.tableRight) && isNumber(value.evidence.panelRight)))
   && Array.isArray(value.logRows) && value.logRows.every((row) => isObject(row) && typeof row.header === 'string' && Array.isArray(row.baselines) && row.baselines.every(isNumber))
   && Array.isArray(value.identifiers) && value.identifiers.every((item) => isObject(item) && typeof item.text === 'string' && typeof item.weight === 'string'
@@ -1897,11 +1804,6 @@ function judgeReplayCheck<T extends { readonly route: string; readonly width: nu
   if (replayRoutes.length === 0) return { verdict: { ok: true }, detail: 'the build holds no replay page' };
   const { verdict } = judgeByWidth(check, lines, replayRoutes, accept, verdictFor, widths);
   return { verdict, detail };
-}
-
-function judgeTabFlow(lines: readonly string[], routes: readonly string[]): CheckResult {
-  const { verdict } = judgeByWidth('TABFLOW', lines, routes, isFlowTabReading, flowTabVerdict);
-  return { verdict, detail: `every visible Stop flow control is reached by Tab before the next section on ${routes.join(', ')}` };
 }
 
 const consoleRecord = (text: string): { readonly text: string; readonly url: string } => {
@@ -1939,17 +1841,15 @@ function judgeRendered(run: DriverRun, routes: readonly string[], print: (line: 
   const results: (readonly [string, { verdict: Verdict; detail: string }])[] = [
     ...RENDERED_CHECKS.map((check) => [check, judgeCheck(check, records.get(check))] as const),
     ...ROUTE_CHECKS.map((check) => [check, judgeRouteCheck(check, routeLines.get(check) ?? [], routes)] as const),
-    ['FLOW', judgeFlow(measured('FLOW'), routes)],
-    ['TABFLOW', judgeTabFlow(measured('TABFLOW'), routes)],
+    ['MOTION', judgeMotion(measured('MOTION'), routes)],
     ['LINES', judgeLines(measured('LINES'), routes)],
     ['NARROW', judgeNarrow(measured('NARROW'), routes)],
-    ['HANG', judgeHang(measured('HANG'), routes)],
     ['REPLAY', judgeReplayCheck('REPLAY', routeLines.get('REPLAY') ?? [], routes, isReplayReading, replayVerdict,
       `Next, Previous, the step buttons, deep links, invalid hashes, keys and history held on ${REPLAY} at 320 and 1440 px`)],
     ['NOSCRIPT', judgeReplayCheck('NOSCRIPT', routeLines.get('NOSCRIPT') ?? [], routes, isNoScriptReading, noScriptVerdict,
-      `with the js class removed every panel showed in order, no control showed and the board held the paused step at 320 and 1440 px (${NO_SCRIPT_METHOD})`)],
+      `with the js class removed every panel showed in order, no control showed and the board and readout held the paused step at 320 and 1440 px (${NO_SCRIPT_METHOD})`)],
     ['LAYOUT', judgeReplayCheck('LAYOUT', routeLines.get('LAYOUT') ?? [], routes, isReplayLayoutReading, replayLayoutVerdict,
-      `the stacked board held one height with the tag's place drawn, the step 2 schedule stayed inside its panel, log cells shared a baseline, log headers took the label style, every API name in the log was a mono identifier, no step scrolled sideways and identifiers computed 500 and broke only after a dot or between an API name's words on ${REPLAY} at ${REPLAY_LAYOUT_WIDTHS.join(', ')} px`,
+      `the board held one height on all four steps, the step 2 schedule stayed inside its panel, log cells shared a baseline, log headers took the label style, every API name in the log was a mono identifier, no step scrolled sideways and identifiers computed 500 and broke only after a dot or between an API name's words on ${REPLAY} at ${REPLAY_LAYOUT_WIDTHS.join(', ')} px`,
       REPLAY_LAYOUT_WIDTHS)],
     ['STORAGE', judgeStorage(records.get('STORAGE'), privacyText)],
     ['PAGEERROR', { verdict: pageErrorVerdict(pageErrors), detail: 'no uncaught exception on any page' }],
@@ -1981,7 +1881,7 @@ async function renderedStep(options: SiteE2eOptions, dist: string, print: (line:
   const identifierTerms = [...names, ...values];
   const privacyText = privacySectionText(loadBuiltSite(dist));
   const served = await withPreview(options.repoRoot, 'fothering-e2e-', async (server, workDir) => {
-    const written = writeDriver(driver.templatePath, { base: server.url, route: '/', routes, widths: AXE_CONFIG.widths, hangWidths: HANG_WIDTHS, families: SITE_FAMILIES, replayRoute: REPLAY, invalidHashes: REPLAY_INVALID_HASHES, layoutWidths: REPLAY_LAYOUT_WIDTHS, identifierTerms, apiNames: LOG_API_NAMES }, join(workDir, 'site.js'));
+    const written = writeDriver(driver.templatePath, { base: server.url, route: '/', routes, widths: AXE_CONFIG.widths, families: SITE_FAMILIES, replayRoute: REPLAY, invalidHashes: REPLAY_INVALID_HASHES, layoutWidths: REPLAY_LAYOUT_WIDTHS, identifierTerms, apiNames: LOG_API_NAMES }, join(workDir, 'site.js'));
     if (!written.ok) return A11Y_MESSAGES.templateTokens(driver.templatePath, written.tokens);
     const run = await runDriver({ launcher: driver.launcher, driverPath: written.path, timeoutSeconds: DRIVER_TIMEOUT_SECONDS });
     return judgeRendered(run, routes, print, privacyText);
