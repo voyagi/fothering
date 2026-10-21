@@ -1,10 +1,11 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, describe, expect, it } from 'vitest';
 import fc from 'fast-check';
 import { parseLaneMap, type LaneEntry } from '@fothering/core/lanes';
 import { attemptRecordSchema, MIN_SEND_GAP_MS, refusalMessage, spacingViolations, type AttemptRecord } from '@fothering/core/live-run';
+import { bucketSortKeyPrefix } from '@fothering/core/records';
 import { parseScenarioSource, stepPlan, type ScenarioSource, type ScenarioTagKind } from '@fothering/core/scenarios';
 import { propertySeed } from '@fothering/core/test/property-seed';
 import {
@@ -225,6 +226,63 @@ describe('live-run send on fixtures, end to end', () => {
     });
 
     for (const text of [accountText, callersText, attemptsText, ...out, ...err]) expect(text).not.toContain(FROM);
+  });
+});
+
+const IMAGE_FILE = join(REPO_ROOT, 'packages', 'core', 'src', 'fixtures', 'run-folder-image.json');
+const IMAGE_RUN_ID = 'live-20261021-s1-1';
+
+type RunFolderImage = Record<string, unknown>;
+
+function readImage(): RunFolderImage {
+  return JSON.parse(readFileSync(IMAGE_FILE, 'utf8')) as RunFolderImage;
+}
+
+// The image holds placeholders where a run-time value goes, so no account id and no thirteen-digit
+// bucket start sits in the committed file, and one image serves any run id.
+function imageFileText(path: string, content: unknown, runId: string): string {
+  const raw = path.endsWith('.jsonl')
+    ? (content as unknown[]).map((line) => `${JSON.stringify(line)}\n`).join('')
+    : `${JSON.stringify(content, null, 2)}\n`;
+  return raw
+    .replaceAll('<ACCOUNT_ID>', ACCOUNT)
+    .replaceAll('<RUN_ID>', runId)
+    .replaceAll('<BUCKET>', bucketSortKeyPrefix(Date.UTC(2026, 9, 21, 9, 0)));
+}
+
+function materializeImage(root: string, runId = IMAGE_RUN_ID, image: RunFolderImage = readImage()): string {
+  const folder = join(root, 'reports', 'live-runs', runId);
+  for (const [path, content] of Object.entries(image)) {
+    const target = join(folder, ...path.split('/'));
+    mkdirSync(dirname(target), { recursive: true });
+    writeFileSync(target, imageFileText(path, content, runId));
+  }
+  return folder;
+}
+
+interface CheckSavedOutcome {
+  code: number;
+  out: string[];
+  err: string[];
+  /** Exit code, ports built and every printed line, so one comparison covers all three. */
+  line: string;
+}
+
+async function checkSaved(root: string, args: readonly string[]): Promise<CheckSavedOutcome> {
+  const state = createFixtureLiveRunState();
+  const { deps, out, err } = harness(root, state, undefined);
+  const code = await main(['check-saved', ...args], deps);
+  return { code, out, err, line: `exit ${code}, ports ${state.constructions}, ${[...out, ...err].join(' | ')}` };
+}
+
+describe('check-saved over a run folder, end to end', () => {
+  it('reads every pre-removal file of the fixture image through the contract and exits 0', async () => {
+    const root = plantRoot();
+    materializeImage(root);
+
+    const outcome = await checkSaved(root, [IMAGE_RUN_ID]);
+
+    expect(outcome.line).toBe('exit 0, ports 0, check-saved: 22 files checked, no findings');
   });
 });
 

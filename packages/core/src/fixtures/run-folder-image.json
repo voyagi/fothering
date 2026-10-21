@@ -1,0 +1,180 @@
+{
+  "run/spike.account.json": { "vdmEnabled": "ENABLED", "productionAccessEnabled": true, "maxSendRate": 1, "requestId": "fixture-request-account-spike" },
+  "run/spike.callers.json": {
+    "lanes": [
+      { "lane": "fothering-bulk", "roleName": "fothering-live-run-bulk", "account": "<ACCOUNT_ID>", "arn": "arn:aws:sts::<ACCOUNT_ID>:assumed-role/fothering-live-run-bulk/session-bulk" },
+      { "lane": "fothering-transactional", "roleName": "fothering-live-run-transactional", "account": "<ACCOUNT_ID>", "arn": "arn:aws:sts::<ACCOUNT_ID>:assumed-role/fothering-live-run-transactional/session-tx" }
+    ],
+    "account": { "account": "<ACCOUNT_ID>", "arn": "arn:aws:sts::<ACCOUNT_ID>:assumed-role/fothering-operator/session-account" }
+  },
+  "run/spike.attempts.jsonl": [
+    {
+      "lane": "fothering-bulk",
+      "tags": [{ "name": "stream", "value": "newsletter" }, { "name": "batch", "value": "clean-import" }, { "name": "fothering_run", "value": "<RUN_ID>" }],
+      "recipient": "success+<RUN_ID>-spike-001@simulator.amazonses.com",
+      "startUtc": "2026-10-21T09:00:00.000Z",
+      "endUtc": "2026-10-21T09:00:00.180Z",
+      "messageId": "fixture-message-spike-001",
+      "requestId": "fixture-request-spike-001"
+    },
+    {
+      "lane": "fothering-bulk",
+      "tags": [{ "name": "stream", "value": "newsletter" }, { "name": "batch", "value": "stale-import" }, { "name": "fothering_run", "value": "<RUN_ID>" }],
+      "recipient": "bounce+<RUN_ID>-spike-005@simulator.amazonses.com",
+      "startUtc": "2026-10-21T09:00:05.000Z",
+      "endUtc": "2026-10-21T09:00:05.170Z",
+      "messageId": "fixture-message-spike-005",
+      "requestId": "fixture-request-spike-005"
+    },
+    {
+      "lane": "fothering-transactional",
+      "tags": [{ "name": "stream", "value": "receipts" }, { "name": "template", "value": "order-receipt" }, { "name": "fothering_run", "value": "<RUN_ID>" }],
+      "recipient": "success+<RUN_ID>-spike-011@simulator.amazonses.com",
+      "startUtc": "2026-10-21T09:00:12.500Z",
+      "endUtc": "2026-10-21T09:00:12.690Z",
+      "messageId": "fixture-message-spike-011",
+      "requestId": "fixture-request-spike-011"
+    }
+  ],
+  "run/after-pause.account.json": { "vdmEnabled": "ENABLED", "productionAccessEnabled": true, "maxSendRate": 1, "requestId": "fixture-request-account-after-pause" },
+  "run/after-pause.callers.json": {
+    "lanes": [
+      { "lane": "fothering-bulk", "roleName": "fothering-live-run-bulk", "account": "<ACCOUNT_ID>", "arn": "arn:aws:sts::<ACCOUNT_ID>:assumed-role/fothering-live-run-bulk/session-bulk" },
+      { "lane": "fothering-transactional", "roleName": "fothering-live-run-transactional", "account": "<ACCOUNT_ID>", "arn": "arn:aws:sts::<ACCOUNT_ID>:assumed-role/fothering-live-run-transactional/session-tx" }
+    ],
+    "account": { "account": "<ACCOUNT_ID>", "arn": "arn:aws:sts::<ACCOUNT_ID>:assumed-role/fothering-operator/session-account" }
+  },
+  "run/after-pause.attempts.jsonl": [
+    {
+      "lane": "fothering-bulk",
+      "tags": [{ "name": "stream", "value": "newsletter" }, { "name": "batch", "value": "clean-import" }, { "name": "fothering_run", "value": "<RUN_ID>" }],
+      "recipient": "success+<RUN_ID>-after-pause-001@simulator.amazonses.com",
+      "startUtc": "2026-10-21T09:40:00.000Z",
+      "endUtc": "2026-10-21T09:40:00.150Z",
+      "errorName": "MessageRejected"
+    },
+    {
+      "lane": "fothering-transactional",
+      "tags": [{ "name": "stream", "value": "receipts" }, { "name": "template", "value": "order-receipt" }, { "name": "fothering_run", "value": "<RUN_ID>" }],
+      "recipient": "success+<RUN_ID>-after-pause-002@simulator.amazonses.com",
+      "startUtc": "2026-10-21T09:40:01.250Z",
+      "endUtc": "2026-10-21T09:40:01.420Z",
+      "messageId": "fixture-message-after-pause-002",
+      "requestId": "fixture-request-after-pause-002"
+    }
+  ],
+  "aws/saved.jsonl": [
+    { "event": "deploy-finished", "deployCommit": "3f9a1c7e5b2d8a6f0c4e9b1d7a3f5c8e2b6d0a4f", "savedAtUtc": "2026-10-21T08:30:00.000Z" },
+    { "file": "aws/stacks.json", "savedAtUtc": "2026-10-21T08:31:00.000Z" },
+    { "file": "aws/templates/FotheringIngest.json", "savedAtUtc": "2026-10-21T08:31:10.000Z" },
+    { "file": "aws/templates/FotheringRuntime.json", "savedAtUtc": "2026-10-21T08:31:20.000Z" },
+    { "file": "aws/templates/FotheringDetection.json", "savedAtUtc": "2026-10-21T08:31:30.000Z" },
+    { "file": "aws/templates/FotheringAction.json", "savedAtUtc": "2026-10-21T08:31:40.000Z" },
+    { "file": "aws/reopen-function.json", "savedAtUtc": "2026-10-21T08:32:00.000Z" },
+    { "file": "aws/items-pointers.json", "savedAtUtc": "2026-10-21T10:00:00.000Z" },
+    { "file": "aws/items-lane-fothering-transactional.json", "savedAtUtc": "2026-10-21T10:00:10.000Z" },
+    { "file": "aws/items-lane-fothering-bulk.json", "savedAtUtc": "2026-10-21T10:00:20.000Z" },
+    { "file": "aws/items-lane-fothering-alerts.json", "savedAtUtc": "2026-10-21T10:00:30.000Z" },
+    { "file": "aws/reopen-result.json", "savedAtUtc": "2026-10-21T10:05:00.000Z" },
+    { "file": "aws/items-incident.json", "savedAtUtc": "2026-10-21T10:06:00.000Z" },
+    { "file": "aws/sets-before-removal/fothering-transactional.json", "savedAtUtc": "2026-10-21T10:07:00.000Z" },
+    { "file": "aws/sets-before-removal/fothering-bulk.json", "savedAtUtc": "2026-10-21T10:07:10.000Z" },
+    { "file": "aws/sets-before-removal/fothering-alerts.json", "savedAtUtc": "2026-10-21T10:07:20.000Z" }
+  ],
+  "aws/stacks.json": {
+    "Stacks": [
+      {
+        "StackId": "arn:aws:cloudformation:eu-central-1:<ACCOUNT_ID>:stack/FotheringIngest/5e1f0a2b-7c3d-4e8f-9a6b-c1d2e3f4a5b6",
+        "StackName": "FotheringIngest",
+        "StackStatus": "CREATE_COMPLETE",
+        "Outputs": [{ "OutputKey": "ForgetFunctionName", "OutputValue": "FotheringIngest-ForgetFunction-AbCdEfGhIjKl" }]
+      },
+      {
+        "StackId": "arn:aws:cloudformation:eu-central-1:<ACCOUNT_ID>:stack/FotheringRuntime/6f2a1b3c-8d4e-4f9a-ab7c-d2e3f4a5b6c7",
+        "StackName": "FotheringRuntime",
+        "StackStatus": "CREATE_COMPLETE"
+      },
+      {
+        "StackId": "arn:aws:cloudformation:eu-central-1:<ACCOUNT_ID>:stack/FotheringDetection/7a3b2c4d-9e5f-4a0b-bc8d-e3f4a5b6c7d8",
+        "StackName": "FotheringDetection",
+        "StackStatus": "CREATE_COMPLETE"
+      },
+      {
+        "StackId": "arn:aws:cloudformation:eu-central-1:<ACCOUNT_ID>:stack/FotheringAction/8b4c3d5e-af6a-4b1c-cd9e-f4a5b6c7d8e9",
+        "StackName": "FotheringAction",
+        "StackStatus": "CREATE_COMPLETE",
+        "Parameters": [
+          { "ParameterKey": "OperatorAddress", "ParameterValue": "operator@example.com" },
+          { "ParameterKey": "FromAddress", "ParameterValue": "sender@example.com" }
+        ],
+        "Outputs": [{ "OutputKey": "ReopenFunctionName", "OutputValue": "FotheringAction-ReopenFunction-MnOpQrStUvWx" }]
+      }
+    ]
+  },
+  "aws/templates/FotheringIngest.json": { "TemplateBody": { "Resources": {} }, "StagesAvailable": ["Original", "Processed"] },
+  "aws/templates/FotheringRuntime.json": { "TemplateBody": { "Resources": {} }, "StagesAvailable": ["Original", "Processed"] },
+  "aws/templates/FotheringDetection.json": { "TemplateBody": { "Resources": {} }, "StagesAvailable": ["Original", "Processed"] },
+  "aws/templates/FotheringAction.json": { "TemplateBody": { "Resources": {} }, "StagesAvailable": ["Original", "Processed"] },
+  "aws/reopen-function.json": {
+    "FunctionName": "FotheringAction-ReopenFunction-MnOpQrStUvWx",
+    "FunctionArn": "arn:aws:lambda:eu-central-1:<ACCOUNT_ID>:function:FotheringAction-ReopenFunction-MnOpQrStUvWx",
+    "Runtime": "nodejs22.x",
+    "Environment": { "Variables": { "FOTHERING_TABLE_NAME": "FotheringIngest-EventsTable-QrStUvWxYzAb" } }
+  },
+  "aws/items-pointers.json": {
+    "Items": [
+      { "pk": { "S": "INCIDENT_LANE#fothering-bulk" }, "sk": { "S": "MARKER" }, "incidentId": { "S": "incident-fixture-one" }, "status": { "S": "open" }, "version": { "N": "1" } },
+      { "pk": { "S": "INCIDENT_LANE#fothering-bulk" }, "sk": { "S": "PAUSE" }, "incidentId": { "S": "incident-fixture-one" }, "version": { "N": "0" } }
+    ],
+    "Count": 2,
+    "ScannedCount": 2
+  },
+  "aws/items-incident.json": {
+    "Items": [
+      { "pk": { "S": "INCIDENT#incident-fixture-one" }, "sk": { "S": "CLOSURE" }, "incidentId": { "S": "incident-fixture-one" }, "configurationSet": { "S": "fothering-bulk" }, "outcome": { "S": "paused-holding" } },
+      { "pk": { "S": "INCIDENT#incident-fixture-one" }, "sk": { "S": "DECISION" }, "outcome": { "S": "close" }, "attempt": { "N": "1" } },
+      { "pk": { "S": "INCIDENT#incident-fixture-one" }, "sk": { "S": "EVIDENCE" }, "record": { "M": { "incidentId": { "S": "incident-fixture-one" }, "configurationSet": { "S": "fothering-bulk" } } } },
+      { "pk": { "S": "INCIDENT#incident-fixture-one" }, "sk": { "S": "STATE" }, "status": { "S": "open" } }
+    ],
+    "Count": 4,
+    "ScannedCount": 4
+  },
+  "aws/items-lane-fothering-transactional.json": {
+    "Items": [
+      { "pk": { "S": "LANE#fothering-transactional" }, "sk": { "S": "<BUCKET>#Delivery#fixture-message-spike-011" }, "kind": { "S": "outcome" }, "eventType": { "S": "Delivery" }, "configurationSet": { "S": "fothering-transactional" }, "messageId": { "S": "fixture-message-spike-011" }, "provenance": { "S": "live" }, "runId": { "S": "<RUN_ID>" }, "receivingDomain": { "S": "simulator.amazonses.com" } }
+    ],
+    "Count": 1,
+    "ScannedCount": 1
+  },
+  "aws/items-lane-fothering-bulk.json": {
+    "Items": [
+      { "pk": { "S": "LANE#fothering-bulk" }, "sk": { "S": "<BUCKET>#Send#fixture-message-spike-001" }, "kind": { "S": "send" }, "eventType": { "S": "Send" }, "configurationSet": { "S": "fothering-bulk" }, "messageId": { "S": "fixture-message-spike-001" }, "provenance": { "S": "live" }, "runId": { "S": "<RUN_ID>" } },
+      { "pk": { "S": "LANE#fothering-bulk" }, "sk": { "S": "<BUCKET>#Bounce#fixture-message-spike-005" }, "kind": { "S": "outcome" }, "eventType": { "S": "Bounce" }, "configurationSet": { "S": "fothering-bulk" }, "messageId": { "S": "fixture-message-spike-005" }, "provenance": { "S": "live" }, "runId": { "S": "<RUN_ID>" }, "receivingDomain": { "S": "simulator.amazonses.com" }, "fields": { "M": { "bounceType": { "S": "Permanent" }, "remoteMtaIp": { "S": "192.0.2.25" } } } }
+    ],
+    "Count": 2,
+    "ScannedCount": 2
+  },
+  "aws/items-lane-fothering-alerts.json": {
+    "Items": [
+      { "pk": { "S": "LANE#fothering-alerts" }, "sk": { "S": "<BUCKET>#Send#fixture-message-operator-001" }, "kind": { "S": "send" }, "eventType": { "S": "Send" }, "configurationSet": { "S": "fothering-alerts" }, "messageId": { "S": "fixture-message-operator-001" }, "provenance": { "S": "live" } }
+    ],
+    "Count": 1,
+    "ScannedCount": 1
+  },
+  "aws/reopen-result.json": { "result": "reopened", "configurationSet": "fothering-bulk" },
+  "aws/sets-before-removal/fothering-transactional.json": {
+    "ConfigurationSetName": "fothering-transactional",
+    "SendingOptions": { "SendingEnabled": true },
+    "ReputationOptions": { "ReputationMetricsEnabled": true }
+  },
+  "aws/sets-before-removal/fothering-bulk.json": {
+    "ConfigurationSetName": "fothering-bulk",
+    "SendingOptions": { "SendingEnabled": true },
+    "ReputationOptions": { "ReputationMetricsEnabled": true }
+  },
+  "aws/sets-before-removal/fothering-alerts.json": {
+    "ConfigurationSetName": "fothering-alerts",
+    "SendingOptions": { "SendingEnabled": true },
+    "ReputationOptions": { "ReputationMetricsEnabled": true }
+  }
+}
