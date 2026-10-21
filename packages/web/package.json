@@ -1,0 +1,30 @@
+{
+  "name": "@fothering/web",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node ../../scripts/astro.mjs build",
+    "check": "node ../../scripts/astro.mjs check",
+    "dev": "node ../../scripts/astro.mjs dev --host 127.0.0.1",
+    "preview": "node ../../scripts/site-tool.mjs preview"
+  },
+  "dependencies": {
+    "@fontsource-variable/red-hat-display": "5.3.0",
+    "@fontsource-variable/red-hat-mono": "5.3.0",
+    "@fontsource-variable/red-hat-text": "5.3.0",
+    "@fothering/core": "0.0.0",
+    "astro": "7.3.8",
+    "parse5": "8.0.1"
+  },
+  "devDependencies": {
+    "@astrojs/check": "0.9.10"
+  },
+  "size-limit": [
+    {
+      "name": "client scripts",
+      "path": "dist/_astro/*.js",
+      "limit": "2 kB"
+    }
+  ]
+}

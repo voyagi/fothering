@@ -8,6 +8,7 @@ import { createStubAssets } from './stub-assets.js';
 interface CfnResource {
   Type: string;
   Properties?: Record<string, unknown>;
+  DeletionPolicy?: string;
 }
 
 export interface CfnTemplate {
@@ -139,7 +140,7 @@ function entriesOfResource(stack: string, logicalId: string, resource: CfnResour
   return [];
 }
 
-function compareText(a: string | null, b: string | null): number {
+export function compareText(a: string | null, b: string | null): number {
   const left = a ?? '';
   const right = b ?? '';
   return left < right ? -1 : left > right ? 1 : 0;

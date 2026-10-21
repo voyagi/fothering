@@ -2,11 +2,11 @@
 
 - Status: accepted
 - Date: 2026-09-16
-- Revised: 2026-09-27 (agent bundle corrected to CommonJS, site workspace path recorded, fallback order corrected)
+- Revised: 2026-09-27 (agent bundle corrected to CommonJS, site workspace path recorded, fallback order corrected); 2026-10-16 (site stack as built: Astro 7.3.8, wrangler kept out of the repo until the deploy, browser checks, fonts and built-HTML parsing recorded, reopening by command, fixture replay)
 
 ## Context
 
-Fothering reads Amazon SES events per configuration set, works out the cause of a bounce or complaint spike from evidence, pauses one configuration set, reads the setting back, and asks the operator to approve by email reply. It must use Amazon SES and Amazon Bedrock AgentCore, run in eu-central-1, and ship a public site where anyone can replay a recorded incident without installing anything.
+Fothering reads Amazon SES events per configuration set, works out the cause of a bounce or complaint spike from evidence, pauses one configuration set, reads the setting back, and tells the operator by email; the operator reopens the lane by command. It must use Amazon SES and Amazon Bedrock AgentCore, run in eu-central-1, and ship a public site where anyone can replay a fixture incident without installing anything.
 
 Three constraints shape every choice below:
 
@@ -29,8 +29,11 @@ Three constraints shape every choice below:
 | Event destination | EventBridge (default bus) | |
 | Event store | DynamoDB, on demand, TTL | |
 | Infrastructure | AWS CDK in TypeScript | `aws-cdk-lib` 2.273.0 |
-| Site | Astro, static output, at `packages/web` inside the existing `packages/*` workspace glob | 7.3.2 |
-| Site host | Cloudflare Workers with static assets | `wrangler` 4.x |
+| Site | Astro, static output, at `packages/web` inside the existing `packages/*` workspace glob | 7.3.8 |
+| Site host | Cloudflare Workers with static assets; `wrangler` is not a dependency of the repo until the owner's deploy, which runs a pinned 4.x | |
+| Browser checks | `dev-browser` driving its own Chromium, with `axe-core` for the WCAG 2.2 AA audit | `dev-browser` 0.2.9, `axe-core` 4.14.0 |
+| Fonts | `@fontsource-variable` Red Hat Display, Text and Mono, self-hosted | 5.3.0 |
+| Built-HTML parsing | `parse5` | 8.0.1 |
 | Schemas | zod | 4.x |
 | Tests | vitest, fast-check, StrykerJS | vitest 4.1.x |
 | Package manager | npm workspaces | |
@@ -55,7 +58,7 @@ The one part without an official example is a Node code package deployed through
 - **EventBridge, not SNS or Firehose.** EventBridge filters on event type before invoking a function. Firehose buffers into batches, which is too slow for a guard. SES delivers to EventBridge best effort and possibly out of order, so ingest deduplicates and buckets by send time.
 - **DynamoDB, not Timestream or S3 with Athena.** Per-item TTL gives the 30-day retention without a cleanup job. TTL deletes within a few days of expiry, so reads filter on the expiry attribute and the privacy page states that timing.
 - **CDK, not Terraform or SAM.** CDK has stable AgentCore Runtime and Memory constructs in the same library as SES, EventBridge, Lambda and DynamoDB, and `cdk synth` produces one template the deploy page can publish with its IAM policy.
-- **Astro static, not SvelteKit or Next.js.** The replay reads committed JSON at build time and needs no server. Astro ships no JavaScript by default and hydrates only the replay timeline and the console. Next.js on Workers through vinext is still beta.
+- **Astro static, not SvelteKit or Next.js.** The replay reads committed JSON at build time and needs no server. Astro ships no JavaScript by default; the site adds plain module scripts for the theme, the flow control and replay stepping, with no islands and no console. Next.js on Workers through vinext is still beta.
 - **npm workspaces, not pnpm.** npm ships with Node, CI needs no extra setup step, and the gate scripts run through `npm run`.
 
 ## Consequences

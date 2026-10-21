@@ -20,6 +20,7 @@
     "scripts/**",
     "design/mockups/**",
     "package-lock.json",
-    "**/fixtures/**/*.json"
+    "**/fixtures/**/*.json",
+    "packages/web/public/font-licences.txt"
   ]
 }

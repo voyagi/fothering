@@ -15,6 +15,23 @@ module.exports = {
       to: { path: '(^|/)@aws-sdk/|(^|/)@smithy/|(^|/)@aws-crypto/|(^|/)bedrock-agentcore($|/)|(^|/)aws4fetch($|/)' },
     },
     {
+      name: 'site-is-a-leaf',
+      severity: 'error',
+      comment: 'Nothing imports the site: it is built and served on its own, so a backend import of it would ship page code into a Lambda or the agent.',
+      from: { path: '^packages/', pathNot: '^packages/web/' },
+      to: { path: '^packages/web/' },
+    },
+    {
+      name: 'site-imports-core-only',
+      severity: 'error',
+      // .astro files are invisible here (no .astro in enhancedResolveOptions.extensions), which is
+      // why every page import goes through a .ts module this rule can see.
+      comment:
+        'The site reads only the pure core and the committed infra snapshots, never providers, functions, agent or infra source, so a page build cannot pull in an AWS client or a handler.',
+      from: { path: '^packages/web/src/' },
+      to: { path: '^packages/', pathNot: ['^packages/(web|core)/', '^packages/infra/[^/]+\\.json$'] },
+    },
+    {
       name: 'ses-v1-client-banned',
       severity: 'error',
       // No providers exemption: the adapters use SES API v2 only. The ($|/) keeps

@@ -1,0 +1,10 @@
+{
+  "name": "fothering-dev-browser",
+  "version": "0.0.0",
+  "private": true,
+  "description": "The dev-browser CLI the CI ship gate drives, installed from the lockfile beside this file.",
+  "license": "UNLICENSED",
+  "dependencies": {
+    "dev-browser": "0.2.9"
+  }
+}

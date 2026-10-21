@@ -1,0 +1,183 @@
+---
+import CommandBlock from '../components/CommandBlock.astro';
+import FlowSwitch from '../components/FlowSwitch.astro';
+import Identifier from '../components/Identifier.astro';
+import LaneDrawing from '../components/LaneDrawing.astro';
+import LockoutTag from '../components/LockoutTag.astro';
+import Message from '../components/Message.astro';
+import Schedule from '../components/Schedule.astro';
+import Sheet from '../layouts/Sheet.astro';
+import { LOG_API_NAMES, textSegments, type Segment } from '../site/identifier-text.ts';
+import { buildReplayView, loadReplayArtifact } from '../site/replay-view.ts';
+import { routeFor } from '../site/route-list.ts';
+
+const artifact = loadReplayArtifact(process.cwd());
+const view = buildReplayView(artifact);
+const { provenance } = artifact;
+const [one, two, three, four] = view.steps;
+const { field, value, atUtc } = artifact.pause.readBack;
+const readBack = { field: field.slice(field.lastIndexOf('.') + 1), value, time: atUtc.slice(11, 16) };
+const STEP_COUNT = view.steps.length;
+
+// The view marks code spans with backticks; the artifact's configuration set names and tag values
+// are found by value. Names keep the face of the text around them, as the comp sets a lane name in
+// running text; tag values and code spans are mono. Each renders through the Identifier component,
+// so none breaks mid-name (UI-SPEC lines 207 and 208).
+const segmentsOf = (text: string): Segment[] => textSegments(text, view.identifierTerms);
+const faceOf = (segment: Segment): 'mono' | 'inherit' => (segment.kind === 'name' ? 'inherit' : 'mono');
+const clock = (step: { number: number; time: string }): string => `Step ${String(step.number)} of ${String(STEP_COUNT)}, ${step.time} UTC`;
+
+const evidenceRows = view.schedule.rows.map((row) => ({
+  header: row.label,
+  ...(row.unconfirmed ? { headerNote: 'unconfirmed' } : {}),
+  ...(row.sourceUrl === undefined ? {} : { headerHref: row.sourceUrl }),
+  attrs: { ...(row.dimension === 'Provider' ? { 'data-provider-row': '' } : {}), ...(row.verdict === 'Cause' ? { class: 'us' } : {}) },
+  cells: [{ text: row.countText }, { text: row.verdict }, { text: row.threshold }],
+}));
+
+// A row shows from the step that reaches it to the last, and carries its own step for the tint.
+const fromStep = (step: number): string => Array.from({ length: STEP_COUNT - step + 1 }, (_, index) => String(step + index)).join(' ');
+// The lane is a configuration set name; in a detail, the artifact's tag values and the listed SES
+// API operations and fields are identifiers, marked as code spans so they render through the
+// Identifier component; the Detail column lets an API name break between its words. The API names
+// come from a closed list, so a product name in a detail stays plain.
+const markIdentifiers = (text: string): string =>
+  textSegments(text, { names: [], values: view.identifierTerms.values }, LOG_API_NAMES).map((segment) => (segment.kind === 'code' ? `\`${segment.text}\`` : segment.text)).join('');
+const DETAIL_COLUMN = 3;
+const logRows = view.eventLog.rows.map((row) => ({
+  header: row.time,
+  attrs: { 'data-steps': fromStep(row.step), 'data-log-step': String(row.step) },
+  cells: [
+    { text: row.kind },
+    { text: `\`${row.lane}\`` },
+    { text: [markIdentifiers(row.detail), row.smtpCode === '' ? '' : `\`${row.smtpCode}\``, row.receivingDomain].filter((part) => part !== '').join(', ') },
+  ],
+}));
+---
+<Sheet route={routeFor('/replay/')}>
+  <div class="row">
+    <div class="rail" aria-hidden="true">1</div>
+    <section class="sheet replay-intro" aria-labelledby="replay-title">
+      <h1 id="replay-title">{segmentsOf(view.h1).map((segment) => (segment.kind === 'text' ? segment.text : <Identifier value={segment.text} face={faceOf(segment)} />))}</h1>
+      <p class="intro" data-provenance={provenance}>{view.intro} <span class="needs-js">Use the buttons or the arrow keys.</span></p>
+      <ol class="summary" data-wordcount="summary" data-provenance={provenance} aria-label="The incident in one line">
+        {view.summary.map((item) => (
+          <li><time>{item.time}</time> {segmentsOf(item.text).map((segment) => (segment.kind === 'text' ? segment.text : <Identifier value={segment.text} face={faceOf(segment)} />))}</li>
+        ))}
+      </ol>
+    </section>
+  </div>
+
+  <div class="row">
+    <div class="rail" aria-hidden="true">2</div>
+    <div class="replay" data-replay>
+      <ol class="steps" aria-label="Replay steps">
+        {view.steps.map((step) => (
+          <li>
+            <button type="button" class="step" data-replay-goto={String(step.number)} data-clock={clock(step)} aria-current={step.number === 1 ? 'step' : undefined}>
+              <span class="dot" aria-hidden="true"></span>
+              <span class="t">{step.time}</span>
+              <span class="step-label">{step.label}</span>
+            </button>
+          </li>
+        ))}
+      </ol>
+
+      <section class="stage" aria-label="The incident, step by step">
+        <div class="board">
+          <div class="board-drawing">
+            <LaneDrawing
+              id="replay-board"
+              variant="board"
+              lanes={artifact.lanes}
+              closedLane={artifact.closedLane}
+              region={artifact.region}
+              provenance={provenance}
+              title={view.landing.drawingTitle}
+              description={view.boardDescriptions[2] ?? ''}
+              stepDescriptions={view.boardDescriptions}
+              readBack={readBack}
+            />
+            <div class="tag-slot" data-wordcount="tag">
+              <svg class="tag-phantom" data-tag-phantom aria-hidden="true" focusable="false">
+                <line class="tag-phantom-stem" x1="50%" y1="-18" x2="50%" y2="12" />
+                <g class="tag-phantom-card">
+                  <rect x="0" y="0" width="100%" height="100%" rx="8" />
+                  <circle cx="50%" cy="20" r="8" />
+                </g>
+              </svg>
+              <LockoutTag tag={view.tag} provenance={provenance} row={2} readBack="field" />
+            </div>
+          </div>
+          <div class="caption-row">
+            <p class="caption" data-wordcount="caption" data-provenance={provenance}>{view.caption}{view.captionLinkHref !== undefined && <Fragment> <a href={view.captionLinkHref}>How SES counts reputation</a></Fragment>}</p>
+            <FlowSwitch />
+          </div>
+        </div>
+
+        <div class="narrative">
+          <div class="controls">
+            <button type="button" class="button quiet" data-replay-previous disabled>Previous step</button>
+            <button type="button" class="button" data-replay-next>Next step</button>
+            <p class="clock" role="status" data-replay-clock>{one === undefined ? '' : clock(one)}</p>
+          </div>
+
+          <section class="panel" data-wordcount="step" data-steps="1" aria-labelledby="step-1-title">
+            <h2 id="step-1-title">{one?.heading}</h2>
+            {one?.paragraphs.map((text) => <p>{segmentsOf(text).map((segment) => (segment.kind === 'text' ? segment.text : <Identifier value={segment.text} face={faceOf(segment)} />))}</p>)}
+          </section>
+
+          <section class="panel" data-wordcount="step" data-steps="2" aria-labelledby="step-2-title">
+            <h2 id="step-2-title">{two?.heading}</h2>
+            <Schedule
+              compact
+              columns={['Dimension', 'Count', 'Verdict', 'Threshold']}
+              rows={evidenceRows}
+              terms={view.identifierTerms}
+              caption={view.schedule.caption}
+              captionAttrs={{ 'data-provenance': provenance }}
+            />
+            <p data-model-role>{view.schedule.modelRole}</p>
+          </section>
+
+          <section class="panel" data-wordcount="step" data-steps="3" aria-labelledby="step-3-title">
+            <h2 id="step-3-title">{three?.heading}</h2>
+            {three?.paragraphs.map((text) => <p>{segmentsOf(text).map((segment) => (segment.kind === 'text' ? segment.text : <Identifier value={segment.text} face={faceOf(segment)} />))}</p>)}
+            <p class="lanes"><svg class="state-mark state-mark-shut" viewBox="0 0 12 12" aria-hidden="true"><rect x="1" y="1" width="10" height="10" /><rect class="bar" x="3" y="5" width="6" height="2" /></svg>{segmentsOf(view.lanesLines.paused).map((segment) => (segment.kind === 'text' ? segment.text : <Identifier value={segment.text} face={faceOf(segment)} />))}</p>
+          </section>
+
+          <section class="panel" data-wordcount="step" data-steps="4" aria-labelledby="step-4-title">
+            <h2 id="step-4-title">{four?.heading}</h2>
+            <Message email={view.email} label="Operator email" terms={view.identifierTerms} />
+            <CommandBlock command={view.reopenCommand} provenance={provenance} />
+            {four?.paragraphs.map((text) => <p>{segmentsOf(text).map((segment) => (segment.kind === 'text' ? segment.text : <Identifier value={segment.text} face={faceOf(segment)} />))}</p>)}
+            <p class="lanes"><svg class="state-mark state-mark-open" viewBox="0 0 12 12" aria-hidden="true"><rect x="1" y="1" width="10" height="10" /></svg>{segmentsOf(view.lanesLines.reopened).map((segment) => (segment.kind === 'text' ? segment.text : <Identifier value={segment.text} face={faceOf(segment)} />))}</p>
+          </section>
+        </div>
+      </section>
+    </div>
+  </div>
+
+  <div class="row">
+    <div class="rail" aria-hidden="true">3</div>
+    <section class="sheet log" aria-labelledby="log-title">
+      <div class="sheet-head">
+        <h2 id="log-title">Event and call log</h2>
+        <p>Rows appear as the replay reaches them. A row keeps the receiving domain, never a recipient address.</p>
+      </div>
+      <Schedule
+        stack
+        columns={['Time UTC', 'Kind', 'Lane', 'Detail']}
+        monoColumns={[0, 2]}
+        wordColumns={[DETAIL_COLUMN]}
+        terms={view.identifierTerms}
+        rows={logRows}
+        caption={`${view.eventLog.caption} ${view.eventLog.note}`}
+        captionAttrs={{ 'data-provenance': provenance }}
+      />
+    </section>
+  </div>
+  <script>
+    import '../client/replay.ts';
+  </script>
+</Sheet>

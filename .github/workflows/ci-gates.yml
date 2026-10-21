@@ -131,6 +131,27 @@ jobs:
         with:
           name: license-census
           path: trivy-licenses.json
+      # The ship gate's e2e and a11y steps drive dev-browser. Its npm tree is locked with integrity
+      # hashes: npm ci installs it from tools/dev-browser/package-lock.json, without install scripts,
+      # since the package's own would download the native binary unchecked. This step fetches the
+      # release asset bin/dev-browser.js expects and refuses it unless its SHA-256 equals the digest
+      # the GitHub API reports for that v0.2.9 asset. The harness looks for dev-browser in the global
+      # npm folder, so the locked package is linked there; its .bin folder joins the PATH for later
+      # steps. `dev-browser install` then fetches Chromium. Playwright 1.58.2 verifies no digest for
+      # its browser download (its lib/server/registry/*.js hold no hash check), so the Chromium
+      # revision is pinned only by the locked playwright-core and fetched over TLS, a named residual risk.
+      - name: install dev-browser 0.2.9 from its lockfile with a digest-checked binary
+        if: ${{ !cancelled() && steps.rebuild.outcome == 'success' }}
+        run: |
+          npm ci --ignore-scripts --prefix tools/dev-browser
+          bin="$GITHUB_WORKSPACE/tools/dev-browser/node_modules/.bin"
+          pkg="$GITHUB_WORKSPACE/tools/dev-browser/node_modules/dev-browser"
+          curl -fsSL -o "$pkg/bin/dev-browser-linux-x64" "https://github.com/SawyerHood/dev-browser/releases/download/v0.2.9/dev-browser-linux-x64"
+          echo "179ee6eb6d27245285fddbac063c24723482314d16b3fb0741dfaf0e63e8c0f6  $pkg/bin/dev-browser-linux-x64" | sha256sum -c -
+          chmod 755 "$pkg/bin/dev-browser-linux-x64"
+          ln -sfn "$pkg" "$(npm root -g)/dev-browser"
+          echo "$bin" >> "$GITHUB_PATH"
+          "$bin/dev-browser" install
       # The ship gate runs once the install above succeeded, whatever the vulnerability verdict says:
       # that verdict can stay red until an upstream fix ships, and under the default success() no
       # test, coverage or mutation result would be reported until then.
@@ -138,12 +159,13 @@ jobs:
         if: ${{ !cancelled() && steps.rebuild.outcome == 'success' }}
         run: npm run verify:ship
       # Only a workspace that BUILDS can leak a secret into a client bundle, so the loop is keyed
-      # on scripts.build rather than a fixed apps/web path, and it reads apps/* as well as
-      # packages/*: the site does not exist yet, and this reaches it the day it does, without a
-      # second edit here. A declared build whose dist/ is missing fails the scan (exit 2, could not
-      # run), so a site added later must build before this step. Each workspace found prints its
-      # own scan; the SKIPPED line names the reason only when none declares a build at all. The
-      # repo root's dist/ holds server bundles only (Lambda handlers, the agent runtime).
+      # on scripts.build rather than a fixed path: the site, packages/web, is scanned because its
+      # package.json declares scripts.build, and apps/* stays in the glob so a workspace added there
+      # is scanned with no second edit here. A declared build whose dist/ is missing fails the scan
+      # (exit 2, could not run), so every such workspace must build before this step; the ship
+      # gate builds the site. Each workspace found prints its own scan; the SKIPPED line names the
+      # reason only when none declares a build at all. The repo root's dist/ holds server bundles
+      # only (Lambda handlers, the agent runtime).
       - name: client bundle secret scan
         # It reads what the ship gate built, so it follows that step's outcome, not the verdict's.
         if: ${{ !cancelled() && steps.ship.outcome == 'success' }}

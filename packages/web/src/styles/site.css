@@ -1,0 +1,681 @@
+/* Own family names rather than the packages' "... Variable" ones, so document.fonts.check on the
+   names DESIGN.md uses can only pass when these faces load. Ranges are copied from each wght.css. */
+@font-face {
+  font-family: 'Red Hat Display';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 300 900;
+  src: url('@fontsource-variable/red-hat-display/files/red-hat-display-latin-ext-wght-normal.woff2') format('woff2-variations');
+  unicode-range: U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF;
+}
+
+@font-face {
+  font-family: 'Red Hat Display';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 300 900;
+  src: url('@fontsource-variable/red-hat-display/files/red-hat-display-latin-wght-normal.woff2') format('woff2-variations');
+  unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD;
+}
+
+@font-face {
+  font-family: 'Red Hat Text';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 300 700;
+  src: url('@fontsource-variable/red-hat-text/files/red-hat-text-latin-ext-wght-normal.woff2') format('woff2-variations');
+  unicode-range: U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF;
+}
+
+@font-face {
+  font-family: 'Red Hat Text';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 300 700;
+  src: url('@fontsource-variable/red-hat-text/files/red-hat-text-latin-wght-normal.woff2') format('woff2-variations');
+  unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD;
+}
+
+@font-face {
+  font-family: 'Red Hat Mono';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 300 700;
+  src: url('@fontsource-variable/red-hat-mono/files/red-hat-mono-latin-ext-wght-normal.woff2') format('woff2-variations');
+  unicode-range: U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF;
+}
+
+@font-face {
+  font-family: 'Red Hat Mono';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 300 700;
+  src: url('@fontsource-variable/red-hat-mono/files/red-hat-mono-latin-wght-normal.woff2') format('woff2-variations');
+  unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD;
+}
+
+/* The sheet. Colours, type sizes, the measure and spacing steps come from tokens.css, which also
+   paints the page ground and ink; this file adds the drawing's geometry and its parts. */
+:root {
+  --font-display: 'Red Hat Display', sans-serif;
+  --font-text: 'Red Hat Text', sans-serif;
+  --font-mono: 'Red Hat Mono', monospace;
+  --gutter: clamp(16px, 3vw, 40px);
+  --sheet-block: clamp(44px, 6vw, 92px);
+  --rail: 34px;
+  /* Browsers round border widths down to whole device pixels, so below 1.5 device pixels per CSS
+     pixel a 1.5px outline would draw as a 1px rule; the weights step up there and stay three lines. */
+  --w-rule: 1px;
+  --w-outline: 1.5px;
+  --w-emph: 2.5px;
+  accent-color: var(--ink);
+  scrollbar-color: var(--label) var(--ground);
+}
+@media (max-resolution: 1.49dppx) {
+  :root { --w-outline: 2px; --w-emph: 3px; }
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
+body { margin: 0; font: 400 var(--text-body)/1.55 var(--font-text); }
+::selection { background: var(--ink); color: var(--ground); }
+a { color: inherit; text-underline-offset: 0.22em; text-decoration-thickness: 1px; }
+a:hover { text-decoration-thickness: 2px; }
+:focus-visible { outline: 2px solid var(--ink); outline-offset: 3px; }
+#main:focus { outline: none; }
+h1 { font: 700 var(--text-display)/1.04 var(--font-display); letter-spacing: -0.026em; margin: 0; max-inline-size: 22ch; text-wrap: balance; }
+h2 { font: 700 var(--text-headline)/1.08 var(--font-display); letter-spacing: -0.02em; margin: 0; text-wrap: balance; }
+h3 { font: 700 var(--text-title)/1.25 var(--font-display); margin: 0 0 var(--space-sm); }
+p, li, dd { max-inline-size: var(--measure); }
+.mono, code { font-family: var(--font-mono); font-feature-settings: "tnum" 1; }
+code { font-size: var(--text-mono-value); font-weight: 500; }
+.visually-hidden, .theme legend { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+
+.skip { position: absolute; left: var(--space-12); top: -64px; z-index: 5; background: var(--ink); color: var(--sheet); padding: var(--space-12) var(--space-md); font-weight: 600; text-decoration: none; }
+.skip:focus { top: var(--space-12); }
+
+/* Drawing frame. The zone letters and the row numbers are real coordinates copy can cite, so the
+   border is an index, not an ornament. */
+.frame { margin: var(--gutter); border: var(--w-outline) solid var(--ink); background: var(--sheet); }
+.zones { display: grid; grid-template-columns: var(--rail) repeat(6, minmax(0, 1fr)); border-bottom: var(--w-rule) solid var(--rule); }
+.zones span { font: 500 var(--text-label-small)/1 var(--font-mono); color: var(--label); text-align: center; padding: 6px 0; border-left: var(--w-rule) solid var(--rule); }
+.zones span:first-child { border-left: 0; }
+.row { display: grid; grid-template-columns: var(--rail) minmax(0, 1fr); border-bottom: var(--w-rule) solid var(--ink); }
+.row:first-of-type { border-top: var(--w-rule) solid var(--ink); }
+.rail { border-right: var(--w-rule) solid var(--rule); font: 500 var(--text-label-small)/1 var(--font-mono); color: var(--label); text-align: center; padding-top: 14px; }
+
+.bar { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: var(--space-md) var(--space-lg); padding: var(--space-md) var(--gutter); }
+.wordmark { font: 850 var(--text-wordmark)/1 var(--font-display); letter-spacing: 0.08em; text-decoration: none; padding: var(--space-xs) 0; }
+.bar-end { display: flex; align-items: center; gap: clamp(16px, 2.4vw, 32px); }
+.bar-link { font: 600 var(--text-small)/1 var(--font-text); padding: var(--space-12) 0; }
+
+/* Three segments in one outline; the native radios sit over their labels, so the browser keeps the
+   group's single Tab stop and its arrow keys. */
+.theme { display: inline-flex; margin: 0; padding: 0; min-inline-size: 0; border: var(--w-outline) solid var(--ink); border-radius: 2px; }
+.theme label { position: relative; cursor: pointer; }
+.theme input { position: absolute; inset: 0; margin: 0; opacity: 0; cursor: pointer; }
+.theme span { display: block; min-width: 44px; min-height: 36px; padding: 11px 10px; font: 600 var(--text-label)/1 var(--font-mono); letter-spacing: 0.04em; text-align: center; border-left: var(--w-rule) solid var(--rule); }
+.theme label:first-of-type span { border-left: 0; }
+.theme input:checked + span { background: var(--ink); color: var(--sheet); }
+.theme input:focus-visible + span { position: relative; z-index: 1; outline: none; box-shadow: 0 0 0 3px var(--sheet), 0 0 0 5px var(--ink); }
+/* Device already follows the OS through CSS alone, so without JavaScript the switch would be a
+   control that does nothing. */
+:root:not(.js) .theme { display: none; }
+@media (forced-colors: active) {
+  .theme input:checked + span { text-decoration: underline; text-decoration-thickness: 2px; text-underline-offset: 3px; }
+  .theme input:focus-visible + span { outline: 2px solid; }
+}
+
+/* Moving flow never plays past the visitor's say (WCAG 2.2.2): Stop flow pins data-flow, and with
+   nothing stored reduced motion keeps the dashes still. */
+.flow-dash { stroke-dasharray: 3 11; animation: flow 1.6s linear infinite; }
+@keyframes flow { to { stroke-dashoffset: -28; } }
+:root[data-flow="stopped"] .flow-dash { animation: none; }
+@media (prefers-reduced-motion: reduce) {
+  :root:not([data-flow="running"]) .flow-dash { animation: none; }
+}
+.flow-toggle { min-width: 44px; min-height: 44px; padding: 0 var(--space-md); font: 600 var(--text-label)/1 var(--font-mono); letter-spacing: 0.04em; color: var(--ink); background: var(--sheet); border: var(--w-outline) solid var(--ink); border-radius: 2px; cursor: pointer; }
+.flow-toggle:hover { background: var(--ground); }
+:root:not(.js) .flow-toggle { display: none; }
+
+/* The title block is the site's navigation, the way a drawing's title block indexes its sheet set.
+   Cells after the project cell share the remaining width, however many sheet lists exist yet. */
+.titleblock { display: grid; grid-template-columns: minmax(0, 2fr); grid-auto-columns: minmax(0, 1fr); grid-auto-flow: column; font-size: var(--text-small); line-height: 1.45; }
+.titleblock > * { padding: 16px var(--gutter) 18px; border-left: var(--w-rule) solid var(--rule); }
+.titleblock > :first-child { border-left: 0; }
+.titleblock b { display: block; margin-bottom: var(--space-sm); font: 600 var(--text-label-small)/1 var(--font-mono); letter-spacing: 0.06em; text-transform: uppercase; color: var(--label); }
+.titleblock ul { list-style: none; margin: 0; padding: 0; }
+.titleblock li a { display: inline-block; padding: var(--space-sm) 0; font-weight: 600; }
+.titleblock a[aria-current="page"] { text-decoration-thickness: 3px; }
+.titleblock .mono { font-size: var(--text-mono-value); font-weight: 500; color: var(--label); }
+
+/* Parts the sheets share: buttons, row padding, section heads, identifiers, state marks. */
+.button { display: inline-flex; align-items: center; gap: var(--space-12); min-height: 48px; padding: var(--space-md) var(--space-lg); border: 0; border-radius: 2px; background: var(--ink); color: var(--sheet); font: 600 var(--text-cell)/1 var(--font-text); text-decoration: none; cursor: pointer; }
+.button:hover { background: var(--ink-2); }
+.button svg { width: 16px; height: 16px; flex: none; }
+.textlink { font-weight: 600; padding: var(--space-12) 0; }
+.sheet { padding: var(--sheet-block) var(--gutter); }
+.sheet-head { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: var(--space-lg) var(--space-40); margin-bottom: clamp(28px, 4vw, 52px); }
+.sheet-head p { margin: 0; color: var(--ink-2); align-self: end; }
+/* An identifier ends a line only at the <wbr> after a dot; nothing here may add another break. */
+.identifier { white-space: normal; overflow-wrap: normal; word-break: normal; hyphens: none; }
+.identifier > span { white-space: nowrap; }
+/* A value a reader may copy or cite whole, a date or a legal reference, keeps one line (UI-SPEC 208). */
+.keep-whole { white-space: nowrap; }
+.state { font: 600 var(--text-label)/1 var(--font-mono); letter-spacing: 0.06em; text-transform: uppercase; white-space: nowrap; }
+/* State marks are drawn, not bordered: a dashed CSS border on a 12px square renders as a solid line,
+   so the not-yet mark keeps its dashes only as an SVG dash array. */
+.state-mark { display: inline-block; width: 12px; height: 12px; margin-right: var(--space-sm); vertical-align: -1px; }
+.state-mark rect { fill: none; stroke: var(--ink); stroke-width: var(--w-outline); }
+.state-mark-later rect { stroke-dasharray: 2.5 2; stroke-dashoffset: 1.25; }
+.state-mark-open rect { fill: var(--ink); }
+/* A failed hand check: the shut mark's barred square, in ink rather than lockout red. */
+.state-mark-failed rect.bar { fill: var(--ink); stroke: none; }
+
+/* Row 1: the claim beside the flow drawing, the tag hung from the closed valve's stem. */
+.moment { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); }
+.claim { display: flex; flex-direction: column; justify-content: center; gap: var(--space-lg); padding: clamp(28px, 4vw, 60px) var(--gutter); border-right: var(--w-rule) solid var(--rule); }
+.landing-title { font: 700 var(--text-landing-headline)/1.05 var(--font-display); letter-spacing: -0.028em; }
+.lede { margin: 0; max-inline-size: 40ch; font-size: var(--text-lede); line-height: 1.55; color: var(--ink-2); }
+.actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-md) var(--space-lg); }
+.drawing { position: relative; display: flex; flex-direction: column; justify-content: center; overflow: hidden; padding: clamp(24px, 3vw, 40px) 0 clamp(24px, 3vw, 40px) clamp(24px, 2.5vw, 36px); }
+.dwg { display: block; width: 100%; height: auto; }
+.dwg-narrow { display: none; }
+.caption-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-sm) var(--space-md); margin-top: var(--space-lg); padding-right: var(--gutter); }
+.caption { margin: 0; font: 500 var(--text-label)/1.4 var(--font-mono); color: var(--label); }
+
+/* Drawing parts, painted from the tokens so both themes redraw them; no presentation colours in markup. */
+.dwg text { font-family: var(--font-mono); font-feature-settings: "tnum" 1; }
+.dwg-source { fill: none; stroke: var(--ink); stroke-width: 2; }
+.dwg-bus { stroke: var(--ink); stroke-width: 3.5; }
+.dwg .dwg-source-name { font-family: var(--font-display); font-weight: 800; font-size: 18px; fill: var(--ink); }
+.dwg .dwg-source-name-narrow { font-size: 15px; }
+.dwg-narrow .dwg-lane { font-size: 12px; }
+.dwg-lane { font-size: 13px; font-weight: 500; fill: var(--ink); }
+.dwg-caption-text { font-size: 12px; font-weight: 500; fill: var(--label); }
+.dwg-state-text { font-size: 12px; font-weight: 600; fill: var(--ink); }
+.dwg-bubble-text { font-size: 12px; font-weight: 600; fill: var(--ink); }
+.dwg-pipe { fill: none; stroke: var(--line); stroke-width: 2.5; }
+.dwg-dotted { stroke-dasharray: 1 9; }
+.dwg-flow { fill: none; stroke: var(--flow); stroke-width: 2.5; }
+.dwg-valve-open { fill: var(--sheet); stroke: var(--ink); stroke-width: 2; }
+.dwg-valve-shut { fill: var(--ink); stroke: var(--ink); stroke-width: 2; }
+.dwg-stem { stroke: var(--ink); stroke-width: 2; }
+.dwg-arrow { fill: var(--ink); }
+.dwg-leader { stroke: var(--ink); stroke-width: 1.5; stroke-dasharray: 4 3; }
+.dwg-bubble { fill: var(--sheet); stroke: var(--ink); stroke-width: 2; }
+.dwg-outlet { fill: none; stroke: var(--ink); stroke-width: 2; }
+.dwg-outlet-shut { fill: none; stroke: var(--line); stroke-width: 2; stroke-dasharray: 3 3; }
+
+/* The lockout tag is a paper card in both themes; only its outline follows the theme ink, which keeps
+   its edge at 3:1 on the dark sheet (DESIGN.md Paper Tag Rule). */
+.tag { position: relative; width: min(320px, 100%); background: var(--tag-card); color: var(--tag-ink); border: var(--w-outline) solid var(--ink); border-radius: 10px 10px 4px 4px; }
+/* The punched hole is an element, not a pseudo element, so the accessibility audit can read the
+   background behind the tag's text. */
+.tag-hole { position: absolute; z-index: 1; top: 12px; left: 50%; width: 16px; height: 16px; margin-left: -8px; border: var(--w-outline) solid var(--tag-ink); border-radius: 50%; background: var(--sheet); }
+.tag header { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: var(--space-xs) var(--space-12); padding: 36px 16px 12px; border-radius: 8px 8px 0 0; background: var(--tag-red); color: var(--tag-card); }
+.tag header b { display: block; font: 900 var(--text-tag-legend)/0.95 var(--font-display); letter-spacing: 0.02em; }
+.tag-lane { font-size: var(--text-mono-value); font-weight: 600; line-height: 1.3; }
+.stamp { grid-row: 1 / span 2; grid-column: 2; align-self: start; padding: var(--space-xs) var(--space-sm); border: var(--w-outline) solid currentColor; border-radius: 2px; font: 600 var(--text-label-small)/1 var(--font-mono); letter-spacing: 0.08em; }
+.tag dl { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: var(--space-sm) var(--space-12); margin: 0; padding: var(--space-xs) var(--space-md) var(--space-12); }
+.tag dt { font: 600 var(--text-label-small)/1.5 var(--font-mono); letter-spacing: 0.06em; text-transform: uppercase; color: var(--tag-field); }
+.tag dd { margin: 0; font: 400 var(--text-tag-value)/1.35 var(--font-text); }
+.tag dd.mono { font-family: var(--font-mono); font-size: var(--text-mono-value); font-weight: 500; }
+.tag footer { display: flex; justify-content: space-between; padding: var(--space-sm) var(--space-md); border-top: var(--w-outline) dashed var(--tag-ink); font: 600 var(--text-label-small)/1.2 var(--font-mono); }
+/* The hole sits on the stem's end: the tag's left edge is the stem's x (36.3% of the wide drawing,
+   53.9% of the narrow one) less half the tag, kept inside the drawing. */
+/* The card rises over the stem's lower end so that 18px of stem always shows above it: a percentage
+   margin resolves against the drawing's width, the same width the drawing scales by, and the stem is
+   48 of the wide drawing's 760 units (58 of the narrow one's 360) in LaneDrawing. */
+.drawing .tag { --tw: min(320px, 100%); width: var(--tw); margin: calc(18px - 100% * 48 / 760) 0 0 clamp(0px, calc(100% * 0.363 - var(--tw) / 2), calc(100% - var(--tw))); transform: rotate(-2.5deg); transform-origin: 50% 20px; }
+
+/* Row 2: one process line with a valve per step. */
+ol.procedure { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); margin: 0; padding: 0; list-style: none; }
+.procedure.steps-5 { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+/* The process line runs from each valve to the next step's numeral, never under a numeral, so the
+   accessibility audit can read the numerals' background. */
+.procedure li { max-inline-size: none; }
+.procedure li > div:last-child { padding-right: var(--space-lg); }
+.procedure .valve { display: flex; align-items: center; margin-bottom: var(--space-md); }
+.procedure .valve svg { flex: none; width: 64px; height: 36px; }
+.procedure .pipe { flex: 1; border-top: 2.5px solid var(--line); }
+.procedure li:last-child .pipe { margin-right: var(--space-lg); }
+.procedure .n { padding-right: var(--space-sm); font: 800 var(--text-numeral)/1 var(--font-display); }
+.procedure h3 { max-inline-size: 18ch; }
+.procedure p { margin: 0; max-inline-size: 34ch; font-size: var(--text-cell); line-height: 1.5; color: var(--ink-2); }
+
+/* Row 3: the refusals, each struck through by the circle-slash. */
+.refusals { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: var(--space-40); }
+ul.refuse { margin: 0; padding: 0; list-style: none; border-top: var(--w-outline) solid var(--ink); }
+/* Each item's rule runs the full column under the outline rule; only its sentence keeps the measure. */
+.refuse li { display: grid; grid-template-columns: 32px minmax(0, 1fr); gap: var(--space-md); max-inline-size: none; padding: var(--space-md) 0; border-bottom: var(--w-rule) solid var(--rule); }
+.refuse li > span { max-inline-size: var(--measure); }
+.refuse svg { width: 22px; height: 22px; margin-top: 2px; }
+
+/* Row 4: the ruled limits table, a schedule without the outline. */
+table.ruled { width: 100%; border-collapse: collapse; }
+.ruled th, .ruled td { padding: var(--space-md) var(--space-md) var(--space-md) 0; text-align: left; vertical-align: top; border-top: var(--w-rule) solid var(--rule); }
+.ruled thead th { border-top: var(--w-outline) solid var(--ink); font: 600 var(--text-label)/1 var(--font-mono); letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-2); }
+.ruled tbody th { font-weight: 600; }
+.cell-text { display: block; max-inline-size: var(--measure); }
+
+/* Row 5: the close band. */
+.close { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-lg) var(--space-40); padding: clamp(32px, 4vw, 52px) var(--gutter); }
+.close p { margin: var(--space-sm) 0 0; color: var(--ink-2); }
+
+@media (max-width: 960px) {
+  .moment, .refusals, .sheet-head { grid-template-columns: minmax(0, 1fr); }
+  .claim { border-right: 0; }
+  .drawing { padding: var(--space-lg) var(--gutter) 28px; }
+  .caption-row { padding-right: 0; }
+  ol.procedure, .procedure.steps-5 { grid-template-columns: repeat(2, minmax(0, 1fr)); row-gap: 36px; }
+}
+@media (max-width: 620px) {
+  .moment { display: flex; flex-direction: column; }
+  .claim { display: contents; }
+  .claim > * { margin-inline: var(--gutter); }
+  .landing-title { order: 1; margin-top: 28px; }
+  .drawing { order: 2; padding: var(--space-md) var(--gutter) var(--space-lg); }
+  .lede { order: 3; margin-top: var(--space-xs); }
+  .actions { order: 4; margin-top: var(--space-md); margin-bottom: 36px; }
+  .dwg-wide { display: none; }
+  .dwg-narrow { display: block; }
+  .drawing .tag { margin-top: calc(18px - 100% * 58 / 360); margin-left: clamp(0px, calc(100% * 0.539 - var(--tw) / 2), calc(100% - var(--tw))); transform: rotate(-2deg); }
+  .tag dl { grid-template-columns: minmax(0, 1fr); gap: 0; }
+  .tag dd { margin-bottom: var(--space-sm); }
+  ol.procedure, .procedure.steps-5 { grid-template-columns: minmax(0, 1fr); row-gap: 0; }
+  .procedure li { display: grid; grid-template-columns: 64px minmax(0, 1fr); column-gap: var(--space-md); }
+  .procedure li > div:last-child { padding: 0 0 28px; }
+  .procedure li:last-child > div:last-child { padding-bottom: 0; }
+  .procedure .valve { grid-row: 1 / span 2; flex-direction: column; align-items: center; margin: 0; }
+  .procedure .valve svg { width: 36px; height: 64px; transform: rotate(90deg); }
+  .procedure .pipe { border-top: 0; border-left: 2.5px solid var(--line); }
+  .procedure li:last-child .pipe { margin-right: 0; }
+  .procedure .n { padding: var(--space-xs) 0; }
+  .ruled .hide-narrow { display: none; }
+  .close .button { width: 100%; justify-content: center; }
+}
+
+@media (max-width: 960px) {
+  .titleblock { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-auto-flow: row; }
+  .titleblock > :first-child { grid-column: 1 / -1; border-bottom: var(--w-rule) solid var(--rule); }
+  .titleblock > :nth-child(2) { border-left: 0; }
+}
+@media (max-width: 620px) {
+  :root { --rail: 22px; }
+  .frame { margin: 0; border-left: 0; border-right: 0; }
+  .bar-link { display: none; }
+  .titleblock { grid-template-columns: minmax(0, 1fr); }
+  .titleblock > * { border-left: 0; border-top: var(--w-rule) solid var(--rule); }
+  .titleblock > :first-child { border-top: 0; border-bottom: 0; }
+}
+
+/* Shared by the replay and later sheets: the quiet and disabled buttons, the outlined schedule and
+   its compact and stacking variants, the operator email and the command block. */
+.button.quiet { background: transparent; color: var(--ink); box-shadow: inset 0 0 0 var(--w-outline) var(--ink); }
+.button.quiet:hover { background: var(--ground); }
+/* Disabled keeps the same box, so the controls never move between steps. */
+.button[disabled], .button[disabled]:hover { cursor: not-allowed; background: var(--rule); color: var(--label); box-shadow: none; }
+table.schedule { width: 100%; border-collapse: collapse; font-size: var(--text-cell); line-height: 1.5; border: var(--w-outline) solid var(--ink); }
+.schedule caption { caption-side: bottom; padding-top: var(--space-sm); text-align: left; font: 500 var(--text-label)/1.4 var(--font-mono); color: var(--label); }
+/* Cells meet on their first baseline, so a 13px mono time sits on the line of the 16px text beside it. */
+.schedule th, .schedule td { padding: 13px 16px; text-align: left; vertical-align: baseline; border-top: var(--w-rule) solid var(--rule); border-left: var(--w-rule) solid var(--rule); }
+.schedule thead th { border-top: 0; border-bottom: var(--w-outline) solid var(--ink); font: 600 var(--text-label)/1.3 var(--font-mono); letter-spacing: 0.05em; text-transform: uppercase; color: var(--ink-2); }
+.schedule tbody th { border-left: 0; font-weight: 600; }
+.schedule td { color: var(--ink-2); }
+.schedule .mono, .schedule tr.us .mono { font-family: var(--font-mono); font-size: var(--text-mono-value); font-weight: 500; }
+.schedule tr.us th, .schedule tr.us td { background: var(--ground); color: var(--ink); font-weight: 600; }
+.schedule .note { display: block; margin-top: var(--space-xs); font: 600 var(--text-label)/1.3 var(--font-mono); letter-spacing: 0.05em; text-transform: uppercase; color: var(--label); }
+.schedule.compact { font-size: var(--text-schedule-compact); line-height: 1.4; }
+.schedule.compact th, .schedule.compact td { padding: var(--space-sm) var(--space-12); }
+.schedule.compact tbody th code { display: block; margin-top: var(--space-xs); }
+
+.message { max-inline-size: calc(44ch + 48px); border: var(--w-outline) solid var(--ink); background: var(--sheet); }
+.message dl { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: var(--space-sm) var(--space-md); margin: 0; padding: var(--space-12) var(--space-lg); border-bottom: var(--w-rule) solid var(--rule); font: 500 var(--text-mono-value)/1.45 var(--font-mono); }
+.message dt { color: var(--label); }
+.message dd { margin: 0; }
+.message-body { padding: var(--space-md) var(--space-lg) var(--space-lg); }
+.message-body p { margin: 0 0 var(--space-12); font-size: var(--text-cell); line-height: 1.5; color: var(--ink); }
+.message-body p:last-child { margin-bottom: 0; }
+.message-body b { font-weight: 600; }
+/* The disclosure opens the body above a rule, so it is read before the agent's paragraph. */
+.message-body .disclosure { padding-bottom: var(--space-12); border-bottom: var(--w-rule) solid var(--rule); font-size: var(--text-small); line-height: 1.45; color: var(--ink-2); }
+pre.command { margin: 0; padding: var(--space-12) var(--space-md); background: var(--ground); border: var(--w-rule) solid var(--rule); white-space: pre-wrap; overflow-wrap: anywhere; font: 500 var(--text-mono-value)/1.5 var(--font-mono); font-feature-settings: "tnum" 1; }
+/* A block code box covers every line of the command. Inline, its line boxes miss the first line of a
+   token that breaks inside itself, so axe reads two element stacks under one text node and cannot
+   compute its contrast (incomplete, elmPartiallyObscuring). The layout is the same either way. */
+pre.command code { display: block; font: inherit; }
+/* Each unit is one atomic box that moves to the next line whole while it fits. A flag with its value
+   is a unit of two token boxes: shrink-to-fit keeps it on one line until it is wider than the
+   block, and only then does it wrap, at the space between its tokens. A token wider than the
+   column breaks inside itself (overflow-wrap above), as the last resort. */
+pre.command code > span, pre.command code > span > span { display: inline-block; max-inline-size: 100%; }
+
+/* Replay. Which step shows is CSS alone: the root's data-step (written before first paint from a
+   valid hash, then by replay.ts) against each part's data-steps list; no data-step means step 1. */
+:root.js:not([data-step]) [data-steps]:not([data-steps~="1"]),
+:root.js[data-step="1"] [data-steps]:not([data-steps~="1"]),
+:root.js[data-step="2"] [data-steps]:not([data-steps~="2"]),
+:root.js[data-step="3"] [data-steps]:not([data-steps~="3"]),
+:root.js[data-step="4"] [data-steps]:not([data-steps~="4"]) { display: none; }
+/* Without JavaScript every panel and log row reads in order, the board holds the paused step, and
+   no control that would do nothing is shown. */
+:root:not(.js) .board [data-steps]:not([data-steps~="3"]),
+:root:not(.js) .steps, :root:not(.js) .controls, :root:not(.js) .needs-js { display: none; }
+
+/* The intro stays short so the board reaches the first viewport: the artifact leads, not the title. */
+.replay-intro { display: grid; grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); gap: var(--space-lg) var(--space-40); align-items: end; padding-block: clamp(28px, 4vw, 56px); }
+.replay-intro .intro { margin: 0; font-size: var(--text-intro); color: var(--ink-2); }
+ol.summary { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); margin: var(--space-md) 0 0; padding: 0; list-style: none; border-top: var(--w-outline) solid var(--ink); }
+.summary li { padding: var(--space-12) var(--space-md) 0 0; font-size: var(--text-cell); line-height: 1.5; }
+.summary li + li { padding-left: var(--space-md); border-left: var(--w-rule) solid var(--rule); }
+.summary time { display: block; font: 600 var(--text-mono-value)/1.4 var(--font-mono); font-feature-settings: "tnum" 1; color: var(--label); }
+
+/* The step strip is the replay's timeline, the same process line the procedure uses. The current
+   step is told by its dot and ring alone, so no box changes size between steps. */
+ol.steps { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); margin: 0; padding: 0 var(--gutter); list-style: none; border-bottom: var(--w-rule) solid var(--rule); }
+.steps li { position: relative; max-inline-size: none; }
+.steps li::before { content: ""; position: absolute; top: 29px; left: 0; right: 0; border-top: 2.5px solid var(--line); }
+.steps .step { position: relative; display: flex; flex-direction: column; align-items: flex-start; gap: var(--space-sm); width: 100%; padding: var(--space-md) var(--space-12) var(--space-md) 0; border: 0; background: none; color: var(--ink); font: 400 var(--text-cell)/1.3 var(--font-text); text-align: left; cursor: pointer; }
+.steps .dot { width: 22px; height: 22px; border: 2px solid var(--ink); border-radius: 50%; background: var(--sheet); }
+.steps .step[aria-current="step"] .dot { background: var(--ink); box-shadow: 0 0 0 4px var(--sheet), 0 0 0 6px var(--ink); }
+.steps .step:hover .step-label { text-decoration: underline; text-underline-offset: 0.22em; }
+.steps .t { font: 600 var(--text-label)/1 var(--font-mono); font-feature-settings: "tnum" 1; color: var(--label); }
+
+.stage { display: grid; grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); align-items: start; }
+.board { position: sticky; top: 0; padding: clamp(24px, 3vw, 44px) var(--gutter) var(--space-40); border-right: var(--w-rule) solid var(--rule); }
+.board-drawing { max-inline-size: 420px; margin-inline: auto; }
+.dwg-board .dwg-lane { font-size: 12px; }
+.dwg-mark { fill: none; stroke: var(--ink); stroke-width: 2; }
+/* The tag hangs from the stem at the board's centre. A percentage margin resolves against the
+   drawing's width, which is what scales the stem's 30 units, so 18px of stem always shows. */
+.board .tag { margin: calc(18px - 100% * 30 / 400) auto 0; transform: rotate(-2deg); transform-origin: 50% 20px; }
+/* Beside the story the tag simply comes off; where the board stacks above the story (960px and
+   below) it keeps its slot, so the story never jumps between steps. */
+:root.js:not([data-step="3"]) .tag-slot { display: none; }
+/* Where the slot is reserved, its empty place is drawn as a phantom: the tag's outline and its stem
+   from the valve, dash-dot in Cell Rule, the drafting line for a part shown where it will go. */
+.tag-slot { position: relative; }
+.tag-phantom { display: none; position: absolute; top: 0; left: 50%; width: min(320px, 100%); height: 100%; translate: -50% 0; overflow: visible; fill: none; stroke: var(--rule); stroke-width: var(--w-rule); stroke-dasharray: 12 4 2 4; }
+.tag-phantom-card { transform: rotate(-2deg); transform-box: view-box; transform-origin: 50% 20px; }
+.board .caption-row { flex-direction: column; justify-content: center; margin-top: var(--space-lg); padding-right: 0; text-align: center; }
+.board .caption { max-inline-size: 44ch; }
+
+.narrative { display: flex; flex-direction: column; gap: var(--space-lg); padding: clamp(24px, 3vw, 44px) var(--gutter) var(--space-40); }
+.controls { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-12); }
+.controls .clock { margin: 0 0 0 auto; font: 600 var(--text-mono-value)/1.4 var(--font-mono); font-feature-settings: "tnum" 1; color: var(--label); }
+.panel { display: flex; flex-direction: column; gap: var(--space-md); }
+.panel h2 { font-size: var(--text-narrative-headline); }
+.panel > p { margin: 0; color: var(--ink-2); }
+.panel .lanes { color: var(--ink); font-weight: 600; }
+.lanes .state-mark { margin-right: var(--space-sm); }
+.state-mark-shut rect { fill: var(--lock); stroke: var(--lock); }
+.state-mark-shut rect.bar { fill: var(--sheet); stroke: none; }
+
+/* Beside the board, and on a narrow screen, the story column can be narrower than four columns of
+   evidence and an unbroken tag value. There each row's dimension spans its row as a heading over its
+   three readings, so no identifier breaks and nothing leaves the panel; the rows sit in one
+   anonymous table cell, which keeps the caption below the outline. The Dimension header stays for
+   screen readers only. */
+.panel { container-type: inline-size; }
+@container (width < 460px) {
+  .schedule.compact tr { display: grid; grid-template-columns: repeat(3, minmax(min-content, 1fr)); }
+  .schedule.compact tbody th { grid-column: 1 / -1; }
+  .schedule.compact tr > :nth-child(2) { border-left: 0; }
+  /* A gap and a rule part the column labels from the first dimension, so COUNT never reads as its label. */
+  .schedule.compact tbody tr:first-child > th { margin-top: var(--space-sm); }
+  .schedule.compact thead th:first-child { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+}
+
+:root.js:not([data-step]) tr[data-log-step="1"] > *,
+:root.js[data-step="1"] tr[data-log-step="1"] > *,
+:root.js[data-step="2"] tr[data-log-step="2"] > *,
+:root.js[data-step="3"] tr[data-log-step="3"] > *,
+:root.js[data-step="4"] tr[data-log-step="4"] > * { background: var(--ground); }
+
+@media (max-width: 960px) {
+  .replay-intro { grid-template-columns: minmax(0, 1fr); }
+  ol.summary { grid-template-columns: repeat(2, minmax(0, 1fr)); row-gap: var(--space-12); }
+  .summary li:nth-child(3) { padding-left: 0; border-left: 0; }
+  .stage { grid-template-columns: minmax(0, 1fr); }
+  .board { position: static; border-right: 0; border-bottom: var(--w-rule) solid var(--rule); }
+  :root.js:not([data-step="3"]) .tag-slot { display: block; visibility: hidden; }
+  :root.js:not([data-step="3"]) .tag-phantom { display: block; visibility: visible; }
+}
+/* A stacking schedule holds identifiers in several columns (the log's lane and its tag values),
+   which never break, so it becomes one block per row only where its own column is narrower than
+   the table needs (600px measured on the replay log, 2026-10-18), never by the viewport alone. */
+.log { container-type: inline-size; }
+@container (width < 604px) {
+  table.schedule.stack, .schedule.stack thead, .schedule.stack tbody, .schedule.stack tr, .schedule.stack th, .schedule.stack td { display: block; width: auto; }
+  .schedule.stack thead { display: none; }
+  .schedule.stack caption { display: block; padding: var(--space-sm) var(--space-md); }
+  .schedule.stack tbody tr { padding: var(--space-xs) 0 var(--space-sm); border-top: var(--w-outline) solid var(--ink); }
+  .schedule.stack tbody tr:first-child { border-top: 0; }
+  .schedule.stack tbody th, .schedule.stack td { padding: var(--space-sm) var(--space-md); border: 0; }
+  .schedule.stack tbody th { padding-top: var(--space-12); }
+  .schedule.stack td::before { content: attr(data-col); display: block; font: 600 var(--text-label-small)/1.4 var(--font-mono); letter-spacing: 0.06em; text-transform: uppercase; color: var(--label); }
+  /* A log detail is a long value, not an identifier, so it may break as the last resort. */
+  .schedule.stack td { overflow-wrap: anywhere; }
+}
+/* Deploy. The intro row, the notice, the command blocks inside procedure steps and schedule cells,
+   the role schedules and the removal list. */
+.sheet-intro { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: var(--space-lg) var(--space-40); align-items: end; padding: clamp(32px, 5vw, 72px) var(--gutter) clamp(28px, 4vw, 52px); }
+.sheet-intro > p { margin: 0; font-size: var(--text-intro); color: var(--ink-2); }
+/* The box keeps the sentence at the measure, its own padding and outline added outside it. */
+.notice { grid-column: 1 / -1; margin: var(--space-sm) 0 0; max-inline-size: calc(var(--measure) + 2 * var(--space-md) + 2 * var(--w-outline)); padding: var(--space-12) var(--space-md); border: var(--w-outline) dashed var(--ink); }
+.notice b { margin-right: var(--space-12); font: 600 var(--text-label)/1 var(--font-mono); letter-spacing: 0.05em; }
+/* An even 8px inset in the narrow step columns, so a flag and its value (-c fothering:live=live,
+   about 172px at mono-value) keeps one line in a five-column step from 1280px up. */
+.procedure pre.command { margin-top: var(--space-12); padding: var(--space-sm); }
+/* Element-qualified so a note inside a procedure step keeps its label face over .procedure p. */
+p.command-note { margin: var(--space-sm) 0 0; font: 500 var(--text-label)/1.4 var(--font-mono); color: var(--label); }
+.command-inline > span { display: inline-block; }
+/* A resource expression or a principal is a long value: it ends a line at its <wbr>s, after a slash,
+   a colon or a comma or before a capital inside a CDK export name, and breaks inside a part only if
+   that part alone is wider than the cell.
+   break-word, unlike anywhere, leaves the column's min-content at its longest part. */
+.long-value { font-family: var(--font-mono); font-feature-settings: "tnum" 1; font-size: var(--text-mono-value); font-weight: 500; overflow-wrap: break-word; }
+.roles { display: grid; gap: var(--space-2xl); }
+.role-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: var(--space-sm) var(--space-lg); margin-bottom: var(--space-md); }
+.role-head h3 { margin: 0; }
+.role-stack { margin: 0; color: var(--label); }
+.role-stack > span { margin-right: var(--space-sm); font: 600 var(--text-label)/1 var(--font-mono); letter-spacing: 0.05em; text-transform: uppercase; }
+.perm-notes { display: grid; gap: var(--space-12); margin-top: var(--space-2xl); }
+.perm-notes p { margin: 0; }
+.perm-notes p + p { color: var(--ink-2); }
+/* The Deny box reads as the exception: an emphasis-weight rule over its heading and schedule, not a
+   box around a box. */
+.deny { margin-top: var(--space-2xl); padding-top: var(--space-md); border-top: var(--w-emph) solid var(--ink); }
+ol.removal { counter-reset: removal; max-inline-size: 80ch; margin: 0; padding: 0; list-style: none; border-top: var(--w-outline) solid var(--ink); }
+.removal li { counter-increment: removal; display: grid; grid-template-columns: 44px minmax(0, 1fr); gap: var(--space-12); max-inline-size: none; padding: var(--space-md) 0; border-bottom: var(--w-rule) solid var(--rule); }
+.removal li::before { content: counter(removal); font: 800 var(--text-numeral-small)/1 var(--font-display); }
+.removal p { margin: 0; }
+.removal pre.command { margin-top: var(--space-sm); }
+
+/* Each deploy schedule keeps its table form while its own section is as wide as the table needs
+   (measured on the rendered tables), and below that becomes one block per row, every cell under its
+   column name; an empty cell, a trust row's missing condition, is left out of the block. */
+.fit-resources { container: resources / inline-size; }
+.fit-permissions { container: permissions / inline-size; }
+/* In table form a reason or a removal keeps a readable column instead of one word per line; these
+   minimums are part of what each table needs. Every stacked block's reset names th and td, so it
+   matches these minimums' specificity and, later in the file, wins over them (here and below). */
+.fit td[data-col="Why"] .cell-text { min-inline-size: 12em; }
+.fit td[data-col="On removal"] .cell-text { min-inline-size: 12em; }
+/* Measured 2026-10-20 on the rendered tables with the minimums above, after the phase 2 merge: the
+   resource table needs 777px and the widest role table, the runtime role's, 937px (a long value
+   now breaks inside a CDK export name, and an action between its words); a later snapshot that
+   widens either moves its threshold. */
+@container resources (width < 780px) {
+  .fit-resources .fit, .fit-resources .fit :is(thead, tbody, tr, th, td) { display: block; width: auto; }
+  .fit-resources .fit :is(thead, td[data-empty]) { display: none; }
+  .fit-resources .fit tbody tr { padding: var(--space-xs) 0 var(--space-sm); }
+  .fit-resources .fit tbody tr + tr { border-top: var(--w-outline) solid var(--ink); }
+  .fit-resources .fit :is(th, td) { padding: var(--space-sm) var(--space-md); border: 0; }
+  .fit-resources .fit :is(th, td)::before { content: attr(data-col); display: block; font: 600 var(--text-label-small)/1.4 var(--font-mono); letter-spacing: 0.06em; text-transform: uppercase; color: var(--label); }
+  .fit-resources .fit caption { display: block; padding: var(--space-sm) var(--space-md); }
+  .fit-resources .fit :is(th, td) .cell-text { min-inline-size: 0; }
+}
+/* The longest logical id, 32 mono characters, needs 250px at the identifier step, plus the stacked
+   cell's 16px inline padding and the outline; under 286px of section it steps down to the label size
+   rather than break mid-name (UI-SPEC 9.3, E10). */
+@container resources (width < 286px) {
+  .fit-resources .fit code { font-size: var(--text-label); }
+}
+@container permissions (width < 940px) {
+  .fit-permissions .fit, .fit-permissions .fit :is(thead, tbody, tr, th, td) { display: block; width: auto; }
+  .fit-permissions .fit :is(thead, td[data-empty]) { display: none; }
+  .fit-permissions .fit tbody tr { padding: var(--space-xs) 0 var(--space-sm); }
+  .fit-permissions .fit tbody tr + tr { border-top: var(--w-outline) solid var(--ink); }
+  .fit-permissions .fit :is(th, td) { padding: var(--space-sm) var(--space-md); border: 0; }
+  .fit-permissions .fit :is(th, td)::before { content: attr(data-col); display: block; font: 600 var(--text-label-small)/1.4 var(--font-mono); letter-spacing: 0.06em; text-transform: uppercase; color: var(--label); }
+  .fit-permissions .fit caption { display: block; padding: var(--space-sm) var(--space-md); }
+  .fit-permissions .fit :is(th, td) .cell-text { min-inline-size: 0; }
+}
+
+@media (max-width: 960px) {
+  .sheet-intro { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* Privacy and AI. The intro's in-page links, the two drawings, the stored-field and model schedules,
+   the facts grid, the website list and the does and never-does lists. */
+.intro-side { display: grid; gap: var(--space-md); align-self: end; }
+.intro-side p { margin: 0; font-size: var(--text-intro); color: var(--ink-2); }
+.intro-side .jump { display: flex; flex-wrap: wrap; gap: var(--space-lg); font-size: var(--text-body); color: var(--ink); }
+.jump a { padding: var(--space-12) 0; font-weight: 600; }
+figure.filter, figure.interlock { margin: 0; }
+.dwg-filter.dwg-wide { max-inline-size: 920px; margin-inline: auto; }
+.dwg-interlock.dwg-wide { max-inline-size: 1000px; margin-inline: auto; }
+.dwg-filter.dwg-narrow { max-inline-size: 360px; margin-inline: auto; }
+.dwg-interlock.dwg-narrow { max-inline-size: 300px; margin-inline: auto; }
+.dwg-unit { fill: var(--sheet); stroke: var(--ink); stroke-width: 2; }
+.dwg-funnel { fill: none; stroke: var(--ink); stroke-width: 1.5; }
+/* The model's box is dashed, the one part that writes no state; the action check is drawn at the
+   emphasis weight, the interlock itself. */
+.dwg-model { stroke-dasharray: 6 4; }
+.dwg-check { stroke-width: 3; }
+.dwg-stem { fill: none; }
+.filter-caption { justify-content: space-between; margin: var(--space-md) 0 clamp(28px, 4vw, 48px); padding-right: 0; }
+.after-schedule { display: grid; gap: var(--space-12); margin-top: var(--space-lg); }
+.after-schedule p { margin: 0; color: var(--ink-2); }
+.facts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border-top: var(--w-outline) solid var(--ink); }
+.facts > div { padding: var(--space-md) var(--space-lg) var(--space-lg) 0; border-bottom: var(--w-rule) solid var(--rule); }
+.facts > div + div { padding-left: var(--space-lg); border-left: var(--w-rule) solid var(--rule); }
+.facts h3 { margin: 0 0 var(--space-sm); }
+.facts p { margin: 0 0 var(--space-12); color: var(--ink-2); }
+.facts p:last-child { margin-bottom: 0; }
+.decides { margin-top: var(--space-2xl); }
+.decides p { margin: 0; color: var(--ink-2); }
+ul.site { display: grid; gap: var(--space-12); margin: 0; padding-left: var(--space-lg); }
+.split { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-xl) var(--space-2xl); }
+.split ul { margin: 0; padding: 0; list-style: none; border-top: var(--w-outline) solid var(--ink); }
+.split li { padding: var(--space-md) 0; border-bottom: var(--w-rule) solid var(--rule); }
+.split h3 { margin-bottom: var(--space-12); }
+.split-note { margin: var(--space-md) 0 0; font-weight: 600; }
+.wrong { display: grid; gap: var(--space-md); }
+.wrong p { margin: 0; color: var(--ink-2); }
+
+/* Like the deploy schedules: each keeps its table form while its section is as wide as the table
+   needs, and below that becomes one block per row with every cell under its column name. */
+.fit-fields { container: fields / inline-size; }
+.fit-model { container: model / inline-size; }
+.fit-fields td[data-col="What is stored"] .cell-text { min-inline-size: 12em; }
+/* In table form a field path keeps one line, which is part of what the table needs; stacked, it
+   may break after its dot like every identifier. */
+.fit-fields .fit tbody th wbr { display: none; }
+/* A model record value is prose, so in table form it keeps a readable column. */
+.fit-model td[data-col="Value"] .cell-text { min-inline-size: 16em; }
+/* Measured 2026-10-18 on the rendered tables: the stored-field table needs 536px with its paths on
+   one line, the model record 391px with its 16em value column. */
+/* The stored-field table also stacks at 620px and below (UI-SPEC 583): there the frame runs edge to
+   edge, so its section is wider at 620px than at 657px and would otherwise switch form three times.
+   Either condition names the wrapper fields-stacked, and the stacked rules below query that name,
+   so they are written once for both. */
+.fit-fields .fit-form { container-type: inline-size; }
+@container fields (width < 540px) { .fit-fields .fit-form { container-name: fields-stacked; } }
+@media (max-width: 620px) { .fit-fields .fit-form { container-name: fields-stacked; } }
+@container fields-stacked (width >= 0px) {
+  .fit-fields .fit, .fit-fields .fit :is(thead, tbody, tr, th, td) { display: block; width: auto; }
+  .fit-fields .fit thead { display: none; }
+  .fit-fields .fit tbody tr { padding: var(--space-xs) 0 var(--space-sm); }
+  .fit-fields .fit tbody tr + tr { border-top: var(--w-outline) solid var(--ink); }
+  .fit-fields .fit :is(th, td) { padding: var(--space-sm) var(--space-md); border: 0; }
+  .fit-fields .fit :is(th, td)::before { content: attr(data-col); display: block; font: 600 var(--text-label-small)/1.4 var(--font-mono); letter-spacing: 0.06em; text-transform: uppercase; color: var(--label); }
+  .fit-fields .fit caption { display: block; padding: var(--space-sm) var(--space-md); }
+  .fit-fields .fit :is(th, td) .cell-text { min-inline-size: 0; }
+  .fit-fields .fit tbody th wbr { display: inline; }
+}
+@container model (width < 394px) {
+  .fit-model .fit, .fit-model .fit :is(thead, tbody, tr, th, td) { display: block; width: auto; }
+  .fit-model .fit thead { display: none; }
+  .fit-model .fit tbody tr { padding: var(--space-xs) 0 var(--space-sm); }
+  .fit-model .fit tbody tr + tr { border-top: var(--w-outline) solid var(--ink); }
+  .fit-model .fit :is(th, td) { padding: var(--space-sm) var(--space-md); border: 0; }
+  .fit-model .fit :is(th, td)::before { content: attr(data-col); display: block; font: 600 var(--text-label-small)/1.4 var(--font-mono); letter-spacing: 0.06em; text-transform: uppercase; color: var(--label); }
+  .fit-model .fit caption { display: block; padding: var(--space-sm) var(--space-md); }
+  .fit-model .fit :is(th, td) .cell-text { min-inline-size: 0; }
+}
+
+@media (max-width: 960px) {
+  .facts, .split { grid-template-columns: minmax(0, 1fr); }
+  .facts > div + div { padding-left: 0; border-left: 0; }
+}
+@media (max-width: 620px) {
+  /* The narrow filter drawing does not move, so there is no flow to stop. */
+  .filter-caption .flow-toggle { display: none; }
+}
+
+/* Accessibility statement. The record and the hand-check schedule follow the stored-field table: each
+   keeps its table form while its section is as wide as the table needs, and is one block per row at
+   that width and below and at 620px and below, so each changes form once between 320 and 1440. */
+.state-mark-none rect { stroke: none; }
+.fit-record { container: record / inline-size; }
+.fit-checks { container: checks / inline-size; }
+.fit-record td[data-col="Record"] .cell-text, .fit-checks td[data-col="How checked"] .cell-text { min-inline-size: 16em; }
+/* The longest criterion name, 1.2.3, takes three lines at 173px of 600-weight text (measured
+   2026-10-18), so the column keeps 11em of text plus the cell's 16px paddings (border-box). */
+.fit-checks .fit tbody th { min-inline-size: calc(11em + 32px); }
+.fit-record .fit-form, .fit-checks .fit-form { container-type: inline-size; }
+/* Either condition names the wrapper statement-stacked, so the stacked rules are written once for
+   both schedules; each schedule's own section decides its own form. */
+/* Measured 2026-10-18 on the rendered tables with the 16em minimums: the record needs 409px and the
+   hand-check schedule, with its criterion column minimum, 672px. */
+@container record (width < 412px) { .fit-record .fit-form { container-name: statement-stacked; } }
+@container checks (width < 676px) { .fit-checks .fit-form { container-name: statement-stacked; } }
+@media (max-width: 620px) {
+  :is(.fit-record, .fit-checks) .fit-form { container-name: statement-stacked; }
+}
+@container statement-stacked (width >= 0px) {
+  :is(.fit-record, .fit-checks) .fit, :is(.fit-record, .fit-checks) .fit :is(thead, tbody, tr, th, td) { display: block; width: auto; }
+  :is(.fit-record, .fit-checks) .fit thead { display: none; }
+  :is(.fit-record, .fit-checks) .fit tbody tr { padding: var(--space-xs) 0 var(--space-sm); }
+  :is(.fit-record, .fit-checks) .fit tbody tr + tr { border-top: var(--w-outline) solid var(--ink); }
+  :is(.fit-record, .fit-checks) .fit :is(th, td) { padding: var(--space-sm) var(--space-md); border: 0; }
+  :is(.fit-record, .fit-checks) .fit :is(th, td)::before { content: attr(data-col); display: block; font: 600 var(--text-label-small)/1.4 var(--font-mono); letter-spacing: 0.06em; text-transform: uppercase; color: var(--label); }
+  :is(.fit-record, .fit-checks) .fit caption { display: block; padding: var(--space-sm) var(--space-md); }
+  :is(.fit-record, .fit-checks) .fit :is(th, td) .cell-text { min-inline-size: 0; }
+  .fit-checks .fit tbody th { min-inline-size: 0; }
+  /* One state per block, so there is no column of names to keep aligned. */
+  .fit-checks .fit .state-mark-none { display: none; }
+}
+/* A sentence, so Red Hat Text 400 like every other (UI-SPEC 171); the rule above it carries the weight. */
+.split .report { margin: 0; padding-top: var(--space-md); border-top: var(--w-outline) solid var(--ink); }
+
+/* The 404 page: the intro row of every sheet, its action under the paragraph. */
+.not-found-action { margin: 0; }
+@media (max-width: 620px) {
+  .not-found-action .button { width: 100%; justify-content: center; }
+}
+
+@media (max-width: 620px) {
+  /* The sticky controls cover the top of the viewport, so focus scrolled into view lands below them. */
+  :root:has(.controls) { scroll-padding-top: 120px; }
+  ol.steps { grid-template-columns: repeat(2, minmax(0, 1fr)); row-gap: var(--space-xs); }
+  .controls { position: sticky; top: 0; z-index: 2; margin: -12px 0 0; padding: var(--space-12) 0; background: var(--sheet); border-bottom: var(--w-rule) solid var(--rule); }
+  .controls .button { flex: 1 1 40%; justify-content: center; }
+  .controls .clock { width: 100%; margin-left: 0; }
+  ol.summary { grid-template-columns: minmax(0, 1fr); }
+  .summary li + li { padding-left: 0; border-left: 0; }
+  .message dl, .message-body { padding-inline: var(--space-md); }
+}
