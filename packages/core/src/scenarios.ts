@@ -52,6 +52,8 @@ export type ScenarioStep = Scenario['steps'][number];
 
 export interface StepPlanEntry {
   index: number;
+  /** The three-digit send number within the step, as it appears in the recipient's plus label. */
+  counter: string;
   step: string;
   lane: string;
   tagKind: ScenarioTagKind;
@@ -64,10 +66,70 @@ export function parseScenarioSource(json: unknown): ScenarioSource {
   return scenarioSourceSchema.parse(json);
 }
 
-export function findStep(_source: ScenarioSource, _scenarioName: string, _stepName: string): { scenario: Scenario; step: ScenarioStep } | undefined {
-  return undefined;
+export function findStep(source: ScenarioSource, scenarioName: string, stepName: string): { scenario: Scenario; step: ScenarioStep } | undefined {
+  const scenario = source.scenarios.find((candidate) => candidate.name === scenarioName);
+  const step = scenario?.steps.find((candidate) => candidate.name === stepName);
+  return scenario === undefined || step === undefined ? undefined : { scenario, step };
 }
 
-export function stepPlan(_source: ScenarioSource, _scenarioName: string, _stepName: string, _runId: string): StepPlanEntry[] {
-  return [];
+type ScenarioGroup = ScenarioStep['groups'][number];
+
+interface GroupCount {
+  group: ScenarioGroup;
+  left: number;
+}
+
+/** Takes up to count messages of a group; a group the step does not define never yields one. */
+function take(remaining: ReadonlyMap<string, GroupCount>, name: string, count: number): ScenarioGroup[] {
+  const entry = remaining.get(name);
+  if (entry === undefined) return [];
+  const taken = Math.min(count, entry.left);
+  entry.left -= taken;
+  return Array.from({ length: taken }, () => entry.group);
+}
+
+// The cycle repeats until none of its groups has a message left; a group already exhausted is
+// skipped, so a cycle naming one group twice keeps drawing from the same count.
+function cycleOrder(step: ScenarioStep, remaining: ReadonlyMap<string, GroupCount>): ScenarioGroup[] {
+  const order: ScenarioGroup[] = [];
+  let placed = true;
+  while (placed) {
+    placed = false;
+    for (const slot of step.cycle) {
+      const taken = take(remaining, slot.group, slot.take);
+      order.push(...taken);
+      if (taken.length > 0) placed = true;
+    }
+  }
+  return order;
+}
+
+function withInterleave(step: ScenarioStep, remaining: ReadonlyMap<string, GroupCount>, cycle: readonly ScenarioGroup[]): ScenarioGroup[] {
+  const interleave = step.interleave;
+  if (interleave === undefined) return [...cycle];
+  return cycle.flatMap((group, position) =>
+    (position + 1) % interleave.afterEvery === 0 ? [group, ...take(remaining, interleave.group, 1)] : [group],
+  );
+}
+
+/** The step's sends in the order the command makes them; empty when the scenario or step is absent. */
+export function stepPlan(source: ScenarioSource, scenarioName: string, stepName: string, runId: string): StepPlanEntry[] {
+  const found = findStep(source, scenarioName, stepName);
+  if (found === undefined) return [];
+  const { step } = found;
+  const remaining = new Map(step.groups.map((group) => [group.name, { group, left: group.count }]));
+  const order = withInterleave(step, remaining, cycleOrder(step, remaining));
+  return order.map((group, index) => {
+    const counter = String(index + 1).padStart(3, '0');
+    return {
+      index,
+      counter,
+      step: step.name,
+      lane: group.lane,
+      tagKind: group.tag.kind,
+      tagValue: group.tag.value,
+      recipientKind: group.recipient,
+      recipient: `${group.recipient}+${runId}-${step.name}-${counter}@${source.recipientDomain}`,
+    };
+  });
 }

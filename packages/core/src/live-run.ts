@@ -1,7 +1,9 @@
 import * as z from 'zod';
-import type { LaneMap } from './lanes.js';
-import type { StepPlanEntry } from './scenarios.js';
+import { CONFIGURATION_SET_PATTERN, findLane, SES_TAG_PATTERN, type LaneEntry, type LaneMap } from './lanes.js';
+import type { ScenarioTagKind, StepPlanEntry } from './scenarios.js';
 
+// The account's send rate is 1 per second (re-read by the command); 1,250 ms keeps every step at
+// 0.8 per second across all lanes, since the rate is per account and not per configuration set.
 export const MIN_SEND_GAP_MS = 1250;
 
 export interface LiveRunTag {
@@ -18,20 +20,53 @@ export interface LiveRunRequest {
   tags: LiveRunTag[];
 }
 
-const tagSchema = z.strictObject({ name: z.string(), value: z.string() });
+const TAG_KEY_FIELD = {
+  batch: 'batchTagKey',
+  campaign: 'campaignTagKey',
+  template: 'templateTagKey',
+} as const satisfies Record<ScenarioTagKind, keyof LaneEntry>;
 
-export const attemptRecordSchema = z.strictObject({
-  lane: z.string(),
-  tags: z.array(tagSchema),
-  recipient: z.string(),
-  startUtc: z.string(),
-  endUtc: z.string(),
-  messageId: z.string(),
-  requestId: z.string(),
-});
+/** The stream tag is the lane's own declared stream, so ingest files every message under the lane it was sent on. */
+export function buildLiveRunRequest(entry: StepPlanEntry, laneMap: LaneMap, runId: string, from: string): LiveRunRequest {
+  const lane = findLane(laneMap, entry.lane);
+  const stream = lane?.declaredStreams[0];
+  if (lane === undefined || stream === undefined) throw new RangeError(`lane ${entry.lane} is not in the lane map`);
+  return {
+    from,
+    to: entry.recipient,
+    subject: `Fothering live run ${runId}, step ${entry.step}, message ${entry.counter}`,
+    text: `Measurement message ${entry.counter} of step ${entry.step} in live run ${runId}, sent to the SES mailbox simulator.`,
+    configurationSetName: lane.configurationSet,
+    tags: [
+      { name: lane.streamTagKey, value: stream },
+      { name: lane[TAG_KEY_FIELD[entry.tagKind]], value: entry.tagValue },
+      { name: laneMap.runIdTagKey, value: runId },
+    ],
+  };
+}
+
+const ASSUMED_ROLE_ARN = /^arn:aws[a-z-]*:sts::\d{12}:assumed-role\/([^/]+)\/[^/]+$/;
+
+/** SES records a role sender's caller identity as the role name, so two sessions of one role are one caller. */
+export function callerKeyOf(arn: string): string | undefined {
+  return ASSUMED_ROLE_ARN.exec(arn)?.[1];
+}
+
+const ISO_UTC_MILLIS = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
+const ERROR_NAME_PATTERN = /^[A-Za-z][A-Za-z0-9_-]{0,127}$/;
+const tagSchema = z.strictObject({ name: z.string().regex(SES_TAG_PATTERN), value: z.string().regex(SES_TAG_PATTERN) });
+
+const attemptFields = {
+  lane: z.string().regex(CONFIGURATION_SET_PATTERN),
+  tags: z.array(tagSchema).min(1),
+  recipient: z.string().min(1),
+  startUtc: z.string().regex(ISO_UTC_MILLIS),
+  endUtc: z.string().regex(ISO_UTC_MILLIS),
+};
+
+export const attemptRecordSchema = z.union([
+  z.strictObject({ ...attemptFields, messageId: z.string().min(1), requestId: z.string().min(1) }),
+  z.strictObject({ ...attemptFields, errorName: z.string().regex(ERROR_NAME_PATTERN) }),
+]);
 
 export type AttemptRecord = z.infer<typeof attemptRecordSchema>;
-
-export function buildLiveRunRequest(_entry: StepPlanEntry, _laneMap: LaneMap, _runId: string, _from: string): LiveRunRequest {
-  throw new Error('not implemented');
-}

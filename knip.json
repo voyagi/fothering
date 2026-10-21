@@ -14,7 +14,7 @@
     },
     "packages/providers": {},
     "packages/functions": {
-      "entry": ["src/*/handler.ts"]
+      "entry": ["src/*/handler.ts", "src/live-run/cli.ts"]
     },
     "packages/infra": {
       "entry": ["src/app.ts", "src/*-cli.ts"]
