@@ -259,10 +259,11 @@ export function buildEvidenceRecord(input: EvidenceRecordInput): EvidenceRecord 
 
 // D-65: the decision store shares the event table, under partition keys that never start with LANE#,
 // so a lane query or the recipient index can never reach one of these items.
-export const INCIDENT_PARTS = ['STATE', 'EVIDENCE', 'DECISION', 'COUNTER'] as const;
+export const INCIDENT_PARTS = ['STATE', 'EVIDENCE', 'DECISION', 'COUNTER', 'CLOSURE'] as const;
 export type IncidentPart = (typeof INCIDENT_PARTS)[number];
 
 const UTC_DATE = /^\d{4}-\d{2}-\d{2}$/;
+const UTC_HOUR = /^\d{4}-\d{2}-\d{2}T\d{2}$/;
 
 export function incidentLaneKey(configurationSet: string): RecordKey {
   return { pk: `INCIDENT_LANE#${configurationSet}`, sk: 'MARKER' };
@@ -275,4 +276,15 @@ export function incidentItemKey(incidentId: string, part: IncidentPart): RecordK
 export function counterDayKey(utcDate: string): RecordKey {
   if (!UTC_DATE.test(utcDate)) throw new RangeError('a counter day is a UTC date written YYYY-MM-DD');
   return { pk: `COUNTER_DAY#${utcDate}`, sk: 'COUNTER' };
+}
+
+/** D-95: the lane's pause pointer, beside its marker, naming the one closure whose pause may hold the lane. */
+export function incidentPauseKey(configurationSet: string): RecordKey {
+  return { pk: `INCIDENT_LANE#${configurationSet}`, sk: 'PAUSE' };
+}
+
+/** D-99: pause and reopen attempts on one lane in one UTC clock hour. */
+export function counterLaneHourKey(configurationSet: string, utcHour: string): RecordKey {
+  if (!UTC_HOUR.test(utcHour)) throw new RangeError('a lane-hour counter names a UTC hour written YYYY-MM-DDTHH');
+  return { pk: `COUNTER_LANE_HOUR#${configurationSet}#${utcHour}`, sk: 'COUNTER' };
 }

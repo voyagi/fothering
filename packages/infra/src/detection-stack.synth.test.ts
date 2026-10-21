@@ -4,14 +4,24 @@ import { parseLaneMap } from '@fothering/core/lanes';
 import { LIVE_SWITCH } from '@fothering/core/mode';
 import { DETECT_FUNCTION_TIMEOUT_MS } from '@fothering/core/model-values';
 import lanesJson from '../../../lanes.json' with { type: 'json' };
+import { ACCOUNT_SENDING_ACTIONS, applyAccountSendingDeny } from './account-deny.js';
+import { ActionStack } from './action-stack.js';
 import { cdkJsonContext } from './cdk-context.js';
-import { DETECTION_STACK_ID, INGEST_STACK_ID, RUNTIME_STACK_ID } from './create-app.js';
+import { ACTION_STACK_ID, DETECTION_STACK_ID, INGEST_STACK_ID, RUNTIME_STACK_ID } from './create-app.js';
 import { DetectionStack } from './detection-stack.js';
 import { IngestStack } from './ingest-stack.js';
-import { collectPermissions, serializePermissions, synthesizePermissionTemplates, type CfnTemplate, type StackTemplates } from './permissions.js';
+import {
+  collectPermissions,
+  serializePermissions,
+  synthesizePermissionTemplates,
+  type CfnTemplate,
+  type PermissionEntry,
+  type StackTemplates,
+} from './permissions.js';
 import { RuntimeStack } from './runtime-stack.js';
 import { createStubAssets } from './stub-assets.js';
 import {
+  denyViolations,
   expectTemplate,
   grantsAction,
   logicalIdOf,
@@ -236,39 +246,115 @@ function plantOn(templates: StackTemplates, stack: string, rolePrefix: string, s
   return planted;
 }
 
+function configurationSetArn(name: string): Record<string, unknown> {
+  return { 'Fn::Join': ['', ['arn:aws:ses:eu-central-1:', { Ref: 'AWS::AccountId' }, `:configuration-set/${name}`]] };
+}
+
+const PAUSE_ACTION = 'ses:PutConfigurationSetSendingOptions';
+
+function pauseEntry(stack: string, role: string, name: string): PermissionEntry {
+  return {
+    stack,
+    role,
+    kind: 'permission',
+    effect: 'Allow',
+    action: PAUSE_ACTION,
+    resource: JSON.stringify(configurationSetArn(name)),
+    principal: null,
+    condition: null,
+  };
+}
+
+function includesEnding(violations: readonly string[], ending: string): boolean {
+  return violations.some((violation) => violation.endsWith(ending));
+}
+
 describe('the permission boundaries, with every wildcard expanded', () => {
+  const laneMap = parseLaneMap(lanesJson);
   let templates: StackTemplates;
   beforeAll(() => {
     templates = synthesizePermissionTemplates();
   }, 60_000);
 
-  it('finds no violation in the three synthesized stacks, which hold the detection grants', () => {
+  const violationsOf = (planted: StackTemplates) => permissionViolations(collectPermissions(planted), laneMap);
+
+  it('finds no violation in the four synthesized stacks, which hold the detection grants and the pause', () => {
     const entries = collectPermissions(templates);
     expect(entries.some((entry) => entry.stack === DETECTION_STACK_ID && entry.action === 'bedrock-agentcore:InvokeAgentRuntime')).toBe(true);
-    expect(permissionViolations(entries)).toEqual([]);
+    expect(entries.some((entry) => entry.stack === ACTION_STACK_ID && entry.effect === 'Allow' && entry.action === PAUSE_ACTION)).toBe(true);
+    expect(permissionViolations(entries, laneMap)).toEqual([]);
+    expect(denyViolations(entries)).toEqual([]);
   });
 
   it('reports a dynamodb:* grant planted on the runtime role', () => {
-    const planted = plantOn(templates, RUNTIME_STACK_ID, 'RuntimeRole', { Effect: 'Allow', Action: 'dynamodb:*', Resource: '*' });
-    const violations = permissionViolations(collectPermissions(planted));
+    const violations = violationsOf(plantOn(templates, RUNTIME_STACK_ID, 'RuntimeRole', { Effect: 'Allow', Action: 'dynamodb:*', Resource: '*' }));
     expect(violations).toHaveLength(1);
     expect(violations[0]).toMatch(/^FotheringRuntime\/RuntimeRole\w+ dynamodb:\*: the runtime role reaches dynamodb$/);
   });
 
   it('reports an InvokeAgentRuntime grant planted on the ingest role', () => {
-    const planted = plantOn(templates, INGEST_STACK_ID, 'IngestRole', { Effect: 'Allow', Action: 'bedrock-agentcore:InvokeAgentRuntime', Resource: '*' });
-    const violations = permissionViolations(collectPermissions(planted));
+    const violations = violationsOf(
+      plantOn(templates, INGEST_STACK_ID, 'IngestRole', { Effect: 'Allow', Action: 'bedrock-agentcore:InvokeAgentRuntime', Resource: '*' }),
+    );
     expect(violations).toHaveLength(1);
     expect(violations[0]).toMatch(/^FotheringIngest\/IngestRole\w+ bedrock-agentcore:InvokeAgentRuntime: only the detection role may invoke the runtime$/);
   });
 
-  it('reports a * grant planted on the runtime role as reaching ses, dynamodb and s3', () => {
-    const planted = plantOn(templates, RUNTIME_STACK_ID, 'RuntimeRole', { Effect: 'Allow', Action: '*', Resource: '*' });
-    const violations = permissionViolations(collectPermissions(planted));
-    for (const service of ['ses', 'dynamodb', 's3']) {
-      expect(violations.some((violation) => violation.endsWith(`: the runtime role reaches ${service}`))).toBe(true);
-    }
-    expect(violations.some((violation) => violation.endsWith('no role may hold ses:PutConfigurationSetSendingOptions'))).toBe(true);
+  it('reports a * grant planted on the runtime role as reaching ses, dynamodb and s3, account-level sending and the pause beside a model action', () => {
+    const violations = violationsOf(plantOn(templates, RUNTIME_STACK_ID, 'RuntimeRole', { Effect: 'Allow', Action: '*', Resource: '*' }));
+    for (const service of ['ses', 'dynamodb', 's3']) expect(includesEnding(violations, `: the runtime role reaches ${service}`)).toBe(true);
+    for (const action of ACCOUNT_SENDING_ACTIONS) expect(includesEnding(violations, `: no role may hold ${action}`)).toBe(true);
+    expect(includesEnding(violations, `: only a pausing role may hold ${PAUSE_ACTION}`)).toBe(true);
+    expect(includesEnding(violations, `: holds ${PAUSE_ACTION} beside a bedrock or bedrock-agentcore action`)).toBe(true);
+  });
+
+  it('reports ses:* planted on the ingest role as the three account-level actions and the pause', () => {
+    const violations = violationsOf(plantOn(templates, INGEST_STACK_ID, 'IngestRole', { Effect: 'Allow', Action: 'ses:*', Resource: '*' }));
+    for (const action of ACCOUNT_SENDING_ACTIONS) expect(includesEnding(violations, `ses:*: no role may hold ${action}`)).toBe(true);
+    expect(includesEnding(violations, `ses:*: only a pausing role may hold ${PAUSE_ACTION}`)).toBe(true);
+  });
+
+  it('reports ses:Put* planted on the action role over fothering-transactional as a pause outside the closeable set', () => {
+    const violations = violationsOf(
+      plantOn(templates, ACTION_STACK_ID, 'ActionRole', { Effect: 'Allow', Action: 'ses:Put*', Resource: configurationSetArn('fothering-transactional') }),
+    );
+    expect(includesEnding(violations, `ses:Put*: ${PAUSE_ACTION} reaches a configuration set outside the statically closeable lanes`)).toBe(true);
+    expect(violations.some((violation) => violation.startsWith('FotheringAction/ActionRole') && violation.includes(': only a pausing role'))).toBe(false);
+  });
+
+  it('reports ses:Update* planted on the action role as the two v1 actions', () => {
+    const violations = violationsOf(plantOn(templates, ACTION_STACK_ID, 'ActionRole', { Effect: 'Allow', Action: 'ses:Update*', Resource: '*' }));
+    expect(violations.filter((violation) => violation.includes(': no role may hold ses:Update')).sort()).toEqual(
+      ['ses:UpdateAccountSendingEnabled', 'ses:UpdateConfigurationSetSendingEnabled'].map((action) => expect.stringContaining(`ses:Update*: no role may hold ${action}`)),
+    );
+  });
+
+  it('reports * planted on the action role as the account-level actions and the pause beside a model action', () => {
+    const violations = violationsOf(plantOn(templates, ACTION_STACK_ID, 'ActionRole', { Effect: 'Allow', Action: '*', Resource: '*' }));
+    for (const action of ACCOUNT_SENDING_ACTIONS) expect(includesEnding(violations, `*: no role may hold ${action}`)).toBe(true);
+    expect(includesEnding(violations, `: holds ${PAUSE_ACTION} beside a bedrock or bedrock-agentcore action`)).toBe(true);
+  });
+
+  it('reports bedrock:InvokeModel planted on the action role as the pause beside a model action, and nothing else', () => {
+    const violations = violationsOf(plantOn(templates, ACTION_STACK_ID, 'ActionRole', { Effect: 'Allow', Action: 'bedrock:InvokeModel', Resource: '*' }));
+    expect(violations).toHaveLength(1);
+    expect(violations[0]).toMatch(/^FotheringAction\/ActionRole\w+: holds ses:PutConfigurationSetSendingOptions beside a bedrock or bedrock-agentcore action$/);
+  });
+
+  it('allows the pause on fothering-bulk to a reopen role in the action stack, and to no reopen role anywhere else', () => {
+    const entries = collectPermissions(templates);
+    expect(permissionViolations([...entries, pauseEntry(ACTION_STACK_ID, 'ReopenRole12345678', 'fothering-bulk')], laneMap)).toEqual([]);
+    expect(permissionViolations([...entries, pauseEntry(DETECTION_STACK_ID, 'ReopenRole12345678', 'fothering-bulk')], laneMap)).toEqual([
+      `FotheringDetection/ReopenRole12345678 ${PAUSE_ACTION}: only a pausing role may hold ${PAUSE_ACTION}`,
+    ]);
+  });
+
+  it('reports a role whose account-level Deny entries were removed', () => {
+    const entries = collectPermissions(templates);
+    const ingestRole = entries.find((entry) => entry.stack === INGEST_STACK_ID && entry.kind === 'trust' && entry.role.startsWith('IngestRole'))?.role;
+    const stripped = entries.filter((entry) => !(entry.role === ingestRole && entry.effect === 'Deny'));
+    expect(entries.length - stripped.length).toBe(ACCOUNT_SENDING_ACTIONS.length);
+    expect(denyViolations(stripped)).toEqual(ACCOUNT_SENDING_ACTIONS.map((action) => `FotheringIngest/${ingestRole}: no Deny on * for ${action}`));
   });
 
   it('serializes two syntheses to byte-identical snapshots', { timeout: 60_000 }, () => {
@@ -276,18 +362,19 @@ describe('the permission boundaries, with every wildcard expanded', () => {
     expect(again).toBe(serializePermissions(collectPermissions(templates)));
   });
 
-  it('collects the same permissions when the runtime stack is created before the ingest stack', { timeout: 60_000 }, () => {
+  it('collects the same permissions when the four stacks are created in another order', { timeout: 60_000 }, () => {
     const assets = createStubAssets();
     try {
       const env = { region: 'eu-central-1' };
-      const laneMap = parseLaneMap(lanesJson);
       const app = new App({ context: { ...cdkJsonContext }, outdir: assets.outdir });
       const runtime = new RuntimeStack(app, RUNTIME_STACK_ID, { env, agentAssetDir: assets.agentAssetDir });
       const ingest = new IngestStack(app, INGEST_STACK_ID, { env, laneMap, ingestAssetDir: assets.ingestAssetDir, forgetAssetDir: assets.forgetAssetDir });
+      new ActionStack(app, ACTION_STACK_ID, { env, laneMap, actionAssetDir: assets.ingestAssetDir, reopenAssetDir: assets.forgetAssetDir, ingest });
       new DetectionStack(app, DETECTION_STACK_ID, { env, laneMap, detectAssetDir: assets.ingestAssetDir, table: ingest.table, runtime: runtime.runtime });
+      applyAccountSendingDeny(app);
       const assembly = app.synth();
       const reordered = Object.fromEntries(
-        [INGEST_STACK_ID, RUNTIME_STACK_ID, DETECTION_STACK_ID].map((id) => [id, assembly.getStackByName(id).template as CfnTemplate]),
+        [INGEST_STACK_ID, RUNTIME_STACK_ID, DETECTION_STACK_ID, ACTION_STACK_ID].map((id) => [id, assembly.getStackByName(id).template as CfnTemplate]),
       );
       expect(serializePermissions(collectPermissions(reordered))).toBe(serializePermissions(collectPermissions(templates)));
     } finally {

@@ -53,6 +53,16 @@ export function readRepoText(relativePath: string, root: string): string {
   return text;
 }
 
+// A committed JSON file, with the file and its remedy named when it does not parse.
+export function readRepoJson(relativePath: string, root: string, remedy: string): unknown {
+  const text = readRepoText(relativePath, root);
+  try {
+    return JSON.parse(text);
+  } catch (error) {
+    throw new Error(`${relativePath}: not valid JSON (${(error as Error).message}). ${remedy}`);
+  }
+}
+
 export interface DeployCommand {
   command: string;
   /** The line's trailing `# ...` comment, or null. */
@@ -98,7 +108,8 @@ function joinContinuations(lines: readonly string[]): string[] {
   let pending: string | undefined;
   for (const line of lines) {
     const text = pending === undefined ? line : `${pending} ${line.trim()}`;
-    const continued = /\s*\\$/.exec(text);
+    // A backslash inside a comment is comment text to the shell, never a continuation.
+    const continued = /(?:^|\s)#/.test(text) ? null : /\s*\\$/.exec(text);
     pending = continued ? text.slice(0, continued.index) : undefined;
     if (!continued) joined.push(text);
   }
@@ -175,43 +186,92 @@ export interface RemovalStep {
   commands: DeployCommand[];
 }
 
+// The deployed stacks go live only when the context key is exactly this value (live-switch.ts).
+const LIVE_KEY = 'fothering:live';
+const LIVE_VALUE = 'live';
+
+// The value a cdk line gives the live switch, read from a context flag spaced from its value (-c k=v,
+// --context k=v) or joined to it (--context=k=v), the forms stackSelection reads. The CDK guide does not
+// say which of two values for one key wins, so a line that sets the key twice is refused.
+function liveSwitchValue(command: string): string | undefined {
+  const words = command.split(/\s+/);
+  const values: string[] = [];
+  for (let index = 0; index < words.length; index += 1) {
+    const word = words[index] ?? '';
+    let assignment: string | undefined;
+    if (word === '-c' || word === '--context') {
+      index += 1;
+      assignment = words[index];
+    } else if (word.startsWith('--context=')) assignment = word.slice('--context='.length);
+    if (assignment?.startsWith(`${LIVE_KEY}=`) === true) values.push(assignment.slice(LIVE_KEY.length + 1));
+  }
+  if (values.length > 1) {
+    throw new Error(`${README_PREFIX}: "${command}" sets ${LIVE_KEY} ${String(values.length)} times, and the deploy sheet cannot tell which one CDK keeps. Set it once.`);
+  }
+  return values[0];
+}
+
+const DEPLOY_LINE = /^npx cdk deploy\b/;
+const isGoLive = (command: string): boolean => DEPLOY_LINE.test(command) && liveSwitchValue(command) === LIVE_VALUE;
+
 // What a README line does, read from its CDK verb, so a step shows whichever line the README holds
-// for it (a later README that names the stacks instead of --all still lands on the same step).
-const COMMAND_USES: Readonly<Record<DeployCommandUse, RegExp>> = {
+// for it (a later README that names the stacks instead of --all still lands on the same step). A
+// deploy goes to the go-live step only when it turns the switch on: any other context it passes
+// leaves it a plain deploy.
+const COMMAND_USES: Readonly<Record<DeployCommandUse, { test(command: string): boolean }>> = {
   'build': /^npm run build$/,
   'bootstrap': /^npx cdk bootstrap\b/,
-  'deploy': /^npx cdk deploy\b(?!.*\s(?:-c|--context)\s)/,
-  'go-live': /^npx cdk deploy\b.*\s(?:-c|--context)\s/,
+  'deploy': { test: (command) => DEPLOY_LINE.test(command) && !isGoLive(command) },
+  'go-live': { test: isGoLive },
   'destroy': /^npx cdk destroy\b/,
 };
 
 const STACK_USES: ReadonlySet<DeployCommandUse> = new Set(['deploy', 'go-live', 'destroy']);
 
-// How many stacks a cdk line selects: --all selects every one, otherwise each word that is neither
-// an option nor a context value names one.
-function stackScope(command: string): number {
+type StackSelection = { all: true } | { all: false; names: ReadonlySet<string> };
+
+// The options a cdk line may hold beside its stack names, each followed by its value: a context
+// key (-c k=v, --context k=v) or a stack parameter (--parameters Stack:Key=v), spaced or joined with =.
+const VALUE_OPTIONS = ['-c', '--context', '--parameters'];
+const JOINED_VALUE_OPTIONS = ['--context=', '--parameters='];
+
+// The stacks a cdk line selects: --all selects every one, otherwise each word that is neither an
+// option nor an option's value names one. Any other option may take a value (--profile p) or not
+// (--exclusively), which no reading of the words can tell apart, so such a line is refused.
+function stackSelection(command: string): StackSelection {
   const words = command.split(/\s+/).slice(3);
-  if (words.includes('--all')) return Number.POSITIVE_INFINITY;
-  let named = 0;
+  if (words.includes('--all')) return { all: true };
+  const names = new Set<string>();
   for (let index = 0; index < words.length; index += 1) {
     const word = words[index] ?? '';
-    if (word === '-c' || word === '--context') index += 1;
-    else if (!word.startsWith('-')) named += 1;
+    if (VALUE_OPTIONS.includes(word)) index += 1;
+    else if (JOINED_VALUE_OPTIONS.some((prefix) => word.startsWith(prefix))) continue;
+    else if (word.startsWith('-')) {
+      throw new Error(`${README_PREFIX}: "${command}" holds the option ${word}, and the deploy sheet reads the stacks a line selects from its words. Keep only --all, -c, --context or --parameters on that line, or name the stacks.`);
+    } else names.add(word);
   }
-  return named;
+  return { all: false, names };
 }
 
-// A cdk line that selects fewer stacks than another for the same use belongs to a narrower
+function covers(wide: StackSelection, narrow: StackSelection): boolean {
+  if (narrow.all) return false;
+  if (wide.all) return true;
+  return narrow.names.size < wide.names.size && [...narrow.names].every((name) => wide.names.has(name));
+}
+
+// A cdk line whose stacks another line for the same use already selects belongs to a narrower
 // procedure (the README's model trial deploys the runtime alone), not to the deploy sheet's step.
-function widestScope(found: readonly DeployCommand[]): DeployCommand[] {
-  const widest = Math.max(...found.map(({ command }) => stackScope(command)));
-  return found.filter(({ command }) => stackScope(command) === widest);
+// Lines that select different stacks are all kept, in README order, so a deploy split across two
+// lines (the action stack deployed last with its parameters, removed first) shows both.
+function withoutNarrowerRepeats(found: readonly DeployCommand[]): DeployCommand[] {
+  const selections = found.map(({ command }) => stackSelection(command));
+  return found.filter((_, index) => !selections.some((wide, other) => other !== index && covers(wide, selections[index] as StackSelection)));
 }
 
 function commandsFor(commands: readonly DeployCommand[], use: DeployCommandUse): DeployCommand[] {
   const found = commands.filter(({ command }) => COMMAND_USES[use].test(command));
   if (found.length === 0) throw new Error(`${README_PREFIX}: no ${use} command. Restore the ${use} line in its sh block.`);
-  return STACK_USES.has(use) ? widestScope(found) : found;
+  return STACK_USES.has(use) ? withoutNarrowerRepeats(found) : found;
 }
 
 export const fillRegion = (text: string, region: string): string => text.replaceAll('{region}', region);

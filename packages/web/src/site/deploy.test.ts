@@ -11,7 +11,7 @@ import {
   permissionSchedules,
   runtimeRoleHoldsNoDataAction,
 } from './permissions-view.js';
-import { DEPLOY_STEPS, REMOVAL_STEP_TEXTS } from './content.js';
+import { DEPLOY_COPY, DEPLOY_STEPS, REMOVAL_STEP_TEXTS } from './content.js';
 import {
   deploySteps,
   isOfferedCommand,
@@ -24,7 +24,8 @@ import {
   repoRoot,
   resolveModelId,
 } from './repo-facts.js';
-import { NOT_LISTED, RESOURCE_NOUNS, resourceRows } from './resources-view.js';
+import { loadResourceSnapshot, NOT_LISTED, RESOURCE_NOUNS, resourceRows } from './resources-view.js';
+import { BARE_DEPLOY_FACTS } from '../test/planted-dist.js';
 
 const ROOT = repoRoot(process.cwd());
 
@@ -63,6 +64,10 @@ function committedPermissions(): SnapshotPermission[] {
   return loadPermissionSnapshot(ROOT) as SnapshotPermission[];
 }
 
+// Without phase 3's account-level Denies and pause grant, for the branches that need neither.
+const barePermissions = (): SnapshotPermission[] => BARE_DEPLOY_FACTS.permissions as SnapshotPermission[];
+const BARE_REASONS = BARE_DEPLOY_FACTS.reasons;
+
 function resource(overrides: Partial<SnapshotResource>): SnapshotResource {
   return { stack: 'FotheringIngest', logicalId: 'EventStore165FCE28', type: 'AWS::DynamoDB::Table', deletionPolicy: 'Delete', ...overrides };
 }
@@ -94,6 +99,15 @@ function plantFile(relative: string, text: string): void {
   writeFileSync(file, text);
 }
 
+describe('the snapshot loaders', () => {
+  it('name the file and the snapshot command when a snapshot is not JSON', () => {
+    const root = join(PLANT, 'torn-snapshots');
+    for (const name of ['permissions', 'resources']) plantFile(`torn-snapshots/packages/infra/${name}.json`, '[{"stack": ');
+    expect(() => loadPermissionSnapshot(root)).toThrow(/^packages\/infra\/permissions\.json: not valid JSON \([\s\S]+\)\. Run npm run permissions:snapshot\.$/);
+    expect(() => loadResourceSnapshot(root)).toThrow(/^packages\/infra\/resources\.json: not valid JSON \([\s\S]+\)\. Run npm run permissions:snapshot\.$/);
+  });
+});
+
 describe('the resource schedule', () => {
   it('classes every type in the committed snapshot in exactly one of the noun map and the not-listed map', () => {
     for (const { type } of committedResources()) {
@@ -108,6 +122,14 @@ describe('the resource schedule', () => {
 
   it('gives every not-listed type a reason', () => {
     for (const reason of Object.values(NOT_LISTED)) expect(reason.trim()).not.toBe('');
+  });
+
+  // The schedule's heading names each left-out kind in words; a type added to or dropped from the
+  // map fails here until that sentence is reworded to match.
+  it('names the three left-out kinds in the schedule heading', () => {
+    expect(Object.keys(NOT_LISTED)).toEqual(['AWS::IAM::Policy', 'AWS::Lambda::EventInvokeConfig', 'AWS::Lambda::Permission']);
+    expect(DEPLOY_COPY.resourcesHead).toContain('Three kinds of attachment have no row of their own');
+    expect(DEPLOY_COPY.resourcesHead).not.toMatch(/Nothing outside this list/);
   });
 
   it('returns one row per listed resource of the committed snapshot, in snapshot order', () => {
@@ -156,7 +178,14 @@ describe('the permissions schedules', () => {
     for (const schedule of schedules) {
       for (const row of schedule.rows) expect(`${row.stack}/${row.role}`).toBe(`${schedule.stack}/${schedule.role}`);
     }
-    expect(schedules.map((schedule) => schedule.role)).toEqual(['DetectRoleDEDAD076', 'ForgetRole9C1F5950', 'IngestRoleAF8AE6D8', 'RuntimeRoleFD8790A4']);
+    expect(schedules.map((schedule) => schedule.role)).toEqual([
+      'ActionRole60B0EDF7',
+      'ReopenRole908169EF',
+      'DetectRoleDEDAD076',
+      'ForgetRole9C1F5950',
+      'IngestRoleAF8AE6D8',
+      'RuntimeRoleFD8790A4',
+    ]);
   });
 
   it('gives a trust row its principal and an empty condition cell where the entry has none', () => {
@@ -190,15 +219,34 @@ describe('the permissions schedules', () => {
 });
 
 describe('the Deny rows', () => {
-  it('are empty for the shipped snapshot', () => {
-    expect(denyRows(committedPermissions())).toEqual([]);
+  it('hold the three account-level sending denies once per role for the shipped snapshot', () => {
+    const roleCount = permissionSchedules(committedPermissions()).length;
+    const rows = denyRows(committedPermissions());
+    expect(rows).toHaveLength(roleCount * 3);
+    expect([...new Set(rows.map((row) => row.action))].sort()).toEqual([
+      'ses:PutAccountSendingAttributes',
+      'ses:UpdateAccountSendingEnabled',
+      'ses:UpdateConfigurationSetSendingEnabled',
+    ]);
   });
 
-  it('hold exactly one row for a planted snapshot with one Deny entry', () => {
+  it('are empty for a snapshot holding no Deny entry', () => {
+    expect(denyRows(barePermissions(), BARE_REASONS)).toEqual([]);
+  });
+
+  it('hold one row per role for a Deny planted on every role', () => {
+    const roles = [...new Map(barePermissions().map((entry) => [`${entry.stack}/${entry.role}`, entry])).values()];
+    const denies = roles.map((entry) => permission({ stack: entry.stack, role: entry.role, effect: 'Deny', action: 'ses:PutConfigurationSetSendingOptions', resource: '"*"' }));
+    const reasons = { ...BARE_REASONS, ...Object.fromEntries(denies.map((deny) => [permissionKey(deny), 'Planted.'])) };
+    expect(denies.length).toBeGreaterThan(1);
+    const rows = denyRows([...barePermissions(), ...denies], reasons);
+    expect(rows.map((row) => `${row.effect} ${row.action}`)).toEqual(denies.map(() => 'Deny ses:PutConfigurationSetSendingOptions'));
+  });
+
+  it('refuse a Deny that some role lacks, which the heading "Denied on every role" would misstate', () => {
     const deny = permission({ role: 'IngestRoleAF8AE6D8', effect: 'Deny', action: 'ses:PutConfigurationSetSendingOptions', resource: '"*"' });
-    const reasons = { ...PERMISSION_REASONS, [permissionKey(deny)]: 'Planted.' };
-    const rows = denyRows([...committedPermissions(), deny], reasons);
-    expect(rows.map((row) => `${row.effect} ${row.action}`)).toEqual(['Deny ses:PutConfigurationSetSendingOptions']);
+    const reasons = { ...BARE_REASONS, [permissionKey(deny)]: 'Planted.' };
+    expect(() => denyRows([...barePermissions(), deny], reasons)).toThrow(/: ses:PutConfigurationSetSendingOptions is denied on some roles but not on FotheringAction\/ActionRole, FotheringAction\/ReopenRole, FotheringDetection\/DetectRole, FotheringIngest\/ForgetRole, FotheringRuntime\/RuntimeRole, and the deploy page heads the Deny box "Denied on every role"\. Deny it on every role, or retitle the box\.$/);
   });
 });
 
@@ -240,17 +288,35 @@ describe('the permission reasons', () => {
 });
 
 describe('the pause grant and runtime role predicates', () => {
-  it('report no pause grant in the shipped snapshot', () => {
-    expect(hasPauseGrant(committedPermissions())).toBe(false);
+  it('report the pause grant phase 3 gives the action and reopen roles in the shipped snapshot', () => {
+    expect(hasPauseGrant(committedPermissions())).toBe(true);
   });
 
-  it('report a pause grant for a planted Allow of ses:PutConfigurationSetSendingOptions', () => {
-    const planted = [...committedPermissions(), permission({ action: 'ses:PutConfigurationSetSendingOptions', resource: '"*"' })];
+  it('report no pause grant for a snapshot without one, and one for a planted Allow of ses:PutConfigurationSetSendingOptions', () => {
+    expect(hasPauseGrant(barePermissions())).toBe(false);
+    const planted = [...barePermissions(), permission({ action: 'ses:PutConfigurationSetSendingOptions', resource: '"*"' })];
     expect(hasPauseGrant(planted)).toBe(true);
   });
 
+  it('refuse one role name in two stacks, which would give two role sections one id', () => {
+    const twin = permission({ stack: 'FotheringOther', role: 'IngestRoleABCDEF12' });
+    const reasons = { ...PERMISSION_REASONS, [permissionKey(twin)]: 'Planted.' };
+    expect(() => permissionSchedules([...committedPermissions(), twin], reasons)).toThrow(/: two roles are named IngestRole, in FotheringIngest and FotheringOther, and the deploy page ids each role section by its name\. Rename one of them\.$/);
+    const renamed = permission({ stack: 'FotheringOther', role: 'OtherRoleABCDEF12' });
+    expect(() => permissionSchedules([...committedPermissions(), renamed], { ...PERMISSION_REASONS, [permissionKey(renamed)]: 'Planted.' })).not.toThrow();
+  });
+
+  it('report a pause grant for a wildcard Allow that covers the action, and none for one that does not', () => {
+    for (const action of ['ses:*', '*', 'ses:PutConfigurationSet*', 'SES:putconfigurationsetsendingoptions', 'ses:PutConfigurationSetSendingOption?']) {
+      expect(hasPauseGrant([...barePermissions(), permission({ action, resource: '"*"' })]), action).toBe(true);
+    }
+    for (const action of ['ses:Get*', 'ses:PutConfigurationSetSendingOptions?', 'dynamodb:*', 'ses:PutConfigurationSet.SendingOptions']) {
+      expect(hasPauseGrant([...barePermissions(), permission({ action, resource: '"*"' })]), action).toBe(false);
+    }
+  });
+
   it('report no pause grant for a Deny of it alone', () => {
-    const planted = [...committedPermissions(), permission({ effect: 'Deny', action: 'ses:PutConfigurationSetSendingOptions', resource: '"*"' })];
+    const planted = [...barePermissions(), permission({ effect: 'Deny', action: 'ses:PutConfigurationSetSendingOptions', resource: '"*"' })];
     expect(hasPauseGrant(planted)).toBe(false);
   });
 
@@ -274,13 +340,22 @@ describe('the pause grant and runtime role predicates', () => {
 const README_COMMANDS = [
   { command: 'npm run build', note: null },
   { command: 'npx cdk bootstrap', note: 'once, before the first deploy' },
-  { command: 'npx cdk deploy --all', note: null },
-  { command: 'npx cdk destroy --all', note: null },
-  { command: 'npx cdk deploy --all -c fothering:live=live', note: null },
+  { command: 'npx cdk deploy FotheringIngest FotheringRuntime FotheringDetection', note: null },
+  {
+    command: 'npx cdk deploy FotheringAction --parameters FotheringAction:OperatorAddress=<address> --parameters FotheringAction:FromAddress=<address>',
+    note: null,
+  },
+  { command: 'npx cdk destroy FotheringAction', note: null },
+  { command: 'npx cdk destroy FotheringIngest FotheringRuntime FotheringDetection', note: null },
+  { command: 'npx cdk deploy FotheringIngest FotheringRuntime FotheringDetection -c fothering:live=live', note: null },
+  {
+    command: 'npx cdk deploy FotheringAction -c fothering:live=live --parameters FotheringAction:OperatorAddress=<address> --parameters FotheringAction:FromAddress=<address>',
+    note: null,
+  },
   { command: 'npx cdk deploy FotheringRuntime -c fothering:live=live', note: null },
   {
     command:
-      'aws bedrock-agentcore invoke-agent-runtime --region eu-central-1 --agent-runtime-arn <runtime arn> --runtime-session-id fothering-trial-0000000000000000000001 --payload fileb://record.json --cli-read-timeout 120 response.json',
+      'aws bedrock-agentcore invoke-agent-runtime --region eu-central-1 --agent-runtime-arn <runtime arn> --runtime-session-id fothering-trial-0000000000000000000001 --payload fileb://packages/agent/fixtures/trial-record.json --cli-read-timeout 120 response.json',
     note: null,
   },
   { command: 'aws events test-event-pattern --event-pattern file://rule-pattern.json --event file://sample-event.json', note: null },
@@ -304,6 +379,14 @@ describe('the README deploy commands', () => {
 
   it('throws on a block whose last command still ends in a backslash', () => {
     expect(() => readDeployCommands('## Deploy and remove\n\n```sh\naws planted run \\\n```\n')).toThrow(/ends in a backslash/);
+  });
+
+  it('reads a backslash at the end of a comment as comment text, the way the shell does', () => {
+    const section = '## Deploy and remove\n\n```sh\nnpx cdk bootstrap  # once \\\n# a note \\\nnpm run build\n```\n';
+    expect(readDeployCommands(section)).toEqual([
+      { command: 'npx cdk bootstrap', note: 'once \\' },
+      { command: 'npm run build', note: null },
+    ]);
   });
 
   it('throws when the Deploy and remove section is missing', () => {
@@ -427,16 +510,38 @@ describe('the deploy steps', () => {
     expect(steps.some((step) => step.text.includes('{region}'))).toBe(false);
   });
 
+  // The bullets under the README's "Before that first deploy:" line, continuation lines included,
+  // up to the first blank line after them.
+  const firstDeployList = (readme: string): string => {
+    const lines = readme.split(/\r?\n/);
+    const start = lines.findIndex((line) => line.trim() === 'Before that first deploy:');
+    if (start < 0) throw new Error('README.md: no "Before that first deploy:" line');
+    const rest = lines.slice(start + 1);
+    const first = rest.findIndex((line) => line.startsWith('- '));
+    const end = rest.findIndex((line, index) => index > first && line.trim() === '');
+    return rest.slice(first, end < 0 ? undefined : end).join('\n');
+  };
+
+  it('names every code span of the README list the first deploy needs, and the sandbox', () => {
+    const list = firstDeployList(readRepoText('README.md', ROOT));
+    const spans = [...list.matchAll(/`([^`]+)`/g)].map((match) => match[1] ?? '');
+    expect(spans).toEqual(expect.arrayContaining(['FromAddress', 'fothering-alerts', 'OperatorAddress']));
+    const [check] = deploySteps({ deployCommands: facts.deployCommands, region: readDeployRegion(ROOT) });
+    expect(spans.filter((span) => !check?.text.includes(`\`${span}\``))).toEqual([]);
+    expect(check?.text).toContain('SES sandbox');
+  });
+
   it('puts no command on the first two steps', () => {
     expect(steps.slice(0, 2).map((step) => step.commands)).toEqual([[], []]);
   });
 
   it('takes the build, bootstrap, deploy and go-live lines from the README, notes kept', () => {
-    // README order: build, bootstrap, deploy, destroy, then the go-live deploy.
+    // README order: build, bootstrap, the two deploy lines (the action stack last), the two destroy
+    // lines, then the two go-live deploys; the runtime trial after them stays off every step.
     expect(steps[2]?.commands.map(({ command }) => command)).toEqual([lineOf(0)]);
-    expect(steps[3]?.commands).toEqual([facts.deployCommands[1], facts.deployCommands[2]]);
+    expect(steps[3]?.commands).toEqual([facts.deployCommands[1], facts.deployCommands[2], facts.deployCommands[3]]);
     expect(steps[3]?.commands[0]?.note).not.toBeNull();
-    expect(steps[4]?.commands.map(({ command }) => command)).toEqual([lineOf(4)]);
+    expect(steps[4]?.commands.map(({ command }) => command)).toEqual([lineOf(6), lineOf(7)]);
   });
 
   // The README's model trial deploys one stack with the switch on; it is not the step that turns
@@ -455,6 +560,79 @@ describe('the deploy steps', () => {
     });
     expect(named[3]?.commands.map(({ command }) => command)).toEqual(['npx cdk bootstrap', 'npx cdk deploy A B C']);
     expect(named[4]?.commands.map(({ command }) => command)).toEqual(['npx cdk deploy A B C --context fothering:live=live']);
+  });
+
+  // Counted as words, --profile p would read as two stacks and tie B's trial with A B; it is refused.
+  it('refuses a cdk line naming stacks beside an option other than --all, -c or --context, and reads --context=', () => {
+    const lines = (commands: readonly string[]) => commands.map((command) => ({ command, note: null }));
+    const base = ['npm run build', 'npx cdk bootstrap', 'npx cdk deploy --all -c fothering:live=live', 'npx cdk destroy --all'];
+    expect(() => deploySteps({ deployCommands: lines([...base, 'npx cdk deploy A B', 'npx cdk deploy B --profile p']), region: 'xx-planted-9' })).toThrow(
+      /^README\.md: Deploy and remove: "npx cdk deploy B --profile p" holds the option --profile, and the deploy sheet reads the stacks a line selects from its words\. /,
+    );
+    const steps = deploySteps({ deployCommands: lines([...base, 'npx cdk deploy A B', 'npx cdk deploy B --context=fothering:trial=1']), region: 'xx-planted-9' });
+    expect(steps[3]?.commands.map(({ command }) => command)).toEqual(['npx cdk bootstrap', 'npx cdk deploy A B']);
+  });
+
+  // Phase 3's README deploys the action stack on its own line, last, with its two address
+  // parameters, and removes it first; the step shows every line that selects stacks no other covers.
+  it('keeps every line of a deploy split across lines that select different stacks, in README order, and still drops the trial', () => {
+    const lines = (commands: readonly string[]) => commands.map((command) => ({ command, note: null }));
+    const action = 'npx cdk deploy D --parameters D:OperatorAddress=<address> --parameters D:FromAddress=<address>';
+    const goLive = 'npx cdk deploy D -c fothering:live=live --parameters D:OperatorAddress=<address> --parameters D:FromAddress=<address>';
+    const commands = lines([
+      'npm run build',
+      'npx cdk bootstrap',
+      'npx cdk deploy A B C',
+      action,
+      'npx cdk destroy D',
+      'npx cdk destroy A B C',
+      'npx cdk deploy A B C -c fothering:live=live',
+      goLive,
+      'npx cdk deploy B -c fothering:live=live',
+    ]);
+    const steps = deploySteps({ deployCommands: commands, region: 'xx-planted-9' });
+    expect(steps[3]?.commands.map(({ command }) => command)).toEqual(['npx cdk bootstrap', 'npx cdk deploy A B C', action]);
+    expect(steps[4]?.commands.map(({ command }) => command)).toEqual(['npx cdk deploy A B C -c fothering:live=live', goLive]);
+    expect(removalSteps({ deployCommands: commands })[0]?.commands.map(({ command }) => command)).toEqual(['npx cdk destroy D', 'npx cdk destroy A B C']);
+  });
+
+  // Read as words, each parameter value would name a stack, and D's line would cover A's trial.
+  it('reads a --parameters value, spaced or joined, as the option it belongs to and never as a stack', () => {
+    const lines = (commands: readonly string[]) => commands.map((command) => ({ command, note: null }));
+    const base = ['npm run build', 'npx cdk bootstrap', 'npx cdk deploy --all -c fothering:live=live', 'npx cdk destroy --all'];
+    for (const parameters of ['--parameters A:Key=<address> --parameters A:Other=<address>', '--parameters=A:Key=<address> --parameters=A:Other=<address>']) {
+      const wide = `npx cdk deploy D ${parameters}`;
+      const steps = deploySteps({ deployCommands: lines([...base, wide, 'npx cdk deploy A']), region: 'xx-planted-9' });
+      expect(steps[3]?.commands.map(({ command }) => command), parameters).toEqual(['npx cdk bootstrap', wide, 'npx cdk deploy A']);
+    }
+  });
+
+  it('files a go-live line written with --context= under the go-live step, never the deploy step', () => {
+    const lines = (commands: readonly string[]) => commands.map((command) => ({ command, note: null }));
+    const steps = deploySteps({
+      deployCommands: lines(['npm run build', 'npx cdk bootstrap', 'npx cdk deploy --all', 'npx cdk deploy --all --context=fothering:live=live']),
+      region: 'xx-planted-9',
+    });
+    expect(steps[3]?.commands.map(({ command }) => command)).toEqual(['npx cdk bootstrap', 'npx cdk deploy --all']);
+    expect(steps[4]?.commands.map(({ command }) => command)).toEqual(['npx cdk deploy --all --context=fothering:live=live']);
+  });
+
+  // Only fothering:live=live turns the stacks on (live-switch.ts); any other context leaves a deploy.
+  it('files a deploy whose context does not turn the switch on under the deploy step, never the go-live step', () => {
+    const lines = (commands: readonly string[]) => commands.map((command) => ({ command, note: null }));
+    for (const plain of ['npx cdk deploy --all -c fothering:trial=1', 'npx cdk deploy --all --context=fothering:live=off', 'npx cdk deploy --all -c fothering:live=LIVE']) {
+      const steps = deploySteps({ deployCommands: lines(['npm run build', 'npx cdk bootstrap', plain, 'npx cdk deploy --all -c fothering:live=live']), region: 'xx-planted-9' });
+      expect(steps[3]?.commands.map(({ command }) => command), plain).toEqual(['npx cdk bootstrap', plain]);
+      expect(steps[4]?.commands.map(({ command }) => command), plain).toEqual(['npx cdk deploy --all -c fothering:live=live']);
+    }
+  });
+
+  it('refuses a cdk line that sets the live switch twice', () => {
+    const lines = (commands: readonly string[]) => commands.map((command) => ({ command, note: null }));
+    const twice = 'npx cdk deploy --all -c fothering:live=live --context=fothering:live=off';
+    expect(() => deploySteps({ deployCommands: lines(['npm run build', 'npx cdk bootstrap', 'npx cdk deploy --all', twice]), region: 'xx-planted-9' })).toThrow(
+      /^README\.md: Deploy and remove: "npx cdk deploy --all -c fothering:live=live --context=fothering:live=off" sets fothering:live 2 times, /,
+    );
   });
 
   it('shows only commands the README or package.json offers', () => {

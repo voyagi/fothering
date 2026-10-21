@@ -23,6 +23,18 @@ const SCRIPT_RULES = {
   'valid-typeof': 'error',
 };
 
+// The aggregated SESv2 class carries every SES API v2 command, the account-level pause among them,
+// so only the per-command classes may be imported, and the v1 client not at all. importNames also
+// reports a namespace import of the module, which would reach the same classes.
+const SES_CLIENT_BANS = [
+  {
+    name: '@aws-sdk/client-sesv2',
+    importNames: ['SESv2', 'PutAccountSendingAttributesCommand'],
+    message: 'Only the per-command SES API v2 classes are used, and never the account-level sending command.',
+  },
+  { name: '@aws-sdk/client-ses', message: 'The SES v1 client is banned: Fothering uses API v2 only.' },
+];
+
 // An agent built with no model would fall back to whatever the SDK defaults to, which is exactly
 // the kind of implicit choice the live providers wrapper exists to make explicit. So the rule
 // reports `new Agent()` and an options literal that names no model of its own (`new Agent({})`,
@@ -124,6 +136,7 @@ export default [
             message: 'BedrockModel is wired only inside packages/providers/src/live.',
           },
         ],
+        paths: SES_CLIENT_BANS,
       }],
     },
   },
@@ -142,8 +155,16 @@ export default [
             message: 'BedrockModel is wired only inside packages/providers/src/live.',
           },
         ],
+        paths: SES_CLIENT_BANS,
       }],
     },
+  },
+  // Its own object, never one trailing object over every package: a later object's options for a
+  // rule replace an earlier one's, which would erase the bans above.
+  {
+    files: ['packages/providers/src/live/**/*.ts'],
+    languageOptions: { ...tsParser },
+    rules: { 'no-restricted-imports': ['error', { paths: SES_CLIENT_BANS }] },
   },
   // The live selectors report any environment access, and any readLiveSwitch() call, found
   // anywhere inside a comparison to 'live': a plain or computed member of process.env or of an

@@ -424,6 +424,19 @@ export interface AssembleInput {
   expiresAt: number;
 }
 
+export function laneTotalsOf(summary: WindowSummary, spike: LaneSpikeVerdict): EvidenceRecordInput['laneTotals'] {
+  return {
+    recipientSends: summary.totals.recipientSends,
+    permanentBounces: summary.totals.permanentBounces,
+    complaints: summary.totals.complaints,
+    hardBounceRatio: spike.hardBounceRatio,
+    complaintRatio: spike.complaintRatio,
+    verdict: spike.verdict,
+    triggers: [...spike.triggers],
+    label: { hardBounceRatio: LANE_RATIO_LABELS.hardBounce, complaintRatio: LANE_RATIO_LABELS.complaint },
+  };
+}
+
 function recordInput(input: AssembleInput, decision: CycleDecision): EvidenceRecordInput {
   const { analysis } = input;
   const { summary, spike } = analysis;
@@ -431,16 +444,7 @@ function recordInput(input: AssembleInput, decision: CycleDecision): EvidenceRec
     incidentId: input.incidentId,
     lane: { configurationSet: analysis.lane.configurationSet, lane: analysis.lane.lane },
     window: { fromBucketMs: summary.window.fromBucketMs, toBucketMs: summary.window.toBucketMs },
-    laneTotals: {
-      recipientSends: summary.totals.recipientSends,
-      permanentBounces: summary.totals.permanentBounces,
-      complaints: summary.totals.complaints,
-      hardBounceRatio: spike.hardBounceRatio,
-      complaintRatio: spike.complaintRatio,
-      verdict: spike.verdict,
-      triggers: [...spike.triggers],
-      label: { hardBounceRatio: LANE_RATIO_LABELS.hardBounce, complaintRatio: LANE_RATIO_LABELS.complaint },
-    },
+    laneTotals: laneTotalsOf(summary, spike),
     share: buildShareRow(summary, input.analyses.map((other) => other.summary)),
     rows: [...analysis.rows],
     configurationRows: [...analysis.configurationRows],

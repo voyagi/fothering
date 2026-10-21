@@ -3,6 +3,7 @@ import { Alarm, ComparisonOperator, TreatMissingData, type IMetric } from 'aws-c
 import { Effect, PolicyStatement, Role, ServicePrincipal } from 'aws-cdk-lib/aws-iam';
 import { Architecture, Code, Runtime } from 'aws-cdk-lib/aws-lambda';
 import { FilterPattern, LogGroup, MetricFilter, RetentionDays, type ILogGroup } from 'aws-cdk-lib/aws-logs';
+import type { LaneMap } from '@fothering/core/lanes';
 
 export const ALARM_PERIOD = Duration.minutes(5);
 
@@ -47,6 +48,25 @@ export function logWriteStatement(stack: Stack, logGroup: ILogGroup): PolicyStat
       }),
     ],
   });
+}
+
+// The four reads readSesFacts makes. Detection and the action re-check the same facts, so both roles
+// take them from here and cannot drift apart.
+export function sesFactReadStatements(stack: Stack, laneMap: LaneMap): PolicyStatement[] {
+  return [
+    // Neither list action has a resource type, so it can only be granted on every resource.
+    new PolicyStatement({ effect: Effect.ALLOW, actions: ['ses:ListEmailIdentities', 'ses:ListConfigurationSets'], resources: ['*'] }),
+    new PolicyStatement({
+      effect: Effect.ALLOW,
+      actions: ['ses:GetEmailIdentity'],
+      resources: [stack.formatArn({ service: 'ses', resource: 'identity', resourceName: '*' })],
+    }),
+    new PolicyStatement({
+      effect: Effect.ALLOW,
+      actions: ['ses:GetConfigurationSetEventDestinations'],
+      resources: laneMap.lanes.map((lane) => stack.formatArn({ service: 'ses', resource: 'configuration-set', resourceName: lane.configurationSet })),
+    }),
+  ];
 }
 
 interface FunctionRole {

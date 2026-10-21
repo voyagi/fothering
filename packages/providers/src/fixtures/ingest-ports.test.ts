@@ -38,7 +38,7 @@ import {
 } from '@fothering/core/window-fold';
 import lanesJson from '../../../../lanes.json' with { type: 'json' };
 import { createDryRunLog } from '../dry-run.js';
-import type { ReservationRequest, UsageRecord } from '../port-types.js';
+import type { LaneAttemptRequest, ReservationRequest, UsageRecord } from '../port-types.js';
 import { DOC_EXAMPLE_LANE_MAP, loadSesEventFixture } from './ses-events/index.js';
 import {
   FixtureWriteError,
@@ -1025,5 +1025,68 @@ describe('the fixture decision store records usage by adding only (AC-P6 store h
       await expect(decisions.recordUsage(usage(overrides))).rejects.toThrow(RangeError);
     }
     expect((await decisions.getItem(DAY_COUNTER, TRACER_NOW_MS))?.inputTokens).toBeUndefined();
+  });
+});
+
+const LANE_ATTEMPT: LaneAttemptRequest = {
+  key: { pk: 'COUNTER_LANE_HOUR#fothering-bulk#2026-10-11T12', sk: 'COUNTER' },
+  cap: 4,
+  expiresAt: NOW_SECONDS + RETENTION_SECONDS,
+};
+
+async function drainMicrotasks(): Promise<void> {
+  for (let turn = 0; turn < 20; turn += 1) await Promise.resolve();
+}
+
+// Pitfall 9: the yield sits before an operation's check, never between its check and its set, so it
+// makes separately built roots interleave without inventing a race DynamoDB's conditional write lacks.
+describe('the fixture stores can yield between operations, off by default (AC-9, AC-10)', () => {
+  it.each([
+    [false, ['get', 'put', 'microtasks drained']],
+    [true, ['microtasks drained', 'get', 'put']],
+  ] as const)('with yieldBetweenOperations %s, a getItem and a putIfAbsent issued together settle in the order %j', async (yieldBetweenOperations, order) => {
+    const decisions = createFixtureDecisionStore({ yieldBetweenOperations });
+    const settled: string[] = [];
+    const read = decisions.getItem(STATE_KEY, TRACER_NOW_MS).then(() => settled.push('get'));
+    const put = decisions.putIfAbsent({ ...STATE_KEY, expiresAt: NOW_SECONDS + 60, version: 1 }, TRACER_NOW_MS).then(() => settled.push('put'));
+    await drainMicrotasks();
+    settled.push('microtasks drained');
+    await Promise.all([read, put]);
+    expect(settled).toEqual(order);
+  });
+
+  it('yields before an event store operation too', async () => {
+    const events = createFixtureEventStore({ yieldBetweenOperations: true });
+    let read = false;
+    const query = events.queryByRecipient('0'.repeat(64)).then(() => {
+      read = true;
+    });
+    await drainMicrotasks();
+    expect(read).toBe(false);
+    await query;
+    expect(read).toBe(true);
+  });
+
+  it('still answers one written and one duplicate for two puts of one key under Promise.all', async () => {
+    const decisions = createFixtureDecisionStore({ yieldBetweenOperations: true });
+    const item = { ...STATE_KEY, expiresAt: NOW_SECONDS + 60, version: 1 };
+    const results = await Promise.all([decisions.putIfAbsent(item, TRACER_NOW_MS), decisions.putIfAbsent(item, TRACER_NOW_MS)]);
+    expect([...results].sort()).toEqual(['duplicate', 'written']);
+  });
+
+  it('answers reserved for four lane attempts on one key and cap for the fifth (AC-10, store half)', async () => {
+    const decisions = createFixtureDecisionStore({ yieldBetweenOperations: true });
+    const answers = [];
+    for (let attempt = 0; attempt < 5; attempt += 1) answers.push(await decisions.reserveLaneAttempt(LANE_ATTEMPT));
+    expect(answers).toEqual(['reserved', 'reserved', 'reserved', 'reserved', 'cap']);
+    expect(await decisions.getItem(LANE_ATTEMPT.key, TRACER_NOW_MS)).toEqual({ ...LANE_ATTEMPT.key, attempts: 4, expiresAt: LANE_ATTEMPT.expiresAt });
+  });
+
+  it('lets exactly four of ten racing lane attempts through two stores built over one table (AC-10, store half)', async () => {
+    const table = createFixtureTableState();
+    const stores = [createFixtureDecisionStore({ store: table, yieldBetweenOperations: true }), createFixtureDecisionStore({ store: table, yieldBetweenOperations: true })];
+    const answers = await Promise.all(Array.from({ length: 10 }, (_, index) => stores[index % 2]?.reserveLaneAttempt(LANE_ATTEMPT)));
+    expect(answers.filter((answer) => answer === 'reserved')).toHaveLength(4);
+    expect((await stores[0]?.getItem(LANE_ATTEMPT.key, TRACER_NOW_MS))?.attempts).toBe(4);
   });
 });

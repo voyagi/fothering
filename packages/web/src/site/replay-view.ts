@@ -243,13 +243,26 @@ function refuseBefore(path: string, later: string, earlierPath: string, earlier:
 
 // The summary and the steps read top to bottom as the incident ran, so the recorded times must too.
 function assertTimeOrder(artifact: ReplayArtifact): void {
-  const { window, pause, reopen } = artifact;
+  const { window, pause, reopen, holdCheck, email } = artifact;
   if (Date.parse(window.startUtc) > Date.parse(window.endUtc)) {
     refuse('window.startUtc', `${window.startUtc} is after window.endUtc ${window.endUtc}`, 'Correct the window times');
   }
   refuseBefore('pause.readBack.atUtc', pause.readBack.atUtc, 'pause.atUtc', pause.atUtc);
   refuseBefore('reopen.atUtc', reopen.atUtc, 'pause.readBack.atUtc', pause.readBack.atUtc);
   refuseBefore('reopen.readBack.atUtc', reopen.readBack.atUtc, 'reopen.atUtc', reopen.atUtc);
+  // Step three says no send was accepted after holdFromUtc, under the heading "Paused, read back,
+  // then held": the hold runs from the pause on, and is checked after the read-back and before the
+  // reopen lets sends through again.
+  if (holdCheck !== undefined) {
+    refuseBefore('holdCheck.holdFromUtc', holdCheck.holdFromUtc, 'pause.atUtc', pause.atUtc);
+    refuseBefore('holdCheck.atUtc', holdCheck.atUtc, 'holdCheck.holdFromUtc', holdCheck.holdFromUtc);
+    refuseBefore('holdCheck.atUtc', holdCheck.atUtc, 'pause.readBack.atUtc', pause.readBack.atUtc);
+    refuseBefore('reopen.atUtc', reopen.atUtc, 'holdCheck.atUtc', holdCheck.atUtc);
+  }
+  // Step four reads "The email, then the reopen": the email explains a confirmed pause and tells the
+  // operator how to reopen, so it goes out after the read-back and before the reopen.
+  refuseBefore('email.sentAtUtc', email.sentAtUtc, 'pause.readBack.atUtc', pause.readBack.atUtc);
+  refuseBefore('reopen.atUtc', reopen.atUtc, 'email.sentAtUtc', email.sentAtUtc);
   // Within a step the events sort by time, so a time that runs backwards is a later step's event
   // set before an earlier step's.
   const events = orderedEvents(artifact.events);
@@ -487,6 +500,11 @@ const HEX_GROUP = '[0-9A-Fa-f]{1,4}';
 const IPV6_PATTERN = new RegExp(`(?<![0-9A-Za-z:])(?:(?:${HEX_GROUP}:){7}${HEX_GROUP}|(?:${HEX_GROUP}:)*(?:${HEX_GROUP})?::(?:${HEX_GROUP}(?::${HEX_GROUP})*)?)(?![0-9A-Za-z:])`, 'g');
 // Letters and digits on either side mean the run is part of a longer token, such as a hash.
 const TWELVE_DIGITS_PATTERN = /(?<![0-9A-Za-z])\d{12}(?![0-9A-Za-z])/g;
+// A UUID's last group is 12 hex digits, all of them decimal in about one id in 280, and AWS request
+// ids and the middle of an SES message id are UUIDs. That group follows 8-4-4-4 hex groups, which an
+// account id never does, so a run with that head is an id, not an account.
+const UUID_HEAD = /[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-$/;
+const UUID_HEAD_LENGTH = 24;
 const RESERVED_TOP_LEVEL = new Set(['test', 'example', 'invalid', 'localhost']);
 // RFC 2606 section 3's second-level names, built from parts so the repo's placeholder-address
 // check does not read the list itself as a stray placeholder.
@@ -539,8 +557,13 @@ export function fixtureFindings(fileName: string, text: string): string[] {
     findings.push({ index: match.index, message: 'an IPv6 address outside 2001:db8::/32' });
   }
   const accountId = manifestAccountId(fileName, text);
+  // Only the manifest may hold the account id, so in any other file every such number is refused.
+  const numberMessage = fileName === 'capture-manifest.json'
+    ? "a 12-digit number other than the manifest's accountId"
+    : 'a 12-digit number outside capture-manifest.json, the only file that may hold the account id';
   for (const match of text.matchAll(TWELVE_DIGITS_PATTERN)) {
-    if (match[0] !== accountId) findings.push({ index: match.index, message: "a 12-digit number outside the capture manifest's accountId" });
+    if (match[0] === accountId || UUID_HEAD.test(text.slice(Math.max(0, match.index - UUID_HEAD_LENGTH), match.index))) continue;
+    findings.push({ index: match.index, message: numberMessage });
   }
   return findings.sort((a, b) => a.index - b.index).map(({ index, message }) => `${fileName}:${String(lineAt(text, index))}: ${message}`);
 }

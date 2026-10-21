@@ -50,8 +50,8 @@ function runDepcruise(root: string): DepcruiseResult {
   return JSON.parse(stdout) as DepcruiseResult;
 }
 
-function violatedFrom(result: DepcruiseResult, from: string): boolean {
-  return result.summary.violations.some((v) => v.from === from);
+function violatedFrom(result: DepcruiseResult, from: string, rule?: string): boolean {
+  return result.summary.violations.some((v) => v.from === from && (rule === undefined || v.rule.name === rule));
 }
 
 describe('the AWS client boundary catches a planted import anywhere outside providers/src', () => {
@@ -104,23 +104,23 @@ describe('the AWS client boundary catches a planted import anywhere outside prov
   });
 });
 
+// warnIgnored surfaces a config mismatch as a message instead of a silent empty result, and the
+// ignored-marker check below turns that message into a hard failure: a path this helper is told
+// to lint must actually be evaluated by a rule, never quietly skipped by a glob that missed it.
+async function lintMessages(code: string, relPath: string): Promise<Array<{ ruleId: string | null; message: string }>> {
+  const eslint = new ESLint({ cwd: REPO_ROOT });
+  const results = await eslint.lintText(code, { filePath: join(REPO_ROOT, relPath), warnIgnored: true });
+  expect(results.length).toBe(1);
+  const ignored = results[0]?.messages.find((m) => m.ruleId === null && /ignored/i.test(m.message));
+  expect(ignored, `expected ${relPath} to be linted, not ignored: ${ignored?.message ?? ''}`).toBeUndefined();
+  return results[0]?.messages ?? [];
+}
+
+function ruleIds(messages: Array<{ ruleId: string | null }>): Array<string | null> {
+  return messages.map((m) => m.ruleId);
+}
+
 describe('lint catches a stray BedrockModel import and an argument-less agent', () => {
-  // warnIgnored surfaces a config mismatch as a message instead of a silent empty result, and the
-  // ignored-marker check below turns that message into a hard failure: a path this helper is told
-  // to lint must actually be evaluated by a rule, never quietly skipped by a glob that missed it.
-  async function lintMessages(code: string, relPath: string): Promise<Array<{ ruleId: string | null; message: string }>> {
-    const eslint = new ESLint({ cwd: REPO_ROOT });
-    const results = await eslint.lintText(code, { filePath: join(REPO_ROOT, relPath), warnIgnored: true });
-    expect(results.length).toBe(1);
-    const ignored = results[0]?.messages.find((m) => m.ruleId === null && /ignored/i.test(m.message));
-    expect(ignored, `expected ${relPath} to be linted, not ignored: ${ignored?.message ?? ''}`).toBeUndefined();
-    return results[0]?.messages ?? [];
-  }
-
-  function ruleIds(messages: Array<{ ruleId: string | null }>): Array<string | null> {
-    return messages.map((m) => m.ruleId);
-  }
-
   const BEDROCK_MODEL_IMPORT = "import { BedrockModel } from '@strands-agents/sdk';\nexport const m = BedrockModel;\n";
 
   it('flags a BedrockModel import outside the live providers', async () => {
@@ -168,5 +168,69 @@ describe('lint catches a stray BedrockModel import and an argument-less agent', 
     const code = `import * as banned from '${specifier}';\nexport const b = banned;\n`;
     expect(ruleIds(await lintMessages(code, 'packages/functions/src/planted.ts'))).toContain('no-restricted-imports');
     expect(ruleIds(await lintMessages(code, 'packages/providers/src/planted.ts'))).not.toContain('no-restricted-imports');
+  });
+});
+
+const SES_V2_BAN = 'Only the per-command SES API v2 classes are used, and never the account-level sending command.';
+const SES_V1_BAN = 'The SES v1 client is banned: Fothering uses API v2 only.';
+const SES_BAN_FOLDERS = ['packages/functions/src', 'packages/core/src', 'packages/providers/src', 'packages/providers/src/live'];
+
+describe('lint refuses the aggregated SES client, the account-level command and the v1 client in every package', () => {
+  // Each one must carry its own ban message: outside providers the @aws-sdk family is already
+  // refused under the same rule id, so a rule id alone would pass with the new paths missing.
+  const planted: ReadonlyArray<[code: string, message: string]> = [
+    ["import { SESv2 } from '@aws-sdk/client-sesv2';\nexport const c = SESv2;\n", SES_V2_BAN],
+    ["import { SESv2 as Client } from '@aws-sdk/client-sesv2';\nexport const c = Client;\n", SES_V2_BAN],
+    ["import * as sesv2 from '@aws-sdk/client-sesv2';\nexport const c = sesv2;\n", SES_V2_BAN],
+    ["import { PutAccountSendingAttributesCommand } from '@aws-sdk/client-sesv2';\nexport const c = PutAccountSendingAttributesCommand;\n", SES_V2_BAN],
+    ["import { SESClient } from '@aws-sdk/client-ses';\nexport const c = SESClient;\n", SES_V1_BAN],
+  ];
+
+  it.each(SES_BAN_FOLDERS)('reports each planted import in %s under its own ban message', async (folder) => {
+    for (const [code, message] of planted) {
+      const messages = await lintMessages(code, `${folder}/planted.ts`);
+      expect(
+        messages.some((m) => m.ruleId === 'no-restricted-imports' && m.message.includes(message)),
+        `${folder}: ${code.split('\n')[0] ?? ''}`,
+      ).toBe(true);
+    }
+  });
+
+  it('passes the per-command classes and the client type inside the live providers', async () => {
+    const code = "import { PutConfigurationSetSendingOptionsCommand, type SESv2Client } from '@aws-sdk/client-sesv2';\nexport const c: [typeof PutConfigurationSetSendingOptionsCommand, SESv2Client | undefined] = [PutConfigurationSetSendingOptionsCommand, undefined];\n";
+    expect(ruleIds(await lintMessages(code, 'packages/providers/src/live/planted.ts'))).not.toContain('no-restricted-imports');
+  });
+});
+
+describe('the dependency rule refuses the SES v1 client in every package, live providers included', () => {
+  const roots: string[] = [];
+  afterAll(() => {
+    for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
+  });
+
+  // Planted under the repo's git-ignored cache rather than the system temp folder, which holds so
+  // many entries that the cruiser's resolver crawls.
+  function buildSesTree(): string {
+    const cache = join(REPO_ROOT, 'node_modules', '.cache');
+    mkdirSync(cache, { recursive: true });
+    const root = mkdtempSync(join(cache, 'fothering-ses-ban-'));
+    roots.push(root);
+    const plant = (folder: string, name: string, specifier: string) => {
+      mkdirSync(join(root, folder), { recursive: true });
+      writeFileSync(join(root, folder, name), `import '${specifier}';\nexport const marker = '${name}';\n`);
+    };
+    for (const folder of ['packages/providers/src/live', 'packages/providers/src', 'packages/functions/src']) plant(folder, 'planted-ses.ts', '@aws-sdk/client-ses');
+    plant('packages/providers/src/live', 'planted-sesv2.ts', '@aws-sdk/client-sesv2');
+    plant('packages/functions/src', 'planted-sqs.ts', '@aws-sdk/client-sqs');
+    return root;
+  }
+
+  it('reports a v1 import in each planted folder under its own rule, and leaves the v2 client to the other rules', () => {
+    const result = runDepcruise(buildSesTree());
+    for (const folder of ['packages/providers/src/live', 'packages/providers/src', 'packages/functions/src']) {
+      expect(violatedFrom(result, `${folder}/planted-ses.ts`, 'ses-v1-client-banned'), `${folder}/planted-ses.ts`).toBe(true);
+    }
+    expect(violatedFrom(result, 'packages/providers/src/live/planted-sesv2.ts', 'ses-v1-client-banned')).toBe(false);
+    expect(violatedFrom(result, 'packages/functions/src/planted-sqs.ts', 'aws-clients-only-in-providers')).toBe(true);
   });
 });

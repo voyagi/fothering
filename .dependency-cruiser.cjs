@@ -32,6 +32,15 @@ module.exports = {
       to: { path: '^packages/', pathNot: ['^packages/(web|core)/', '^packages/infra/[^/]+\\.json$'] },
     },
     {
+      name: 'ses-v1-client-banned',
+      severity: 'error',
+      // No providers exemption: the adapters use SES API v2 only. The ($|/) keeps
+      // @aws-sdk/client-sesv2 out of the match.
+      comment: 'The SES v1 client is banned in every package, providers included: Fothering uses SES API v2 only.',
+      from: { path: '^packages/' },
+      to: { path: '(^|/)@aws-sdk/client-ses($|/)' },
+    },
+    {
       name: 'no-circular',
       severity: 'error',
       comment: 'Circular dependencies make code hard to reason about, test, and tree-shake.',

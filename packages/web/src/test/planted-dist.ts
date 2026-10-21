@@ -229,6 +229,19 @@ export const DEPLOY_FACTS: DeployFacts = Object.freeze({
   scripts: REPO_FACTS.scripts,
 });
 
+// The committed snapshot without phase 3's account-level Denies and its pause grant, the state the
+// site was built against before phase 3, so the no-Deny and NOT YET branches stay tested on purpose.
+type SnapshotKeyFields = Parameters<typeof permissionKey>[0];
+const BARE_PERMISSIONS = (DEPLOY_FACTS.permissions as SnapshotKeyFields[]).filter(
+  (entry) => entry.effect !== 'Deny' && entry.action !== 'ses:PutConfigurationSetSendingOptions',
+);
+const BARE_KEYS = new Set(BARE_PERMISSIONS.map(permissionKey));
+export const BARE_DEPLOY_FACTS: DeployFacts = Object.freeze({
+  ...DEPLOY_FACTS,
+  permissions: BARE_PERMISSIONS,
+  reasons: Object.fromEntries(Object.entries(PERMISSION_REASONS).filter(([key]) => BARE_KEYS.has(key))),
+});
+
 const escapeHtml = (text: string): string => text.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
 const cell = (tag: 'th' | 'td', column: string, text: string): string => `<${tag} data-col="${column}">${escapeHtml(text)}</${tag}>`;
 

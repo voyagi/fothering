@@ -9,4 +9,6 @@ addFotheringStacks(new App(), {
   forgetAssetDir: 'dist/forget',
   agentAssetDir: 'dist/agent',
   detectAssetDir: 'dist/detect',
+  actionAssetDir: 'dist/action',
+  reopenAssetDir: 'dist/reopen',
 });

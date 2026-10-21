@@ -28,6 +28,7 @@ export const EXPECTED_KINDS: Readonly<Record<string, Readonly<Record<string, Kin
     updateIfVersion: ['fixture', 'live', 'live'],
     reserveInvocation: ['fixture', 'live', 'live'],
     recordUsage: ['fixture', 'live', 'live'],
+    reserveLaneAttempt: ['fixture', 'live', 'live'],
   },
   addressKey: {
     getKeySet: ['fixture', 'live', 'live'],
@@ -40,9 +41,10 @@ export const EXPECTED_KINDS: Readonly<Record<string, Readonly<Record<string, Kin
     listEmailIdentities: ['fixture', 'live', 'live'],
     listConfigurationSets: ['fixture', 'live', 'live'],
     getConfigurationSetEventDestinations: ['fixture', 'live', 'live'],
-    pauseConfigurationSet: ['fixture', 'dry-run', 'not-built-until-phase-3'],
-    reopenConfigurationSet: ['fixture', 'dry-run', 'not-built-until-phase-3'],
-    sendEmail: ['fixture', 'dry-run', 'not-built-until-phase-4'],
+    getConfigurationSetSending: ['fixture', 'live', 'live'],
+    pauseConfigurationSet: ['fixture', 'dry-run', 'live'],
+    reopenConfigurationSet: ['fixture', 'dry-run', 'live'],
+    sendEmail: ['fixture', 'dry-run', 'live'],
   },
   // R6: recorded in test, live in deployed whatever the switch.
   dns: {

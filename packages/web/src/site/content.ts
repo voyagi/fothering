@@ -37,16 +37,17 @@ export const BANNED_NAMES: readonly string[] = Object.freeze([
 ]);
 
 // The event records and the model requests are processed in different places, so no sentence may
-// put all of it in one Region (AC-E14).
+// put all of it in one Region (AC-E14). Up to two words may qualify the data ("all of your event data").
 export const REGION_CLAIM_PATTERNS: readonly RegExp[] = Object.freeze([
-  /\ball\s+(?:of\s+)?(?:the\s+|your\s+)?data\b[^.]{0,80}?\b(?:eu-central-1|Frankfurt)\b/i,
+  /\ball\s+(?:of\s+)?(?:the\s+|your\s+|our\s+)?(?:\w+\s+){0,2}data\b[^.]{0,80}?\b(?:eu-central-1|Frankfurt)\b/i,
   /\beverything\b[^.]{0,80}?\b(?:eu-central-1|Frankfurt)\b/i,
 ]);
 
-// DynamoDB deletes an expired item within a few days after its TTL, never at it (AC-P12).
+// DynamoDB deletes an expired item within a few days after its TTL, never at it (AC-P12), so a
+// deadline at 30 days ("within", "by") is as wrong as the exact day.
 export const EXACT_30_DAY_PATTERNS: readonly RegExp[] = Object.freeze([
   /\bexactly\s+(?:30|thirty)\s+days\b/i,
-  /\b(?:deleted|removed|erased)\s+(?:(?:at|on|after)\s+)?(?:30|thirty)\s+days\b/i,
+  /\b(?:deleted|removed|erased)\s+(?:(?:at|on|after|within|by)\s+)?(?:30|thirty)\s+days\b/i,
 ]);
 
 // Until phase 3's files are on the branch, no page states an Article 50 verdict, the pause error
@@ -129,7 +130,9 @@ export const DEPLOY_COPY = Object.freeze({
   stepsHeading: 'Five steps, one template',
   stepsHead: 'The deploy is one CDK app. Building it is free and offline, so you can read the CloudFormation it produces before anything is created.',
   resourcesHeading: 'What the template creates',
-  resourcesHead: 'Nothing outside this list. Each row comes from the synthesized templates, with what removal does to it.',
+  // One clause per NOT_LISTED type in resources-view.ts; deploy.test.ts fails when that map changes.
+  resourcesHead:
+    "Each row comes from the synthesized templates, with what removal does to it. Three kinds of attachment have no row of their own: the policies attached to the roles (the permissions table lists every grant they hold), each function's retry setting for the events that invoke it, and the grants that let an event rule invoke its function. Nothing else is left out.",
   resourcesCaption: 'Resource schedule, `{region}`, generated from packages/infra/resources.json.',
   permissionsHeading: 'Every permission, and why',
   permissionsHead: 'Listed per role, generated from the committed permissions snapshot, which the test suite compares with the synthesized templates both ways. If a role in the template you deploy holds anything not listed here, do not deploy it.',
@@ -137,7 +140,10 @@ export const DEPLOY_COPY = Object.freeze({
   runtimeRoleSentence: 'The runtime role holds no SES, DynamoDB or S3 action.',
   denyHeading: 'Denied on every role',
   removalHeading: 'Taking it out',
-  removalHead: 'Removal deletes what the template created. Your configuration sets and their event destinations are yours to remove.',
+  // The bootstrap step deploys CDKToolkit, an S3 bucket and an ECR repository for the whole account
+  // and Region, which deleting this app's stacks leaves in place (CDK guide, cdk bootstrap).
+  removalHead:
+    'Removal deletes what the template created. Your configuration sets and their event destinations are yours to remove, and so is the CDKToolkit stack the bootstrap step adds: it holds an S3 bucket and an ECR repository for every CDK app in this account and Region, so delete it only when nothing else deploys there.',
 });
 
 // AC-36: the sentence and its reason, rendered whole so the one-caller rule can find it.
@@ -158,15 +164,27 @@ export interface DeployStepCopy {
   readonly uses: readonly DeployCommandUse[];
 }
 
+// Step one carries the README's "Before that first deploy" list (deploy.test.ts compares the two):
+// the action stack's first deploy needs all three. SES sandbox rule: request-production-access.html.
 export const DEPLOY_STEPS: readonly DeployStepCopy[] = Object.freeze([
-  { title: 'Check what you have', text: 'An AWS account with SES in `{region}`, Node.js 22, and credentials for that account.', uses: [] },
+  {
+    title: 'Check what you have',
+    text: 'An AWS account with SES in `{region}`, Node.js 22, and credentials for that account. The address you deploy as `FromAddress` must be a verified SES identity in `{region}`, or sit on a verified domain. The `fothering-alerts` configuration set must exist, with an enabled EventBridge event destination for all six event types: the operator email goes out through it. While the account is in the SES sandbox, SES delivers only to verified identities, so verify `OperatorAddress` too.',
+    uses: [],
+  },
   {
     title: 'Name the lanes to watch',
     text: 'List every configuration set you send through in `lanes.json`, transactional ones included, each with an EventBridge event destination for all six event types.',
     uses: [],
   },
   { title: 'Build and read the template', text: 'This writes the CloudFormation templates into `cdk.out`. Read their IAM statements against the tables below.', uses: ['build'] },
-  { title: 'Deploy with the switch off', text: 'The stacks start in dry run: they read and store events and log what they would do.', uses: ['bootstrap', 'deploy'] },
+  // CDK also reads context from these three files (CDK guide, context values), so a key left there
+  // turns this deploy live with no flag on the line.
+  {
+    title: 'Deploy with the switch off',
+    text: 'The stacks start in dry run: they read and store events and log what they would do. A `fothering:live` key left in `cdk.json`, `cdk.context.json` or `~/.cdk.json` would switch them on, so check that none of the three holds one.',
+    uses: ['bootstrap', 'deploy'],
+  },
   { title: 'Turn the switch on', text: 'Only after a dry-run week you are happy with.', uses: ['go-live'] },
 ]);
 

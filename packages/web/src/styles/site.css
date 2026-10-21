@@ -311,7 +311,10 @@ ol.procedure { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(
 
 /* A command as a reader would paste it, on a recessed well. */
 pre.command { margin: var(--space-12) 0 0; padding: var(--space-sm) var(--space-12); border-radius: 4px; background: var(--well); color: var(--ink); white-space: pre-wrap; overflow-wrap: anywhere; font: 500 var(--text-mono-value)/1.5 var(--font-mono); font-feature-settings: "tnum" 1; }
-pre.command code { font: inherit; color: inherit; }
+/* A block code box covers every line of the command. Inline, its line boxes miss the first line of a
+   token that breaks inside itself, so axe reads two element stacks under one text node and cannot
+   compute its contrast (incomplete, elmPartiallyObscuring). The layout is the same either way. */
+pre.command code { display: block; font: inherit; color: inherit; }
 /* Each unit is one atomic box that moves to the next line whole while it fits. A flag with its value
    is a unit of two token boxes: shrink-to-fit keeps it on one line until it is wider than the
    block, and only then does it wrap, at the space between its tokens. A token wider than the

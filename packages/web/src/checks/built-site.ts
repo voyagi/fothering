@@ -135,8 +135,8 @@ function convert(node: DefaultTreeAdapterTypes.Element, inSvg: boolean): BuiltEl
 }
 
 function rootElement(html: string, file: string): BuiltElement {
-  // With scripting on, parse5 reads <noscript> content as one text node; the no-JavaScript reading
-  // of the replay lives there, so the rules must see it as elements.
+  // With scripting on, parse5 reads <noscript> content as one text node, so text inside one would
+  // pass every rule unread; with scripting off it is elements the rules walk like any other.
   const document = parse(html, { scriptingEnabled: false });
   const root = document.childNodes.find((node): node is DefaultTreeAdapterTypes.Element => 'tagName' in node);
   if (root === undefined) throw new Error(`${file}: parse5 returned no root element`);

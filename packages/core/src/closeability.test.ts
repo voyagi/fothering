@@ -2,9 +2,13 @@ import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
 import { BUCKET_MS, LATENESS_HORIZON_MS, bucketStartMs, isBucketComplete } from './buckets.js';
 import {
+  LANE_MAP_REFUSALS,
   REFUSAL_REASONS,
   REQUIRED_EVENT_TYPES,
+  SES_CONFIGURATION_REFUSALS,
   checkCloseability,
+  configurationRefusals,
+  isStaticallyCloseable,
   observeLanes,
   type CloseabilityResult,
   type CloseableLane,
@@ -348,6 +352,65 @@ describe('the closeable type (AC-17)', () => {
 
     expect(fromCheck.configurationSet).toBe(BULK);
     expect(forged.configurationSet).toBe(lane.configurationSet);
+  });
+});
+
+describe('the configuration half of the refusal table, for action time (D-102, CH-06)', () => {
+  it('splits the lane-map and SES-configuration refusals, each in REFUSAL_REASONS order', () => {
+    expect(LANE_MAP_REFUSALS).toEqual(['multiple-declared-streams', 'operator-alert', 'transactional']);
+    expect(SES_CONFIGURATION_REFUSALS).toEqual(['unlisted-configuration-set', 'default-configuration-set', 'destination-missing-event-types']);
+    for (const half of [LANE_MAP_REFUSALS, SES_CONFIGURATION_REFUSALS]) {
+      expect(REFUSAL_REASONS.filter((reason) => (half as readonly string[]).includes(reason))).toEqual([...half]);
+    }
+  });
+
+  it('merges both halves in REFUSAL_REASONS order and never names an observed code', () => {
+    const laneMap = withBulkLane({ declaredStreams: ['newsletter', 'digest'], criticality: 'transactional' });
+    const partial = destinationsFor(BULK, [PARTIAL_DESTINATION]);
+    const ses = { ...partial, configurationSets: new Set([...LANE_SETS, 'fothering-legacy']), defaultConfigurationSets: new Set([BULK]) };
+    expect(configurationRefusals(BULK, { laneMap, ses })).toEqual([
+      'multiple-declared-streams',
+      'unlisted-configuration-set',
+      'default-configuration-set',
+      'destination-missing-event-types',
+      'transactional',
+    ]);
+  });
+
+  it('reads the committed lanes.json over complete SES facts as the email lane block shows it', () => {
+    const refusals = Object.fromEntries(LANE_SETS.map((set) => [set, configurationRefusals(set, { laneMap: LANE_MAP, ses: sesFacts() })]));
+    expect(refusals).toEqual({ [TRANSACTIONAL]: ['transactional'], [BULK]: [], [ALERTS]: ['operator-alert', 'transactional'] });
+  });
+
+  it('gives the lane-map refusals alone when the SES facts were not read', () => {
+    expect(configurationRefusals(ALERTS, { laneMap: LANE_MAP, ses: undefined })).toEqual(['operator-alert', 'transactional']);
+    expect(configurationRefusals(BULK, { laneMap: withBulkLane({ declaredStreams: ['newsletter', 'digest'] }), ses: undefined })).toEqual(['multiple-declared-streams']);
+  });
+
+  it('still names an identity default set on a lane with no records, which checkCloseability reads as NO DATA (CH-06)', () => {
+    const ses = sesFacts({ defaultConfigurationSets: new Set([BULK]) });
+    expect(evaluate({ records: [], ses }).state).toBe('no-data');
+    expect(configurationRefusals(BULK, { laneMap: LANE_MAP, ses })).toEqual(['default-configuration-set']);
+  });
+
+  it('throws for a set the lane map does not list, as checkCloseability does', () => {
+    expect(() => configurationRefusals('a-set-nobody-declared', { laneMap: LANE_MAP, ses: sesFacts() })).toThrow('a-set-nobody-declared');
+  });
+});
+
+describe('the statically closeable rule IAM and the action share (D-104)', () => {
+  it('holds for fothering-bulk alone in the committed lanes.json', () => {
+    expect(LANE_MAP.lanes.filter((lane) => isStaticallyCloseable(lane)).map((lane) => lane.configurationSet)).toEqual([BULK]);
+  });
+
+  it.each<[string, Partial<LaneEntry>]>([
+    ['two declared streams', { declaredStreams: ['newsletter', 'digest'] }],
+    ['operatorAlert true', { operatorAlert: true }],
+    ['a transactional criticality', { criticality: 'transactional' }],
+  ])('refuses a bulk lane with %s', (_case, overrides) => {
+    const bulk = withBulkLane(overrides).lanes.find((lane) => lane.configurationSet === BULK);
+    if (bulk === undefined) throw new Error('lanes.json holds no bulk lane');
+    expect(isStaticallyCloseable(bulk)).toBe(false);
   });
 });
 

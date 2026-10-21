@@ -53,16 +53,18 @@ rule's permission to invoke the ingest function, is pinned by the ingest stack's
   run at all when it reads `live`.
 - A deployed stack with `FOTHERING_LIVE` unset: the product's own table, the address key secret
   and the queue are live, while every SES pause, reopen and send, every model call and every
-  InvokeAgentRuntime becomes one dry-run line instead of a real call. The four SES reads the
-  closeability check needs resolve live too, and the detection function makes them. Only the
-  detection role holds SES permissions, and only those four reads (`ses:ListEmailIdentities`,
+  InvokeAgentRuntime becomes one dry-run line instead of a real call. The SES reads change nothing,
+  so they resolve live too: the four the closeability check needs (`ses:ListEmailIdentities`,
   `ses:ListConfigurationSets`, `ses:GetEmailIdentity` and
-  `ses:GetConfigurationSetEventDestinations`); only the runtime role may invoke the model. Every
-  other permission arrives with the phase that first makes its call.
-- A deployed stack with `FOTHERING_LIVE` set to the exact word `live`: those mutations go live as
-  later phases build them. Until a phase builds an operation, a call to it fails with a
-  `not built until phase N` error instead of writing a dry-run line, so going live before phases
-  2 to 4 have landed stops those calls rather than recording them.
+  `ses:GetConfigurationSetEventDestinations`), which the detection and action functions make, and
+  the read of one set's sending setting that follows a live pause or reopen. Only the detection and
+  action roles hold the four reads, only the action and reopen roles hold the pause, the reopen and
+  that one read, on the sets `lanes.json` lets the action close, and only the action role holds the
+  send (Deploy and remove has the detail). Only the runtime role may invoke the model.
+- A deployed stack with `FOTHERING_LIVE` set to the exact word `live`: those mutations go live. A
+  result the action reached with the switch off stays as it was: turning the switch on pauses
+  nothing for an incident it already met, and an operator email that was only a dry-run line is
+  sent on the first live run while its lane's marker still names that incident.
 
 A deployed stack never takes the switch from a shell variable. It reaches a deployed function or
 the runtime only through the CDK context key `fothering:live`, and only when that key is exactly
@@ -77,45 +79,83 @@ until you remove it; the test suite fails when `cdk.json` carries it.
 
 ## Deploy and remove
 
-The app has three stacks: `FotheringIngest` (the event table, the ingest and forget functions),
-`FotheringRuntime` (the agent on AgentCore Runtime) and `FotheringDetection` (the detection
-function and its schedule). Detection imports the table and the runtime ARN from the other two, so
-`npx cdk deploy --all` deploys `FotheringIngest` and `FotheringRuntime` before
-`FotheringDetection`, and `npx cdk destroy --all` removes `FotheringDetection` first. Neither of the
-other two stacks can be removed or replace the table or the runtime while detection is deployed.
+The app has four stacks: `FotheringIngest` (the event table, the ingest and forget functions),
+`FotheringRuntime` (the agent on AgentCore Runtime), `FotheringDetection` (the detection function
+and its schedule) and `FotheringAction` (the action function, its schedule and the reopen function). Detection imports
+the table and the runtime ARN from the first two. `FotheringAction` imports the table and the address
+key from `FotheringIngest` and depends on neither `FotheringRuntime` nor `FotheringDetection`. Neither the
+ingest nor the runtime stack can be removed, or replace the table or the runtime, while a stack
+that imports from it is deployed.
 
-Run from the owner's account, in `eu-central-1`:
+`FotheringAction` holds the only SES writes in the app: pausing a configuration set and reading the
+setting back, granted on the lanes `lanes.json` lets the action close and on no other set, and
+sending the operator email, granted on your From address, its domain and the `fothering-alerts`
+set alone. A deployment without it holds no SES write at all, so detection can be deployed and watched on its
+own first. Every role in every stack also carries an explicit Deny on the three actions that change
+account-level sending, so no grant added later can stop the whole account. `FotheringAction` also
+holds the reopen function, which turns sending back on for a set Fothering paused, only when you
+run it by hand; [docs/reopen-a-lane.md](docs/reopen-a-lane.md) has the command.
+
+Run from the owner's account, in `eu-central-1`. Deploy the first three stacks, check them in the
+CloudFormation console, then deploy `FotheringAction` last. Remove it first, after reopening any set
+it paused: the reopen function goes with the stack, and a set left paused stays paused in SES until
+you re-enable it in the SES console.
 
 ```sh
 npm run build
 npx cdk bootstrap             # once, before the first deploy
-npx cdk deploy --all
-npx cdk destroy --all
+npx cdk deploy FotheringIngest FotheringRuntime FotheringDetection
+npx cdk deploy FotheringAction --parameters FotheringAction:OperatorAddress=<address> --parameters FotheringAction:FromAddress=<address>
+npx cdk destroy FotheringAction
+npx cdk destroy FotheringIngest FotheringRuntime FotheringDetection
 ```
+
+`FotheringAction` takes two addresses as stack parameters: `OperatorAddress`, where the operator
+email goes, and `FromAddress`, the address it is sent from. They stay in the deployed stack and the
+action function's environment in your account, never in this repository. The first deploy of
+`FotheringAction` fails without both; later deploys keep the values they were given, because the CDK
+CLI reuses a stack's previous parameter values on every deploy unless you pass
+`--no-previous-parameters`.
+
+Before that first deploy:
+
+- `FromAddress` must be on a verified SES identity in `eu-central-1`: the address itself or its
+  domain.
+- The `fothering-alerts` configuration set must exist, with an enabled EventBridge destination for
+  the six event types Fothering reads: send, delivery, bounce, complaint, reject and delivery delay.
+  The stacks create no configuration set.
+- While the account is in the SES sandbox, SES delivers only to verified identities, so
+  `OperatorAddress` must be verified too.
 
 The detection function runs every five minutes. It reads SES configuration and DNS only when a
 spike opens an incident, and it may invoke the runtime and write its own incident, evidence,
 decision and counter items to the table. It invokes the runtime for an incident that stored events
 opened, at most three times per incident and six times a UTC day.
 
-To deploy with the switch on, pass the context key. Do this only after a dry-run week you are
-happy with:
+The action function also runs every five minutes. It reads the decisions detection stored, checks
+the SES configuration again, and pauses a set only when the decision and the checks still agree.
+
+To deploy with the switch on, pass the context key on each deploy. Do this only after a dry-run
+week you are happy with:
 
 ```sh
-npx cdk deploy --all -c fothering:live=live
+npx cdk deploy FotheringIngest FotheringRuntime FotheringDetection -c fothering:live=live
+npx cdk deploy FotheringAction -c fothering:live=live --parameters FotheringAction:OperatorAddress=<address> --parameters FotheringAction:FromAddress=<address>
 ```
 
-To try the model on its own, deploy only the runtime with the switch on and invoke it once with an
-evidence record built from fixtures, saved as `record.json`. The runtime ARN is among the
-`FotheringRuntime` stack outputs in the CloudFormation console. The session id must be at least 33
-characters, and the read timeout is raised because the CLI gives up after 60 seconds by default:
+To try the model on its own, deploy only the runtime with the switch on and invoke it once with the
+committed trial record, `packages/agent/fixtures/trial-record.json` (one bad import batch on
+`fothering-bulk`, built from fixtures; a test keeps it equal to the builder, so it stays current). Run
+the commands from the repository root. The runtime ARN is among the `FotheringRuntime` stack outputs in
+the CloudFormation console. The session id must be at least 33 characters, and the read timeout is
+raised because the CLI gives up after 60 seconds by default:
 
 ```sh
 npx cdk deploy FotheringRuntime -c fothering:live=live
 aws bedrock-agentcore invoke-agent-runtime --region eu-central-1 \
   --agent-runtime-arn <runtime arn> \
   --runtime-session-id fothering-trial-0000000000000000000001 \
-  --payload fileb://record.json \
+  --payload fileb://packages/agent/fixtures/trial-record.json \
   --cli-read-timeout 120 \
   response.json
 ```
