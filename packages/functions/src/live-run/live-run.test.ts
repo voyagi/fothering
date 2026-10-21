@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, describe, expect, it } from 'vitest';
@@ -8,10 +8,12 @@ import { attemptRecordSchema, MIN_SEND_GAP_MS, refusalMessage, spacingViolations
 import { parseScenarioSource, stepPlan, type ScenarioSource, type ScenarioTagKind } from '@fothering/core/scenarios';
 import { propertySeed } from '@fothering/core/test/property-seed';
 import {
+  createFixtureLiveRunPorts,
   createFixtureLiveRunState,
   type FixtureLiveRunCall,
   type FixtureLiveRunState,
 } from '@fothering/providers/fixtures/live-run-ports';
+import { createLiveRunPortFactory } from '@fothering/providers/live/live-run-ports';
 import type { LiveRunPortFactory, LiveRunSendRequest } from '@fothering/providers/live-run-port-types';
 import { sleep } from '@fothering/providers/ses-facts';
 import { LIVE_RUN_MESSAGES, main } from './cli.js';
@@ -744,5 +746,229 @@ describe('buildLiveRunRoot', () => {
     await expect(deps.portFactory().callerIdentity('unscripted').getCallerIdentity()).rejects.toThrow('the fixture holds no caller for that profile');
     expect(() => deps.gitCheckIgnore(join(REPO_ROOT, 'packages', 'functions', 'src', 'live-run', 'cli.ts'))).toThrow();
     expect(() => deps.gitCheckIgnore(join(REPO_ROOT, 'node_modules'))).not.toThrow();
+  });
+});
+
+interface ImportFact {
+  specifier: string;
+  /** Value names only; a name written `type X` is erased at build time and never loads anything. */
+  names: string[];
+  typeOnly: boolean;
+}
+
+// One expression per import form: a statement with a clause (import or re-export), a bare import,
+// and a dynamic import. The clause class stops at `=` and `;`, so `export const x = ...` never matches.
+const IMPORT_FORMS = {
+  clause: /^[ \t]*(?:import|export)\s+(type\s+)?([\w$*{}\s,]*?)\s*from\s*['"]([^'"]+)['"]/gm,
+  bare: /^[ \t]*import\s*['"]([^'"]+)['"]/gm,
+  dynamic: /\bimport\s*\(\s*['"]([^'"]+)['"]\s*\)/g,
+};
+
+function clauseNames(clause: string): string[] {
+  const braced = /\{([\s\S]*)\}/.exec(clause);
+  const outside = clause.replace(/\{[\s\S]*\}/, '').split(',').map((part) => part.trim()).filter((part) => part !== '');
+  const inside = (braced?.[1] ?? '').split(',').map((part) => part.trim()).filter((part) => part !== '' && !part.startsWith('type '));
+  return [...outside.map((part) => (part.startsWith('*') ? '*' : 'default')), ...inside.map((part) => part.split(/\s+as\s+/)[0] ?? part)];
+}
+
+function importsOf(text: string): ImportFact[] {
+  const facts: ImportFact[] = [];
+  for (const match of text.matchAll(IMPORT_FORMS.clause)) {
+    const names = clauseNames(match[2] ?? '');
+    facts.push({ specifier: match[3] ?? '', names, typeOnly: match[1] !== undefined || names.length === 0 });
+  }
+  for (const match of text.matchAll(IMPORT_FORMS.bare)) facts.push({ specifier: match[1] ?? '', names: [], typeOnly: false });
+  for (const match of text.matchAll(IMPORT_FORMS.dynamic)) facts.push({ specifier: match[1] ?? '', names: ['*'], typeOnly: false });
+  return facts;
+}
+
+const AWS_FAMILIES = /^(?:@aws-sdk\/|@smithy\/|@aws-crypto\/|bedrock-agentcore|aws4fetch)/;
+
+// What the command may load from providers, by module and, where it narrows anything, by name.
+// ses-facts holds only type imports of its own, and the command takes its sleep and nothing else.
+const PROVIDER_IMPORTS = new Map<string, readonly string[] | 'any'>([
+  ['@fothering/providers/live-run-port-types', 'any'],
+  ['@fothering/providers/fixtures/live-run-ports', 'any'],
+  ['@fothering/providers/live/live-run-ports', ['createLiveRunPortFactory']],
+  ['@fothering/providers/live-switch', ['readLiveSwitch']],
+  ['@fothering/providers/ses-facts', ['sleep']],
+]);
+
+function commandImportViolations(file: string, text: string): string[] {
+  const violations: string[] = [];
+  for (const fact of importsOf(text)) {
+    if (AWS_FAMILIES.test(fact.specifier)) {
+      violations.push(`${file}: ${fact.specifier}`);
+    } else if (fact.specifier.startsWith('@fothering/providers/')) {
+      const allowed = PROVIDER_IMPORTS.get(fact.specifier);
+      if (allowed === undefined) violations.push(`${file}: ${fact.specifier}`);
+      else if (allowed !== 'any') violations.push(...fact.names.filter((name) => !allowed.includes(name)).map((name) => `${file}: ${name} from ${fact.specifier}`));
+    } else if (fact.specifier.startsWith('../') && !fact.specifier.endsWith('.json') && !fact.typeOnly) {
+      // A value import out of this folder could carry a deployed root, and with it PORT_TABLE.
+      violations.push(`${file}: ${fact.specifier}`);
+    }
+  }
+  return violations;
+}
+
+const ADAPTER_SDK_NAMES = new Map<string, readonly string[]>([
+  ['@aws-sdk/client-sesv2', ['GetAccountCommand', 'SendEmailCommand', 'SESv2Client']],
+  ['@aws-sdk/client-sts', ['GetCallerIdentityCommand', 'STSClient']],
+]);
+const ADAPTER_RELATIVE_IMPORTS = new Set(['../live-run-port-types.js', '../port-types.js', './lazy-client.js']);
+
+function adapterImportViolations(text: string): string[] {
+  const violations: string[] = [];
+  for (const fact of importsOf(text)) {
+    const sdkNames = ADAPTER_SDK_NAMES.get(fact.specifier);
+    if (sdkNames !== undefined) violations.push(...fact.names.filter((name) => !sdkNames.includes(name)).map((name) => `${name} from ${fact.specifier}`));
+    else if (!ADAPTER_RELATIVE_IMPORTS.has(fact.specifier)) violations.push(fact.specifier);
+  }
+  return violations;
+}
+
+function commandClassesOf(text: string): string[] {
+  return importsOf(text)
+    .filter((fact) => fact.specifier.startsWith('@aws-sdk/'))
+    .flatMap((fact) => fact.names.filter((name) => name.endsWith('Command')))
+    .sort();
+}
+
+const LIVE_RUN_DIR = join(REPO_ROOT, 'packages', 'functions', 'src', 'live-run');
+const ADAPTER_FILE = join(REPO_ROOT, 'packages', 'providers', 'src', 'live', 'live-run-ports.ts');
+// The files the scan reads, named so a new source file in the folder fails the list check below
+// until it is added here and scanned.
+const COMMAND_FILES = ['cli.ts', 'root.ts', 'send.ts'];
+
+describe('the command can reach SendEmail, GetAccount and GetCallerIdentity and nothing else', () => {
+  it('names every non-test source file in the command folder', () => {
+    const sources = readdirSync(LIVE_RUN_DIR).filter((name) => name.endsWith('.ts') && !name.endsWith('.test.ts'));
+    expect(sources.sort()).toEqual([...COMMAND_FILES].sort());
+  });
+
+  it('imports from providers only the live-run ports, the switch reader and sleep, and no AWS package', () => {
+    const violations = COMMAND_FILES.flatMap((file) => commandImportViolations(file, readFileSync(join(LIVE_RUN_DIR, file), 'utf8')));
+    expect(violations).toEqual([]);
+  });
+
+  it('the live adapter imports exactly the three command classes and their two clients', () => {
+    const text = readFileSync(ADAPTER_FILE, 'utf8');
+    expect(commandClassesOf(text)).toEqual(['GetAccountCommand', 'GetCallerIdentityCommand', 'SendEmailCommand']);
+    expect(adapterImportViolations(text)).toEqual([]);
+  });
+
+  it('reports a planted pause command, the product port table and an IAM client (control)', () => {
+    const planted = [
+      "import { PutConfigurationSetSendingOptionsCommand } from '@aws-sdk/client-sesv2';",
+      "import { PORT_TABLE } from '@fothering/providers/ports';",
+      "import { createSesWrites } from '@fothering/providers/live/ses-writes';",
+      "import { readSesFacts } from '@fothering/providers/ses-facts';",
+      "import { buildIngestRoot } from '../ingest/root.js';",
+      "const iam = await import('@aws-sdk/client-iam');",
+    ].join('\n');
+    expect(commandImportViolations('planted.ts', planted)).toEqual([
+      'planted.ts: @aws-sdk/client-sesv2',
+      'planted.ts: @fothering/providers/ports',
+      'planted.ts: @fothering/providers/live/ses-writes',
+      'planted.ts: readSesFacts from @fothering/providers/ses-facts',
+      'planted.ts: ../ingest/root.js',
+      'planted.ts: @aws-sdk/client-iam',
+    ]);
+
+    const adapter = readFileSync(ADAPTER_FILE, 'utf8');
+    const plantedAdapter = `import {\n  PutConfigurationSetSendingOptionsCommand,\n} from '@aws-sdk/client-sesv2';\nimport { IAMClient } from '@aws-sdk/client-iam';\nimport { PORT_TABLE } from '../ports.js';\n${adapter}`;
+    expect(adapterImportViolations(plantedAdapter)).toEqual([
+      'PutConfigurationSetSendingOptionsCommand from @aws-sdk/client-sesv2',
+      '@aws-sdk/client-iam',
+      '../ports.js',
+    ]);
+    expect(commandClassesOf(plantedAdapter)).toContain('PutConfigurationSetSendingOptionsCommand');
+  });
+
+  it('hands out ports whose only methods are the narrow ones, from the fixture and the live factory alike', () => {
+    for (const factory of [createFixtureLiveRunPorts(createFixtureLiveRunState()), createLiveRunPortFactory()]) {
+      expect(Object.keys(factory.ses('planted-profile')).sort()).toEqual(['getAccount', 'sendEmail']);
+      expect(Object.keys(factory.callerIdentity('planted-profile'))).toEqual(['getCallerIdentity']);
+    }
+  });
+});
+
+interface DeployedOutcome {
+  line: string;
+  factoryCalls: number;
+  constructions: number;
+  sends: number;
+}
+
+// A deployed root, as the process entry builds it, with a liveFactory that counts its calls and
+// hands back fixture ports holding no callers, so a run that gets past every local check stops at
+// the callers phase and never sends.
+async function runDeployed(argv: readonly string[], switchValue: string | undefined): Promise<DeployedOutcome> {
+  const state = createFixtureLiveRunState();
+  const err: string[] = [];
+  let factoryCalls = 0;
+  const deps = buildLiveRunRoot({
+    runtimeContext: 'deployed',
+    switchValue,
+    repoRoot: plantRoot(),
+    io: { out: () => undefined, err: (line) => err.push(line) },
+    liveFactory: () => {
+      factoryCalls += 1;
+      return createFixtureLiveRunPorts(state);
+    },
+  });
+  const code = await main(argv, deps);
+  const sends = sendsOf(state).length;
+  const line = `exit ${code}, factory ${factoryCalls}, ports ${state.constructions}, sends ${sends}, ${err[0] ?? 'no error line'}`;
+  return { line, factoryCalls, constructions: state.constructions, sends };
+}
+
+describe('only an exact switch builds a port, and only once the local checks have passed', () => {
+  it.each([
+    ['unset', undefined],
+    ['LIVE', 'LIVE'],
+  ])('a deployed root with the switch %s calls no live factory and builds no port', async (_label, switchValue) => {
+    const outcome = await runDeployed(sendArgs(RUN_ID, 'bulk-stale-import', 'spike'), switchValue);
+    expect(outcome.line).toBe(`exit 1, factory 0, ports 0, sends 0, ${refusalMessage('switch-not-live')}`);
+  });
+
+  it('a deployed root with exactly live and a refused run id calls no live factory', async () => {
+    const outcome = await runDeployed(sendArgs('run-one', 'bulk-stale-import', 'spike'), 'live');
+    expect(outcome.line).toBe(`exit 1, factory 0, ports 0, sends 0, ${refusalMessage('run-id-invalid')}`);
+  });
+
+  it('a deployed root with exactly live builds ports only at the callers phase, and sends nothing there', async () => {
+    const outcome = await runDeployed(sendArgs(RUN_ID, 'bulk-stale-import', 'spike'), 'live');
+    expect(outcome.line.startsWith('exit 1, factory 1, ')).toBe(true);
+    expect(outcome.constructions).toBeGreaterThan(0);
+    expect(outcome.sends).toBe(0);
+    expect(outcome.line.endsWith(refusalMessage('caller-unresolved', 'fothering-bulk'))).toBe(true);
+  });
+});
+
+describe('send takes profile names only and refuses any flag it does not know', () => {
+  const PLANTED_KEY = 'planted-key-value';
+
+  it.each([
+    ['an unknown flag with a value', ['--access-key', PLANTED_KEY]],
+    ['an unknown flag written with an equals sign', [`--secret-access-key=${PLANTED_KEY}`]],
+    ['an unknown flag with no value', ['--debug']],
+  ])('refuses %s as a usage error, building nothing and echoing nothing', async (_label, extra) => {
+    const outcome = await run(sendArgs(RUN_ID, 'bulk-stale-import', 'spike', extra));
+    expect(refusalLine(outcome)).toBe(refusalMessage('usage'));
+    expect([...outcome.out, ...outcome.err].some((line) => line.includes(PLANTED_KEY))).toBe(false);
+  });
+
+  const LANES_ARGS = ['--lane-profile', `fothering-bulk=${PROFILES.bulk}`, '--lane-profile', `fothering-transactional=${PROFILES.transactional}`];
+
+  it.each([
+    ['the account profile', ['--from', FROM, '--account-profile', '--debug', ...LANES_ARGS]],
+    ['the from address', ['--account-profile', PROFILES.account, ...LANES_ARGS, '--from', '--debug']],
+    ['the rate', ['--from', FROM, '--account-profile', PROFILES.account, ...LANES_ARGS, '--rate', '--debug']],
+    ['a lane profile', ['--from', FROM, '--account-profile', PROFILES.account, '--lane-profile', `--access-key=${PLANTED_KEY}`, ...LANES_ARGS]],
+  ])('refuses an unknown flag standing where %s belongs, instead of reading it as the value', async (_label, flags) => {
+    const outcome = await run(['send', RUN_ID, 'bulk-stale-import', 'spike', ...flags]);
+    expect(refusalLine(outcome)).toBe(refusalMessage('usage'));
+    expect([...outcome.out, ...outcome.err].some((line) => line.includes(PLANTED_KEY))).toBe(false);
   });
 });
