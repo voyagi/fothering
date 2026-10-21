@@ -850,6 +850,7 @@ const PROVIDER_IMPORTS = new Map<string, readonly string[] | 'any'>([
   ['@fothering/providers/live/live-run-ports', ['createLiveRunPortFactory']],
   ['@fothering/providers/live-switch', ['readLiveSwitch']],
   ['@fothering/providers/ses-facts', ['sleep']],
+  ['@fothering/providers/saved-items', ['readSavedItems']],
 ]);
 
 function commandImportViolations(file: string, text: string): string[] {
@@ -896,7 +897,7 @@ const LIVE_RUN_DIR = join(REPO_ROOT, 'packages', 'functions', 'src', 'live-run')
 const ADAPTER_FILE = join(REPO_ROOT, 'packages', 'providers', 'src', 'live', 'live-run-ports.ts');
 // The files the scan reads, named so a new source file in the folder fails the list check below
 // until it is added here and scanned.
-const COMMAND_FILES = ['cli.ts', 'root.ts', 'send.ts'];
+const COMMAND_FILES = ['check-saved.ts', 'cli.ts', 'root.ts', 'send.ts'];
 
 describe('the command can reach SendEmail, GetAccount and GetCallerIdentity and nothing else', () => {
   it('names every non-test source file in the command folder', () => {
@@ -904,7 +905,7 @@ describe('the command can reach SendEmail, GetAccount and GetCallerIdentity and 
     expect(sources.sort()).toEqual([...COMMAND_FILES].sort());
   });
 
-  it('imports from providers only the live-run ports, the switch reader and sleep, and no AWS package', () => {
+  it('imports from providers only the live-run ports, the switch reader, sleep and the saved-items reader, and no AWS package', () => {
     const violations = COMMAND_FILES.flatMap((file) => commandImportViolations(file, readFileSync(join(LIVE_RUN_DIR, file), 'utf8')));
     expect(violations).toEqual([]);
   });

@@ -4,12 +4,13 @@ import { resolveProviderMode } from '@fothering/core/mode';
 import type { StepPlanEntry } from '@fothering/core/scenarios';
 import { createLiveRunPortFactory } from '@fothering/providers/live/live-run-ports';
 import { readLiveSwitch } from '@fothering/providers/live-switch';
+import { runCheckSaved } from './check-saved.js';
 import { buildLiveRunRoot, type LiveRunDeps } from './root.js';
 import { refuse, runSendStep } from './send.js';
 
 export const LIVE_RUN_MESSAGES = {
   usage:
-    'usage: live-run plan <scenario> <step> <runId>, or live-run send <runId> <scenario> <step> --from <address> --account-profile <name> --lane-profile <set>=<name> [--lane-profile <set>=<name> ...] [--rate <per second>]',
+    'usage: live-run plan <scenario> <step> <runId>, or live-run send <runId> <scenario> <step> --from <address> --account-profile <name> --lane-profile <set>=<name> [--lane-profile <set>=<name> ...] [--rate <per second>], or live-run check-saved <runId> [--after-removal]',
   planHeader: (scenario: string, step: string, sends: number) =>
     `${scenario} ${step}: ${sends} sends, each started at least ${MIN_SEND_GAP_MS} ms after the one before`,
   planLine: (entry: StepPlanEntry) => `${entry.counter} ${entry.lane} ${entry.tagKind}=${entry.tagValue} ${entry.recipientKind}`,
@@ -109,11 +110,20 @@ async function send(args: readonly string[], deps: LiveRunDeps): Promise<number>
   return runSendStep(deps, { runId, scenarioName, stepName, from, accountProfile, laneProfiles, rateMilli });
 }
 
+// Its own exact parse: --after-removal takes no value, so parseArgs would read the next argument as one.
+function checkSaved(args: readonly string[], deps: LiveRunDeps): number {
+  const [runId, flag, ...extra] = args;
+  if (runId === undefined || runId.startsWith('--') || extra.length > 0) return usage(deps);
+  if (flag !== undefined && flag !== '--after-removal') return usage(deps);
+  return runCheckSaved(deps, runId, flag !== undefined);
+}
+
 /** Returns the process exit code; every refusal is one line on io.err and exit 1. */
 export async function main(argv: readonly string[], deps: LiveRunDeps): Promise<number> {
   const [subcommand, ...rest] = argv;
   if (subcommand === 'plan') return plan(rest, deps);
   if (subcommand === 'send') return send(rest, deps);
+  if (subcommand === 'check-saved') return checkSaved(rest, deps);
   return usage(deps);
 }
 
