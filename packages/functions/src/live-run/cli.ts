@@ -32,7 +32,9 @@ function parseArgs(args: readonly string[]): ParsedArgs | undefined {
       continue;
     }
     const value = args[i + 1];
-    if (!VALUE_OPTIONS.has(arg) || value === undefined) return undefined;
+    // A flag in a value slot is an unknown flag, never a profile name or a lane, so it cannot
+    // carry a key into the command by standing where a known flag's value goes.
+    if (!VALUE_OPTIONS.has(arg) || value === undefined || value.startsWith('--')) return undefined;
     options.set(arg, [...(options.get(arg) ?? []), value]);
     i += 1;
   }
