@@ -2,7 +2,20 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
+import { closureItemSchema } from '@fothering/core/closure';
+import { MIN_SEND_GAP_MS } from '@fothering/core/live-run';
+import { MODEL_VALUES, TOKEN_RESERVATION_PER_INVOCATION } from '@fothering/core/model-values';
+import { incidentLimitSentence } from '@fothering/core/reopen';
 import { parseScenarioSource, RECIPIENT_KINDS, SCENARIO_TAG_KINDS, type Scenario, type ScenarioSource } from '@fothering/core/scenarios';
+import {
+  COMPLAINT_THRESHOLD,
+  COVERAGE_THRESHOLD,
+  HARD_BOUNCE_THRESHOLD,
+  LANE_MIN_RECIPIENT_SENDS,
+  MIN_RATIO_EVENTS,
+  ROW_MIN_RECIPIENT_SENDS,
+  type Rational,
+} from '@fothering/core/verdicts';
 
 // This file lives at packages/infra/src/repo/, four levels below the repo root.
 const REPO_ROOT = fileURLToPath(new URL('../../../../', import.meta.url));
@@ -274,5 +287,258 @@ describe('the protocol scenario tables are the committed scenario source', () =>
 
   it('names recipients by local part only, never as a whole address', () => {
     expect(readCommitted(PROTOCOL_PATH) ?? '@').not.toContain('@');
+  });
+});
+
+function protocolText(): string {
+  return readCommitted(PROTOCOL_PATH) ?? '';
+}
+
+const THRESHOLDS: ReadonlyArray<[string, Rational | number]> = [
+  ['HARD_BOUNCE_THRESHOLD', HARD_BOUNCE_THRESHOLD],
+  ['COMPLAINT_THRESHOLD', COMPLAINT_THRESHOLD],
+  ['MIN_RATIO_EVENTS', MIN_RATIO_EVENTS],
+  ['LANE_MIN_RECIPIENT_SENDS', LANE_MIN_RECIPIENT_SENDS],
+  ['ROW_MIN_RECIPIENT_SENDS', ROW_MIN_RECIPIENT_SENDS],
+  ['COVERAGE_THRESHOLD', COVERAGE_THRESHOLD],
+];
+
+function statedValue(value: Rational | number): string {
+  return typeof value === 'number' ? String(value) : `${value.numerator}/${value.denominator}`;
+}
+
+function thresholdFindings(text: string): string[] {
+  const rows = new Map(
+    tableRows(sectionBody(text, 'Thresholds and minimum sample').split('\n'))
+      .slice(1)
+      .map(([name = '', value = '']) => [name, value]),
+  );
+  const findings: string[] = [];
+  for (const [name, value] of THRESHOLDS) {
+    const stated = rows.get(name);
+    if (stated === undefined) findings.push(`${name} is not in the thresholds table`);
+    else if (stated !== statedValue(value)) findings.push(`${name}: protocol "${stated}", verdicts.ts "${statedValue(value)}"`);
+  }
+  return findings;
+}
+
+describe('every threshold the protocol states is the constant verdicts.ts enforces', () => {
+  it('states each of the six constants with its value as an integer or an integer fraction', () => {
+    expect(thresholdFindings(protocolText()).join('; ')).toBe('');
+  });
+
+  it('reports a percentage or a changed fraction in place of a constant', () => {
+    expect(thresholdFindings(protocolText().replace('| HARD_BOUNCE_THRESHOLD | 5/100 |', '| HARD_BOUNCE_THRESHOLD | 5% |'))).toEqual([
+      'HARD_BOUNCE_THRESHOLD: protocol "5%", verdicts.ts "5/100"',
+    ]);
+    expect(thresholdFindings(protocolText().replace('| HARD_BOUNCE_THRESHOLD | 5/100 |', '| HARD_BOUNCE_THRESHOLD | 4/100 |'))).toEqual([
+      'HARD_BOUNCE_THRESHOLD: protocol "4/100", verdicts.ts "5/100"',
+    ]);
+    expect(thresholdFindings(protocolText().replace('| MIN_RATIO_EVENTS | 3 |\n', ''))).toEqual(['MIN_RATIO_EVENTS is not in the thresholds table']);
+  });
+});
+
+describe('pacing, the incident limit and the per-hop fields are the values the code uses', () => {
+  it('states the send gap equal to MIN_SEND_GAP_MS and to the scenario source, with no retry', () => {
+    const pacing = sectionProse(protocolText(), 'Pacing and throttles');
+    expect(committedSource().minGapMs).toBe(MIN_SEND_GAP_MS);
+    expect(pacing).toContain(`${MIN_SEND_GAP_MS} milliseconds`);
+    expect(pacing).toContain('never retries');
+    expect(pacing).toContain('by its error name');
+  });
+
+  it('quotes the incident limit sentence for the bulk lane verbatim and logs scenario 3 as not run', () => {
+    const limit = sectionProse(protocolText(), 'Incident limit');
+    expect(limit).toContain(incidentLimitSentence('fothering-bulk'));
+    expect(limit).toContain('logged as not run');
+  });
+
+  it('names only closure and email fields the closure schema holds', () => {
+    const perHop = sectionProse(protocolText(), 'Per-hop breakdown');
+    const closureFields = Object.keys(closureItemSchema.shape);
+    const emailFields = Object.keys(closureItemSchema.shape.email.unwrap().shape);
+    for (const field of ['pauseRequestedAtMs', 'readBackAtMs', 'holdEndMs', 'holdCheckedAtMs']) {
+      expect(perHop).toContain(`\`${field}\``);
+      expect(closureFields).toContain(field);
+    }
+    expect(perHop).toContain('`email.sentAtMs`');
+    expect(emailFields).toContain('sentAtMs');
+  });
+});
+
+function stepTotals(source: ScenarioSource): string[] {
+  return source.scenarios.flatMap((scenario) =>
+    scenario.steps.map((step) => `Run ${scenario.run}, step ${step.name}: ${step.groups.reduce((sum, group) => sum + group.count, 0)} sends`),
+  );
+}
+
+const CEILINGS: ReadonlyArray<[string, number]> = [
+  ['MODEL_VALUES.perIncidentInvocations', MODEL_VALUES.perIncidentInvocations],
+  ['MODEL_VALUES.perDayInvocations', MODEL_VALUES.perDayInvocations],
+  ['MODEL_VALUES.perDayTokenReservations', MODEL_VALUES.perDayTokenReservations],
+  ['MODEL_VALUES.modelCallCeiling', MODEL_VALUES.modelCallCeiling],
+  ['TOKEN_RESERVATION_PER_INVOCATION', TOKEN_RESERVATION_PER_INVOCATION],
+];
+
+describe('the spend section states the sends, the model ceilings and what runs while deployed', () => {
+  it('states every step total of the scenario source', () => {
+    const spend = sectionProse(protocolText(), 'Spend and what runs while deployed');
+    for (const total of stepTotals(committedSource())) expect(spend).toContain(total);
+  });
+
+  it('names each model ceiling with the value core declares', () => {
+    const spend = sectionProse(protocolText(), 'Spend and what runs while deployed');
+    for (const [name, value] of CEILINGS) expect(spend).toContain(`\`${name}\` (${value})`);
+    const calls = MODEL_VALUES.perDayInvocations * MODEL_VALUES.modelCallCeiling;
+    expect(spend).toContain(`${calls * MODEL_VALUES.inputTokenCeiling} input tokens`);
+    expect(spend).toContain(`${calls * MODEL_VALUES.maxTokens} output tokens`);
+  });
+
+  it('names the budget alarm, the price source marked UNVERIFIED, the five-minute schedules and their end at removal', () => {
+    const spend = sectionProse(protocolText(), 'Spend and what runs while deployed');
+    for (const phrase of ['USD 10 monthly budget alarm', 'read on 2026-10-17', 'UNVERIFIED', 'every five minutes', 'Removal ends both', '2026-10-31']) {
+      expect(spend).toContain(phrase);
+    }
+  });
+});
+
+describe('the caller section states one role per lane and why', () => {
+  it('names both roles, their path, the closeability reason, the trust relationship and the From identity rule', () => {
+    const callers = sectionProse(protocolText(), 'One caller identity per lane');
+    for (const phrase of [
+      '`fothering-live-run-transactional`',
+      '`fothering-live-run-bulk`',
+      '`/fothering-live-run/`',
+      'refuses to close a lane whose caller also sends through another configuration set',
+      "operator's own administrator identity",
+      'maximum session of one hour',
+      'If the From address is itself a verified identity',
+      'three resources',
+    ]) {
+      expect(callers).toContain(phrase);
+    }
+  });
+});
+
+// Each step of the removal is one numbered item; the order is the order of the items that first
+// name each marker, so a reworded item still has to keep its place.
+const REMOVAL_MARKERS = ['read back as sending', 'check-saved', 'FotheringAction', 'FotheringDetection', '/fothering-live-run/', 'after-removal'] as const;
+
+function removalFindings(text: string): string[] {
+  const items = sectionBody(text, 'Removal order')
+    .split('\n')
+    .filter((line) => /^\d+\. /.test(line));
+  const positions = REMOVAL_MARKERS.map((marker) => items.findIndex((item) => item.includes(marker)));
+  const findings = REMOVAL_MARKERS.filter((_, index) => positions[index] === -1).map((marker) => `no removal step names ${marker}`);
+  for (let index = 1; index < positions.length; index += 1) {
+    if (positions[index]! < positions[index - 1]!) findings.push(`${REMOVAL_MARKERS[index]} comes before ${REMOVAL_MARKERS[index - 1]}`);
+  }
+  return findings;
+}
+
+describe('the removal order puts every reopen and save before the first destroy', () => {
+  it('lists the reopen read-backs, check-saved, FotheringAction, the other stacks, the roles and the reads in that order', () => {
+    expect(removalFindings(protocolText())).toEqual([]);
+    const removal = sectionProse(protocolText(), 'Removal order');
+    for (const stack of ['FotheringRuntime', 'FotheringIngest']) expect(removal).toContain(stack);
+    expect(removal).toContain('2026-10-31');
+  });
+
+  it('reports a destroy moved ahead of the saved-files check', () => {
+    const items = sectionBody(protocolText(), 'Removal order')
+      .split('\n')
+      .filter((line) => /^\d+\. /.test(line));
+    const save = items.find((item) => item.includes('check-saved'))!;
+    const destroy = items.find((item) => item.includes('FotheringAction'))!;
+    const swapped = protocolText().replace(save, 'SWAP').replace(destroy, save).replace('SWAP', destroy);
+    expect(removalFindings(swapped)).toContain('FotheringAction comes before check-saved');
+  });
+});
+
+const SAVED_PATHS = [
+  'run/<step>.account.json',
+  'run/<step>.callers.json',
+  'run/<step>.attempts.jsonl',
+  'aws/saved.jsonl',
+  'aws/stacks.json',
+  'aws/templates/<StackName>.json',
+  'aws/reopen-function.json',
+  'aws/items-pointers.json',
+  'aws/items-incident.json',
+  'aws/items-lane-<set>.json',
+  'aws/reopen-result.json',
+  'aws/sets-before-removal/<set>.json',
+  'aws/after-removal/stack-<StackName>.json',
+  'aws/after-removal/resources-<StackName>.json',
+  'aws/after-removal/log-groups.json',
+  'aws/after-removal/roles.json',
+] as const;
+
+describe('the saved files section lists every file of a run folder', () => {
+  it('names each run and aws path under reports/live-runs/<runId>/', () => {
+    const saved = sectionProse(protocolText(), 'Saved files');
+    expect(saved).toContain('`reports/live-runs/<runId>/`');
+    for (const path of SAVED_PATHS) expect(saved).toContain(`\`${path}\``);
+  });
+});
+
+const POLICY_PATHS = { 'fothering-transactional': 'docs/live-run-policy-transactional.json', 'fothering-bulk': 'docs/live-run-policy-bulk.json' } as const;
+const ARN_PREFIX = 'arn:aws:ses:eu-central-1:<ACCOUNT_ID>';
+
+function statementFindings(statement: Record<string, unknown>, lane: string): string[] {
+  const findings: string[] = [];
+  const keys = Object.keys(statement).sort().join(',');
+  if (keys !== 'Action,Effect,Resource') findings.push(`the statement holds the keys ${keys}, not Action, Effect and Resource`);
+  if (statement['Effect'] !== 'Allow') findings.push(`the effect is ${String(statement['Effect'])}, not Allow`);
+  if (statement['Action'] !== 'ses:SendEmail') findings.push(`the action is ${JSON.stringify(statement['Action'])}, not exactly ses:SendEmail`);
+  const resources = Array.isArray(statement['Resource']) ? (statement['Resource'] as unknown[]) : [statement['Resource']];
+  if (resources.some((resource) => typeof resource !== 'string' || resource.includes('*'))) findings.push('a resource holds a wildcard or is not text');
+  const expected = [`${ARN_PREFIX}:configuration-set/${lane}`, `${ARN_PREFIX}:identity/<FROM_DOMAIN>`];
+  if (resources.length !== expected.length) findings.push(`the statement holds ${resources.length} resources, not ${expected.length}`);
+  for (const arn of expected) if (!resources.includes(arn)) findings.push(`the resource ${arn} is missing`);
+  return findings;
+}
+
+function lanePolicyFindings(policy: unknown, lane: string): string[] {
+  if (typeof policy !== 'object' || policy === null) return ['the policy is not a JSON object'];
+  const { Version: version, Statement: statements, ...rest } = policy as Record<string, unknown>;
+  const findings: string[] = [];
+  if (version !== '2012-10-17') findings.push(`the version is ${String(version)}, not 2012-10-17`);
+  if (Object.keys(rest).length > 0) findings.push(`the policy holds the extra keys ${Object.keys(rest).join(', ')}`);
+  if (!Array.isArray(statements) || statements.length !== 1) return [...findings, 'the policy does not hold exactly one statement'];
+  return [...findings, ...statementFindings(statements[0] as Record<string, unknown>, lane)];
+}
+
+function committedPolicy(lane: keyof typeof POLICY_PATHS): unknown {
+  return JSON.parse(readCommitted(POLICY_PATHS[lane]) ?? 'null');
+}
+
+describe('each lane role policy grants one send action on exactly two resources', () => {
+  it.each(Object.keys(POLICY_PATHS) as Array<keyof typeof POLICY_PATHS>)('%s: one Allow statement, ses:SendEmail, its set and the From domain', (lane) => {
+    expect(lanePolicyFindings(committedPolicy(lane), lane)).toEqual([]);
+    const text = readCommitted(POLICY_PATHS[lane]) ?? '';
+    expect(characterFindings(text)).toEqual([]);
+    expect(text).not.toMatch(/\d{12}/);
+  });
+
+  it('reports a second action, ses:*, a third resource, a wildcard resource and a Deny', () => {
+    const lane = 'fothering-bulk';
+    const plant = (change: (statement: Record<string, unknown>) => void): string[] => {
+      const policy = structuredClone(committedPolicy(lane)) as { Statement: Array<Record<string, unknown>> };
+      change(policy.Statement[0]!);
+      return lanePolicyFindings(policy, lane);
+    };
+    expect(plant((statement) => (statement['Action'] = ['ses:SendEmail', 'ses:SendRawEmail']))).toEqual([
+      'the action is ["ses:SendEmail","ses:SendRawEmail"], not exactly ses:SendEmail',
+    ]);
+    expect(plant((statement) => (statement['Action'] = 'ses:*'))).toEqual(['the action is "ses:*", not exactly ses:SendEmail']);
+    expect(plant((statement) => (statement['Resource'] as string[]).push(`${ARN_PREFIX}:identity/sender.<FROM_DOMAIN>`))).toEqual([
+      'the statement holds 3 resources, not 2',
+    ]);
+    expect(plant((statement) => ((statement['Resource'] as string[])[0] = `${ARN_PREFIX}:configuration-set/*`))).toEqual([
+      'a resource holds a wildcard or is not text',
+      `the resource ${ARN_PREFIX}:configuration-set/fothering-bulk is missing`,
+    ]);
+    expect(plant((statement) => (statement['Effect'] = 'Deny'))).toEqual(['the effect is Deny, not Allow']);
   });
 });
