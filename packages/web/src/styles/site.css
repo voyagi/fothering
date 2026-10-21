@@ -192,7 +192,7 @@ code { font-size: var(--text-mono-value); font-weight: 500; }
 .claim { display: flex; flex-direction: column; gap: var(--space-lg); min-inline-size: 0; }
 .claim p { margin: 0; }
 .landing-title { font-size: var(--text-landing-headline); }
-.lede { max-inline-size: 64ch; font-size: var(--text-lede); line-height: 1.55; color: var(--ink-2); }
+.lede { max-inline-size: 58ch; font-size: var(--text-lede); line-height: 1.55; color: var(--ink-2); }
 .intro { font-size: var(--text-intro); line-height: 1.55; color: var(--ink-2); }
 .actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-12) var(--space-md); }
 
@@ -294,9 +294,12 @@ ol.procedure { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(
 .procedure li { display: flex; flex-direction: column; gap: var(--space-12); min-inline-size: 0; max-inline-size: none; }
 .step-key { position: relative; display: block; block-size: 72px; padding: var(--space-sm) var(--space-12); border: var(--w-rule) solid var(--key-edge); border-radius: 6px; background: var(--bank); color: var(--key-ink); }
 .step-key::after { content: ""; position: absolute; right: var(--space-12); bottom: var(--space-12); inline-size: 16px; block-size: 10px; border-radius: 2px; background: var(--lamp-dark); }
-.numeral { font: 800 var(--text-numeral)/1 var(--font-silk); font-stretch: 75%; }
-.procedure.removal .step-key { block-size: 52px; }
-.procedure.removal .numeral { font-size: var(--text-headline); }
+/* A block, so its box spans the key: axe leaves text incomplete when a pseudo element (the key's lamp)
+   is over a quarter of the text's own box, which the narrow glyph 1 alone was. */
+.numeral { display: block; font: 800 var(--text-numeral)/1 var(--font-silk); font-stretch: 75%; }
+/* The smaller key holds the main keys' numeral: a glyph box running past the key's edge (the headline
+   size did at 1440) leaves axe unable to tell what the numeral sits on. */
+.procedure.removal .step-key { block-size: 64px; }
 .procedure h3 { margin-bottom: var(--space-xs); }
 .procedure p { margin: 0; font-size: var(--text-small); line-height: 1.5; color: var(--ink-2); }
 
@@ -321,6 +324,9 @@ p.command-note { margin: var(--space-sm) 0 0; font: 400 var(--text-silk)/1.4 var
 /* An identifier ends a line only at the <wbr> after a dot; nothing here may add another break. */
 .identifier { white-space: normal; overflow-wrap: normal; word-break: normal; hyphens: none; }
 .identifier > span { white-space: nowrap; }
+/* A copyable value keeps the exact spelling AWS gives it, inside silkscreen caps too (eu-central-1 in a
+   readout head, never EU-CENTRAL-1). */
+code.identifier { text-transform: none; letter-spacing: 0; }
 /* A value a reader may copy or cite whole, a date or a legal reference, keeps one line. */
 .keep-whole { white-space: nowrap; }
 /* A resource expression or a principal is a long value: it ends a line at its <wbr>s, after a slash,

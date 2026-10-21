@@ -63,12 +63,15 @@ describe('the token source and tokens.css (D-140, AC-39, AC-63)', () => {
     expect(page?.index).toBeGreaterThan(blocks().order[2] ?? Number.POSITIVE_INFINITY);
   });
 
-  it('holds the six R14 type tokens, the 62ch measure, and the four bank hues with their legend ink equal in both themes', () => {
+  it('holds the six R14 type tokens, the 54ch measure, and the four bank hues with their legend ink equal in both themes', () => {
     const statics = new Map(source.static.map((token) => [token.name, token.value]));
     expect(statics.get('--text-small')).toBe('0.9375rem');
     expect(statics.get('--text-mono-value')).toBe('0.8125rem');
     for (const name of ['--text-lede', '--text-intro', '--text-narrative-headline', '--text-schedule-compact']) expect(statics.has(name), name).toBe(true);
-    expect(statics.get('--measure')).toBe('62ch');
+    // Public Sans sets up to about 1.41 characters per ch of measure (2026-10-21, 1440 px: 62ch reached 85
+    // characters and 56ch 79), so 54ch keeps every rendered line clear of the e2e LINES limit of 80 with
+    // room for CI's font rendering.
+    expect(statics.get('--measure')).toBe('54ch');
     // A key is a physical part: its colour and the legend printed on it hold in both themes.
     const keys = source.themed.filter((token) => /^--key-(?:red|orange|yellow|white|ink)$/.test(token.name));
     expect(keys.map((token) => token.name)).toEqual(['--key-red', '--key-orange', '--key-yellow', '--key-white', '--key-ink']);

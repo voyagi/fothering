@@ -178,6 +178,11 @@ const installLineWalker = () => page.evaluate(() => {
     const walker = document.createTreeWalker(root, window.NodeFilter.SHOW_TEXT);
     let node = walker.nextNode();
     while (node) {
+      // Screen-reader-only text sits in a clipped 1px box, so it renders no line to measure.
+      if (node.parentElement.closest('.visually-hidden') !== null) {
+        node = walker.nextNode();
+        continue;
+      }
       for (let offset = 0; offset < node.data.length; offset += 1) {
         const range = document.createRange();
         range.setStart(node, offset);
@@ -410,10 +415,11 @@ const layoutStep = (step) => page.evaluate((args) => {
       const style = getComputedStyle(element);
       return { text: element.textContent.trim(), weight: style.fontWeight, family: style.fontFamily, lines: linesOf(element), ...partsOf(element), ...faceOf(element) };
     });
-  // Text outside every identifier: drawings, command blocks and hidden parts aside.
+  // Text outside every identifier: drawings, command blocks and hidden parts aside, screen-reader-only
+  // text included, since its clipped 1px box never shows a line that could break.
   const plainNodes = (root) => textNodes(root).filter((node) => {
     const parent = node.parentElement;
-    return parent.closest('[data-identifier], svg, pre, script, style') === null && visible(parent);
+    return parent.closest('[data-identifier], svg, pre, script, style, .visually-hidden') === null && visible(parent);
   });
   // A listed SES API name left as plain text in a log Detail cell.
   reading.plainApiNames = Array.from(document.querySelectorAll('tr[data-log-step] td[data-col="Detail"]')).filter(visible)
