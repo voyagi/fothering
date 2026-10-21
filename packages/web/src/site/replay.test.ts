@@ -438,6 +438,12 @@ describe('buildReplayView refuses an artifact the replay copy would misstate', (
   const at = (time: string): string => `2026-10-14T${time}Z`;
   const shippedHold = artifact.holdCheck ?? { atUtc: at('14:04:00'), holdFromUtc: at('14:03:00'), result: 'passed' as const };
   const withHold = (change: Partial<typeof shippedHold>): ReplayArtifact => ({ ...artifact, holdCheck: { ...shippedHold, ...change } });
+  // Every event of one step moved to one time, one second before the moment the shipped artifact
+  // records an event of that step exactly at.
+  const withStepAt = (step: number, atUtc: string): ReplayArtifact => ({
+    ...artifact,
+    events: artifact.events.map((event) => (event.step === step ? { ...event, atUtc } : event)),
+  });
   const cases: [string, ReplayArtifact, RegExp][] = [
     ['a bounce on another lane', { ...artifact, events: [...artifact.events, otherLaneBounce] }, /: events: a bounce sits on fothering-transactional, and the replay heads step one "Hard bounces on one lane"\. Replay an incident whose bounces are all on the paused lane\.$/],
     ['mixed SMTP codes on the closed lane', withEvent(secondBounce, { smtpCode: '552 5.2.2' }), /: events: the bounces on fothering-bulk carry 550 5\.1\.1 and 552 5\.2\.2, and step one says the bounces logged here read one code\. /],
@@ -460,6 +466,8 @@ describe('buildReplayView refuses an artifact the replay copy would misstate', (
     ['an email sent before the pause read-back', { ...artifact, email: { ...artifact.email, sentAtUtc: at('14:03:01') } }, /: email\.sentAtUtc: 2026-10-14T14:03:01Z is before pause\.readBack\.atUtc 2026-10-14T14:03:02Z\. /],
     ['a reopen before the email', { ...artifact, email: { ...artifact.email, sentAtUtc: at('15:20:01') } }, /: reopen\.atUtc: 2026-10-14T15:20:00Z is before email\.sentAtUtc 2026-10-14T15:20:01Z\. /],
     ['a step 2 event earlier than a step 1 event', withEvent(artifact.events.findIndex((event) => event.step === 2), { atUtc: at('14:01:00') }), /: events: step 2 has an event at 2026-10-14T14:01:00Z, before a step 1 event at 2026-10-14T14:01:20Z\. /],
+    ['a paused step whose events all come before the pause', withStepAt(3, at('14:02:59')), /: events: step 3 has no event at or after pause\.atUtc 2026-10-14T14:03:00Z, so the step pattern would show fothering-bulk open on the paused step\. Add the step 3 event recorded at pause\.atUtc\.$/],
+    ['a reopen step whose events all come before the reopen', withStepAt(4, at('15:19:59')), /: events: step 4 has no event at or after reopen\.atUtc 2026-10-14T15:20:00Z, so the step pattern would show fothering-bulk muted after the reopen\. Add the step 4 event recorded at reopen\.atUtc\.$/],
   ];
 
   it('plants each case on the shipped artifact, which itself builds', () => {

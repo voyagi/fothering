@@ -61,7 +61,8 @@ function banksOf(columns: readonly TrackColumn[]): TrackBank[] {
 
 // The closed lane is muted from the column the pause lands on up to the column the reopen lands on,
 // so a pattern that stops before the reopen leaves it muted, and one that stops before the pause
-// leaves every track open.
+// leaves every track open. The replay refuses an artifact whose paused step or reopen step has no
+// event from that moment on (replay-view.ts), so neither column is ever missing from its own step.
 export function buildTrackGrid(artifact: GridSource, throughStep: number): TrackGrid {
   if (!Number.isInteger(throughStep) || throughStep < 1 || throughStep > 4) {
     throw new Error(`track grid: throughStep is ${String(throughStep)}, and the replay has steps 1 to 4. Pass a step from 1 to 4.`);

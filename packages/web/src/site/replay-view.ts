@@ -272,6 +272,17 @@ function assertTimeOrder(artifact: ReplayArtifact): void {
       refuse('events', `step ${String(event.step)} has an event at ${event.atUtc}, before a step ${String(previous.step)} event at ${previous.atUtc}`, 'Correct the times so every step follows the one before it');
     }
   });
+  // The step pattern mutes the closed lane from the first column at or after the pause and opens it
+  // from the first at or after the reopen (track-grid.ts), so each needs an event of its own step
+  // from that moment on, or the pattern would show the lane open while the readout says paused, or
+  // still muted after the reopen read back true.
+  refuseUnplaced(artifact, 3, 'pause.atUtc', pause.atUtc, `${artifact.closedLane} open on the paused step`);
+  refuseUnplaced(artifact, 4, 'reopen.atUtc', reopen.atUtc, `${artifact.closedLane} muted after the reopen`);
+}
+
+function refuseUnplaced(artifact: ReplayArtifact, step: number, path: string, utc: string, misdrawn: string): void {
+  if (artifact.events.some((event) => event.step === step && Date.parse(event.atUtc) >= Date.parse(utc))) return;
+  refuse('events', `step ${String(step)} has no event at or after ${path} ${utc}, so the step pattern would show ${misdrawn}`, `Add the step ${String(step)} event recorded at ${path}`);
 }
 
 // Step first, then time; the index breaks ties so equal times keep the artifact's order. The step
