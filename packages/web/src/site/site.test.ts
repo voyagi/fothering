@@ -132,8 +132,19 @@ const ACCESSIBILITY_TITLE = 'Accessibility statement: Fothering';
 const ACCESSIBILITY_DESCRIPTION = 'The WCAG 2.2 AA target for this site, the last automated audit, what was checked by hand, known limitations and how to report a problem.';
 
 describe('the route list (D-153)', () => {
-  it('holds an RFC 2606 reserved origin with no trailing slash until the deployed host is known', () => {
-    expect(SITE_ORIGIN).toMatch(/^https:\/\/[a-z-]+\.example$/);
+  it('holds a deployable origin: https, a lowercase dotted host, no port, no path, no trailing slash', () => {
+    const deployedOrigin = /^https:\/\/[a-z0-9-]+(\.[a-z0-9-]+)+$/;
+    expect(SITE_ORIGIN).toMatch(deployedOrigin);
+    for (const refused of [
+      'http://fothering-site.ops.workers.dev',
+      'https://Fothering-Site.ops.workers.dev',
+      'https://fothering-site.ops.workers.dev:8443',
+      'https://fothering-site.ops.workers.dev/site',
+      'https://fothering-site.ops.workers.dev/',
+      'https://localhost',
+    ]) {
+      expect(refused).not.toMatch(deployedOrigin);
+    }
   });
 
   it('holds / as Landing with the UI-SPEC 11.2 title and description, indexable', () => {
