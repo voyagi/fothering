@@ -203,6 +203,20 @@ function endsWithoutNewline(file: string): boolean {
   return last[0] !== 0x0a;
 }
 
+// Exclusive create: the empty attempts file is the step's claim, made before the callers and account
+// files are written and before the first send. The local check for it ran before the lock, so another
+// process can have finished the step since; and a crash after SES accepted a message but before its
+// line was appended must still leave the step marked run.
+function claimStep(paths: StepPaths): boolean {
+  try {
+    closeSync(openSync(paths.attempts, 'wx'));
+    return true;
+  } catch (error) {
+    if (error instanceof Error && 'code' in error && error.code === 'EEXIST') return false;
+    throw error;
+  }
+}
+
 /** A crash can leave a torn last line with no newline; appending straight after it would fuse the two records. */
 export function appendAttempt(file: string, record: AttemptRecord): void {
   appendFileSync(file, `${endsWithoutNewline(file) ? '\n' : ''}${JSON.stringify(record)}\n`);
@@ -215,6 +229,7 @@ async function sendStep(deps: LiveRunDeps, request: SendStepRequest, step: Check
   const account = await checkedAccount(factory, request.accountProfile);
   if ('code' in account) return refuse(deps, account);
   mkdirSync(step.paths.folder, { recursive: true });
+  if (!claimStep(step.paths)) return refuse(deps, { code: 'step-already-run', subject: step.paths.attemptsRelative });
   writeFileSync(join(step.paths.folder, `${request.stepName}.callers.json`), `${JSON.stringify(callers, null, 2)}\n`);
   writeFileSync(join(step.paths.folder, `${request.stepName}.account.json`), `${JSON.stringify(account, null, 2)}\n`);
 

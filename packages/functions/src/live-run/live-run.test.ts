@@ -586,6 +586,61 @@ describe('send refuses every unsafe or unnamed request before any port exists', 
     expect(existsSync(lock)).toBe(true);
   });
 
+  it('claims the step before its first send, so a crash after SES accepts still leaves the step marked run', async () => {
+    const root = plantRoot();
+    const state = fixtureState();
+    const { deps } = harness(root, state, 'live');
+    const fixture = deps.portFactory;
+    const attempts = join(runFolder(root), 'after-pause.attempts.jsonl');
+    const claimedAtSend: boolean[] = [];
+    const watching = (): LiveRunPortFactory => {
+      const factory = fixture();
+      return {
+        callerIdentity: (profile) => factory.callerIdentity(profile),
+        ses: (profile) => {
+          const port = factory.ses(profile);
+          return {
+            getAccount: () => port.getAccount(),
+            sendEmail: (request) => {
+              claimedAtSend.push(existsSync(attempts));
+              return port.sendEmail(request);
+            },
+          };
+        },
+      };
+    };
+    expect(await main(sendArgs(RUN_ID, 'bulk-stale-import', 'after-pause'), { ...deps, portFactory: watching })).toBe(0);
+    expect(claimedAtSend[0]).toBe(true);
+  });
+
+  it('refuses, with no send, a step another process finished after the local checks, and leaves its files', async () => {
+    const root = plantRoot();
+    const state = fixtureState();
+    const { deps, err } = harness(root, state, 'live');
+    const fixture = deps.portFactory;
+    const folder = runFolder(root);
+    const theirCallers = '{"theirs":true}\n';
+    // The other process finishes while this one reads its callers: past the local checks, before the claim.
+    const racing = (): LiveRunPortFactory => {
+      const factory = fixture();
+      return {
+        callerIdentity: (profile) => {
+          if (!existsSync(join(folder, 'after-pause.attempts.jsonl'))) {
+            mkdirSync(folder, { recursive: true });
+            writeFileSync(join(folder, 'after-pause.callers.json'), theirCallers);
+            writeFileSync(join(folder, 'after-pause.attempts.jsonl'), '');
+          }
+          return factory.callerIdentity(profile);
+        },
+        ses: (profile) => factory.ses(profile),
+      };
+    };
+    expect(await main(sendArgs(RUN_ID, 'bulk-stale-import', 'after-pause'), { ...deps, portFactory: racing })).toBe(1);
+    expect(sendsOf(state)).toHaveLength(0);
+    expect(err[0]).toBe(refusalMessage('step-already-run', `reports/live-runs/${RUN_ID}/run/after-pause.attempts.jsonl`));
+    expect(readFileSync(join(folder, 'after-pause.callers.json'), 'utf8')).toBe(theirCallers);
+  });
+
   it('releases its own lock when the step ends', async () => {
     const outcome = await run(sendArgs(RUN_ID, 'bulk-stale-import', 'after-pause'));
     expect(outcome.code).toBe(0);
