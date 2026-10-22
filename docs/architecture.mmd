@@ -41,7 +41,7 @@ flowchart TB
   detect -->|"6 checked decision"| table
   table -->|"7 decision"| action
   ses <-->|"8 pause, read back"| action
-  action -->|"9 cause, evidence,<br/>reopen command"| inbox
+  action -->|"9 what happened,<br/>why, and the reopen<br/>command if paused"| inbox
   inbox -->|"10 reopen"| reopen
   ses <-->|"resume, read back"| reopen
 

@@ -8,8 +8,9 @@ Everything runs in your own AWS account in `eu-central-1`, from the four CDK sta
 (`action-stack.ts`). The numbers below follow the arrows in the picture.
 
 1. Your apps send through Amazon SES, one configuration set per lane, each listed in `lanes.json`.
-   Each set publishes six event types to the EventBridge default bus: send, delivery, bounce,
-   complaint, reject and delivery delay. The stacks create no configuration set.
+   Each set needs an event destination on the EventBridge default bus that publishes six event
+   types: send, delivery, bounce, complaint, reject and delivery delay. Fothering never pauses a set
+   whose destination misses one. The stacks create no configuration set.
 2. A rule in `ingest-stack.ts` forwards those events, from the lanes' sets only, to the ingest
    function, which stores minimized records in DynamoDB: one per recipient for a send, delivery,
    bounce or delivery delay, one counting record plus one per complained recipient for a complaint,
@@ -34,8 +35,13 @@ Everything runs in your own AWS account in `eu-central-1`, from the four CDK sta
    waits out a one-minute hold, in which SES may still send what it had already accepted, and five
    minutes after that checks that nothing more was sent through the set. Its role may pause only the
    sets `lanes.json` lets the action close.
-9. It emails the operator through the `fothering-alerts` set: the cause with its evidence, what was
-   paused and when the read-back confirmed it, what stays open, and the command that reopens the lane.
+9. It emails the operator through the `fothering-alerts` set. After a pause that held, the email
+   gives the cause with its evidence, what was paused and when the read-back confirmed it, what
+   stays open, and the command that reopens the lane. A pause that could not be confirmed or did
+   not hold is reported as such, still with the reopen command. A pause that failed leaves nothing
+   to reopen, so that email has none. When nothing was paused (the agent answered unknown, a cap was
+   reached, or the fresh checks refused the close), the email says why, with what Fothering saw and
+   found, and has no reopen command.
 10. The operator runs the reopen function by hand ([reopen-a-lane.md](reopen-a-lane.md)). It turns
     sending back on for a set Fothering paused and reads the setting back.
 
