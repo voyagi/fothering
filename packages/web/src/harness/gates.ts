@@ -906,11 +906,20 @@ interface RunResult {
 
 const printedLines = (run: DriverRun): string[] => run.stdoutLines.map((line) => line.trim()).filter((line) => line !== '');
 
+// A crash names itself on its first line and prints its stack below, so a long stderr keeps that
+// line beside its tail: the tail alone cut the message off a dev-browser crash in CI.
+function stderrExcerpt(stderr: string): string {
+  const text = stderr.trim();
+  if (text.length <= STDERR_TAIL) return text;
+  const firstLine = (text.split('\n', 1)[0] ?? '').trimEnd().slice(0, STDERR_TAIL);
+  return `${firstLine} [...] ${text.slice(-STDERR_TAIL)}`;
+}
+
 // Both driver templates end with `done`, so a run that stopped early never reads as a pass.
 function driverRunFailures(run: DriverRun, label: string, printed: readonly string[]): string[] {
   const failures: string[] = [];
   if (run.timedOut) failures.push(A11Y_MESSAGES.driverTimedOut(label));
-  else if (run.exitCode !== 0) failures.push(A11Y_MESSAGES.driverExit(label, run.exitCode, run.stderr.trim().slice(-STDERR_TAIL)));
+  else if (run.exitCode !== 0) failures.push(A11Y_MESSAGES.driverExit(label, run.exitCode, stderrExcerpt(run.stderr)));
   if (printed.at(-1) !== 'done') failures.push(A11Y_MESSAGES.noDone(label));
   return failures;
 }
