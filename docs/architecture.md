@@ -37,11 +37,13 @@ Everything runs in your own AWS account in `eu-central-1`, from the four CDK sta
 10. The operator runs the reopen function by hand ([reopen-a-lane.md](reopen-a-lane.md)). It turns
     sending back on for a set Fothering paused and reads the setting back.
 
-Every role in every stack carries an explicit Deny on the three SES actions that change
-account-level sending, so no grant can stop the whole account. The action stack holds the only SES
-writes, so a deployment without it watches and detects but never pauses anything. The ingest,
-detection and action functions have CloudWatch alarms on their errors and on their error-level log
-lines.
+Every role in every stack carries an explicit Deny on three SES actions that IAM cannot limit to
+one resource: `PutAccountSendingAttributes` and `UpdateAccountSendingEnabled`, which stop the whole
+account's sending, and the v1 `UpdateConfigurationSetSendingEnabled`, which could switch any set.
+A Deny wins over every Allow, so no later grant can stop the whole account. The action stack holds
+the only SES writes, so a deployment without it watches and detects but never pauses anything. The
+ingest, detection and action functions have CloudWatch alarms on their errors and on their
+error-level log lines. The alarms notify no one yet: you read their state in CloudWatch.
 
 The picture is drawn from [architecture.mmd](architecture.mmd). After a change, render it again with
 mermaid-cli:
