@@ -1,7 +1,7 @@
 import { validateExplanation } from './agent-answer.js';
 import { ACTION_FUNCTION_TIMEOUT_MS, EMAIL_SEND_ATTEMPTS } from './close-values.js';
 import type { ActionRefusal, Closure, ClosureOutcome, EMAIL_KINDS, LANE_STATES, StoredDecision } from './closure.js';
-import type { ConfigurationRefusal } from './closeability.js';
+import type { ConfigurationRefusal, LANE_MAP_REFUSALS } from './closeability.js';
 import { AUTOMATED_SENDER_FOOTER, MODEL_PARAGRAPH_LABEL, MODEL_TEXT_MARKER_HEADER } from './disclosure.js';
 import type { EvidenceRecord } from './evidence-record.js';
 import type { LaneMap } from './lanes.js';
@@ -70,6 +70,25 @@ export const LANE_STATE_WORDS: Readonly<Record<(typeof LANE_STATES)[number], str
 
 export type ReasonCode = ActionRefusal | 'cap-reached' | ConfigurationRefusal;
 
+type LaneMapRefusal = (typeof LANE_MAP_REFUSALS)[number];
+
+// The lane-map refusals end the same way, so a lane held by several of them gets one sentence naming
+// each reason once (the 2026-10-22 live email repeated the clause for fothering-alerts).
+const NEVER_PAUSED_REASONS: Readonly<Record<LaneMapRefusal, string>> = {
+  'multiple-declared-streams': 'the lane map declares more than one stream on this set',
+  'operator-alert': 'this set carries the operator email',
+  transactional: 'the lane map marks this set transactional',
+};
+
+function listedReasons(reasons: readonly string[]): string {
+  return reasons.map((reason, index) => (index > 0 && index === reasons.length - 1 ? `and ${reason}` : reason)).join(', ');
+}
+
+function neverPausedSentence(codes: readonly LaneMapRefusal[]): string {
+  const listed = listedReasons(codes.map((code) => NEVER_PAUSED_REASONS[code]));
+  return `${listed.charAt(0).toUpperCase()}${listed.slice(1)}, so Fothering never pauses it.`;
+}
+
 // D-112: one plain sentence per refusal and decision code. The incident lifecycle's own status is
 // never named here (Pitfall 10), and no sentence says closed.
 export const REASON_SENTENCES: Readonly<Record<ReasonCode, string>> = {
@@ -92,9 +111,9 @@ export const REASON_SENTENCES: Readonly<Record<ReasonCode, string>> = {
   'configuration-not-closeable': 'The lane map or the SES configuration rules out pausing this lane, so Fothering paused nothing.',
   'lane-already-paused': 'Fothering already holds a pause on this lane from an earlier incident, so it paused nothing new.',
   'lane-cap-reached': 'This lane used up its pause and reopen attempts for the hour, so Fothering paused nothing.',
-  'multiple-declared-streams': 'The lane map declares more than one stream on this set, so Fothering never pauses it.',
-  'operator-alert': 'This set carries the operator email, so Fothering never pauses it.',
-  transactional: 'The lane map marks this set transactional, so Fothering never pauses it.',
+  'multiple-declared-streams': neverPausedSentence(['multiple-declared-streams']),
+  'operator-alert': neverPausedSentence(['operator-alert']),
+  transactional: neverPausedSentence(['transactional']),
   'unlisted-configuration-set': 'SES holds a configuration set the lane map does not list, so Fothering pauses no set until the lane map lists every one.',
   'default-configuration-set': 'An SES identity sends through this set by default, so pausing it would also stop mail that never named it, and Fothering does not pause it.',
   'destination-missing-event-types':
@@ -203,12 +222,25 @@ function refusalWords(code: string): string {
   return Object.hasOwn(REASON_SENTENCES, code) ? REASON_SENTENCES[code as ConfigurationRefusal] : code;
 }
 
+function isNeverPausedReason(code: string): code is LaneMapRefusal {
+  return Object.hasOwn(NEVER_PAUSED_REASONS, code);
+}
+
+/** One sentence per refusal, except the lane-map ones, which share one sentence where the first of them stands. */
+export function laneRefusalSentences(codes: readonly string[]): string[] {
+  const neverPaused = codes.filter(isNeverPausedReason);
+  return codes.flatMap((code) => {
+    if (!isNeverPausedReason(code)) return [refusalWords(code)];
+    return code === neverPaused[0] ? [neverPausedSentence(neverPaused)] : [];
+  });
+}
+
 // D-102 and AC-E25: the lanes as the act stored them, never a fresh read. After a pause the incident's
 // own set is told in what happened and left out here; when nothing was paused it stays open too.
 function openLines(closure: Closure, withOwnLane: boolean): string[] {
   const listed = closure.lanes.filter((lane) => withOwnLane || lane.configurationSet !== closure.configurationSet);
   const lines = listed.map((lane) => {
-    const refusals = lane.configurationRefusals.map(refusalWords);
+    const refusals = laneRefusalSentences(lane.configurationRefusals);
     const tail = refusals.length === 0 ? 'Nothing in its configuration stops Fothering from pausing it.' : refusals.join(' ');
     return `${lane.configurationSet}: ${LANE_STATE_WORDS[lane.state]}. ${tail}`;
   });

@@ -2,7 +2,6 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import fc from 'fast-check';
 import { BUCKET_MS, bucketStartMs } from '@fothering/core/buckets';
 import { ACTION_FUNCTION_TIMEOUT_MS, HOLD_CHECK_DELAY_MS, HOLD_MS, LANE_HOUR_ATTEMPT_CAP, REOPEN_FUNCTION_TIMEOUT_MS } from '@fothering/core/close-values';
-import type { ConfigurationRefusal } from '@fothering/core/closeability';
 import { closureClaimItem, closureKey, decisionOf, parseClosure, type Closure, type FreshnessRefusal } from '@fothering/core/closure';
 import { AUTOMATED_SENDER_FOOTER, MODEL_PARAGRAPH_LABEL, MODEL_TEXT_MARKER_HEADER } from '@fothering/core/disclosure';
 import { reserveLaneAttempt } from '@fothering/core/counters';
@@ -23,6 +22,7 @@ import {
   REASON_SENTENCES,
   SECTION_HEADINGS,
   isoOf,
+  laneRefusalSentences,
   renderOperatorEmail,
   type RenderedEmail,
 } from '@fothering/core/operator-email';
@@ -1431,7 +1431,7 @@ describe('a closed lane becomes one closed-path email sent once through fotherin
     const open = sectionOf(email, SECTION_HEADINGS.open);
     for (const lane of closure?.lanes.filter((entry) => entry.configurationSet !== BULK) ?? []) {
       expect(open).toContain(`${lane.configurationSet}: ${LANE_STATE_WORDS[lane.state]}.`);
-      for (const refusal of lane.configurationRefusals) expect(open).toContain(REASON_SENTENCES[refusal as ConfigurationRefusal]);
+      for (const sentence of laneRefusalSentences(lane.configurationRefusals)) expect(open).toContain(sentence);
     }
     expect(text).toContain('SendingPausedException');
     expect(text).not.toMatch(/<\/?(html|body|p|br|div)\b/i);

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { HOLD_CHECK_DELAY_MS, HOLD_MS } from './close-values.js';
-import { LANE_MAP_REFUSALS, SES_CONFIGURATION_REFUSALS } from './closeability.js';
+import { LANE_MAP_REFUSALS, SES_CONFIGURATION_REFUSALS, type RefusalReason } from './closeability.js';
 import { ACTION_REFUSALS, CLOSURE_OUTCOMES, closureClaimItem, type ActionRefusal, type Closure, type StoredDecision } from './closure.js';
 import { AUTOMATED_SENDER_FOOTER, MODEL_PARAGRAPH_LABEL, MODEL_TEXT_MARKER_HEADER } from './disclosure.js';
 import { buildEvidenceRecord, type EvidenceRecord } from './evidence-record.js';
@@ -235,6 +235,32 @@ describe('REASON_SENTENCES gives every refusal and decision code one plain sente
   });
 });
 
+// The 2026-10-22 live email repeated "so Fothering never pauses it" on fothering-alerts, once per reason.
+describe('what stays open gives a lane one sentence for every reason that keeps it from pausing', () => {
+  function openFor(configurationRefusals: RefusalReason[]): string {
+    const lanes: Closure['lanes'] = [{ configurationSet: 'fothering-alerts', state: 'no-open-incident', configurationRefusals }];
+    const email = renderOperatorEmail({ closure: { ...closedClosure(), lanes }, record: RECORD, decision: CLOSE_DECISION, laneMap: LANE_MAP });
+    return sectionText(email, SECTION_HEADINGS.open);
+  }
+
+  it('names the operator email and the transactional mark once each, and the consequence once', () => {
+    expect(openFor(['operator-alert', 'transactional'])).toBe(
+      'fothering-alerts: no incident is open on it. This set carries the operator email, and the lane map marks this set transactional, so Fothering never pauses it.',
+    );
+  });
+
+  it('joins three lane-map reasons in refusal order and keeps an SES refusal as its own sentence after them', () => {
+    expect(openFor(['multiple-declared-streams', 'default-configuration-set', 'operator-alert', 'transactional'])).toBe(
+      'fothering-alerts: no incident is open on it. The lane map declares more than one stream on this set, this set carries the operator email, ' +
+        `and the lane map marks this set transactional, so Fothering never pauses it. ${REASON_SENTENCES['default-configuration-set']}`,
+    );
+  });
+
+  it('keeps the one-reason sentence for a lane held by one lane-map reason', () => {
+    for (const code of LANE_MAP_REFUSALS) expect(openFor([code])).toBe(`fothering-alerts: no incident is open on it. ${REASON_SENTENCES[code]}`);
+  });
+});
+
 describe('a pause that is not confirmed renders the not-confirmed path (R9)', () => {
   it.each([
     ['not-holding', NOT_HOLDING, `[Fothering] ${SET} paused, but a send was accepted after the hold`],
@@ -381,7 +407,7 @@ describe('each kind has a fixed section order (AC-E28)', () => {
 
       What stays open
       fothering-transactional: no incident is open on it. The lane map marks this set transactional, so Fothering never pauses it.
-      fothering-alerts: no incident is open on it. This set carries the operator email, so Fothering never pauses it. The lane map marks this set transactional, so Fothering never pauses it.
+      fothering-alerts: no incident is open on it. This set carries the operator email, and the lane map marks this set transactional, so Fothering never pauses it.
 
       What your app sees
       In a test send through a paused configuration set, SES refused the message with SendingPausedException, and the error message named the configuration set.
@@ -437,7 +463,7 @@ describe('each kind has a fixed section order (AC-E28)', () => {
 
       What stays open
       fothering-transactional: no incident is open on it. The lane map marks this set transactional, so Fothering never pauses it.
-      fothering-alerts: no incident is open on it. This set carries the operator email, so Fothering never pauses it. The lane map marks this set transactional, so Fothering never pauses it.
+      fothering-alerts: no incident is open on it. This set carries the operator email, and the lane map marks this set transactional, so Fothering never pauses it.
 
       What your app sees
       In a test send through a paused configuration set, SES refused the message with SendingPausedException, and the error message named the configuration set.
@@ -491,7 +517,7 @@ describe('each kind has a fixed section order (AC-E28)', () => {
 
       What stays open
       fothering-transactional: no incident is open on it. The lane map marks this set transactional, so Fothering never pauses it.
-      fothering-alerts: no incident is open on it. This set carries the operator email, so Fothering never pauses it. The lane map marks this set transactional, so Fothering never pauses it.
+      fothering-alerts: no incident is open on it. This set carries the operator email, and the lane map marks this set transactional, so Fothering never pauses it.
 
       What your app sees
       In a test send through a paused configuration set, SES refused the message with SendingPausedException, and the error message named the configuration set.
@@ -532,7 +558,7 @@ describe('each kind has a fixed section order (AC-E28)', () => {
       What stays open
       fothering-transactional: no incident is open on it. The lane map marks this set transactional, so Fothering never pauses it.
       fothering-bulk: an incident is open on it. Nothing in its configuration stops Fothering from pausing it.
-      fothering-alerts: no incident is open on it. This set carries the operator email, so Fothering never pauses it. The lane map marks this set transactional, so Fothering never pauses it.
+      fothering-alerts: no incident is open on it. This set carries the operator email, and the lane map marks this set transactional, so Fothering never pauses it.
 
       Limits
       If AWS pauses sending for the whole account, this email cannot be sent either, so silence from Fothering is not a sign that all is well.
