@@ -8,9 +8,9 @@ Everything runs in your own AWS account in `eu-central-1`, from the four CDK sta
 (`action-stack.ts`). The numbers below follow the arrows in the picture.
 
 1. Your apps send through Amazon SES, one configuration set per lane, each listed in `lanes.json`.
-   Each set needs an event destination on the EventBridge default bus that publishes six event
-   types: send, delivery, bounce, complaint, reject and delivery delay. Fothering never pauses a set
-   whose destination misses one. The stacks create no configuration set.
+   Each set's enabled EventBridge event destinations, which all publish to the default bus, must
+   cover six event types between them: send, delivery, bounce, complaint, reject and delivery delay.
+   Fothering never pauses a set whose destinations miss one. The stacks create no configuration set.
 2. A rule in `ingest-stack.ts` forwards those events, from the lanes' sets only, to the ingest
    function, which stores minimized records in DynamoDB: one per recipient for a send, delivery,
    bounce or delivery delay, one counting record plus one per complained recipient for a complaint,
