@@ -226,6 +226,19 @@ describe('the items hold the run, the incident and its parts', () => {
   });
 });
 
+describe('every set reads sending enabled before the first destroy', () => {
+  it.each(['fothering-bulk', 'fothering-alerts'])('fails a %s read that is still paused, since the reopen function goes with FotheringAction', (set) => {
+    const path = `aws/sets-before-removal/${set}.json`;
+    const plant: Plant = { image: (image) => (image[path] = { SendingOptions: { SendingEnabled: false } }) };
+    expect(findingsOf(plant)).toBe(`${path}: does not read sending enabled`);
+  });
+
+  it('fails a read whose SendingOptions names no SendingEnabled, never reading it as enabled', () => {
+    const path = 'aws/sets-before-removal/fothering-transactional.json';
+    expect(findingsOf({ image: (image) => (image[path] = { SendingOptions: {} }) })).toBe(`${path}: does not read sending enabled`);
+  });
+});
+
 describe('every attempt line was written by this run', () => {
   const OTHER_RUN = 'live-20261021-s1-2';
 

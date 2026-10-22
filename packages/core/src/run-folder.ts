@@ -313,6 +313,20 @@ function laneFindings(set: string, items: Items, input: CheckSavedInput): string
   return findings;
 }
 
+// check-saved gates the first destroy, and FotheringAction takes the reopen function with it, so a
+// set still paused here would stay paused with no product command left to reopen it.
+function sendingFindings(expected: readonly ExpectedRunFolderFile[], reads: ReadonlyMap<string, FileRead>): string[] {
+  return expected
+    .filter(({ path }) => path.startsWith(SETS_BEFORE_REMOVAL_PREFIX))
+    .flatMap(({ path }) => {
+      const values = reads.get(path)?.values;
+      if (values === undefined) return [];
+      const [first] = values;
+      const options = isRecord(first) ? first.SendingOptions : undefined;
+      return isRecord(options) && options.SendingEnabled === true ? [] : [`${path}: does not read sending enabled`];
+    });
+}
+
 // The command writes every attempt with this run's id tag, so a line that is no attempt record,
 // carries no tag of this run or names a set outside the lane map was not written by this run.
 // callers.json and account.json carry no run id, so only their envelope can be checked.
@@ -431,6 +445,7 @@ export function checkSavedFolder(input: CheckSavedInput): CheckSavedResult {
     ...[...reads.values()].flatMap((read) => read.findings),
     ...stacksFindings(reads.get(STACKS_PATH)?.values),
     ...attemptFindings(input, expected, reads),
+    ...sendingFindings(expected, reads),
     ...itemsFindings(input, reads),
     ...saveLogFindings(input, expected, reads.get(SAVED_LOG_PATH)?.values),
   ];
