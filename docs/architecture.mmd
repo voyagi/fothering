@@ -1,0 +1,51 @@
+---
+config:
+  theme: base
+  fontFamily: Arial, Helvetica, sans-serif
+  themeVariables:
+    fontFamily: Arial, Helvetica, sans-serif
+    fontSize: 18px
+    primaryColor: "#FFFFFF"
+    primaryTextColor: "#141413"
+    primaryBorderColor: "#141413"
+    lineColor: "#3B3B38"
+    clusterBkg: "#D8D9D5"
+    clusterBorder: "#6F706B"
+    titleColor: "#141413"
+    edgeLabelBackground: "#FFFFFF"
+  flowchart:
+    curve: basis
+    padding: 16
+    nodeSpacing: 60
+    rankSpacing: 60
+    wrappingWidth: 600
+---
+flowchart TB
+  subgraph account["Your AWS account, eu-central-1. No Fothering role can stop the whole account's sending."]
+    ses["<b>Amazon SES</b><br/>your apps send through one configuration set per lane<br/>fothering-transactional, fothering-bulk, fothering-alerts"]
+    ingest["<b>Amazon EventBridge rule, then Ingest</b> (AWS Lambda)<br/>six SES event types, from the lanes' sets only"]
+    table[("<b>Amazon DynamoDB</b><br/>recipient domain and a keyed hash, kept 30 days")]
+    detect["<b>Detection</b> (AWS Lambda, every 5 minutes)<br/>on a spike: reads SES settings, SPF, DMARC, MX<br/>and builds one evidence record"]
+    action["<b>Action</b> (AWS Lambda, every 5 minutes)<br/>checks the decision again, pauses ONE set,<br/>reads it back, checks that it holds"]
+    runtime["<b>Amazon Bedrock AgentCore Runtime</b><br/>Strands agent with no tools<br/><b>Amazon Bedrock</b>: Claude Sonnet 4.6, EU profile"]
+    reopen["<b>Reopen</b> (AWS Lambda)<br/>run by hand"]
+  end
+
+  inbox["<b>Your inbox</b><br/>the operator email,<br/>through fothering-alerts"]
+
+  ses -->|"1 send, delivery, bounce,<br/>complaint, reject, delay"| ingest
+  ingest -->|"2 minimized record"| table
+  table -->|"3 lane windows"| detect
+  detect -->|"4 evidence record and<br/>the closeable lanes"| runtime
+  runtime -->|"5 close one lane or unknown,<br/>with one paragraph"| detect
+  detect -->|"6 checked decision"| table
+  table -->|"7 decision"| action
+  ses <-->|"8 pause, read back"| action
+  action -->|"9 what happened,<br/>why, and the reopen<br/>command if paused"| inbox
+  inbox -->|"10 reopen"| reopen
+  ses <-->|"resume, read back"| reopen
+
+  classDef closer fill:#E8492F,stroke:#141413,color:#121211
+  classDef thinker fill:#F1BF1B,stroke:#141413,color:#121211
+  class action closer
+  class runtime thinker
