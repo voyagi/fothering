@@ -18,9 +18,9 @@ export interface TokenSource {
 }
 
 // ES5 on purpose, and one line with no backslash: it runs before every stylesheet, on any engine,
-// and its exact text is hashed into the CSP. Each storage read sits in its own try/catch, so a
-// throwing getter or getItem leaves Device and still lets the flow and step apply. The hash is read
-// as a closed set and only the matched digit is written.
+// and its exact text is hashed into the CSP. The storage read sits in its own try/catch, so a
+// throwing getter or getItem leaves Device and still lets the step apply. The hash is read as a
+// closed set and only the matched digit is written.
 export const HEAD_SCRIPT = [
   '(function () {',
   'var root = document.documentElement;',
@@ -29,8 +29,6 @@ export const HEAD_SCRIPT = [
   'function known(value, choices) { return choices.indexOf(value) >= 0 ? value : null; }',
   "var theme = known(read('fothering-theme'), ['light', 'dark']);",
   "if (theme) root.setAttribute('data-theme', theme);",
-  "var flow = known(read('fothering-flow'), ['stopped', 'running']);",
-  "if (flow) root.setAttribute('data-flow', flow);",
   'var step = /^#step-([1-4])$/.exec(location.hash);',
   "if (step) root.setAttribute('data-step', step[1]);",
   '})();',

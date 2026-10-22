@@ -151,10 +151,14 @@ function refuse(path: string, problem: string, fix: string): never {
 }
 
 const STEP_NUMBERS = [1, 2, 3, 4] as const;
+// The stylesheet carries column span classes up to .cols-16, so a step's label or key spans at most
+// this many pads. The landing continues a longer bank in single cells; the replay's step keys are one
+// list item a step, so the replay refuses a step it could not draw under its own pads.
+export const MAX_BANK_SPAN = 16;
 const STEP_LABELS = ['Bounces arrive', 'Cause named', 'Paused, read back', 'Reopened by command'] as const;
 const DIMENSION_LABELS: Record<EvidenceRow['dimension'], string> = { tag: 'Tag', provider: 'Provider', configuration: 'Configuration' };
 const VERDICT_LABELS: Record<EvidenceRow['verdict'], string> = { cause: 'Cause', clean: 'Clean', 'ruled-out': 'Ruled out' };
-const KIND_LABELS: Record<ReplayEvent['kind'], string> = {
+export const KIND_LABELS: Record<ReplayEvent['kind'], string> = {
   bounce: 'Bounce',
   delivery: 'Delivery',
   'evidence-record': 'Evidence record',
@@ -190,6 +194,10 @@ function assertReplayable(artifact: ReplayArtifact): void {
   }
   for (const step of STEP_NUMBERS) {
     if (!artifact.events.some((event) => event.step === step)) refuse('events', `step ${String(step)} has no event`, 'Add the events of every step');
+    const count = artifact.events.filter((event) => event.step === step).length;
+    if (count > MAX_BANK_SPAN) {
+      refuse('events', `step ${String(step)} has ${String(count)} events, and the replay's step key spans at most ${String(MAX_BANK_SPAN)} of its pads`, `Keep at most ${String(MAX_BANK_SPAN)} events in each step`);
+    }
   }
   assertBounceClaims(artifact);
   assertTimeOrder(artifact);
@@ -272,10 +280,22 @@ function assertTimeOrder(artifact: ReplayArtifact): void {
       refuse('events', `step ${String(event.step)} has an event at ${event.atUtc}, before a step ${String(previous.step)} event at ${previous.atUtc}`, 'Correct the times so every step follows the one before it');
     }
   });
+  // The step pattern mutes the closed lane from the paused step's first column at or after the pause
+  // and opens it from the reopen step's first at or after the reopen (track-grid.ts), so each step
+  // needs an event from that moment on, or the pattern would show the lane open while the readout
+  // says paused, or still muted after the reopen read back true.
+  refuseUnplaced(artifact, 3, 'pause.atUtc', pause.atUtc, `${artifact.closedLane} open on the paused step`);
+  refuseUnplaced(artifact, 4, 'reopen.atUtc', reopen.atUtc, `${artifact.closedLane} muted after the reopen`);
 }
 
-// Step first, then time; the index breaks ties so equal times keep the artifact's order.
-function orderedEvents(events: readonly ReplayEvent[]): ReplayEvent[] {
+function refuseUnplaced(artifact: ReplayArtifact, step: number, path: string, utc: string, misdrawn: string): void {
+  if (artifact.events.some((event) => event.step === step && Date.parse(event.atUtc) >= Date.parse(utc))) return;
+  refuse('events', `step ${String(step)} has no event at or after ${path} ${utc}, so the step pattern would show ${misdrawn}`, `Add the step ${String(step)} event recorded at ${path}`);
+}
+
+// Step first, then time; the index breaks ties so equal times keep the artifact's order. The step
+// grid reads the events in this order too, so its columns and the log's rows agree.
+export function orderedEvents(events: readonly ReplayEvent[]): ReplayEvent[] {
   return events
     .map((event, index) => ({ event, index, at: Date.parse(event.atUtc) }))
     .sort((a, b) => a.event.step - b.event.step || a.at - b.at || a.index - b.index)
@@ -329,24 +349,26 @@ function lanesLines(closedLane: string, openLanes: readonly string[], held: bool
   };
 }
 
-// The board and the drawing describe the lanes' state, which their lines and valves stand for, never
-// traffic: an artifact can log no delivery on an open lane and still build (WR-13).
+// The board and the landing's step grid describe the lanes' state, which the tracks and their mute
+// keys stand for, never traffic: an artifact can log no delivery on an open lane and still build
+// (WR-13).
 function boardDescriptions(closedLane: string, lanes: readonly string[], openLanes: readonly string[]): string[] {
   const allLanes = lanes.length === 1 ? 'The only lane is' : `All ${String(lanes.length)} lanes are`;
   const stayOpen = openLanes.length === 0 ? '' : ` ${openLanes.join(', ')} ${openLanes.length === 1 ? 'stays' : 'stay'} open.`;
   return [
-    `${allLanes} open. Bounce marks appear on ${closedLane}.`,
-    `${allLanes} still open, with bounce marks on ${closedLane}. Detection code has approved one lane.`,
-    `${closedLane} is stopped at a filled valve with a lockout tag, and its outlet is dotted.${stayOpen}`,
-    `${closedLane} is open again and the tag is off the valve. ${allLanes} open.`,
+    `${allLanes} open and no track is muted. Bounces arrive on ${closedLane}.`,
+    `${allLanes} still open. Detection code has approved one lane, and no track is muted yet.`,
+    `The ${closedLane} track is muted, and the read-back confirmed it.${stayOpen}`,
+    `The ${closedLane} track is unmuted and the lane is open again. ${allLanes} open.`,
   ];
 }
 
 // With one lane no other lane is open, so the description names the paused lane as the only one.
 function drawingDescription(closedLane: string, openLanes: readonly string[], held: boolean, pausedAt: string): string {
-  const stopped = `is stopped at a ${held ? 'closed' : 'filled'} valve that carries a lockout tag, with a read-back instrument at ${pausedAt} UTC.`;
-  if (openLanes.length === 0) return `${closedLane}, the only lane from the SES account, ${stopped}`;
-  return `The SES account feeds ${openLanes.join(', ')}, which ${openLanes.length === 1 ? 'is' : 'are'} open. ${closedLane} ${stopped}`;
+  const confirmed = `and the read-back at ${pausedAt} UTC confirmed it.`;
+  if (openLanes.length === 0) return `${closedLane}, the only lane from the SES account, is muted: the lane is ${held ? 'closed' : 'paused'}, ${confirmed}`;
+  const open = openLanes.length === 1 ? 'is open, its track not muted' : 'are open, their tracks not muted';
+  return `${openLanes.join(', ')} ${open}. The ${closedLane} track is muted: the lane is ${held ? 'closed' : 'paused'}, ${confirmed}`;
 }
 
 function firstEventTime(events: readonly ReplayEvent[], step: number): string {
@@ -472,7 +494,7 @@ export function buildReplayView(artifact: ReplayArtifact): ReplayView {
       number: 'TAG 001',
     },
     landing: {
-      drawingTitle: `Flow drawing of one SES account with ${String(artifact.lanes.length)} sending lanes`,
+      drawingTitle: `One SES account with ${String(artifact.lanes.length)} sending lanes, each lane a track`,
       drawingDescription: drawingDescription(artifact.closedLane, openLanes, held, pausedAt),
     },
     eventLog: {
