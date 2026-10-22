@@ -86,18 +86,22 @@ const TABLE_IMPORT = /^\{"Fn::ImportValue":"FotheringIngest:[^"]*EventStore[^"]*
 const ADDRESS_KEY_IMPORT = /^\{"Fn::ImportValue":"FotheringIngest:[^"]*AddressKey[^"]*"\}$/;
 const SEND_EMAIL = 'ses:SendEmail';
 const FROM_ADDRESS_REF = { Ref: 'FromAddress' };
+const OPERATOR_ADDRESS_REF = { Ref: 'OperatorAddress' };
 
 function identityArn(name: unknown): string {
   return JSON.stringify({ 'Fn::Join': ['', ['arn:aws:ses:eu-central-1:', { Ref: 'AWS::AccountId' }, ':identity/', name]] });
 }
 
-// The three resources the operator email may be sent from and through: the From address's own
-// identity, its domain's identity, and the operator-alert configuration set.
+// The four resources the operator email may be sent from, to and through: the From address's own
+// identity, its domain's identity, the operator address's own identity (an SES sandbox account
+// checks the send against the recipient's identity too), and the operator-alert configuration set.
 const SEND_EMAIL_RESOURCES = [
   identityArn(FROM_ADDRESS_REF),
   identityArn({ 'Fn::Select': [1, { 'Fn::Split': ['@', FROM_ADDRESS_REF] }] }),
+  identityArn(OPERATOR_ADDRESS_REF),
   configurationSetArn('fothering-alerts'),
 ].sort();
+const SEND_EMAIL_REACH = `${SEND_EMAIL} reaches a resource other than the From identity, its domain, the operator address's identity or the operator-alert set`;
 
 // The raw statements, Condition included, that grant an action to a role.
 function statementsGranting(template: Template, rolePrefix: string, action: string): Array<Record<string, unknown>> {
@@ -233,6 +237,16 @@ describe('ActionStack synth', () => {
     expect(JSON.stringify(variables.FOTHERING_TABLE_NAME)).toMatch(/^\{"Fn::ImportValue":"FotheringIngest:/);
   });
 
+  // Both values become ses:SendEmail identity ARNs, where * and ? are IAM wildcards: '*@*.*' would
+  // grant every address identity in the account.
+  it.each(['OperatorAddress', 'FromAddress'])('refuses an IAM wildcard in %s, since its value lands in the send grant', (name) => {
+    const parameters = stacks.action.toJSON().Parameters as Record<string, Record<string, unknown>> | undefined;
+    const pattern = new RegExp(String(parameters?.[name]?.AllowedPattern));
+    for (const refused of ['*@*.*', '*@example.com', 'ops@*.example.com', 'o?s@example.com', 'ops@example.c?m']) {
+      expect(pattern.test(refused), refused).toBe(false);
+    }
+  });
+
   it.each(['OperatorAddress', 'FromAddress'])('takes %s as a String parameter with no default and a one-address pattern', (name) => {
     const parameters = stacks.action.toJSON().Parameters as Record<string, Record<string, unknown>> | undefined;
     const parameter = parameters?.[name];
@@ -245,7 +259,7 @@ describe('ActionStack synth', () => {
     }
   });
 
-  it('may send mail only from the From identity and its domain through fothering-alerts, with no condition (AC-23)', () => {
+  it("may send mail only from the From identity and its domain, to the operator address's identity, through fothering-alerts, with no condition (AC-23)", () => {
     const grants = grantsOfRole(stacks.action, 'ActionRole');
     expect(grants[SEND_EMAIL]).toEqual(SEND_EMAIL_RESOURCES);
     const statements = statementsGranting(stacks.action, 'ActionRole', SEND_EMAIL);
@@ -275,12 +289,12 @@ describe('ActionStack synth', () => {
 
     const sendEntries = (): PermissionEntry[] => entries.filter((entry) => entry.effect === 'Allow' && entry.action === SEND_EMAIL);
 
-    it('finds nothing in the clean synthesis, which holds the three SendEmail grants', () => {
-      expect(sendEntries()).toHaveLength(3);
+    it('finds nothing in the clean synthesis, which holds the four SendEmail grants', () => {
+      expect(sendEntries()).toHaveLength(4);
       expect(permissionViolations(entries, stacks.laneMap)).toEqual([]);
     });
 
-    it('reports ses:SendEmail planted on the reopen role, on each of the three resources', () => {
+    it('reports ses:SendEmail planted on the reopen role, on each of the four resources', () => {
       const planted = sendEntries().map((entry) => ({ ...entry, role: reopenRole }));
       const violations = permissionViolations([...entries, ...planted], stacks.laneMap);
       expect(violations).toEqual(planted.map(() => `FotheringAction/${reopenRole} ${SEND_EMAIL}: only the action role may hold ${SEND_EMAIL}`));
@@ -290,9 +304,18 @@ describe('ActionStack synth', () => {
       const [first] = sendEntries();
       const everyIdentity = JSON.stringify({ 'Fn::Join': ['', ['arn:aws:ses:eu-central-1:', { Ref: 'AWS::AccountId' }, ':identity/*']] });
       const violations = permissionViolations([...entries, { ...(first as PermissionEntry), resource: everyIdentity }], stacks.laneMap);
-      expect(violations).toEqual([
-        `FotheringAction/${actionRole} ${SEND_EMAIL}: ${SEND_EMAIL} reaches a resource other than the From identity, its domain or the operator-alert set`,
-      ]);
+      expect(violations).toEqual([`FotheringAction/${actionRole} ${SEND_EMAIL}: ${SEND_EMAIL_REACH}`]);
+    });
+
+    // Only the operator address itself is granted as a recipient: its domain would let the role send
+    // from any address on it, and another parameter could name any identity at deploy time.
+    it.each([
+      ["the operator address's domain", { 'Fn::Select': [1, { 'Fn::Split': ['@', OPERATOR_ADDRESS_REF] }] }],
+      ['an identity named by another parameter', { Ref: 'OtherAddress' }],
+    ])('reports ses:SendEmail planted on the action role over %s', (_label, name) => {
+      const [first] = sendEntries();
+      const violations = permissionViolations([...entries, { ...(first as PermissionEntry), resource: identityArn(name) }], stacks.laneMap);
+      expect(violations).toEqual([`FotheringAction/${actionRole} ${SEND_EMAIL}: ${SEND_EMAIL_REACH}`]);
     });
 
     it('reports ses:Send* on the From identity as the raw and bulk sends, which no role may hold', () => {

@@ -20,8 +20,9 @@ export interface ActionStackProps extends StackProps {
   readonly ingest: Pick<IngestStack, 'table' | 'addressKey'>;
 }
 
-// One bare address: no display name, no second @, no space.
-const ADDRESS_PATTERN = '^[^@\\s<>]+@[^@\\s<>]+\\.[^@\\s<>]+$';
+// One bare address: no display name, no second @, no space. No * or ? either: both values become
+// ses:SendEmail identity ARNs, where they are IAM wildcards ('*@*.*' would grant every address identity).
+const ADDRESS_PATTERN = '^[^@\\s<>*?]+@[^@\\s<>*?]+\\.[^@\\s<>*?]+$';
 
 // The operator's addresses live only in the deployed stack's parameters and the action function's
 // environment, never in the repository or the committed snapshot. A first deploy without them fails;
@@ -36,12 +37,15 @@ function addressParameter(stack: Stack, id: string, purpose: string): CfnParamet
 }
 
 // The operator email goes out through the single operator-alert set; with none or several the action
-// sends nothing, so the role holds no send. Both identities are granted because which one SES
+// sends nothing, so the role holds no send. Both From identities are granted because which one SES
 // authorizes a send against, when the From address and its domain are both verified identities, is
-// unverified until a live send. No ses:FromAddress condition: how SES compares it with a From header
+// unverified until a live send. The operator address's own identity is granted too: on an SES sandbox
+// account a live send to it on 2026-10-22 was refused on identity/<operator address>, so the sandbox
+// checks the recipient's identity as well. Only the address, never its domain, which would let the role
+// send from any address there. No ses:FromAddress condition: how SES compares it with a From header
 // carrying a display name is unverified too. The domain is split from the parameter at deploy time,
 // since at synth time the address is a token, not text.
-function sendStatement(stack: Stack, laneMap: LaneMap, fromAddress: string): PolicyStatement[] {
+function sendStatement(stack: Stack, laneMap: LaneMap, fromAddress: string, operatorAddress: string): PolicyStatement[] {
   const [alertLane, ...otherAlertLanes] = laneMap.lanes.filter((lane) => lane.operatorAlert);
   if (alertLane === undefined || otherAlertLanes.length > 0) return [];
   const identity = (name: string): string => stack.formatArn({ service: 'ses', resource: 'identity', resourceName: name });
@@ -52,6 +56,7 @@ function sendStatement(stack: Stack, laneMap: LaneMap, fromAddress: string): Pol
       resources: [
         identity(fromAddress),
         identity(Fn.select(1, Fn.split('@', fromAddress))),
+        identity(operatorAddress),
         stack.formatArn({ service: 'ses', resource: 'configuration-set', resourceName: alertLane.configurationSet }),
       ],
     }),
@@ -101,7 +106,7 @@ export class ActionStack extends Stack {
       }),
       ...sesFactReadStatements(this, props.laneMap),
       ...pauseStatement(staticallyCloseableArns(this, props.laneMap)),
-      ...sendStatement(this, props.laneMap, fromAddress.valueAsString),
+      ...sendStatement(this, props.laneMap, fromAddress.valueAsString, operatorAddress.valueAsString),
       new PolicyStatement({ effect: Effect.ALLOW, actions: ['secretsmanager:GetSecretValue'], resources: [props.ingest.addressKey.secretArn] }),
     ]);
 

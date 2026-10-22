@@ -1,6 +1,5 @@
-// D-153: the sitemap, robots, canonical and og:url all read this one origin. It stays an RFC 2606
-// reserved name until live session B knows the deployed host.
-export const SITE_ORIGIN = 'https://fothering.example';
+// D-153: the sitemap, robots, canonical and og:url all read this one origin, the deployed host.
+export const SITE_ORIGIN = 'https://fothering.taranity.com';
 
 interface PageMeta {
   readonly title: string;

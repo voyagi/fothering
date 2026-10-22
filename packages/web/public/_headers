@@ -3,3 +3,4 @@
   Referrer-Policy: no-referrer
   X-Frame-Options: DENY
   Content-Security-Policy: default-src 'self'; script-src 'self' 'sha256-wauJVM/J5AOXYYDUJj1irwVTJUTGuzeBESfc4iAUgSs='; frame-ancestors 'none'; base-uri 'none'; form-action 'none'
+  Strict-Transport-Security: max-age=31536000; includeSubDomains

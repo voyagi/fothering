@@ -76,3 +76,15 @@ export function agentcoreInlineRequirePlugin() {
     },
   };
 }
+
+// The settings for the live-run command's bundle. The AWS SDK ships CommonJS, and inside an ESM
+// bundle esbuild routes its require() of a Node built-in through a stub that throws "Dynamic
+// require ... is not supported" on load. Keeping the SDK families external lets Node load the
+// installed SDK itself, as CDK_TOOL_BUNDLE_BASE does for aws-cdk-lib.
+export const LIVE_RUN_BUNDLE_BASE = Object.freeze({
+  bundle: true,
+  platform: 'node',
+  target: 'node22',
+  format: 'esm',
+  external: ['@aws-sdk/*', '@smithy/*', '@aws-crypto/*'],
+});

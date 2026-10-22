@@ -138,6 +138,7 @@ const SES_WRITES = [...ACCOUNT_SENDING_ACTIONS, 'ses:SendRawEmail', 'ses:SendBul
 const CONFIGURATION_SET_ARN_TAIL = /:configuration-set\/([^*?]+)$/;
 const FROM_ADDRESS_REF = JSON.stringify({ Ref: 'FromAddress' });
 const FROM_DOMAIN = JSON.stringify({ 'Fn::Select': [1, { 'Fn::Split': ['@', { Ref: 'FromAddress' }] }] });
+const OPERATOR_ADDRESS_REF = JSON.stringify({ Ref: 'OperatorAddress' });
 
 function joinedParts(value: unknown): unknown[] {
   if (typeof value !== 'object' || value === null) return [];
@@ -165,9 +166,11 @@ function operatorAlertSet(laneMap: LaneMap): string | undefined {
   return alerts.length === 1 ? alerts[0]?.configurationSet : undefined;
 }
 
-// Whether a granted resource is one of the three the operator email may use: the identity ARN whose
-// name is exactly the FromAddress parameter, the one whose name is that parameter's domain, or the
-// operator-alert set. A wildcard or any other name is something wider.
+// Whether a granted resource is one of the four the operator email may use: the identity ARN whose
+// name is exactly the FromAddress parameter, the one whose name is that parameter's domain, the one
+// whose name is exactly the OperatorAddress parameter (an SES sandbox account checks the recipient's
+// identity too), or the operator-alert set. A wildcard or any other name, the operator's domain
+// included, is something wider.
 function isOperatorEmailResource(resource: string | null, laneMap: LaneMap): boolean {
   if (resource === null) return false;
   const parts = joinedParts(JSON.parse(resource));
@@ -177,7 +180,7 @@ function isOperatorEmailResource(resource: string | null, laneMap: LaneMap): boo
   const isSesArn = typeof service === 'string' && service.startsWith('arn:') && service.includes(':ses:');
   if (isSesArn && typeof before === 'string' && before.endsWith(':identity/') && name !== undefined) {
     const named = JSON.stringify(name);
-    return named === FROM_ADDRESS_REF || named === FROM_DOMAIN;
+    return named === FROM_ADDRESS_REF || named === FROM_DOMAIN || named === OPERATOR_ADDRESS_REF;
   }
   const alertSet = operatorAlertSet(laneMap);
   return alertSet !== undefined && pausedSetName(resource) === alertSet;
@@ -195,7 +198,7 @@ function sendViolations(entry: PermissionEntry, laneMap: LaneMap): string[] {
     violations.push(`${where}: only the action role may hold ${SEND_EMAIL}`);
   }
   if (!isOperatorEmailResource(entry.resource, laneMap)) {
-    violations.push(`${where}: ${SEND_EMAIL} reaches a resource other than the From identity, its domain or the operator-alert set`);
+    violations.push(`${where}: ${SEND_EMAIL} reaches a resource other than the From identity, its domain, the operator address's identity or the operator-alert set`);
   }
   return violations;
 }

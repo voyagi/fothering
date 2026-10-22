@@ -77,7 +77,7 @@ export const PERMISSION_REASONS: Reasons = {
   'FotheringAction/ActionRole/permission/Allow/ses:PutConfigurationSetSendingOptions':
     "Turns sending off for the one configuration set an incident's evidence names; granted only on the sets the lane map lets Fothering close, so no other set can be paused.",
   'FotheringAction/ActionRole/permission/Allow/ses:SendEmail':
-    'Sends the operator email, only from the From address or its domain. The operator-alert configuration set is the only one a send can go through, and the action function names it on every send.',
+    "Sends the operator email. Granted on the From address and its domain, on the operator address, because an SES sandbox account checks a send against the recipient's identity too, and on the operator-alert configuration set, the only one a send can go through. The action function names that set on every send.",
   'FotheringAction/ActionRole/trust/Allow/sts:AssumeRole': LAMBDA_TRUST,
   ...accountDenyReasons('FotheringAction/ActionRole'),
   'FotheringAction/ReopenRole/permission/Allow/dynamodb:GetItem': "Reads a lane's pause pointer and the closure it points at, by their keys.",
