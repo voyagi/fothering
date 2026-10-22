@@ -109,6 +109,7 @@ else {
     const site = scenario.site || {};
     for (const line of site.lines || []) console.log(line);
     if (!site.omitDone) console.log('done');
+    if (site.stderr !== undefined) console.error(site.stderr);
     process.exit(site.exitCode === undefined ? 0 : site.exitCode);
   }
   if (!existsSync(join(scenario.homeDir, '.dev-browser', 'tmp', job.axeFile))) {
@@ -144,6 +145,7 @@ interface SiteScenario {
   readonly lines?: readonly string[];
   readonly omitDone?: boolean;
   readonly exitCode?: number;
+  readonly stderr?: string;
 }
 
 interface Scenario {
@@ -1882,6 +1884,24 @@ describe('the built checks through the CLI and the e2e step (D-150, D-151)', () 
     const exited = await e2e(renderedTree(), {}, { lines: siteLines(), exitCode: 2 });
     expect(exited.code).toBe(1);
     expect(exited.lines.at(-1)).toBe(E2E_MESSAGES.fail(A11Y_MESSAGES.driverExit('rendered', 2, '')));
+    const short = await e2e(renderedTree(), {}, { lines: siteLines(), exitCode: 1, stderr: 'driver failed' });
+    expect(short.lines.at(-1)).toBe(E2E_MESSAGES.fail(A11Y_MESSAGES.driverExit('rendered', 1, 'driver failed')));
+  });
+
+  it('a long stderr from a failed driver run keeps its first line beside its tail', async () => {
+    const message = 'RuntimeError: Aborted(Assertion failed: list_empty(&rt->gc_obj_list))';
+    const frames = Array.from({ length: 40 }, (_, index) => `    at frame${String(index)} (file:///daemon.mjs:${String(index)}:1)`);
+    const crashed = await e2e(renderedTree(), {}, { lines: siteLines(), exitCode: 1, stderr: [message, ...frames].join('\n') });
+    expect(crashed.code).toBe(1);
+    const failure = crashed.lines.at(-1) ?? '';
+    expect(failure).toContain(`: ${message} [...] `);
+    expect(failure).toContain('at frame39 (file:///daemon.mjs:39:1)');
+    expect(failure).not.toContain('at frame0 ');
+    // 450 characters with a 120-character first line: the line and the 400-character tail would
+    // overlap, so the text stays whole rather than showing part of the line twice.
+    const near = `${'x'.repeat(120)}\n${'y'.repeat(329)}`;
+    const nearCut = await e2e(renderedTree(), {}, { lines: siteLines(), exitCode: 1, stderr: near });
+    expect(nearCut.lines.at(-1)).toBe(E2E_MESSAGES.fail(A11Y_MESSAGES.driverExit('rendered', 1, near)));
   });
 
   it('the rendered step refuses a missing dev-browser, a missing template and a broken Workers config by name', async () => {

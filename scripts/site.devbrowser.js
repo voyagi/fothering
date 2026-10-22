@@ -12,21 +12,24 @@ const page = await browser.newPage();
 const consoleErrors = [];
 // The location travels with each error, so the harness can tell the unknown address's own 404 from
 // a resource that failed to load.
-page.on('console', (message) => {
+const onConsole = (message) => {
   if (message.type() !== 'error') return;
   const location = message.location();
   consoleErrors.push({ text: message.text(), url: location && location.url ? location.url : '' });
-});
+};
+page.on('console', onConsole);
 // An uncaught exception never reaches the console listener: the browser raises it as pageerror.
 const pageErrors = [];
-page.on('pageerror', (error) => {
+const onPageError = (error) => {
   const message = error && error.message !== undefined ? error.message : error;
   pageErrors.push({ name: error && error.name ? String(error.name) : '', message: String(message), url: page.url() });
-});
+};
+page.on('pageerror', onPageError);
 let requests = [];
-page.on('request', (request) => {
+const onRequest = (request) => {
   requests.push(request.url());
-});
+};
+page.on('request', onRequest);
 
 const url = JOB.base + JOB.route;
 const readTheme = () => page.evaluate(() => ({
@@ -523,6 +526,13 @@ const storage = await page.evaluate(() => {
   return { local: keysOf(localStorage), session: keysOf(window.sessionStorage) };
 });
 console.log('STORAGE ' + JSON.stringify(storage));
+
+// dev-browser 0.2.9 crashed freeing its script engine as this run returned, in CI, and never as the
+// a11y driver's run returned, which listens to nothing. So the run ends listening to nothing too:
+// off, never removeAllListeners, which leaves the browser sending the events.
+page.off('console', onConsole);
+page.off('pageerror', onPageError);
+page.off('request', onRequest);
 
 for (const error of pageErrors) console.log('PAGEERROR ' + JSON.stringify(error));
 for (const error of consoleErrors) console.log('CONSOLE ' + JSON.stringify({ type: 'error', text: error.text, url: error.url }));
