@@ -528,12 +528,11 @@ const storage = await page.evaluate(() => {
 console.log('STORAGE ' + JSON.stringify(storage));
 
 // dev-browser 0.2.9 crashed freeing its script engine as this run returned, in CI, and never as the
-// a11y driver's run returned, which listens to nothing. So the run stops its page events here (off,
-// never removeAllListeners, which leaves the browser sending them) and closes its own page.
+// a11y driver's run returned, which listens to nothing. So the run ends listening to nothing too:
+// off, never removeAllListeners, which leaves the browser sending the events.
 page.off('console', onConsole);
 page.off('pageerror', onPageError);
 page.off('request', onRequest);
-await page.close();
 
 for (const error of pageErrors) console.log('PAGEERROR ' + JSON.stringify(error));
 for (const error of consoleErrors) console.log('CONSOLE ' + JSON.stringify({ type: 'error', text: error.text, url: error.url }));

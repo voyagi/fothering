@@ -1897,6 +1897,11 @@ describe('the built checks through the CLI and the e2e step (D-150, D-151)', () 
     expect(failure).toContain(`: ${message} [...] `);
     expect(failure).toContain('at frame39 (file:///daemon.mjs:39:1)');
     expect(failure).not.toContain('at frame0 ');
+    // 450 characters with a 120-character first line: the line and the 400-character tail would
+    // overlap, so the text stays whole rather than showing part of the line twice.
+    const near = `${'x'.repeat(120)}\n${'y'.repeat(329)}`;
+    const nearCut = await e2e(renderedTree(), {}, { lines: siteLines(), exitCode: 1, stderr: near });
+    expect(nearCut.lines.at(-1)).toBe(E2E_MESSAGES.fail(A11Y_MESSAGES.driverExit('rendered', 1, near)));
   });
 
   it('the rendered step refuses a missing dev-browser, a missing template and a broken Workers config by name', async () => {

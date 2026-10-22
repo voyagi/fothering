@@ -907,11 +907,12 @@ interface RunResult {
 const printedLines = (run: DriverRun): string[] => run.stdoutLines.map((line) => line.trim()).filter((line) => line !== '');
 
 // A crash names itself on its first line and prints its stack below, so a long stderr keeps that
-// line beside its tail: the tail alone cut the message off a dev-browser crash in CI.
+// line beside its tail: the tail alone cut the message off a dev-browser crash in CI. While the
+// line and the tail would meet, the text is kept whole, so nothing reads as cut or shows twice.
 function stderrExcerpt(stderr: string): string {
   const text = stderr.trim();
-  if (text.length <= STDERR_TAIL) return text;
   const firstLine = (text.split('\n', 1)[0] ?? '').trimEnd().slice(0, STDERR_TAIL);
+  if (firstLine.length + STDERR_TAIL >= text.length) return text;
   return `${firstLine} [...] ${text.slice(-STDERR_TAIL)}`;
 }
 
