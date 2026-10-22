@@ -237,6 +237,16 @@ describe('ActionStack synth', () => {
     expect(JSON.stringify(variables.FOTHERING_TABLE_NAME)).toMatch(/^\{"Fn::ImportValue":"FotheringIngest:/);
   });
 
+  // Both values become ses:SendEmail identity ARNs, where * and ? are IAM wildcards: '*@*.*' would
+  // grant every address identity in the account.
+  it.each(['OperatorAddress', 'FromAddress'])('refuses an IAM wildcard in %s, since its value lands in the send grant', (name) => {
+    const parameters = stacks.action.toJSON().Parameters as Record<string, Record<string, unknown>> | undefined;
+    const pattern = new RegExp(String(parameters?.[name]?.AllowedPattern));
+    for (const refused of ['*@*.*', '*@example.com', 'ops@*.example.com', 'o?s@example.com', 'ops@example.c?m']) {
+      expect(pattern.test(refused), refused).toBe(false);
+    }
+  });
+
   it.each(['OperatorAddress', 'FromAddress'])('takes %s as a String parameter with no default and a one-address pattern', (name) => {
     const parameters = stacks.action.toJSON().Parameters as Record<string, Record<string, unknown>> | undefined;
     const parameter = parameters?.[name];

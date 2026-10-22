@@ -20,8 +20,9 @@ export interface ActionStackProps extends StackProps {
   readonly ingest: Pick<IngestStack, 'table' | 'addressKey'>;
 }
 
-// One bare address: no display name, no second @, no space.
-const ADDRESS_PATTERN = '^[^@\\s<>]+@[^@\\s<>]+\\.[^@\\s<>]+$';
+// One bare address: no display name, no second @, no space. No * or ? either: both values become
+// ses:SendEmail identity ARNs, where they are IAM wildcards ('*@*.*' would grant every address identity).
+const ADDRESS_PATTERN = '^[^@\\s<>*?]+@[^@\\s<>*?]+\\.[^@\\s<>*?]+$';
 
 // The operator's addresses live only in the deployed stack's parameters and the action function's
 // environment, never in the repository or the committed snapshot. A first deploy without them fails;
