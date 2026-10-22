@@ -392,7 +392,9 @@ describe('the response headers file (D-149, T-05-21, T-05-23, T-05-24)', () => {
     expect(hashes).toEqual([headScriptHash()]);
   });
 
-  it('holds one /* rule with exactly the four headers of D-149', () => {
+  // HSTS joins D-149's four once the site has a custom domain: a .dev host is on the browsers' HTTPS-only
+  // preload list, a custom host is not.
+  it('holds one /* rule with exactly the four headers of D-149 plus HSTS', () => {
     const lines = text().split(/\r?\n/).filter((line) => line.trim() !== '');
     expect(lines[0]).toBe('/*');
     const headers = lines.slice(1).map((line) => {
@@ -405,6 +407,7 @@ describe('the response headers file (D-149, T-05-21, T-05-23, T-05-24)', () => {
       ['Referrer-Policy', 'no-referrer'],
       ['X-Frame-Options', 'DENY'],
       ['Content-Security-Policy', `default-src 'self'; script-src 'self' 'sha256-${headScriptHash()}'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'`],
+      ['Strict-Transport-Security', 'max-age=31536000; includeSubDomains'],
     ]);
   });
 
