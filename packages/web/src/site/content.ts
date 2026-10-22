@@ -169,7 +169,7 @@ export interface DeployStepCopy {
 export const DEPLOY_STEPS: readonly DeployStepCopy[] = Object.freeze([
   {
     title: 'Check what you have',
-    text: 'An AWS account with SES in `{region}`, Node.js 22, and credentials for that account. The address you deploy as `FromAddress` must be a verified SES identity in `{region}`, or sit on a verified domain. The `fothering-alerts` configuration set must exist, with an enabled EventBridge event destination for all six event types: the operator email goes out through it. While the account is in the SES sandbox, SES delivers only to verified identities, so verify `OperatorAddress` too.',
+    text: 'An AWS account with SES in `{region}`, Node.js 22, and credentials for that account. The address you deploy as `FromAddress` must be a verified SES identity in `{region}`, or sit on a verified domain. The `fothering-alerts` configuration set must exist, with an enabled EventBridge event destination for all six event types: the operator email goes out through it. While the account is in the SES sandbox, SES delivers only to verified identities and checks a send against the recipient\'s identity too, so verify `OperatorAddress` as an address identity of its own: the action role\'s send is granted on that identity, not on its domain.',
     uses: [],
   },
   {

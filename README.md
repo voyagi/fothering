@@ -124,8 +124,9 @@ Before that first deploy:
 - The `fothering-alerts` configuration set must exist, with an enabled EventBridge destination for
   the six event types Fothering reads: send, delivery, bounce, complaint, reject and delivery delay.
   The stacks create no configuration set.
-- While the account is in the SES sandbox, SES delivers only to verified identities, so
-  `OperatorAddress` must be verified too.
+- While the account is in the SES sandbox, SES delivers only to verified identities and checks a
+  send against the recipient's identity too, so verify `OperatorAddress` as an address identity of
+  its own: the action role's send is granted on that identity, not on its domain.
 
 The detection function runs every five minutes. It reads SES configuration and DNS only when a
 spike opens an incident, and it may invoke the runtime and write its own incident, evidence,

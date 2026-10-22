@@ -193,6 +193,16 @@
     "stack": "FotheringAction",
     "role": "ActionRole60B0EDF7",
     "kind": "permission",
+    "effect": "Allow",
+    "action": "ses:SendEmail",
+    "resource": "{\"Fn::Join\":[\"\",[\"arn:aws:ses:eu-central-1:\",{\"Ref\":\"AWS::AccountId\"},\":identity/\",{\"Ref\":\"OperatorAddress\"}]]}",
+    "principal": null,
+    "condition": null
+  },
+  {
+    "stack": "FotheringAction",
+    "role": "ActionRole60B0EDF7",
+    "kind": "permission",
     "effect": "Deny",
     "action": "ses:UpdateAccountSendingEnabled",
     "resource": "\"*\"",
