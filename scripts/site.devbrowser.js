@@ -142,95 +142,30 @@ for (const route of JOB.routes) {
   console.log('SWITCH ' + JSON.stringify(await switchRun(route)));
 }
 
-const FLOW_SWITCHES = 'button[data-flow-switch]';
-const runningAnimations = () => page.evaluate(() => document.getAnimations().filter((animation) => animation.playState === 'running').length);
 const settle = () => page.evaluate(() => document.fonts.ready.then(() => new Promise((resolve) => window.requestAnimationFrame(() => window.requestAnimationFrame(() => resolve(true))))));
-const visibleFlowSwitches = () => page.evaluate((selector) => Array.from(document.querySelectorAll(selector)).map((button, index) => {
-  const box = button.getBoundingClientRect();
-  const style = getComputedStyle(button);
-  return { index, label: button.textContent.trim(), width: box.width, height: box.height, visible: box.width > 0 && box.height > 0 && style.visibility !== 'hidden' };
-}).filter((control) => control.visible), FLOW_SWITCHES);
-const flowLabels = async () => (await visibleFlowSwitches()).map((control) => control.label);
-// Each reading starts from a known stored choice and motion preference, then a fresh load.
-const loadFlow = async (route, width, stored, motion) => {
+// Each reading starts from a fresh load at a known width and motion preference.
+const loadAt = async (route, width, motion) => {
   await page.setViewportSize({ width, height: 900 });
   await page.emulateMedia({ colorScheme: 'light', reducedMotion: motion });
-  // Only the flow key changes, so the storage reading after the run still holds the theme key the
-  // switch run wrote.
-  await page.evaluate((value) => {
-    if (value === null) localStorage.removeItem('fothering-flow');
-    else localStorage.setItem('fothering-flow', value);
-  }, stored);
   await page.goto(JOB.base + route, { waitUntil: 'load' });
   await settle();
 };
 
-// Whether a route moves is read from its running animations, never from a marker on the page.
-const flowRun = async (route, width) => {
-  await loadFlow(route, width, null, 'no-preference');
-  const movingOnLoad = (await runningAnimations()) > 0;
-  const controls = await visibleFlowSwitches();
-  for (const control of controls) {
-    const label = await page.evaluate((args) => document.querySelectorAll(args.selector)[args.index].textContent.trim(), { selector: FLOW_SWITCHES, index: control.index });
-    if (label === 'Stop flow') await page.locator(FLOW_SWITCHES).nth(control.index).click();
-  }
-  await settle();
-  const afterClick = { running: await runningAnimations(), labels: await flowLabels() };
-  await page.reload({ waitUntil: 'load' });
-  await settle();
-  const afterReload = { running: await runningAnimations(), labels: await flowLabels() };
-  await loadFlow(route, width, null, 'reduce');
-  const reduced = await runningAnimations();
-  await loadFlow(route, width, 'running', 'reduce');
-  const storedRunningReduced = await runningAnimations();
-  await loadFlow(route, width, 'stopped', 'no-preference');
-  const storedStopped = await runningAnimations();
-  return {
-    route, width, movingOnLoad,
-    controls: controls.map((control) => ({ label: control.label, width: control.width, height: control.height })),
-    afterClick, afterReload, reduced, storedRunningReduced, storedStopped,
-  };
-};
+// Every animation on the page a few frames after load, read from the page itself, never from a
+// marker: how many, how many repeat forever, and when the last finite one ends, its delay included.
+// An infinite one is counted apart, since its endTime is Infinity and JSON would print it as null.
+const readMotion = () => page.evaluate(() => {
+  const animations = document.getAnimations();
+  const finite = animations.map((animation) => animation.effect.getComputedTiming()).filter((timing) => timing.iterations !== Infinity);
+  return { count: animations.length, infinite: animations.length - finite.length, longestEnd: Math.max(0, ...finite.map((timing) => timing.endTime)) };
+});
 
-// A flow switch's section is its numbered row; the next section's first focusable is the first one
-// in the document after that row. Both are tagged, then a Tab walk records when each is reached.
-const tabFlowRun = async (route, width) => {
-  await loadFlow(route, width, null, 'reduce');
-  const pairs = await page.evaluate((selector) => {
-    const focusable = 'a[href], button, input, select, textarea, [tabindex]:not([tabindex="-1"])';
-    const visible = (element) => {
-      const box = element.getBoundingClientRect();
-      return box.width > 0 && box.height > 0 && getComputedStyle(element).visibility !== 'hidden';
-    };
-    const all = Array.from(document.querySelectorAll(focusable)).filter(visible);
-    const flows = Array.from(document.querySelectorAll(selector)).filter(visible);
-    return flows.map((button, index) => {
-      button.setAttribute('data-tab-probe', 'flow-' + index);
-      const section = button.closest('.row') || button.parentElement;
-      const next = all.find((element) => !section.contains(element) && (section.compareDocumentPosition(element) & window.Node.DOCUMENT_POSITION_FOLLOWING));
-      if (next) next.setAttribute('data-tab-probe', (next.getAttribute('data-tab-probe') || '') + ' next-' + index);
-      return { index, hasNext: Boolean(next) };
-    });
-  }, FLOW_SWITCHES);
-  const steps = new Map();
-  if (pairs.length > 0) {
-    await page.evaluate(() => {
-      if (document.activeElement) document.activeElement.blur();
-    });
-    const limit = await page.evaluate(() => document.querySelectorAll('a[href], button, input, select, textarea, [tabindex]').length + 4);
-    for (let step = 1; step <= limit; step += 1) {
-      await page.keyboard.press('Tab');
-      const probe = await page.evaluate(() => (document.activeElement ? document.activeElement.getAttribute('data-tab-probe') : null));
-      for (const tag of (probe || '').split(' ').filter((item) => item !== '')) {
-        if (!steps.has(tag)) steps.set(tag, step);
-      }
-    }
-  }
-  const flows = pairs.map((pair) => ({
-    flowStep: steps.has('flow-' + pair.index) ? steps.get('flow-' + pair.index) : null,
-    nextStep: pair.hasNext && steps.has('next-' + pair.index) ? steps.get('next-' + pair.index) : null,
-  }));
-  return { route, width, flows };
+// The playhead run with motion allowed, then the same route under reduced motion.
+const motionRun = async (route, width) => {
+  await loadAt(route, width, 'no-preference');
+  const onLoad = await readMotion();
+  await loadAt(route, width, 'reduce');
+  return { route, width, onLoad, reduced: (await readMotion()).count };
 };
 
 // Rendered lines are found by walking each character's box: a character whose vertical middle sits
@@ -243,6 +178,11 @@ const installLineWalker = () => page.evaluate(() => {
     const walker = document.createTreeWalker(root, window.NodeFilter.SHOW_TEXT);
     let node = walker.nextNode();
     while (node) {
+      // Screen-reader-only text sits in a clipped 1px box, so it renders no line to measure.
+      if (node.parentElement.closest('.visually-hidden') !== null) {
+        node = walker.nextNode();
+        continue;
+      }
       for (let offset = 0; offset < node.data.length; offset += 1) {
         const range = document.createRange();
         range.setStart(node, offset);
@@ -269,7 +209,7 @@ const installLineWalker = () => page.evaluate(() => {
 });
 
 const linesRun = async (route) => {
-  await loadFlow(route, 1440, null, 'reduce');
+  await loadAt(route, 1440, 'reduce');
   await installLineWalker();
   const measured = await page.evaluate(() => {
     const lines = [];
@@ -286,7 +226,7 @@ const linesRun = async (route) => {
 };
 
 const narrowRun = async (route) => {
-  await loadFlow(route, 320, null, 'reduce');
+  await loadAt(route, 320, 'reduce');
   await installLineWalker();
   return page.evaluate((path) => {
     const boxOf = (element) => {
@@ -297,8 +237,9 @@ const narrowRun = async (route) => {
       const box = element.getBoundingClientRect();
       return box.width > 0 && box.height > 0;
     };
-    const tag = Array.from(document.querySelectorAll('[data-tag]')).find(shown);
-    const drawings = Array.from(document.querySelectorAll('svg[data-drawing]')).filter(shown).map((svg) => ({
+    // The labelled drawings are the privacy page's svg.dwg figures; the readout's digits and the
+    // state squares carry no text.
+    const drawings = Array.from(document.querySelectorAll('svg.dwg')).filter(shown).map((svg) => ({
       box: boxOf(svg),
       texts: Array.from(svg.querySelectorAll('text')).filter(shown).map((text) => ({ text: text.textContent.trim(), box: boxOf(text) })),
     }));
@@ -308,44 +249,12 @@ const narrowRun = async (route) => {
         lines: window.fotheringLines(element),
         ...(element.hasAttribute('data-identifier-words') ? { parts: Array.from(element.children).filter((child) => child.tagName === 'SPAN').map((child) => child.textContent) } : {}),
       }));
-    return { route: path, tag: tag ? boxOf(tag) : null, drawings, identifiers };
+    return { route: path, drawings, identifiers };
   }, route);
 };
 
-// The stem shown between the closed valve and the hung tag: a walk down the stem's line until the
-// card is the element hit there, with the tag scrolled into view so every point can be hit.
-const hangRun = async (route, width) => {
-  await loadFlow(route, width, null, 'reduce');
-  return page.evaluate((args) => {
-    // A vertical stem has no width, so a part counts as shown when either side has length.
-    const shown = (element) => {
-      const box = element.getBoundingClientRect();
-      return box.width > 0 || box.height > 0;
-    };
-    const tag = Array.from(document.querySelectorAll('[data-tag]')).find(shown);
-    const valve = Array.from(document.querySelectorAll('[data-lane-state="closed"] .dwg-valve-shut')).find(shown);
-    const stem = Array.from(document.querySelectorAll('[data-lane-state="closed"] .dwg-stem')).find(shown);
-    if (!tag || !valve || !stem) return { route: args.route, width: args.width, hanging: false, visibleStem: 0, tagTop: 0, valveBottom: 0 };
-    tag.scrollIntoView({ block: 'center' });
-    const valveBox = valve.getBoundingClientRect();
-    const stemBox = stem.getBoundingClientRect();
-    const x = stemBox.left + stemBox.width / 2;
-    let visibleStem = 0;
-    for (let y = Math.ceil(valveBox.bottom) + 1; y < valveBox.bottom + 400; y += 1) {
-      const hit = document.elementFromPoint(x, y);
-      if (hit === null || hit.closest('[data-tag]')) break;
-      visibleStem += 1;
-    }
-    return { route: args.route, width: args.width, hanging: true, visibleStem, tagTop: tag.getBoundingClientRect().top, valveBottom: valveBox.bottom };
-  }, { route, width });
-};
-
 for (const route of JOB.routes) {
-  for (const width of JOB.hangWidths) console.log('HANG ' + JSON.stringify(await hangRun(route, width)));
-  for (const width of JOB.widths) {
-    console.log('FLOW ' + JSON.stringify(await flowRun(route, width)));
-    console.log('TABFLOW ' + JSON.stringify(await tabFlowRun(route, width)));
-  }
+  for (const width of JOB.widths) console.log('MOTION ' + JSON.stringify(await motionRun(route, width)));
   console.log('LINES ' + JSON.stringify(await linesRun(route)));
   console.log('NARROW ' + JSON.stringify(await narrowRun(route)));
 }
@@ -449,14 +358,16 @@ const noScriptRun = async (width) => {
     const shown = (element) => element.getClientRects().length > 0 && getComputedStyle(element).visibility !== 'hidden';
     const panels = Array.from(document.querySelectorAll('[data-wordcount="step"]')).filter(shown).map((panel) => panel.getAttribute('data-steps'));
     const controls = args.selectors.map((selector) => document.querySelector(selector)).filter((element) => element !== null && shown(element)).length;
-    const boardParts = Array.from(document.querySelectorAll('svg[data-drawing="board"] [data-steps]')).map((part) => ({ steps: part.getAttribute('data-steps'), displayed: part.getClientRects().length > 0 }));
-    const tag = document.querySelector('[data-tag]');
-    return { route: args.route, width: args.width, panels, controls, boardParts, tagShown: tag !== null && shown(tag) };
+    // The board's and the readout's per-step parts share one cell per part and are hidden by
+    // visibility, so shown() reads both ways a part can be hidden.
+    const boardParts = Array.from(document.querySelectorAll('[data-replay] :is(.board, .readout) [data-steps]')).map((part) => ({ steps: part.getAttribute('data-steps'), displayed: shown(part) }));
+    const closure = document.querySelector('[data-replay] .readout [data-wordcount="tag"]');
+    return { route: args.route, width: args.width, panels, controls, boardParts, tagShown: closure !== null && shown(closure) };
   }, { route: JOB.replayRoute, width, selectors: REPLAY_CONTROLS });
 };
 
-// The replay's layout, each step loaded by its deep link: the board's height and whether the tag's
-// drawn place shows; on step 2 the evidence schedule's right edge against its panel's; on step 4,
+// The replay's layout, each step loaded by its deep link: the board's height; on step 2 the evidence
+// schedule's right edge against its panel's; on step 4,
 // with every log row shown, each row's cell baselines and every identifier's computed weight. A
 // zero-size inline block set just before a cell's first text sits on that line's baseline, so its
 // bottom edge is the baseline; it is removed straight after.
@@ -464,13 +375,10 @@ const layoutStep = (step) => page.evaluate((args) => {
   const round = (value) => Math.round(value * 100) / 100;
   const visible = (element) => element.getClientRects().length > 0 && getComputedStyle(element).visibility !== 'hidden';
   const board = document.querySelector('[data-replay] .board');
-  const phantoms = Array.from(document.querySelectorAll('[data-tag-phantom]'));
   const reading = {
     step: args.step,
     scrollWidth: document.documentElement.scrollWidth,
     boardHeight: board === null ? 0 : round(board.getBoundingClientRect().height),
-    phantom: phantoms.some(visible),
-    phantomExposed: phantoms.filter((element) => element.closest('[aria-hidden="true"]') === null).length,
   };
   const { NodeFilter: filter } = window;
   const textNodes = (element) => {
@@ -480,7 +388,7 @@ const layoutStep = (step) => page.evaluate((args) => {
     return nodes;
   };
   // An identifier's rendered lines: a character that starts left of the one before it opens a new
-  // line. Tops are not compared, since the hung tag is tilted and its one line climbs as it runs.
+  // line.
   const linesOf = (element) => {
     const lines = [];
     let left = null;
@@ -507,10 +415,11 @@ const layoutStep = (step) => page.evaluate((args) => {
       const style = getComputedStyle(element);
       return { text: element.textContent.trim(), weight: style.fontWeight, family: style.fontFamily, lines: linesOf(element), ...partsOf(element), ...faceOf(element) };
     });
-  // Text outside every identifier: drawings, command blocks and hidden parts aside.
+  // Text outside every identifier: drawings, command blocks and hidden parts aside, screen-reader-only
+  // text included, since its clipped 1px box never shows a line that could break.
   const plainNodes = (root) => textNodes(root).filter((node) => {
     const parent = node.parentElement;
-    return parent.closest('[data-identifier], svg, pre, script, style') === null && visible(parent);
+    return parent.closest('[data-identifier], svg, pre, script, style, .visually-hidden') === null && visible(parent);
   });
   // A listed SES API name left as plain text in a log Detail cell.
   reading.plainApiNames = Array.from(document.querySelectorAll('tr[data-log-step] td[data-col="Detail"]')).filter(visible)
@@ -558,7 +467,6 @@ const layoutStep = (step) => page.evaluate((args) => {
 
 const layoutRun = async (width) => {
   const steps = [];
-  let phantomExposed = 0;
   let evidence = null;
   let logRows = [];
   let logHeaders = [];
@@ -570,9 +478,8 @@ const layoutRun = async (width) => {
   for (const step of [1, 2, 3, 4]) {
     await loadReplay(width, '#step-' + step);
     const reading = await layoutStep(step);
-    steps.push({ step, boardHeight: reading.boardHeight, phantom: reading.phantom });
+    steps.push({ step, boardHeight: reading.boardHeight });
     scrollWidths.push(reading.scrollWidth);
-    phantomExposed = Math.max(phantomExposed, reading.phantomExposed);
     if (step === 2) evidence = reading.evidence;
     if (step === 4) {
       logRows = reading.logRows;
@@ -589,7 +496,7 @@ const layoutRun = async (width) => {
       if (!identifiers.some((seen) => seen.text === item.text && seen.weight === item.weight && seen.lines.join('|') === item.lines.join('|'))) identifiers.push(item);
     }
   }
-  return { route: JOB.replayRoute, width, steps, phantomExposed, evidence, logRows, identifiers, logHeaders, plainApiNames, plainTerms, scrollWidths, logForm };
+  return { route: JOB.replayRoute, width, steps, evidence, logRows, identifiers, logHeaders, plainApiNames, plainTerms, scrollWidths, logForm };
 };
 
 if (JOB.routes.includes(JOB.replayRoute)) {
@@ -600,20 +507,12 @@ if (JOB.routes.includes(JOB.replayRoute)) {
   for (const width of JOB.layoutWidths) console.log('LAYOUT ' + JSON.stringify(await layoutRun(width)));
 }
 
-// AC-22: before the keys are listed the run uses the theme switch and every visible flow control, on
-// the first route that shows one at 1440 with motion allowed, so each key the site can write is there.
+// AC-22: before the keys are listed the run uses the theme switch, the one control that stores
+// anything, so each key the site can write is there.
 await page.setViewportSize({ width: 1440, height: 900 });
-await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'no-preference' });
+await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'reduce' });
 await page.goto(url, { waitUntil: 'load' });
 await choose('dark');
-for (const route of JOB.routes) {
-  await page.goto(JOB.base + route, { waitUntil: 'load' });
-  await settle();
-  const controls = await visibleFlowSwitches();
-  if (controls.length === 0) continue;
-  for (const control of controls) await page.locator(FLOW_SWITCHES).nth(control.index).click();
-  break;
-}
 
 const storage = await page.evaluate(() => {
   const keysOf = (area) => {

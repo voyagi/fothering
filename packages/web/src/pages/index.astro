@@ -1,15 +1,16 @@
 ---
-import FlowSwitch from '../components/FlowSwitch.astro';
-import LaneDrawing from '../components/LaneDrawing.astro';
-import LockoutTag from '../components/LockoutTag.astro';
+import Identifier from '../components/Identifier.astro';
 import Procedure from '../components/Procedure.astro';
 import Schedule from '../components/Schedule.astro';
 import Sheet from '../layouts/Sheet.astro';
 import { LANDING_SECTIONS, LIMITS_FIXED_ROWS, LIMITS_REPLAY_ROW, NO_MEASURED_NUMBER_SENTENCE, type LandingSectionId } from '../site/content.ts';
+import { textSegments, type Segment } from '../site/identifier-text.ts';
 import { PROVENANCE_LABELS } from '../site/labels.ts';
 import { readDeployRegion, repoRoot } from '../site/repo-facts.ts';
-import { buildReplayView, loadReplayArtifact } from '../site/replay-view.ts';
+import { buildReplayView, KIND_LABELS, loadReplayArtifact, MAX_BANK_SPAN } from '../site/replay-view.ts';
 import { routeFor } from '../site/route-list.ts';
+import { segmentNumber } from '../site/seven-segment.ts';
+import { buildTrackGrid, type TrackKey } from '../site/track-grid.ts';
 
 // The Region comes from the stacks' pin, as on the deploy and privacy pages, never typed here.
 const region = readDeployRegion(repoRoot(process.cwd()));
@@ -17,15 +18,45 @@ const artifact = loadReplayArtifact(process.cwd());
 const view = buildReplayView(artifact);
 const label = PROVENANCE_LABELS[artifact.provenance];
 const heading = (id: LandingSectionId): string => LANDING_SECTIONS.find((section) => section.id === id)?.heading ?? '';
-const { field, value, atUtc } = artifact.pause.readBack;
-const readBack = { field: field.slice(field.lastIndexOf('.') + 1), value, time: atUtc.slice(11, 16) };
+const terms = view.identifierTerms;
+const held = artifact.holdCheck?.result === 'passed';
+const clock = (utc: string): string => utc.slice(11, 16);
+
+// The readout: the window's times and sends, then what was found, muted and read back.
+const windowTimes = `${clock(artifact.window.startUtc)} to ${clock(artifact.window.endUtc)} UTC`;
+const sends = segmentNumber(String(artifact.window.sends));
+// The view writes the read-back as "<field>: <value>, <time> UTC"; only the field is an identifier.
+const readBackText = view.tag.replayReadBack;
+const readBackSplit = readBackText.indexOf(': ');
+const readBackField = readBackSplit < 0 ? readBackText : readBackText.slice(0, readBackSplit);
+const readBackRest = readBackSplit < 0 ? '' : readBackText.slice(readBackSplit);
+// Committed solid, alternatives in outline: the cause row is the one filled mark, and every other
+// evidence row is the same mark in outline.
+const ruledOut = view.schedule.rows.filter((row) => row.verdict !== 'Cause');
+const faceOf = (segment: Segment): 'mono' | 'inherit' => (segment.kind === 'name' ? 'inherit' : 'mono');
+
+// The step pattern through the paused step: the replay page plays step 4, the reopen.
+const grid = buildTrackGrid(artifact, 3);
+const pausedAt = `${held ? 'Closed' : 'Paused'} at ${clock(artifact.pause.atUtc)} UTC`;
+// The playhead lights one column after another; past fifteen columns the rest light together.
+const at = (index: number): string => `at-${String(Math.min(Math.max(index, 0), 15))}`;
+const padClass = (key: TrackKey, step: number, index: number): string =>
+  ['pad', `bank-${String(step)}`, key.lamp === 'event' ? 'lit' : key.lamp === 'bounce' ? 'bounce' : '', key.muted ? 'muted' : '', at(index)].filter((part) => part !== '').join(' ');
+// A bank's label spans the bank's pads, so it wraps inside its own bank and never runs into the
+// next one. The stylesheet carries span classes up to sixteen columns; a longer bank continues in
+// single cells, which keeps every later bank under its own pads.
+const bankCells = grid.banks.flatMap((bank) => {
+  const span = Math.min(bank.columns, MAX_BANK_SPAN);
+  const rest = Array.from({ length: bank.columns - span }, () => ({ span: 1, step: undefined }));
+  return [{ span, step: view.steps[bank.step - 1] }, ...rest];
+});
 
 const steps = [
   { title: 'Watch every event', text: 'Sends, deliveries, bounces, complaints, rejects and delays arrive through EventBridge, grouped by configuration set and by your message tags.' },
   { title: 'Name the cause, or say unknown', text: 'Detection code traces a spike to one import batch, template, receiving provider or missing authentication record, with the events that show it.' },
   {
     title: 'Close one lane, then read it back',
-    text: `Sending is switched off for that configuration set only, then confirmed through a second call, like the filled valve on ${artifact.closedLane} in row 1.`,
+    text: `Sending is switched off for that configuration set only, then confirmed through a second call, like the muted ${artifact.closedLane} track above.`,
     provenance: artifact.provenance,
   },
   { title: 'Tell you by email', text: 'You get what it saw, what it closed, what stays open, and the command that reopens the lane. Nothing reopens until you run it.' },
@@ -35,8 +66,14 @@ const refusals = [
   'Close a lane on a guess. When the evidence does not settle the cause, nothing closes, and the email says what code found.',
   'Pause your whole account. The smallest closure that stops the damage is one configuration set.',
   'Reopen on its own, or report a closure the read-back did not confirm. A lane reopens only when you run the reopen command.',
-  `Keep recipient addresses. Event records hold the receiving domain and a keyed hash, in ${region}, and expire 30 days after the send; deletion follows within a few days.`,
+  `Keep recipient addresses. Event records hold the receiving domain and a keyed hash, in \`${region}\`, and expire 30 days after the send; deletion follows within a few days.`,
 ];
+// The refusal is its first sentence and the reason the rest, split so the text reads unchanged. A
+// code span in a reason (the Region) renders as an identifier, so it never breaks at its hyphens.
+const refusalParts = refusals.map((refusal) => {
+  const end = refusal.indexOf('. ') + 1;
+  return { refusal: refusal.slice(0, end), reason: refusal.slice(end + 1) };
+});
 
 const limitsRows = [
   {
@@ -52,86 +89,129 @@ const limitsRows = [
 ];
 ---
 <Sheet route={routeFor('/')}>
-  <div class="row">
-    <div class="rail" aria-hidden="true">1</div>
-    <section class="moment" aria-labelledby="moment-title">
-      <div class="claim">
-        <h1 id="moment-title" class="landing-title">{heading('moment')}</h1>
-        <p class="lede" data-lede data-model-role>Fothering reads the events your Amazon SES configuration sets publish. When one stream starts damaging the reputation they share, its code pauses that one configuration set, reads the setting back, and tells you by email. An agent on Amazon Bedrock AgentCore explains the evidence, and can only confirm the lane code approved or say unknown.</p>
-        <div class="actions">
-          <a class="button" href="/replay/">Replay the incident
-            <svg viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M3 8h9M8.5 4l4 4-4 4" stroke="currentColor" stroke-width="1.8" /></svg>
-          </a>
-          <a class="textlink" href="/deploy/">Deploy into your AWS account</a>
+  <section class="first-band" aria-labelledby="moment-title">
+    <div class="claim">
+      <h1 id="moment-title" class="landing-title">{heading('moment')}</h1>
+      <p class="lede" data-lede data-model-role>Fothering reads the events your Amazon SES configuration sets publish. When one stream starts damaging the reputation they share, its code pauses that one configuration set, reads the setting back, and tells you by email. An agent on Amazon Bedrock AgentCore explains the evidence, and can only confirm the lane code approved or say unknown.</p>
+      <div class="actions">
+        <a class="keybtn" href="/replay/">Replay the incident
+          <svg viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M3 8h9M8.5 4l4 4-4 4" stroke="currentColor" stroke-width="1.8" /></svg>
+        </a>
+        <a class="keybtn outline" href="/deploy/">Deploy into your AWS account</a>
+      </div>
+    </div>
+    <aside class="readout" data-tag data-provenance={artifact.provenance} aria-labelledby="readout-title">
+      <p class="readout-head" id="readout-title"><span>Window</span> <span>{windowTimes}</span></p>
+      <p class="window">
+        <svg viewBox={sends.viewBox} aria-hidden="true" focusable="false">
+          {sends.digits.map((digit) => <g transform={digit.transform}>{digit.segments.map((segment) => <polygon class={segment.lit ? 'seg lit' : 'seg'} points={segment.points} />)}</g>)}
+        </svg>
+        <span class="visually-hidden">{artifact.window.sends} sends on {artifact.closedLane}</span>
+        <span class="unit" aria-hidden="true"><b>Sends</b><Identifier value={artifact.closedLane} /></span>
+      </p>
+      <dl>
+        <div>
+          <dt>Cause</dt>
+          <dd><svg class="sq sq-solid" viewBox="0 0 12 12" aria-hidden="true"><rect x="1" y="1" width="10" height="10" /></svg><Identifier value={view.tag.cause} /></dd>
         </div>
-      </div>
-      <div class="drawing">
-        <LaneDrawing
-          id="landing-drawing"
-          lanes={artifact.lanes}
-          closedLane={artifact.closedLane}
-          region={artifact.region}
-          provenance={artifact.provenance}
-          title={view.landing.drawingTitle}
-          description={view.landing.drawingDescription}
-          readBack={readBack}
-        />
-        <LockoutTag tag={view.tag} provenance={artifact.provenance} row={1} evidence />
-        <div class="caption-row">
-          <p class="caption" data-provenance={artifact.provenance}>{view.caption}{view.captionLinkHref !== undefined && <Fragment> <a href={view.captionLinkHref}>How SES counts reputation</a></Fragment>}</p>
-          <FlowSwitch />
+        <div>
+          <dt>Muted</dt>
+          <dd><span class="lamp on" aria-hidden="true"></span><Identifier value={view.tag.lane} /><span class="legend">{view.tag.legend}</span></dd>
         </div>
+        <div>
+          <dt>Read back</dt>
+          <dd><Identifier value={readBackField} />{readBackRest}</dd>
+        </div>
+      </dl>
+      <p class="stamp" data-provenance={artifact.provenance}>{view.tag.stamp}</p>
+    </aside>
+  </section>
+
+  <figure class="pattern" data-provenance={artifact.provenance} aria-label={view.landing.drawingTitle} aria-describedby="pattern-desc">
+    <p id="pattern-desc" class="visually-hidden">{view.landing.drawingDescription}</p>
+    <div class="tracks" aria-hidden="true">
+      <div class="track track-head">
+        <span class="silk">Lane</span>
+        <div class="pads">{grid.columns.map((column) => <span>{KIND_LABELS[column.kind]}<time>{column.time}</time></span>)}</div>
+        <span class="silk">Mute</span>
       </div>
-    </section>
-  </div>
-
-  <div class="row">
-    <div class="rail" aria-hidden="true">2</div>
-    <section class="sheet" aria-labelledby="procedure-title">
-      <div class="sheet-head">
-        <h2 id="procedure-title">{heading('procedure')}</h2>
-        <p>The order is fixed, the way an isolation procedure is. A step that cannot finish stops the sequence and closes nothing.</p>
+      {grid.tracks.map((track) => (
+        <div class="track">
+          <p class="lane-name"><Identifier value={track.lane} /><span>{track.muted ? pausedAt : 'Open'}</span></p>
+          <div class="pads">{track.keys.map((key, index) => <span class={padClass(key, grid.columns[index]?.step ?? 1, index)}></span>)}</div>
+          <span class={track.muted ? `mute on ${at(grid.muteColumn)}` : 'mute'}><span class="lamp"></span>{track.muted ? 'Muted' : 'Mute'}</span>
+        </div>
+      ))}
+      <div class="track track-banks">
+        <span></span>
+        <div class="pads">
+          {bankCells.map((cell) => (
+            <span class={`cols-${String(cell.span)}`}>{cell.step !== undefined && <Fragment><span class="step-name">{cell.step.label}</span><time>{cell.step.time}</time></Fragment>}</span>
+          ))}
+        </div>
+        <span></span>
       </div>
-      <Procedure steps={steps} closingStep={3} />
-    </section>
-  </div>
+    </div>
+    <figcaption data-provenance={artifact.provenance}>{view.caption}{view.captionLinkHref !== undefined && <Fragment> <a href={view.captionLinkHref}>How SES counts reputation</a></Fragment>}</figcaption>
+  </figure>
 
-  <div class="row">
-    <div class="rail" aria-hidden="true">3</div>
-    <section class="sheet refusals" aria-labelledby="refusals-title">
-      <h2 id="refusals-title">{heading('refusals')}</h2>
-      <ul class="refuse">
-        {refusals.map((refusal) => (
-          <li>
-            <svg viewBox="0 0 22 22" fill="none" aria-hidden="true"><circle cx="11" cy="11" r="9.5" stroke="currentColor" stroke-width="1.8" /><path d="M4.5 17.5l13-13" stroke="currentColor" stroke-width="1.8" /></svg>
-            <span>{refusal}</span>
-          </li>
-        ))}
-      </ul>
-    </section>
-  </div>
-
-  <div class="row">
-    <div class="rail" aria-hidden="true">4</div>
-    <section class="sheet" aria-labelledby="limits-title" data-limits>
-      <div class="sheet-head">
-        <h2 id="limits-title">{heading('limits')}</h2>
-        <p>This is a hackathon build. {NO_MEASURED_NUMBER_SENTENCE}</p>
-      </div>
-      <Schedule variant="ruled" columns={['Part', 'State', 'Note']} narrowHidden={[2]} rows={limitsRows} />
-    </section>
-  </div>
-
-  <div class="row">
-    <div class="rail" aria-hidden="true">5</div>
-    <section class="close" aria-labelledby="close-title">
+  <dl class="findings" data-provenance={artifact.provenance}>
+    <div>
+      <dt>Evidence</dt>
+      <dd>{textSegments(view.tag.evidence, terms).map((segment) => (segment.kind === 'text' ? segment.text : <Identifier value={segment.text} face={faceOf(segment)} />))}</dd>
+    </div>
+    {ruledOut.length > 0 && (
       <div>
-        <h2 id="close-title">Watch it close one lane</h2>
-        <p>The replay plays in this browser. Nothing to install, no AWS account needed.</p>
+        <dt>Ruled out</dt>
+        <dd>
+          <ul>
+            {ruledOut.map((row) => (
+              <li><svg class="sq" viewBox="0 0 12 12" aria-hidden="true"><rect x="1" y="1" width="10" height="10" /></svg>{textSegments(row.label, terms).map((segment) => (segment.kind === 'text' ? segment.text : <Identifier value={segment.text} face={faceOf(segment)} />))}</li>
+            ))}
+          </ul>
+        </dd>
       </div>
-      <a class="button" href="/replay/">Replay the incident
-        <svg viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M3 8h9M8.5 4l4 4-4 4" stroke="currentColor" stroke-width="1.8" /></svg>
-      </a>
-    </section>
-  </div>
+    )}
+    <div>
+      <dt>Reopens</dt>
+      <dd>{view.tag.reopens}</dd>
+    </div>
+  </dl>
+
+  <section class="band" aria-labelledby="procedure-title">
+    <div class="band-head">
+      <h2 id="procedure-title" class="keycap bank-1">{heading('procedure')}</h2>
+      <p>The order is fixed, the way an isolation procedure is. A step that cannot finish stops the sequence and closes nothing.</p>
+    </div>
+    <Procedure steps={steps} />
+  </section>
+
+  <section class="band band-split refusals" aria-labelledby="refusals-title">
+    <div class="band-intro">
+      <h2 id="refusals-title" class="keycap bank-2">{heading('refusals')}</h2>
+    </div>
+    <ul class="refuse">
+      {refusalParts.map((part) => <li><b>{part.refusal}</b> <span>{textSegments(part.reason, terms).map((segment) => (segment.kind === 'text' ? segment.text : <Identifier value={segment.text} face={faceOf(segment)} />))}</span></li>)}
+    </ul>
+  </section>
+
+  <section class="band fit-limits" aria-labelledby="limits-title" data-limits>
+    <div class="band-head">
+      <h2 id="limits-title" class="keycap bank-3">{heading('limits')}</h2>
+      <p>This is a hackathon build. {NO_MEASURED_NUMBER_SENTENCE}</p>
+    </div>
+    <div class="fit-form">
+      <Schedule variant="ruled" fit columns={['Part', 'State', 'Note']} rows={limitsRows} />
+    </div>
+  </section>
+
+  <section class="close-band" aria-labelledby="close-title">
+    <div>
+      <h2 id="close-title">Watch it close one lane</h2>
+      <p>The replay plays in this browser. Nothing to install, no AWS account needed.</p>
+    </div>
+    <a class="keybtn" href="/replay/">Replay the incident
+      <svg viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M3 8h9M8.5 4l4 4-4 4" stroke="currentColor" stroke-width="1.8" /></svg>
+    </a>
+  </section>
 </Sheet>

@@ -24,7 +24,7 @@
     },
     "packages/web": {
       "entry": ["src/pages/**/*.{astro,ts}", "src/harness/cli.ts"],
-      "ignoreDependencies": ["@astrojs/check", "@fontsource-variable/red-hat-display", "@fontsource-variable/red-hat-text", "@fontsource-variable/red-hat-mono"]
+      "ignoreDependencies": ["@astrojs/check", "@fontsource-variable/saira", "@fontsource-variable/public-sans", "@fontsource-variable/source-code-pro"]
     }
   }
 }

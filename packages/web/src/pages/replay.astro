@@ -1,23 +1,22 @@
 ---
 import CommandBlock from '../components/CommandBlock.astro';
-import FlowSwitch from '../components/FlowSwitch.astro';
 import Identifier from '../components/Identifier.astro';
-import LaneDrawing from '../components/LaneDrawing.astro';
-import LockoutTag from '../components/LockoutTag.astro';
 import Message from '../components/Message.astro';
 import Schedule from '../components/Schedule.astro';
 import Sheet from '../layouts/Sheet.astro';
 import { LOG_API_NAMES, textSegments, type Segment } from '../site/identifier-text.ts';
-import { buildReplayView, loadReplayArtifact } from '../site/replay-view.ts';
+import { buildReplayView, KIND_LABELS, loadReplayArtifact, MAX_BANK_SPAN } from '../site/replay-view.ts';
 import { routeFor } from '../site/route-list.ts';
+import { segmentNumber } from '../site/seven-segment.ts';
+import { buildTrackGrid, type TrackKey } from '../site/track-grid.ts';
 
 const artifact = loadReplayArtifact(process.cwd());
 const view = buildReplayView(artifact);
 const { provenance } = artifact;
 const [one, two, three, four] = view.steps;
-const { field, value, atUtc } = artifact.pause.readBack;
-const readBack = { field: field.slice(field.lastIndexOf('.') + 1), value, time: atUtc.slice(11, 16) };
 const STEP_COUNT = view.steps.length;
+const held = artifact.holdCheck?.result === 'passed';
+const hhmm = (utc: string): string => utc.slice(11, 16);
 
 // The view marks code spans with backticks; the artifact's configuration set names and tag values
 // are found by value. Names keep the face of the text around them, as the comp sets a lane name in
@@ -26,6 +25,35 @@ const STEP_COUNT = view.steps.length;
 const segmentsOf = (text: string): Segment[] => textSegments(text, view.identifierTerms);
 const faceOf = (segment: Segment): 'mono' | 'inherit' => (segment.kind === 'name' ? 'inherit' : 'mono');
 const clock = (step: { number: number; time: string }): string => `Step ${String(step.number)} of ${String(STEP_COUNT)}, ${step.time} UTC`;
+
+// The view writes the read-back as "<field>: <value>, <time> UTC"; only the field is an identifier.
+// The reopen read the same field back, so its line is built from the same field.
+const pausedText = view.tag.replayReadBack;
+const readBackSplit = pausedText.indexOf(': ');
+const readBackField = readBackSplit < 0 ? pausedText : pausedText.slice(0, readBackSplit);
+const pausedRest = readBackSplit < 0 ? '' : pausedText.slice(readBackSplit);
+const reopenedRest = `: ${artifact.reopen.readBack.value}, ${hhmm(artifact.reopen.readBack.atUtc)} UTC`;
+const boardDesc = Object.fromEntries(view.boardDescriptions.map((text, index) => [`data-desc-${String(index + 1)}`, text]));
+
+// The readout: the window's sends, then what each step has found, muted and read back so far.
+const windowTimes = `${hhmm(artifact.window.startUtc)} to ${hhmm(artifact.window.endUtc)} UTC`;
+const sends = segmentNumber(String(artifact.window.sends));
+
+// The whole pattern, through the reopen. Each step lights its own bank when it shows, so the
+// playhead runs from the first column of the bank, and a bank the replay has not reached yet is
+// drawn as unplayed keys (the stylesheet reads the root's data-step).
+const grid = buildTrackGrid(artifact, 4);
+const pausedAt = `${held ? 'Closed' : 'Paused'} at ${hhmm(artifact.pause.atUtc)} UTC`;
+const reopenedAt = `Open again at ${hhmm(artifact.reopen.atUtc)} UTC`;
+const bankFirst = (step: number): number => grid.banks.find((bank) => bank.step === step)?.first ?? 0;
+const at = (index: number): string => `at-${String(Math.min(Math.max(index, 0), 15))}`;
+const padClass = (key: TrackKey, step: number, index: number): string =>
+  ['pad', `bank-${String(step)}`, key.lamp === 'event' ? 'lit' : key.lamp === 'bounce' ? 'bounce' : '', key.muted ? 'muted' : '', at(index - bankFirst(step))].filter((part) => part !== '').join(' ');
+const muteStep = grid.columns[grid.muteColumn]?.step ?? 3;
+const muteAt = at(grid.muteColumn - bankFirst(muteStep));
+// A bank's step key spans the bank's pads; the replay refuses a step with more events than the
+// stylesheet's span classes reach (MAX_BANK_SPAN), so the cap below never cuts a bank short.
+const spanOf = (step: number): number => Math.min(grid.banks.find((bank) => bank.step === step)?.columns ?? 1, MAX_BANK_SPAN);
 
 const evidenceRows = view.schedule.rows.map((row) => ({
   header: row.label,
@@ -55,128 +83,160 @@ const logRows = view.eventLog.rows.map((row) => ({
 }));
 ---
 <Sheet route={routeFor('/replay/')}>
-  <div class="row">
-    <div class="rail" aria-hidden="true">1</div>
-    <section class="sheet replay-intro" aria-labelledby="replay-title">
-      <h1 id="replay-title">{segmentsOf(view.h1).map((segment) => (segment.kind === 'text' ? segment.text : <Identifier value={segment.text} face={faceOf(segment)} />))}</h1>
-      <p class="intro" data-provenance={provenance}>{view.intro} <span class="needs-js">Use the buttons or the arrow keys.</span></p>
-      <ol class="summary" data-wordcount="summary" data-provenance={provenance} aria-label="The incident in one line">
-        {view.summary.map((item) => (
-          <li><time>{item.time}</time> {segmentsOf(item.text).map((segment) => (segment.kind === 'text' ? segment.text : <Identifier value={segment.text} face={faceOf(segment)} />))}</li>
-        ))}
-      </ol>
+  <div class="replay" data-replay>
+    <section class="first-band" aria-labelledby="replay-title">
+      <div class="claim">
+        <h1 id="replay-title">{segmentsOf(view.h1).map((segment) => (segment.kind === 'text' ? segment.text : <Identifier value={segment.text} face={faceOf(segment)} />))}</h1>
+        <p class="intro" data-provenance={provenance}>{view.intro} <span class="needs-js">Use the buttons or the arrow keys.</span></p>
+        <ol class="summary" data-wordcount="summary" data-provenance={provenance} aria-label="The incident in one line">
+          {view.summary.map((item) => (
+            <li><time>{item.time}</time> {segmentsOf(item.text).map((segment) => (segment.kind === 'text' ? segment.text : <Identifier value={segment.text} face={faceOf(segment)} />))}</li>
+          ))}
+        </ol>
+      </div>
+      <aside class="readout" data-provenance={provenance} aria-labelledby="readout-title">
+        <p class="readout-head" id="readout-title"><span>Window</span> <span>{windowTimes}</span></p>
+        <p class="window">
+          <svg viewBox={sends.viewBox} aria-hidden="true" focusable="false">
+            {sends.digits.map((digit) => <g transform={digit.transform}>{digit.segments.map((segment) => <polygon class={segment.lit ? 'seg lit' : 'seg'} points={segment.points} />)}</g>)}
+          </svg>
+          <span class="visually-hidden">{artifact.window.sends} sends on {artifact.closedLane}</span>
+          <span class="unit" aria-hidden="true"><b>Sends</b><Identifier value={artifact.closedLane} /></span>
+        </p>
+        <dl>
+          <div>
+            <dt>Cause</dt>
+            <dd data-steps="1">Not named yet</dd>
+            <dd data-steps="2 3 4"><svg class="sq sq-solid" viewBox="0 0 12 12" aria-hidden="true"><rect x="1" y="1" width="10" height="10" /></svg><Identifier value={view.tag.cause} /></dd>
+          </div>
+          <div>
+            <dt>Muted</dt>
+            <dd data-steps="1 2 4">No track</dd>
+            <dd data-steps="3" data-wordcount="tag"><span class="lamp on" aria-hidden="true"></span><Identifier value={view.tag.lane} /><span class="legend">{view.tag.legend}</span></dd>
+          </div>
+          <div>
+            <dt>Read back</dt>
+            <dd data-steps="1 2">Not yet</dd>
+            <dd data-steps="3"><Identifier value={readBackField} />{pausedRest}</dd>
+            <dd data-steps="4"><Identifier value={readBackField} />{reopenedRest}</dd>
+          </div>
+        </dl>
+        <p class="stamp" data-provenance={provenance}>{view.tag.stamp}</p>
+      </aside>
     </section>
-  </div>
 
-  <div class="row">
-    <div class="rail" aria-hidden="true">2</div>
-    <div class="replay" data-replay>
-      <ol class="steps" aria-label="Replay steps">
-        {view.steps.map((step) => (
-          <li>
-            <button type="button" class="step" data-replay-goto={String(step.number)} data-clock={clock(step)} aria-current={step.number === 1 ? 'step' : undefined}>
-              <span class="dot" aria-hidden="true"></span>
-              <span class="t">{step.time}</span>
-              <span class="step-label">{step.label}</span>
-            </button>
-          </li>
-        ))}
-      </ol>
-
-      <section class="stage" aria-label="The incident, step by step">
-        <div class="board">
-          <div class="board-drawing">
-            <LaneDrawing
-              id="replay-board"
-              variant="board"
-              lanes={artifact.lanes}
-              closedLane={artifact.closedLane}
-              region={artifact.region}
-              provenance={provenance}
-              title={view.landing.drawingTitle}
-              description={view.boardDescriptions[2] ?? ''}
-              stepDescriptions={view.boardDescriptions}
-              readBack={readBack}
-            />
-            <div class="tag-slot" data-wordcount="tag">
-              <svg class="tag-phantom" data-tag-phantom aria-hidden="true" focusable="false">
-                <line class="tag-phantom-stem" x1="50%" y1="-18" x2="50%" y2="12" />
-                <g class="tag-phantom-card">
-                  <rect x="0" y="0" width="100%" height="100%" rx="8" />
-                  <circle cx="50%" cy="20" r="8" />
-                </g>
-              </svg>
-              <LockoutTag tag={view.tag} provenance={provenance} row={2} readBack="field" />
-            </div>
-          </div>
-          <div class="caption-row">
-            <p class="caption" data-wordcount="caption" data-provenance={provenance}>{view.caption}{view.captionLinkHref !== undefined && <Fragment> <a href={view.captionLinkHref}>How SES counts reputation</a></Fragment>}</p>
-            <FlowSwitch />
-          </div>
+    <figure class="board" aria-label={view.landing.drawingTitle} aria-describedby="board-desc" data-provenance={provenance}>
+      <p id="board-desc" class="visually-hidden" data-replay-desc {...boardDesc}>{view.boardDescriptions[2] ?? ''}</p>
+      <div class="tracks" aria-hidden="true">
+        <div class="track track-head">
+          <span class="silk">Lane</span>
+          <div class="pads">{grid.columns.map((column) => <span>{KIND_LABELS[column.kind]}<time>{column.time}</time></span>)}</div>
+          <span class="silk">Mute</span>
         </div>
-
-        <div class="narrative">
-          <div class="controls">
-            <button type="button" class="button quiet" data-replay-previous disabled>Previous step</button>
-            <button type="button" class="button" data-replay-next>Next step</button>
-            <p class="clock" role="status" data-replay-clock>{one === undefined ? '' : clock(one)}</p>
+        {grid.tracks.map((track) => (
+          <div class="track">
+            {track.lane === artifact.closedLane ? (
+              <p class="lane-name"><Identifier value={track.lane} /><span data-steps="1 2">Open</span><span data-steps="3">{pausedAt}</span><span data-steps="4">{reopenedAt}</span></p>
+            ) : (
+              <p class="lane-name"><Identifier value={track.lane} /><span>Open</span></p>
+            )}
+            <div class="pads">{track.keys.map((key, index) => <span class={padClass(key, grid.columns[index]?.step ?? 1, index)}></span>)}</div>
+            {track.lane === artifact.closedLane ? (
+              <Fragment>
+                <span class="mute" data-steps="1 2 4"><span class="lamp"></span>Mute</span>
+                <span class={`mute on ${muteAt}`} data-steps="3"><span class="lamp"></span>Muted</span>
+              </Fragment>
+            ) : (
+              <span class="mute"><span class="lamp"></span>Mute</span>
+            )}
           </div>
+        ))}
+      </div>
+      <div class="track track-banks">
+        <span></span>
+        <ol class="pads steps" aria-label="Replay steps">
+          {view.steps.map((step) => (
+            <li class={`cols-${String(spanOf(step.number))} bank-${String(step.number)}`}>
+              <button type="button" class="step" data-replay-goto={String(step.number)} data-clock={clock(step)} aria-current={step.number === 1 ? 'step' : undefined}>
+                <span class="key" aria-hidden="true"><span class="numeral">{step.number}</span><span class="lamp"></span></span>
+                <span class="t">{step.time}</span>
+                <span class="step-label">{step.label}</span>
+              </button>
+            </li>
+          ))}
+        </ol>
+        <span></span>
+      </div>
+      <figcaption class="caption" data-wordcount="caption" data-provenance={provenance}>{view.caption}{view.captionLinkHref !== undefined && <Fragment> <a href={view.captionLinkHref}>How SES counts reputation</a></Fragment>}</figcaption>
+    </figure>
 
-          <section class="panel" data-wordcount="step" data-steps="1" aria-labelledby="step-1-title">
-            <h2 id="step-1-title">{one?.heading}</h2>
-            {one?.paragraphs.map((text) => <p>{segmentsOf(text).map((segment) => (segment.kind === 'text' ? segment.text : <Identifier value={segment.text} face={faceOf(segment)} />))}</p>)}
-          </section>
+    <div class="controls">
+      <button type="button" class="button quiet" data-replay-previous disabled>Previous step</button>
+      <button type="button" class="button keybtn" data-replay-next>Next step
+        <svg viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M3 8h9M8.5 4l4 4-4 4" stroke="currentColor" stroke-width="1.8" /></svg>
+      </button>
+      <p class="clock" role="status" data-replay-clock>{one === undefined ? '' : clock(one)}</p>
+    </div>
 
-          <section class="panel" data-wordcount="step" data-steps="2" aria-labelledby="step-2-title">
-            <h2 id="step-2-title">{two?.heading}</h2>
-            <Schedule
-              compact
-              columns={['Dimension', 'Count', 'Verdict', 'Threshold']}
-              rows={evidenceRows}
-              terms={view.identifierTerms}
-              caption={view.schedule.caption}
-              captionAttrs={{ 'data-provenance': provenance }}
-            />
-            <p data-model-role>{view.schedule.modelRole}</p>
-          </section>
+    <div class="story">
+      <section class="panel" data-wordcount="step" data-steps="1" aria-labelledby="step-1-title">
+        <h2 id="step-1-title" class="keycap bank-1">{one?.heading}</h2>
+        <div class="panel-body">
+          {one?.paragraphs.map((text) => <p>{segmentsOf(text).map((segment) => (segment.kind === 'text' ? segment.text : <Identifier value={segment.text} face={faceOf(segment)} />))}</p>)}
+        </div>
+      </section>
 
-          <section class="panel" data-wordcount="step" data-steps="3" aria-labelledby="step-3-title">
-            <h2 id="step-3-title">{three?.heading}</h2>
-            {three?.paragraphs.map((text) => <p>{segmentsOf(text).map((segment) => (segment.kind === 'text' ? segment.text : <Identifier value={segment.text} face={faceOf(segment)} />))}</p>)}
-            <p class="lanes"><svg class="state-mark state-mark-shut" viewBox="0 0 12 12" aria-hidden="true"><rect x="1" y="1" width="10" height="10" /><rect class="bar" x="3" y="5" width="6" height="2" /></svg>{segmentsOf(view.lanesLines.paused).map((segment) => (segment.kind === 'text' ? segment.text : <Identifier value={segment.text} face={faceOf(segment)} />))}</p>
-          </section>
+      <section class="panel" data-wordcount="step" data-steps="2" aria-labelledby="step-2-title">
+        <h2 id="step-2-title" class="keycap bank-2">{two?.heading}</h2>
+        <div class="panel-body">
+          <Schedule
+            compact
+            columns={['Dimension', 'Count', 'Verdict', 'Threshold']}
+            rows={evidenceRows}
+            terms={view.identifierTerms}
+            caption={view.schedule.caption}
+            captionAttrs={{ 'data-provenance': provenance }}
+          />
+          <p data-model-role>{view.schedule.modelRole}</p>
+        </div>
+      </section>
 
-          <section class="panel" data-wordcount="step" data-steps="4" aria-labelledby="step-4-title">
-            <h2 id="step-4-title">{four?.heading}</h2>
-            <Message email={view.email} label="Operator email" terms={view.identifierTerms} />
-            <CommandBlock command={view.reopenCommand} provenance={provenance} />
-            {four?.paragraphs.map((text) => <p>{segmentsOf(text).map((segment) => (segment.kind === 'text' ? segment.text : <Identifier value={segment.text} face={faceOf(segment)} />))}</p>)}
-            <p class="lanes"><svg class="state-mark state-mark-open" viewBox="0 0 12 12" aria-hidden="true"><rect x="1" y="1" width="10" height="10" /></svg>{segmentsOf(view.lanesLines.reopened).map((segment) => (segment.kind === 'text' ? segment.text : <Identifier value={segment.text} face={faceOf(segment)} />))}</p>
-          </section>
+      <section class="panel" data-wordcount="step" data-steps="3" aria-labelledby="step-3-title">
+        <h2 id="step-3-title" class="keycap bank-3">{three?.heading}</h2>
+        <div class="panel-body">
+          {three?.paragraphs.map((text) => <p>{segmentsOf(text).map((segment) => (segment.kind === 'text' ? segment.text : <Identifier value={segment.text} face={faceOf(segment)} />))}</p>)}
+          <p class="lanes"><span class="lamp on" aria-hidden="true"></span>{segmentsOf(view.lanesLines.paused).map((segment) => (segment.kind === 'text' ? segment.text : <Identifier value={segment.text} face={faceOf(segment)} />))}</p>
+        </div>
+      </section>
+
+      <section class="panel" data-wordcount="step" data-steps="4" aria-labelledby="step-4-title">
+        <h2 id="step-4-title" class="keycap bank-4">{four?.heading}</h2>
+        <div class="panel-body">
+          <Message email={view.email} label="Operator email" terms={view.identifierTerms} />
+          <CommandBlock command={view.reopenCommand} provenance={provenance} />
+          {four?.paragraphs.map((text) => <p>{segmentsOf(text).map((segment) => (segment.kind === 'text' ? segment.text : <Identifier value={segment.text} face={faceOf(segment)} />))}</p>)}
+          <p class="lanes"><span class="lamp" aria-hidden="true"></span>{segmentsOf(view.lanesLines.reopened).map((segment) => (segment.kind === 'text' ? segment.text : <Identifier value={segment.text} face={faceOf(segment)} />))}</p>
         </div>
       </section>
     </div>
   </div>
 
-  <div class="row">
-    <div class="rail" aria-hidden="true">3</div>
-    <section class="sheet log" aria-labelledby="log-title">
-      <div class="sheet-head">
-        <h2 id="log-title">Event and call log</h2>
-        <p>Rows appear as the replay reaches them. A row keeps the receiving domain, never a recipient address.</p>
-      </div>
-      <Schedule
-        stack
-        columns={['Time UTC', 'Kind', 'Lane', 'Detail']}
-        monoColumns={[0, 2]}
-        wordColumns={[DETAIL_COLUMN]}
-        terms={view.identifierTerms}
-        rows={logRows}
-        caption={`${view.eventLog.caption} ${view.eventLog.note}`}
-        captionAttrs={{ 'data-provenance': provenance }}
-      />
-    </section>
-  </div>
+  <section class="band log" aria-labelledby="log-title">
+    <div class="band-head">
+      <h2 id="log-title">Event and call log</h2>
+      <p>Rows appear as the replay reaches them. A row keeps the receiving domain, never a recipient address.</p>
+    </div>
+    <Schedule
+      stack
+      columns={['Time UTC', 'Kind', 'Lane', 'Detail']}
+      monoColumns={[0, 2]}
+      wordColumns={[DETAIL_COLUMN]}
+      terms={view.identifierTerms}
+      rows={logRows}
+      caption={`${view.eventLog.caption} ${view.eventLog.note}`}
+      captionAttrs={{ 'data-provenance': provenance }}
+    />
+  </section>
   <script>
     import '../client/replay.ts';
   </script>

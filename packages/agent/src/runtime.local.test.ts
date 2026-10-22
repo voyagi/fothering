@@ -19,11 +19,13 @@ const BUNDLE_OPTIONS = join(REPO_ROOT, 'scripts', 'bundle-options.mjs');
 const AGENTCORE_APP_JS = join(REPO_ROOT, 'node_modules', 'bedrock-agentcore', 'dist', 'src', 'runtime', 'app.js');
 const CREATE_REQUIRE_LINE = 'const require = createRequire(import.meta.url);';
 const CHILD_TIMEOUT_MS = 60000;
-// The two tests that run esbuild inside this process write their planted inputs here, not under
-// the system temp folder: the time of those tiny builds follows the size of the folders above the
-// planted files. Under a temp folder holding about a million entries they took about 3 s alone and
-// went past 60 s in 3 of 4 cold verify:ship runs; from a small folder they took under 50 ms
-// (measured 2026-10-14). node_modules/ is git-ignored.
+// Every test that runs esbuild over planted files writes them here, not under the system temp
+// folder: the time of those tiny builds follows the size of the folders above the planted files.
+// Under a temp folder holding about a million entries the two in-process builds took about 3 s
+// alone and went past 60 s in 3 of 4 cold verify:ship runs; from a small folder they took under
+// 50 ms (measured 2026-10-14). The planted handler built by scripts/build.mjs in a child took
+// 112,694 ms under the temp folder and 644 ms here, back to back (measured 2026-10-21).
+// node_modules/ is git-ignored.
 const PLANT_PARENT = join(REPO_ROOT, 'node_modules', '.cache');
 const SESSION_HEADER = 'x-amzn-bedrock-agentcore-runtime-session-id';
 const LISTEN_REFUSED = 'listen guard refused a non-loopback bind';
@@ -218,7 +220,7 @@ describe('the agent bundle answers the AgentCore contract with the real handler 
     'names the handler bundle that throws while loading',
     () => {
       // Planted under plantDir for the reason PLANT_PARENT gives: this build resolves from the planted
-      // root, and from under a large system temp folder it took about 60 s alone (measured 2026-10-21).
+      // root, so the size of the folders above it sets the build time (figures at PLANT_PARENT).
       const plantedRoot = join(plantDir, 'planted-handler-root');
       const handlerDir = join(plantedRoot, 'packages', 'functions', 'src', 'planted');
       mkdirSync(handlerDir, { recursive: true });

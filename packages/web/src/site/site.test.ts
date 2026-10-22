@@ -136,33 +136,32 @@ describe('the route list (D-153)', () => {
     expect(SITE_ORIGIN).toMatch(/^https:\/\/[a-z-]+\.example$/);
   });
 
-  it('holds / as sheet FTH-001 with the UI-SPEC 11.2 title and description, indexable', () => {
+  it('holds / as Landing with the UI-SPEC 11.2 title and description, indexable', () => {
     expect(ROUTES.map((route) => route.path)).toEqual(['/', '/replay/', '/deploy/', '/privacy-and-ai/', '/accessibility/']);
-    expect(ROUTES[0]).toEqual({ path: '/', sheet: 'FTH-001', label: 'Landing', title: LANDING_TITLE, description: LANDING_DESCRIPTION, indexable: true });
+    expect(ROUTES[0]).toEqual({ path: '/', label: 'Landing', title: LANDING_TITLE, description: LANDING_DESCRIPTION, indexable: true });
   });
 
-  it('holds /replay/ as sheet FTH-002 with the UI-SPEC 11.2 title and description, indexable', () => {
-    expect(ROUTES[1]).toEqual({ path: '/replay/', sheet: 'FTH-002', label: 'Replay', title: REPLAY_TITLE, description: REPLAY_DESCRIPTION, indexable: true });
+  it('holds /replay/ as Replay with the UI-SPEC 11.2 title and description, indexable', () => {
+    expect(ROUTES[1]).toEqual({ path: '/replay/', label: 'Replay', title: REPLAY_TITLE, description: REPLAY_DESCRIPTION, indexable: true });
   });
 
-  it('holds /deploy/ as sheet FTH-003 with the UI-SPEC 11.2 title and description, indexable', () => {
-    expect(ROUTES[2]).toEqual({ path: '/deploy/', sheet: 'FTH-003', label: 'Deploy', title: DEPLOY_TITLE, description: DEPLOY_DESCRIPTION, indexable: true });
+  it('holds /deploy/ as Deploy with the UI-SPEC 11.2 title and description, indexable', () => {
+    expect(ROUTES[2]).toEqual({ path: '/deploy/', label: 'Deploy', title: DEPLOY_TITLE, description: DEPLOY_DESCRIPTION, indexable: true });
   });
 
-  it('holds /privacy-and-ai/ as sheet FTH-004 with the UI-SPEC 11.2 title and description, indexable', () => {
-    expect(ROUTES[3]).toEqual({ path: '/privacy-and-ai/', sheet: 'FTH-004', label: 'Privacy and AI', title: PRIVACY_TITLE, description: PRIVACY_DESCRIPTION, indexable: true });
+  it('holds /privacy-and-ai/ as Privacy and AI with the UI-SPEC 11.2 title and description, indexable', () => {
+    expect(ROUTES[3]).toEqual({ path: '/privacy-and-ai/', label: 'Privacy and AI', title: PRIVACY_TITLE, description: PRIVACY_DESCRIPTION, indexable: true });
   });
 
-  it('holds /accessibility/ as sheet FTH-005 with the UI-SPEC 11.2 title and description, indexable', () => {
-    expect(ROUTES[4]).toEqual({ path: '/accessibility/', sheet: 'FTH-005', label: 'Accessibility', title: ACCESSIBILITY_TITLE, description: ACCESSIBILITY_DESCRIPTION, indexable: true });
+  it('holds /accessibility/ as Accessibility with the UI-SPEC 11.2 title and description, indexable', () => {
+    expect(ROUTES[4]).toEqual({ path: '/accessibility/', label: 'Accessibility', title: ACCESSIBILITY_TITLE, description: ACCESSIBILITY_DESCRIPTION, indexable: true });
   });
 
-  it('holds the 404 title, description and Drawing cell text, with no path and not indexable', () => {
+  it('holds the 404 title and description, with no path and not indexable', () => {
     expect(NOT_FOUND_ROUTE).toEqual({
       path: null,
-      title: 'No sheet at this address: Fothering',
-      description: 'This address is not one of the sheets of the Fothering site.',
-      drawing: 'Not in the sheet set',
+      title: 'No page at this address: Fothering',
+      description: 'This address is not one of the pages of the Fothering site.',
       indexable: false,
     });
   });
@@ -177,12 +176,12 @@ describe('the route list (D-153)', () => {
 describe('routeFor', () => {
   const planted: readonly SiteRoute[] = [
     ...ROUTES,
-    { path: '/replay/', sheet: 'FTH-002', label: 'Replay', title: 't', description: 'd', indexable: true },
+    { path: '/replay/', label: 'Replay', title: 't', description: 'd', indexable: true },
   ];
 
   it('finds a route by its path with or without the trailing slash', () => {
-    expect(routeFor('/replay/', planted).sheet).toBe('FTH-002');
-    expect(routeFor('/replay', planted).sheet).toBe('FTH-002');
+    expect(routeFor('/replay/', planted).title).toBe(REPLAY_TITLE);
+    expect(routeFor('/replay', planted).title).toBe(REPLAY_TITLE);
   });
 
   it('finds the landing page at / and at the empty path', () => {
@@ -259,9 +258,9 @@ describe('the accessibility record (D-156, AC-53)', () => {
     expect(ACCESSIBILITY_RECORD.contact).not.toMatch(/@/);
   });
 
-  it('lists the known limitations, the drawings among them in the words of UI-SPEC 11.8', () => {
+  it('lists the known limitations, the drawn step pattern and digits among them', () => {
     expect(ACCESSIBILITY_RECORD.limitations.find((limitation) => limitation.id === 'drawings')?.text).toBe(
-      'The flow drawings are images with text descriptions; every lane name and state they show is also in the page text.',
+      "The step pattern and the readout's digits are drawn. The page text gives each lane's state and the number, and the replay's log lists every event.",
     );
     // axe-core 4.14.0's color-contrast rule does not skip SVG text, so the statement claims no such gap.
     expect(ACCESSIBILITY_RECORD.limitations.map((limitation) => limitation.id)).not.toContain('drawing-contrast');

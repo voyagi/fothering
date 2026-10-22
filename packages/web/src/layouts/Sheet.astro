@@ -12,22 +12,16 @@ interface Props {
 const { route } = Astro.props;
 const head = headMeta(route);
 
-// The revision is committed, never read from the build clock, so two builds of one commit match.
-// The date is kept whole; the line may end after the mark.
-const REVISION = { mark: 'Rev A', date: '2026-10-17' };
-const ZONES = ['A', 'B', 'C', 'D', 'E', 'F'];
 const THEMES = [
   { value: 'device', label: 'Device' },
   { value: 'light', label: 'Light' },
   { value: 'dark', label: 'Dark' },
 ];
-// Working sheets and reading sheets sit in separate title block cells, as on the approved comp.
-const READING_PATHS = new Set(['/privacy-and-ai/', '/accessibility/']);
-const workingSheets = ROUTES.filter((entry) => !READING_PATHS.has(entry.path));
-const readingSheets = ROUTES.filter((entry) => READING_PATHS.has(entry.path));
-const sheetIndex = ROUTES.findIndex((entry) => entry.path === route.path);
-const drawing = route.path === null ? route.drawing : `${route.sheet}, sheet ${sheetIndex + 1} of ${ROUTES.length}`;
-const status = PROVENANCE_LABELS[loadReplayArtifact(process.cwd()).provenance].titleBlockStatus;
+// The top strip names the three working pages; the index at the foot names all five.
+const STRIP_PATHS = ['/replay/', '/deploy/', '/privacy-and-ai/'];
+const stripRoutes = STRIP_PATHS.map((path) => ROUTES.find((entry) => entry.path === path)).filter((entry) => entry !== undefined);
+const { provenance } = loadReplayArtifact(process.cwd());
+const status = PROVENANCE_LABELS[provenance].titleBlockStatus;
 const currentMark = (path: string): 'page' | undefined => (path === route.path ? 'page' : undefined);
 ---
 <!doctype html>
@@ -46,56 +40,35 @@ const currentMark = (path: string): 'page' | undefined => (path === route.path ?
     </script>
   </head>
   <body>
-    <div class="frame">
-      <a class="skip" href="#main">Skip to main content</a>
-      <div class="zones" aria-hidden="true">
-        <span></span>
-        {ZONES.map((zone) => <span>{zone}</span>)}
-      </div>
-      <header class="bar">
-        <a class="wordmark" href="/">FOTHERING</a>
-        <div class="bar-end">
-          <a class="bar-link" href="#index">Sheet index</a>
-          <fieldset class="theme">
-            <legend>Colour theme</legend>
-            {THEMES.map((theme) => (
-              <label>
-                <input type="radio" name="theme" value={theme.value} checked={theme.value === 'device'} />
-                <span>{theme.label}</span>
-              </label>
-            ))}
-          </fieldset>
-        </div>
-      </header>
-      <main id="main" tabindex="-1">
-        <slot />
-      </main>
-      <footer id="index" class="titleblock">
-        <div>
-          <b>Project</b>
-          Fothering. Stops one leak without stopping the ship.
-        </div>
-        <nav aria-label="Sheets">
-          <b>Sheets</b>
-          <ul>
-            {workingSheets.map((entry) => <li><a href={entry.path} aria-current={currentMark(entry.path)}>{entry.label}</a></li>)}
-          </ul>
-        </nav>
-        {readingSheets.length > 0 && (
-          <div>
-            <b>Read</b>
-            <ul>
-              {readingSheets.map((entry) => <li><a href={entry.path} aria-current={currentMark(entry.path)}>{entry.label}</a></li>)}
-            </ul>
-          </div>
-        )}
-        <div>
-          <b>Drawing</b>
-          <span class="mono">{drawing}</span><br />
-          <span class="mono">{REVISION.mark}, <span class="keep-whole">{REVISION.date}</span></span><br />
-          <span class="mono">Status: {status}</span>
-        </div>
-      </footer>
-    </div>
+    <a class="skip" href="#main">Skip to main content</a>
+    <header class="top-strip">
+      <a class="wordmark" href="/">FOTHERING</a>
+      <nav aria-label="Main">
+        <ul>
+          {stripRoutes.map((entry) => <li><a href={entry.path} aria-current={currentMark(entry.path)}><span class="lamp" aria-hidden="true"></span>{entry.label}</a></li>)}
+        </ul>
+      </nav>
+      <fieldset class="theme">
+        <legend>Colour theme</legend>
+        {THEMES.map((theme) => (
+          <label>
+            <input type="radio" name="theme" value={theme.value} checked={theme.value === 'device'} />
+            <span><span class="lamp" aria-hidden="true"></span><span class="cap" aria-hidden="true"></span>{theme.label}</span>
+          </label>
+        ))}
+      </fieldset>
+    </header>
+    <main id="main" tabindex="-1">
+      <slot />
+    </main>
+    <footer class="index">
+      <p class="project">Fothering. Stops one leak without stopping the ship.</p>
+      <nav aria-label="Every page">
+        <ul>
+          {ROUTES.map((entry) => <li><a href={entry.path} aria-current={currentMark(entry.path)}>{entry.label}</a></li>)}
+        </ul>
+      </nav>
+      <p class="status" data-provenance={provenance}>Replay data: {status}</p>
+    </footer>
   </body>
 </html>
