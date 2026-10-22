@@ -1,5 +1,6 @@
 import * as z from 'zod';
 import { INCIDENT_PARTS, incidentItemKey, incidentLaneKey, incidentPauseKey, type IncidentPart } from './evidence-record.js';
+import { attemptRecordSchema } from './live-run.js';
 import { lanePartitionKey, PARTITION_KEY, SORT_KEY, type EventRecord, type RecordKey } from './records.js';
 import { REOPEN_COMMAND_TEMPLATE, REOPEN_FUNCTION_NAME_SLOT } from './reopen.js';
 
@@ -100,10 +101,12 @@ const REOPEN_SAVE_COMMAND = REOPEN_COMMAND_TEMPLATE.replace(REOPEN_FUNCTION_NAME
   .replace('{set}', '<lane>')
   .replace(/result\.json$/, REOPEN_RESULT_PATH);
 
+const ATTEMPTS_FILE = written('attempts.jsonl', 'jsonl', 'lane');
+
 export const RUN_FOLDER_FILES: readonly RunFolderFile[] = [
   written('account.json', 'json', 'requestId'),
   written('callers.json', 'json', 'lanes'),
-  written('attempts.jsonl', 'jsonl', 'lane'),
+  ATTEMPTS_FILE,
   entry({ path: 'aws/saved.jsonl', producer: 'runbook', phase: 'pre-removal', appliesTo: 'all', format: 'jsonl', envelope: 'savedAtUtc', emptyAllowed: false }),
   read('aws/stacks.json', 'Stacks', cli('aws cloudformation describe-stacks', `--region ${REGION}`)),
   read('aws/templates/<StackName>.json', 'TemplateBody', cli('aws cloudformation get-template', `--region ${REGION}`, '--template-stage Original', '--stack-name <StackName>'), {
@@ -182,6 +185,8 @@ export type SavedFileContent =
 
 export interface CheckSavedInput extends RunFolderContext {
   runId: string;
+  /** The lane map's runIdTagKey, which every attempt the command writes carries. */
+  runIdTagKey: string;
   /** Keyed by the path relative to the run folder. */
   files: ReadonlyMap<string, SavedFileContent>;
 }
@@ -308,6 +313,28 @@ function laneFindings(set: string, items: Items, input: CheckSavedInput): string
   return findings;
 }
 
+// The command writes every attempt with this run's id tag, so a line that is no attempt record,
+// carries no tag of this run or names a set outside the lane map was not written by this run.
+// callers.json and account.json carry no run id, so only their envelope can be checked.
+function attemptLineFinding(value: unknown, input: CheckSavedInput): string | undefined {
+  const parsed = attemptRecordSchema.safeParse(value);
+  if (!parsed.success) return 'is not an attempt record';
+  if (!parsed.data.tags.some((tag) => tag.name === input.runIdTagKey && tag.value === input.runId)) return 'carries no run id tag of this run';
+  if (!input.sets.includes(parsed.data.lane)) return 'names a set outside the lane map';
+  return undefined;
+}
+
+function attemptFindings(input: CheckSavedInput, expected: readonly ExpectedRunFolderFile[], reads: ReadonlyMap<string, FileRead>): string[] {
+  return expected
+    .filter(({ file }) => file === ATTEMPTS_FILE)
+    .flatMap(({ path }) =>
+      (reads.get(path)?.values ?? []).flatMap((value, index) => {
+        const finding = attemptLineFinding(value, input);
+        return finding === undefined ? [] : [`${path} line ${index + 1}: ${finding}`];
+      }),
+    );
+}
+
 function itemsFindings(input: CheckSavedInput, reads: ReadonlyMap<string, FileRead>): string[] {
   const pointers = reads.get(POINTERS_PATH)?.items;
   const incident = reads.get(INCIDENT_PATH)?.items;
@@ -403,6 +430,7 @@ export function checkSavedFolder(input: CheckSavedInput): CheckSavedResult {
   const findings = [
     ...[...reads.values()].flatMap((read) => read.findings),
     ...stacksFindings(reads.get(STACKS_PATH)?.values),
+    ...attemptFindings(input, expected, reads),
     ...itemsFindings(input, reads),
     ...saveLogFindings(input, expected, reads.get(SAVED_LOG_PATH)?.values),
   ];

@@ -14,6 +14,7 @@ type Image = Record<string, unknown>;
 
 const IMAGE: Image = JSON.parse(readFileSync(new URL('./fixtures/run-folder-image.json', import.meta.url), 'utf8')) as Image;
 const RUN_ID = 'live-20261021-s1-1';
+const RUN_ID_TAG_KEY = 'fothering_run';
 // Built at run time so no twelve-digit literal sits in the file.
 const ACCOUNT = '0'.repeat(12);
 const SETS = ['fothering-transactional', 'fothering-bulk', 'fothering-alerts'];
@@ -71,7 +72,7 @@ function inputOf(plant: Plant = {}): CheckSavedInput {
   plant.image?.(image);
   const files = new Map(Object.entries(image).map(([path, content]) => [path, contentOf(path, content, RUN_ID)]));
   plant.files?.(files);
-  return { runId: RUN_ID, scenario: plant.scenario ?? CLOSE_RUN, sets: SETS, afterRemoval: plant.afterRemoval ?? false, files };
+  return { runId: RUN_ID, runIdTagKey: RUN_ID_TAG_KEY, scenario: plant.scenario ?? CLOSE_RUN, sets: SETS, afterRemoval: plant.afterRemoval ?? false, files };
 }
 
 function findingsOf(plant: Plant = {}): string {
@@ -96,6 +97,20 @@ function itemsOf(image: Image, path: string): Record<string, DynamoValue>[] {
 
 function setText(path: string, text: string): (files: Map<string, SavedFileContent>) => void {
   return (files) => files.set(path, { kind: 'text', text });
+}
+
+interface AttemptLine {
+  lane: string;
+  tags: { name: string; value: string }[];
+  [field: string]: unknown;
+}
+
+function attemptsOf(image: Image, step: string): AttemptLine[] {
+  return image[`run/${step}.attempts.jsonl`] as AttemptLine[];
+}
+
+function setRunIdTag(line: AttemptLine | undefined, runId: string): void {
+  for (const tag of line?.tags ?? []) if (tag.name === RUN_ID_TAG_KEY) tag.value = runId;
 }
 
 describe('checkSavedFolder over the committed image', () => {
@@ -208,6 +223,49 @@ describe('the items hold the run, the incident and its parts', () => {
       },
     };
     expect(findingsOf(plant)).toBe(`aws/items-pointers.json: has no ${sortKey} item`);
+  });
+});
+
+describe('every attempt line was written by this run', () => {
+  const OTHER_RUN = 'live-20261021-s1-2';
+
+  it('fails an attempts file copied from another run, naming each line', () => {
+    const plant: Plant = { image: (image) => attemptsOf(image, 'spike').forEach((line) => setRunIdTag(line, OTHER_RUN)) };
+    const findings = checkSavedFolder(inputOf(plant)).findings;
+    expect(findings).toHaveLength(attemptsOf(structuredClone(IMAGE), 'spike').length);
+    expect(findings[0]).toBe('run/spike.attempts.jsonl line 1: carries no run id tag of this run');
+  });
+
+  it('fails one line of another run among lines of this run', () => {
+    expect(findingsOf({ image: (image) => setRunIdTag(attemptsOf(image, 'after-pause')[1], OTHER_RUN) })).toBe(
+      'run/after-pause.attempts.jsonl line 2: carries no run id tag of this run',
+    );
+  });
+
+  it('fails a line with no run id tag at all', () => {
+    const plant: Plant = {
+      image: (image) => {
+        const line = attemptsOf(image, 'spike')[0];
+        if (line !== undefined) line.tags = line.tags.filter((tag) => tag.name !== RUN_ID_TAG_KEY);
+      },
+    };
+    expect(findingsOf(plant)).toBe('run/spike.attempts.jsonl line 1: carries no run id tag of this run');
+  });
+
+  it('fails a line that holds only a lane, since it is no attempt record', () => {
+    expect(findingsOf({ image: (image) => (attemptsOf(image, 'spike')[0] = { lane: 'fothering-bulk', tags: [] }) })).toBe(
+      'run/spike.attempts.jsonl line 1: is not an attempt record',
+    );
+  });
+
+  it('fails a line naming a set outside the lane map', () => {
+    const plant: Plant = {
+      image: (image) => {
+        const line = attemptsOf(image, 'spike')[1];
+        if (line !== undefined) line.lane = 'fothering-elsewhere';
+      },
+    };
+    expect(findingsOf(plant)).toBe('run/spike.attempts.jsonl line 2: names a set outside the lane map');
   });
 });
 
@@ -374,6 +432,8 @@ describe('findings name files and parts, never a value read from a file', () => 
       { image: (image) => itemsOf(image, 'aws/items-incident.json').forEach((item) => (item.pk = { S: 'INCIDENT#incident-fixture-two' })) },
       { image: (image) => moveSave(image, 'aws/stacks.json', 'deploy-finished') },
       { image: (image) => (savedLog(image)[0] = { event: 'deploy-finished', deployCommit: 'ABC', savedAtUtc: 'later' }) },
+      { image: (image) => setRunIdTag(attemptsOf(image, 'spike')[0], 'live-20261021-s1-2') },
+      { image: (image) => (attemptsOf(image, 'spike')[0] = { lane: 'fothering-bulk', tags: [], recipient: 'x@ABC.example' }) },
     ];
     const findings = plants.flatMap((plant) => checkSavedFolder(inputOf(plant)).findings);
     expect(findings.length).toBeGreaterThanOrEqual(plants.length);

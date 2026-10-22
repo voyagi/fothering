@@ -55,7 +55,7 @@ export function runCheckSaved(deps: LiveRunDeps, runId: string, afterRemoval: bo
   const sets = deps.laneMap.lanes.map((lane) => lane.configurationSet);
   const expected = expectedRunFolderFiles({ scenario, sets, afterRemoval });
   const files = new Map(expected.map(({ path, file }) => [path, readContent(join(folder, ...path.split('/')), file.format === 'items')]));
-  const result = checkSavedFolder({ runId, scenario, sets, afterRemoval, files });
+  const result = checkSavedFolder({ runId, runIdTagKey: deps.laneMap.runIdTagKey, scenario, sets, afterRemoval, files });
   if (result.ok) {
     deps.io.out(summaryLine(result.checked, 0));
     return 0;
