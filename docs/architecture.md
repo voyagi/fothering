@@ -11,9 +11,11 @@ Everything runs in your own AWS account in `eu-central-1`, from the four CDK sta
    Each set publishes six event types to the EventBridge default bus: send, delivery, bounce,
    complaint, reject and delivery delay. The stacks create no configuration set.
 2. A rule in `ingest-stack.ts` forwards those events, from the lanes' sets only, to the ingest
-   function. It stores one minimized record per recipient in DynamoDB: the receiving domain and an
-   HMAC of the address under a key held in Secrets Manager, with no subject and no headers. Each
-   record expires 30 days after its send.
+   function, which stores minimized records in DynamoDB: one per recipient for a send, delivery,
+   bounce or delivery delay, one counting record plus one per complained recipient for a complaint,
+   and one record with no recipient for a reject. A recipient is kept only as the receiving domain
+   and an HMAC of the address under a key held in Secrets Manager, and no record keeps the subject
+   or the headers. Each record expires 30 days after its send.
 3. Every five minutes the detection function reads each lane's recent windows.
 4. A spike opens an incident. Only then does detection read the SES settings (identities,
    configuration sets, event destinations) and DNS (SPF, DMARC, MX), and build one evidence record.

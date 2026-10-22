@@ -21,7 +21,7 @@ config:
     wrappingWidth: 600
 ---
 flowchart TB
-  subgraph account["Your AWS account, eu-central-1. Every role is denied account-level sending."]
+  subgraph account["Your AWS account, eu-central-1. No Fothering role can stop the whole account's sending."]
     ses["<b>Amazon SES</b><br/>your apps send through one configuration set per lane<br/>fothering-transactional, fothering-bulk, fothering-alerts"]
     ingest["<b>Amazon EventBridge rule, then Ingest</b> (AWS Lambda)<br/>six SES event types, from the lanes' sets only"]
     table[("<b>Amazon DynamoDB</b><br/>recipient domain and a keyed hash, kept 30 days")]
