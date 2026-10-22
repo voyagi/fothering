@@ -1,75 +1,86 @@
 /* Own family names rather than the packages' "... Variable" ones, so document.fonts.check on the
-   names DESIGN.md uses can only pass when these faces load. Ranges are copied from each wght.css. */
+   names DESIGN.md uses can only pass when these faces load. Descriptors are copied from each
+   package's installed CSS: Saira's from wdth.css, so its width axis rides on font-stretch, and
+   Public Sans's and Source Code Pro's from wght.css. Only latin and latin-ext ship. */
 @font-face {
-  font-family: 'Red Hat Display';
+  font-family: 'Saira';
   font-style: normal;
   font-display: swap;
-  font-weight: 300 900;
-  src: url('@fontsource-variable/red-hat-display/files/red-hat-display-latin-ext-wght-normal.woff2') format('woff2-variations');
+  font-weight: 100 900;
+  font-stretch: 50% 125%;
+  src: url('@fontsource-variable/saira/files/saira-latin-ext-wdth-normal.woff2') format('woff2-variations');
   unicode-range: U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF;
 }
 
 @font-face {
-  font-family: 'Red Hat Display';
+  font-family: 'Saira';
   font-style: normal;
   font-display: swap;
-  font-weight: 300 900;
-  src: url('@fontsource-variable/red-hat-display/files/red-hat-display-latin-wght-normal.woff2') format('woff2-variations');
+  font-weight: 100 900;
+  font-stretch: 50% 125%;
+  src: url('@fontsource-variable/saira/files/saira-latin-wdth-normal.woff2') format('woff2-variations');
   unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD;
 }
 
 @font-face {
-  font-family: 'Red Hat Text';
+  font-family: 'Public Sans';
   font-style: normal;
   font-display: swap;
-  font-weight: 300 700;
-  src: url('@fontsource-variable/red-hat-text/files/red-hat-text-latin-ext-wght-normal.woff2') format('woff2-variations');
+  font-weight: 100 900;
+  src: url('@fontsource-variable/public-sans/files/public-sans-latin-ext-wght-normal.woff2') format('woff2-variations');
   unicode-range: U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF;
 }
 
 @font-face {
-  font-family: 'Red Hat Text';
+  font-family: 'Public Sans';
   font-style: normal;
   font-display: swap;
-  font-weight: 300 700;
-  src: url('@fontsource-variable/red-hat-text/files/red-hat-text-latin-wght-normal.woff2') format('woff2-variations');
+  font-weight: 100 900;
+  src: url('@fontsource-variable/public-sans/files/public-sans-latin-wght-normal.woff2') format('woff2-variations');
   unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD;
 }
 
 @font-face {
-  font-family: 'Red Hat Mono';
+  font-family: 'Source Code Pro';
   font-style: normal;
   font-display: swap;
-  font-weight: 300 700;
-  src: url('@fontsource-variable/red-hat-mono/files/red-hat-mono-latin-ext-wght-normal.woff2') format('woff2-variations');
-  unicode-range: U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF;
+  font-weight: 200 900;
+  src: url('@fontsource-variable/source-code-pro/files/source-code-pro-latin-ext-wght-normal.woff2') format('woff2-variations');
+  unicode-range: U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C4,U+2113,U+2C60-2C7F,U+A720-A7FF;
 }
 
 @font-face {
-  font-family: 'Red Hat Mono';
+  font-family: 'Source Code Pro';
   font-style: normal;
   font-display: swap;
-  font-weight: 300 700;
-  src: url('@fontsource-variable/red-hat-mono/files/red-hat-mono-latin-wght-normal.woff2') format('woff2-variations');
+  font-weight: 200 900;
+  src: url('@fontsource-variable/source-code-pro/files/source-code-pro-latin-wght-normal.woff2') format('woff2-variations');
   unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD;
 }
 
-/* The sheet. Colours, type sizes, the measure and spacing steps come from tokens.css, which also
-   paints the page ground and ink; this file adds the drawing's geometry and its parts. */
+/* The Muted Track. A grey chassis printed in silkscreen ink; step keys in four bank colours that
+   hold in both themes; one LED red that lights only what is on; a black readout window. Colours,
+   type sizes, the measure and the spacing steps come from tokens.css, which also paints the page
+   ground and ink; this file adds the faces, the geometry and the parts.
+   Saira is the silkscreen and headline voice and takes its width from font-stretch, which the font
+   shorthand resets, so every rule that sets a Saira width writes font-stretch after the shorthand. */
 :root {
-  --font-display: 'Red Hat Display', sans-serif;
-  --font-text: 'Red Hat Text', sans-serif;
-  --font-mono: 'Red Hat Mono', monospace;
-  --gutter: clamp(16px, 3vw, 40px);
-  --sheet-block: clamp(44px, 6vw, 92px);
-  --rail: 34px;
+  --font-silk: 'Saira', sans-serif;
+  --font-text: 'Public Sans', sans-serif;
+  --font-mono: 'Source Code Pro', monospace;
+  --gutter: clamp(16px, 3.75vw, 48px);
+  --band-block: clamp(48px, 7vw, 88px);
+  --strip: 72px;
+  /* An unlit lamp on a coloured key is the key's own colour, darkened. */
+  --lamp-dark: color-mix(in srgb, var(--key-ink) 30%, transparent);
   /* Browsers round border widths down to whole device pixels, so below 1.5 device pixels per CSS
      pixel a 1.5px outline would draw as a 1px rule; the weights step up there and stay three lines. */
   --w-rule: 1px;
   --w-outline: 1.5px;
   --w-emph: 2.5px;
-  accent-color: var(--ink);
-  scrollbar-color: var(--label) var(--ground);
+  accent-color: var(--key-red);
+  caret-color: var(--ink);
+  scrollbar-color: var(--label) var(--well);
 }
 @media (max-resolution: 1.49dppx) {
   :root { --w-outline: 2px; --w-emph: 3px; }
@@ -78,351 +89,417 @@
 *, *::before, *::after { box-sizing: border-box; }
 html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
 body { margin: 0; font: 400 var(--text-body)/1.55 var(--font-text); }
-::selection { background: var(--ink); color: var(--ground); }
+::selection { background: var(--key-yellow); color: var(--key-ink); }
 a { color: inherit; text-underline-offset: 0.22em; text-decoration-thickness: 1px; }
 a:hover { text-decoration-thickness: 2px; }
 :focus-visible { outline: 2px solid var(--ink); outline-offset: 3px; }
 #main:focus { outline: none; }
-h1 { font: 700 var(--text-display)/1.04 var(--font-display); letter-spacing: -0.026em; margin: 0; max-inline-size: 22ch; text-wrap: balance; }
-h2 { font: 700 var(--text-headline)/1.08 var(--font-display); letter-spacing: -0.02em; margin: 0; text-wrap: balance; }
-h3 { font: 700 var(--text-title)/1.25 var(--font-display); margin: 0 0 var(--space-sm); }
+h1, h2, h3 { margin: 0; text-wrap: balance; text-transform: uppercase; }
+h1 { font: 800 var(--text-display)/0.98 var(--font-silk); font-stretch: 75%; letter-spacing: 0.005em; }
+h2 { font: 800 var(--text-headline)/1 var(--font-silk); font-stretch: 75%; letter-spacing: 0.01em; }
+h3 { font: 700 var(--text-title)/1.25 var(--font-silk); font-stretch: 85%; letter-spacing: 0.06em; }
 p, li, dd { max-inline-size: var(--measure); }
 .mono, code { font-family: var(--font-mono); font-feature-settings: "tnum" 1; }
 code { font-size: var(--text-mono-value); font-weight: 500; }
-.visually-hidden, .theme legend { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 
-.skip { position: absolute; left: var(--space-12); top: -64px; z-index: 5; background: var(--ink); color: var(--sheet); padding: var(--space-12) var(--space-md); font-weight: 600; text-decoration: none; }
+.skip { position: absolute; left: var(--space-12); top: -64px; z-index: 5; padding: var(--space-12) var(--space-md); border-radius: 4px; background: var(--ink); color: var(--ground); font: 700 var(--text-silk)/1 var(--font-silk); font-stretch: 85%; letter-spacing: 0.14em; text-transform: uppercase; text-decoration: none; }
 .skip:focus { top: var(--space-12); }
 
-/* Drawing frame. The zone letters and the row numbers are real coordinates copy can cite, so the
-   border is an index, not an ornament. */
-.frame { margin: var(--gutter); border: var(--w-outline) solid var(--ink); background: var(--sheet); }
-.zones { display: grid; grid-template-columns: var(--rail) repeat(6, minmax(0, 1fr)); border-bottom: var(--w-rule) solid var(--rule); }
-.zones span { font: 500 var(--text-label-small)/1 var(--font-mono); color: var(--label); text-align: center; padding: 6px 0; border-left: var(--w-rule) solid var(--rule); }
-.zones span:first-child { border-left: 0; }
-.row { display: grid; grid-template-columns: var(--rail) minmax(0, 1fr); border-bottom: var(--w-rule) solid var(--ink); }
-.row:first-of-type { border-top: var(--w-rule) solid var(--ink); }
-.rail { border-right: var(--w-rule) solid var(--rule); font: 500 var(--text-label-small)/1 var(--font-mono); color: var(--label); text-align: center; padding-top: 14px; }
+/* Silkscreen: what the chassis prints beside its controls. Saira caps, a little condensed, spaced. */
+.silk, .state, .schedule .note, .readout dt, .findings dt, .readout-head, .role-stack > span, .decode .k {
+  font: 600 var(--text-silk)/1.3 var(--font-silk);
+  font-stretch: 85%;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink-2);
+}
 
-.bar { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: var(--space-md) var(--space-lg); padding: var(--space-md) var(--gutter); }
-.wordmark { font: 850 var(--text-wordmark)/1 var(--font-display); letter-spacing: 0.08em; text-decoration: none; padding: var(--space-xs) 0; }
-.bar-end { display: flex; align-items: center; gap: clamp(16px, 2.4vw, 32px); }
-.bar-link { font: 600 var(--text-small)/1 var(--font-text); padding: var(--space-12) 0; }
+/* A lamp is off until something is on. Only the LED red lights one. */
+.lamp { display: inline-block; flex: none; inline-size: 8px; block-size: 8px; border-radius: 50%; background: var(--led-off); }
+.lamp.on { background: var(--led); }
 
-/* Three segments in one outline; the native radios sit over their labels, so the browser keeps the
-   group's single Tab stop and its arrow keys. */
-.theme { display: inline-flex; margin: 0; padding: 0; min-inline-size: 0; border: var(--w-outline) solid var(--ink); border-radius: 2px; }
+/* The top strip: the wordmark, the three working pages with their lamps, and the theme module in a
+   box of its own. */
+.top-strip { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-sm) var(--space-xl); min-block-size: var(--strip); padding: var(--space-sm) var(--gutter); border-bottom: 2px solid var(--ink); }
+.wordmark { margin-right: auto; padding-block: var(--space-sm); font: 800 var(--text-wordmark)/1 var(--font-silk); font-stretch: 70%; letter-spacing: 0.02em; text-decoration: none; }
+.top-strip ul, .index ul { display: flex; flex-wrap: wrap; gap: 0 var(--space-lg); margin: 0; padding: 0; list-style: none; }
+.top-strip li, .index li { max-inline-size: none; }
+.top-strip nav a, .index nav a { display: inline-flex; align-items: center; gap: var(--space-sm); min-block-size: 44px; font: 600 var(--text-silk)/1 var(--font-silk); font-stretch: 85%; letter-spacing: 0.14em; text-transform: uppercase; text-decoration: none; }
+.top-strip nav a:hover, .index nav a:hover { text-decoration: underline 1px; text-underline-offset: 6px; }
+/* The current page lights its lamp and carries a bar under its name, so the mark is not colour alone. */
+.top-strip a[aria-current="page"], .index a[aria-current="page"] { text-decoration: underline 2px; text-underline-offset: 6px; }
+.top-strip a[aria-current="page"] .lamp { background: var(--led); }
+
+/* The theme module: a recessed box of three keys, each with a lamp and its word. The native radios
+   sit over their keys, so the group keeps one Tab stop and its arrow keys. */
+.theme { display: flex; align-items: center; gap: var(--space-xs); margin: 0; padding: var(--space-xs) var(--space-sm) var(--space-xs) var(--space-12); min-inline-size: 0; border: var(--w-rule) solid var(--rule); border-radius: 6px; background: var(--well); }
+/* Floated, the legend leaves the border and prints inside the box like the module's own label. */
+.theme legend { float: left; inline-size: min-content; margin-right: var(--space-sm); padding: 0; font: 600 var(--text-silk-small)/1.25 var(--font-silk); font-stretch: 85%; letter-spacing: 0.14em; text-transform: uppercase; color: var(--label); }
 .theme label { position: relative; cursor: pointer; }
 .theme input { position: absolute; inset: 0; margin: 0; opacity: 0; cursor: pointer; }
-.theme span { display: block; min-width: 44px; min-height: 36px; padding: 11px 10px; font: 600 var(--text-label)/1 var(--font-mono); letter-spacing: 0.04em; text-align: center; border-left: var(--w-rule) solid var(--rule); }
-.theme label:first-of-type span { border-left: 0; }
-.theme input:checked + span { background: var(--ink); color: var(--sheet); }
-.theme input:focus-visible + span { position: relative; z-index: 1; outline: none; box-shadow: 0 0 0 3px var(--sheet), 0 0 0 5px var(--ink); }
+.theme label > span { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--space-xs); min-inline-size: 48px; min-block-size: 48px; padding: 0 var(--space-xs); border-radius: 4px; font: 600 var(--text-silk-small)/1 var(--font-silk); font-stretch: 85%; letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink-2); }
+.theme .cap { display: block; inline-size: 32px; block-size: 14px; border: 2px solid var(--ink); border-radius: 3px; background: var(--ground); }
+.theme label:hover .cap { background: var(--key-white); }
+/* The pressed key is filled, its lamp lit and its word in full ink, so the choice reads without colour. */
+.theme input:checked + span { color: var(--ink); }
+.theme input:checked + span .cap { background: var(--ink); }
+.theme input:checked + span .lamp { background: var(--led); }
+.theme input:focus-visible + span { outline: 2px solid var(--ink); outline-offset: 0; }
+@media (forced-colors: active) {
+  .theme .cap { forced-color-adjust: none; border-color: CanvasText; background: Canvas; }
+  .theme input:checked + span .cap { background: CanvasText; }
+}
 /* Device already follows the OS through CSS alone, so without JavaScript the switch would be a
    control that does nothing. */
 :root:not(.js) .theme { display: none; }
+
+/* The four banks own every keyed row: a key takes its bank's colour, which holds in both themes. */
+.bank-1 { --bank: var(--key-red); }
+.bank-2 { --bank: var(--key-orange); }
+.bank-3 { --bank: var(--key-yellow); }
+.bank-4 { --bank: var(--key-white); }
+
+/* Buttons are keys: the red key acts, the outlined key is the alternative. Hover moves the arrow. */
+.keybtn { display: inline-flex; align-items: center; gap: var(--space-12); min-block-size: 48px; padding: var(--space-12) var(--space-lg); border: 2px solid var(--key-red); border-radius: 4px; background: var(--key-red); color: var(--key-ink); font: 700 var(--text-small)/1.2 var(--font-silk); font-stretch: 85%; letter-spacing: 0.12em; text-transform: uppercase; text-decoration: none; cursor: pointer; }
+.keybtn.outline { border-color: var(--ink); background: transparent; color: var(--ink); }
+.keybtn.outline:hover { background: var(--well); }
+.keybtn svg { inline-size: 16px; block-size: 16px; flex: none; transition: translate 200ms cubic-bezier(0.16, 1, 0.3, 1); }
+.keybtn:hover svg { translate: 4px 0; }
+.keybtn:active { translate: 0 1px; }
+.keybtn[disabled] { border-color: var(--rule); background: var(--rule); color: var(--label); cursor: not-allowed; }
+.keybtn[disabled] svg { translate: none; }
+.textlink { padding-block: var(--space-12); font: 600 var(--text-body)/1.2 var(--font-text); }
+/* The quiet step button is a text button; disabled, it drops its underline. */
+.button.quiet { min-block-size: 48px; padding: var(--space-12) var(--space-xs); border: 0; background: none; color: var(--ink); font: 700 var(--text-small)/1.2 var(--font-silk); font-stretch: 85%; letter-spacing: 0.12em; text-transform: uppercase; text-decoration: underline 1px; text-underline-offset: 0.3em; cursor: pointer; }
+.button.quiet:hover { text-decoration-thickness: 2px; }
+.button.quiet[disabled] { color: var(--label); text-decoration: none; cursor: not-allowed; }
 @media (forced-colors: active) {
-  .theme input:checked + span { text-decoration: underline; text-decoration-thickness: 2px; text-underline-offset: 3px; }
-  .theme input:focus-visible + span { outline: 2px solid; }
+  .keybtn { border-color: ButtonText; }
 }
-
-/* Moving flow never plays past the visitor's say (WCAG 2.2.2): Stop flow pins data-flow, and with
-   nothing stored reduced motion keeps the dashes still. */
-.flow-dash { stroke-dasharray: 3 11; animation: flow 1.6s linear infinite; }
-@keyframes flow { to { stroke-dashoffset: -28; } }
-:root[data-flow="stopped"] .flow-dash { animation: none; }
 @media (prefers-reduced-motion: reduce) {
-  :root:not([data-flow="running"]) .flow-dash { animation: none; }
+  .keybtn svg { transition: none; }
+  .keybtn:active { translate: none; }
 }
-.flow-toggle { min-width: 44px; min-height: 44px; padding: 0 var(--space-md); font: 600 var(--text-label)/1 var(--font-mono); letter-spacing: 0.04em; color: var(--ink); background: var(--sheet); border: var(--w-outline) solid var(--ink); border-radius: 2px; cursor: pointer; }
-.flow-toggle:hover { background: var(--ground); }
-:root:not(.js) .flow-toggle { display: none; }
 
-/* The title block is the site's navigation, the way a drawing's title block indexes its sheet set.
-   Cells after the project cell share the remaining width, however many sheet lists exist yet. */
-.titleblock { display: grid; grid-template-columns: minmax(0, 2fr); grid-auto-columns: minmax(0, 1fr); grid-auto-flow: column; font-size: var(--text-small); line-height: 1.45; }
-.titleblock > * { padding: 16px var(--gutter) 18px; border-left: var(--w-rule) solid var(--rule); }
-.titleblock > :first-child { border-left: 0; }
-.titleblock b { display: block; margin-bottom: var(--space-sm); font: 600 var(--text-label-small)/1 var(--font-mono); letter-spacing: 0.06em; text-transform: uppercase; color: var(--label); }
-.titleblock ul { list-style: none; margin: 0; padding: 0; }
-.titleblock li a { display: inline-block; padding: var(--space-sm) 0; font-weight: 600; }
-.titleblock a[aria-current="page"] { text-decoration-thickness: 3px; }
-.titleblock .mono { font-size: var(--text-mono-value); font-weight: 500; color: var(--label); }
+/* The first band: the claim, and beside it on the landing the readout module. */
+.first-band { display: grid; grid-template-columns: minmax(0, 1fr) minmax(320px, 400px); gap: var(--space-xl) var(--space-40); align-items: start; padding: var(--space-40) var(--gutter) var(--space-xl); }
+.first-band.solo { grid-template-columns: minmax(0, 1fr); }
+/* Beside the readout, 24px tighter, so at 1280 x 800 the landing's whole pattern and its provenance
+   caption sit in the first viewport. */
+@media (min-width: 961px) { .first-band { padding-block: var(--space-lg); } }
+/* The deploy steps close the first band under a 2px rule, their heading set plain. */
+.steps-block { display: grid; gap: var(--space-lg); padding-top: var(--space-lg); border-top: 2px solid var(--ink); }
+.steps-head { display: grid; gap: var(--space-sm); }
+.steps-head p { margin: 0; color: var(--ink-2); }
+.claim { display: flex; flex-direction: column; gap: var(--space-lg); min-inline-size: 0; }
+.claim p { margin: 0; }
+.landing-title { font-size: var(--text-landing-headline); }
+.lede { max-inline-size: 58ch; font-size: var(--text-lede); line-height: 1.55; color: var(--ink-2); }
+.intro { font-size: var(--text-intro); line-height: 1.55; color: var(--ink-2); }
+.actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-12) var(--space-md); }
 
-/* Parts the sheets share: buttons, row padding, section heads, identifiers, state marks. */
-.button { display: inline-flex; align-items: center; gap: var(--space-12); min-height: 48px; padding: var(--space-md) var(--space-lg); border: 0; border-radius: 2px; background: var(--ink); color: var(--sheet); font: 600 var(--text-cell)/1 var(--font-text); text-decoration: none; cursor: pointer; }
-.button:hover { background: var(--ink-2); }
-.button svg { width: 16px; height: 16px; flex: none; }
-.textlink { font-weight: 600; padding: var(--space-12) 0; }
-.sheet { padding: var(--sheet-block) var(--gutter); }
-.sheet-head { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: var(--space-lg) var(--space-40); margin-bottom: clamp(28px, 4vw, 52px); }
-.sheet-head p { margin: 0; color: var(--ink-2); align-self: end; }
+/* The readout: the window's times in silkscreen, the sends in red segments behind black glass,
+   then what was found, what was muted and what the read-back said. */
+.readout { display: grid; gap: var(--space-12); align-content: start; margin: 0; padding: var(--space-md); border: 2px solid var(--ink); border-radius: 6px; }
+.readout-head { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 0 var(--space-sm); margin: 0; }
+.window { display: flex; align-items: flex-end; gap: var(--space-md); margin: 0; padding: var(--space-12) var(--space-md); border-radius: 4px; background: var(--window); color: var(--window-ink); max-inline-size: none; }
+.window svg { flex: none; block-size: 56px; inline-size: auto; }
+.seg { fill: var(--segment-off); }
+.seg.lit { fill: var(--led); }
+.window .unit { display: grid; gap: var(--space-xs); padding-bottom: var(--space-xs); }
+.window .unit b { font: 600 var(--text-segment-unit)/1 var(--font-silk); font-stretch: 85%; letter-spacing: 0.14em; }
+.window code { color: var(--window-ink); }
+.window .unit > span { font-size: var(--text-small); line-height: 1.3; }
+.readout dl { margin: 0; }
+.readout dl > div { display: grid; grid-template-columns: 88px minmax(0, 1fr); gap: var(--space-12); align-items: baseline; padding: var(--space-sm) 0; border-top: var(--w-rule) solid var(--ink); }
+.readout dd { margin: 0; max-inline-size: none; font-size: var(--text-small); line-height: 1.45; color: var(--ink-2); }
+.readout .legend { margin-left: var(--space-sm); font: 700 var(--text-silk-small)/1 var(--font-silk); font-stretch: 85%; letter-spacing: 0.14em; color: var(--ink); }
+.readout .lamp { margin-right: var(--space-sm); vertical-align: 1px; }
+.stamp { justify-self: start; align-self: flex-start; margin: 0; padding: var(--space-xs) var(--space-sm); border: 2px solid currentColor; border-radius: 3px; font: 700 var(--text-silk-small)/1 var(--font-silk); font-stretch: 85%; letter-spacing: 0.14em; text-transform: uppercase; }
+/* Committed solid, alternatives in outline: the cause acted on is the one filled square, and every
+   cause ruled out is the same square in outline. */
+.sq { display: inline-block; inline-size: 12px; block-size: 12px; margin-right: 6px; vertical-align: -1px; }
+.sq rect { fill: none; stroke: var(--ink); stroke-width: 2px; }
+.sq-solid rect { fill: var(--ink); }
+
+/* The step pattern: each lane a track of pads, one pad per recorded event, banked by replay step.
+   A row is its own grid, so on a narrow screen the lane's name and mute key restack above its pads
+   and no pad is ever cropped. */
+.pattern, .board { margin: 0; padding: 0 var(--gutter) var(--space-xl); container: pattern / inline-size; }
+.tracks { --pad-h: 44px; display: grid; gap: var(--space-sm); padding-top: var(--space-12); border-top: 2px solid var(--ink); }
+.track { display: grid; grid-template-columns: 13rem minmax(0, 1fr) 5.5rem; gap: 0 var(--space-md); align-items: center; }
+.pads { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: var(--space-sm); }
+.track-head .pads > span { display: grid; gap: 2px; align-self: end; text-align: center; font: 600 var(--text-silk-small)/1.2 var(--font-silk); font-stretch: 85%; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-2); }
+.track-head .pads time { font: 500 var(--text-silk-small)/1.2 var(--font-mono); letter-spacing: 0; text-transform: none; color: var(--label); }
+.track-head > .silk { align-self: end; }
+.lane-name { display: grid; gap: 2px; min-inline-size: 0; margin: 0; font-size: var(--text-small); line-height: 1.3; color: var(--label); }
+.lane-name code { color: var(--ink); }
+.pad { position: relative; block-size: var(--pad-h); border: var(--w-rule) solid var(--key-edge); border-radius: 4px; background: var(--bank); }
+.pad.muted { background: var(--key-muted); }
+/* The pad's lamp sits at its top edge; the slot at its foot is the key's own texture. */
+.pad::before, .pad::after { content: ""; position: absolute; left: 50%; translate: -50% 0; border-radius: 2px; }
+.pad::before { top: var(--space-sm); inline-size: 16px; block-size: 10px; background: var(--lamp-dark); }
+.pad::after { bottom: var(--space-sm); inline-size: 10px; block-size: 4px; background: var(--lamp-dark); }
+.pad.lit::before { background: var(--key-white); outline: 1.5px solid var(--key-ink); }
+/* A bounce lamp is a red core in a white bezel, so it holds on the red bank. */
+.pad.bounce::before { border: 3px solid var(--key-white); background: var(--led); outline: 1.5px solid var(--key-ink); }
+/* A track's mute is a state, not a control: unlit it is a silkscreen label printed into a recessed well,
+   with no raised edge, so it never reads as a key to press. The transparent border keeps the box the
+   lit key fills. */
+.mute { display: flex; align-items: center; justify-content: center; gap: var(--space-sm); block-size: var(--pad-h); border: 2px solid transparent; border-radius: 4px; background: var(--well); color: var(--ink-2); cursor: default; font: 700 var(--text-silk-small)/1 var(--font-silk); font-stretch: 85%; letter-spacing: 0.14em; text-transform: uppercase; }
+/* The one key lit at full strength: the muted track's. */
+.mute.on { border-color: var(--key-red); background: var(--key-red); color: var(--key-ink); }
+.mute.on .lamp { background: var(--led); outline: 2px solid var(--key-ink); }
+/* Each bank's label spans its pads under one rule, and wraps inside that width. */
+.track-banks .pads > span { display: flex; flex-wrap: wrap; align-content: start; gap: 0 var(--space-sm); padding-top: var(--space-xs); border-top: 2px solid var(--ink); font: 600 var(--text-silk-small)/1.3 var(--font-silk); font-stretch: 85%; letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink-2); }
+.cols-1 { grid-column: span 1; } .cols-2 { grid-column: span 2; } .cols-3 { grid-column: span 3; } .cols-4 { grid-column: span 4; }
+.cols-5 { grid-column: span 5; } .cols-6 { grid-column: span 6; } .cols-7 { grid-column: span 7; } .cols-8 { grid-column: span 8; }
+.cols-9 { grid-column: span 9; } .cols-10 { grid-column: span 10; } .cols-11 { grid-column: span 11; } .cols-12 { grid-column: span 12; }
+.cols-13 { grid-column: span 13; } .cols-14 { grid-column: span 14; } .cols-15 { grid-column: span 15; } .cols-16 { grid-column: span 16; }
+.track-banks time { font: 500 var(--text-silk-small)/1.3 var(--font-mono); letter-spacing: 0; color: var(--label); }
+:is(.pattern, .board) figcaption { margin-top: var(--space-md); font: 400 var(--text-silk)/1.4 var(--font-text); color: var(--ink-2); }
+
+/* The readout's detail, under the pattern: what the cause rests on, what was ruled out, and what
+   reopens the lane. */
+.findings { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(16rem, 100%), 1fr)); gap: var(--space-lg) var(--space-40); margin: 0; padding: 0 var(--gutter) var(--space-2xl); }
+.findings > div { display: grid; gap: var(--space-sm); align-content: start; padding-top: var(--space-12); border-top: 2px solid var(--ink); }
+.findings dd { margin: 0; color: var(--ink-2); }
+.findings dd ul { display: grid; gap: var(--space-xs); margin: 0; padding: 0; list-style: none; }
+
+/* The motion grammar: on first view the playhead runs once across the pattern, each event's lamp
+   lighting in turn, and each muted pad drops to grey as the playhead passes it; the mute key lights
+   on the column the pause took. Nothing loops. Reduced motion places the final state. */
+.at-1 { --at: 1; } .at-2 { --at: 2; } .at-3 { --at: 3; } .at-4 { --at: 4; } .at-5 { --at: 5; }
+.at-6 { --at: 6; } .at-7 { --at: 7; } .at-8 { --at: 8; } .at-9 { --at: 9; } .at-10 { --at: 10; }
+.at-11 { --at: 11; } .at-12 { --at: 12; } .at-13 { --at: 13; } .at-14 { --at: 14; } .at-15 { --at: 15; }
+@keyframes lamp-on { from { border-color: transparent; background: var(--lamp-dark); outline-color: transparent; } }
+@keyframes pad-mute { from { background: var(--bank); } }
+@keyframes mute-on { from { border-color: transparent; background: var(--well); color: var(--ink-2); } }
+@media (prefers-reduced-motion: no-preference) {
+  .pattern :is(.pad.lit, .pad.bounce)::before { animation: lamp-on 160ms cubic-bezier(0.16, 1, 0.3, 1) calc(400ms + var(--at, 0) * 90ms) backwards; }
+  .pattern .pad.muted { animation: pad-mute 240ms cubic-bezier(0.16, 1, 0.3, 1) calc(400ms + var(--at, 0) * 90ms) backwards; }
+  .pattern .mute.on { animation: mute-on 200ms cubic-bezier(0.16, 1, 0.3, 1) calc(400ms + var(--at, 0) * 90ms) backwards; }
+}
+
+/* After the first band each section is headed by its title on a keycap, in page order red,
+   orange, yellow, white. */
+.band { padding: var(--band-block) var(--gutter); border-top: 2px solid var(--ink); }
+.band-head { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: var(--space-md) var(--space-40); align-items: start; margin-bottom: clamp(28px, 4vw, 48px); }
+.band-head p { margin: 0; padding-top: var(--space-sm); color: var(--ink-2); }
+.band-split { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: var(--space-xl) var(--space-40); align-items: start; }
+.band-intro { display: grid; justify-items: start; gap: var(--space-md); }
+.band-intro p { margin: 0; color: var(--ink-2); }
+.keycap { position: relative; justify-self: start; padding: var(--space-12) var(--space-40) var(--space-12) var(--space-md); border: var(--w-rule) solid var(--key-edge); border-radius: 6px; background: var(--bank); color: var(--key-ink); }
+.keycap::after { content: ""; position: absolute; top: var(--space-sm); right: var(--space-sm); inline-size: 14px; block-size: 8px; border-radius: 2px; background: var(--lamp-dark); }
+.keycap::selection { background: var(--key-ink); color: var(--key-white); }
+
+/* A procedure is a row of keys read left to right, each step's number printed on its key; the
+   list carries the number for assistive technology. */
+ol.procedure { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: var(--space-lg) var(--space-md); margin: 0; padding: 0; list-style: none; }
+.procedure li { display: flex; flex-direction: column; gap: var(--space-12); min-inline-size: 0; max-inline-size: none; }
+.step-key { position: relative; display: block; block-size: 72px; padding: var(--space-sm) var(--space-12); border: var(--w-rule) solid var(--key-edge); border-radius: 6px; background: var(--bank); color: var(--key-ink); }
+.step-key::after { content: ""; position: absolute; right: var(--space-12); bottom: var(--space-12); inline-size: 16px; block-size: 10px; border-radius: 2px; background: var(--lamp-dark); }
+/* A block, so its box spans the key: axe leaves text incomplete when a pseudo element (the key's lamp)
+   is over a quarter of the text's own box, which the narrow glyph 1 alone was. */
+.numeral { display: block; font: 800 var(--text-numeral)/1 var(--font-silk); font-stretch: 75%; }
+/* The smaller key holds the main keys' numeral: a glyph box running past the key's edge (the headline
+   size did at 1440) leaves axe unable to tell what the numeral sits on. */
+.procedure.removal .step-key { block-size: 64px; }
+.procedure h3 { margin-bottom: var(--space-xs); }
+.procedure p { margin: 0; font-size: var(--text-small); line-height: 1.5; color: var(--ink-2); }
+
+/* A command as a reader would paste it, on a recessed well. */
+pre.command { margin: var(--space-12) 0 0; padding: var(--space-sm) var(--space-12); border-radius: 4px; background: var(--well); color: var(--ink); white-space: pre-wrap; overflow-wrap: anywhere; font: 500 var(--text-mono-value)/1.5 var(--font-mono); font-feature-settings: "tnum" 1; }
+/* A block code box covers every line of the command. Inline, its line boxes miss the first line of a
+   token that breaks inside itself, so axe reads two element stacks under one text node and cannot
+   compute its contrast (incomplete, elmPartiallyObscuring). The layout is the same either way. */
+pre.command code { display: block; font: inherit; color: inherit; }
+/* Each unit is one atomic box that moves to the next line whole while it fits. A flag with its value
+   is a unit of two token boxes: shrink-to-fit keeps it on one line until it is wider than the
+   block, and only then does it wrap, at the space between its tokens. A token wider than the
+   column breaks inside itself (overflow-wrap above), as the last resort. */
+pre.command code > span, pre.command code > span > span { display: inline-block; max-inline-size: 100%; }
+/* Element-qualified so a note inside a procedure step keeps its own face over .procedure p. */
+p.command-note { margin: var(--space-sm) 0 0; font: 400 var(--text-silk)/1.4 var(--font-text); color: var(--label); }
+.command-inline > span { display: inline-block; }
+
+/* A notice: an unlit lamp and its silkscreen label, boxed, for what is not built yet. */
+.notice { display: flex; align-items: flex-start; gap: var(--space-12); max-inline-size: calc(var(--measure) + 64px); margin: 0; padding: var(--space-12) var(--space-md); border: 2px solid var(--ink); border-radius: 4px; }
+.notice .lamp { margin-top: 0.5em; }
+.notice p { margin: 0; }
+.notice b { margin-right: var(--space-sm); font: 700 var(--text-silk)/1 var(--font-silk); font-stretch: 85%; letter-spacing: 0.14em; text-transform: uppercase; }
+
 /* An identifier ends a line only at the <wbr> after a dot; nothing here may add another break. */
 .identifier { white-space: normal; overflow-wrap: normal; word-break: normal; hyphens: none; }
 .identifier > span { white-space: nowrap; }
-/* A value a reader may copy or cite whole, a date or a legal reference, keeps one line (UI-SPEC 208). */
+/* A copyable value keeps the exact spelling AWS gives it, inside silkscreen caps too (eu-central-1 in a
+   readout head, never EU-CENTRAL-1). A name set in the face around it keeps its own case as well, so
+   the replay title reads fothering-bulk in Saira, never FOTHERING-BULK. */
+code.identifier { text-transform: none; letter-spacing: 0; }
+.identifier[data-identifier-face="inherit"] { text-transform: none; }
+/* A role's name is its heading, an identifier at the heading's size. */
+.role-head h3 code.identifier { font-size: inherit; }
+/* A value a reader may copy or cite whole, a date or a legal reference, keeps one line. */
 .keep-whole { white-space: nowrap; }
-.state { font: 600 var(--text-label)/1 var(--font-mono); letter-spacing: 0.06em; text-transform: uppercase; white-space: nowrap; }
+/* A resource expression or a principal is a long value: it ends a line at its <wbr>s, after a slash,
+   a colon or a comma or before a capital inside a CDK export name, and breaks inside a part only if
+   that part alone is wider than the cell. break-word, unlike anywhere, leaves the column's
+   min-content at its longest part. */
+.long-value { font-family: var(--font-mono); font-feature-settings: "tnum" 1; font-size: var(--text-mono-value); font-weight: 500; overflow-wrap: break-word; }
+.state { white-space: nowrap; color: var(--ink); }
 /* State marks are drawn, not bordered: a dashed CSS border on a 12px square renders as a solid line,
    so the not-yet mark keeps its dashes only as an SVG dash array. */
 .state-mark { display: inline-block; width: 12px; height: 12px; margin-right: var(--space-sm); vertical-align: -1px; }
 .state-mark rect { fill: none; stroke: var(--ink); stroke-width: var(--w-outline); }
 .state-mark-later rect { stroke-dasharray: 2.5 2; stroke-dashoffset: 1.25; }
 .state-mark-open rect { fill: var(--ink); }
-/* A failed hand check: the shut mark's barred square, in ink rather than lockout red. */
 .state-mark-failed rect.bar { fill: var(--ink); stroke: none; }
+.state-mark-none rect { stroke: none; }
 
-/* Row 1: the claim beside the flow drawing, the tag hung from the closed valve's stem. */
-.moment { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); }
-.claim { display: flex; flex-direction: column; justify-content: center; gap: var(--space-lg); padding: clamp(28px, 4vw, 60px) var(--gutter); border-right: var(--w-rule) solid var(--rule); }
-.landing-title { font: 700 var(--text-landing-headline)/1.05 var(--font-display); letter-spacing: -0.028em; }
-.lede { margin: 0; max-inline-size: 40ch; font-size: var(--text-lede); line-height: 1.55; color: var(--ink-2); }
-.actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-md) var(--space-lg); }
-.drawing { position: relative; display: flex; flex-direction: column; justify-content: center; overflow: hidden; padding: clamp(24px, 3vw, 40px) 0 clamp(24px, 3vw, 40px) clamp(24px, 2.5vw, 36px); }
-.dwg { display: block; width: 100%; height: auto; }
-.dwg-narrow { display: none; }
-.caption-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-sm) var(--space-md); margin-top: var(--space-lg); padding-right: var(--gutter); }
-.caption { margin: 0; font: 500 var(--text-label)/1.4 var(--font-mono); color: var(--label); }
+/* The refusals: one row each, the refusal in silkscreen caps, its reason in running text. */
+ul.refuse { margin: 0; padding: 0; list-style: none; border-top: 2px solid var(--ink); }
+.refuse li { max-inline-size: none; padding: var(--space-lg) 0; border-bottom: var(--w-rule) solid var(--rule); }
+.refuse b { display: block; margin-bottom: var(--space-xs); font: 700 var(--text-title)/1.3 var(--font-silk); font-stretch: 85%; letter-spacing: 0.04em; text-transform: uppercase; }
+.refuse li > span { display: block; max-inline-size: var(--measure); color: var(--ink-2); }
 
-/* Drawing parts, painted from the tokens so both themes redraw them; no presentation colours in markup. */
-.dwg text { font-family: var(--font-mono); font-feature-settings: "tnum" 1; }
-.dwg-source { fill: none; stroke: var(--ink); stroke-width: 2; }
-.dwg-bus { stroke: var(--ink); stroke-width: 3.5; }
-.dwg .dwg-source-name { font-family: var(--font-display); font-weight: 800; font-size: 18px; fill: var(--ink); }
-.dwg .dwg-source-name-narrow { font-size: 15px; }
-.dwg-narrow .dwg-lane { font-size: 12px; }
-.dwg-lane { font-size: 13px; font-weight: 500; fill: var(--ink); }
-.dwg-caption-text { font-size: 12px; font-weight: 500; fill: var(--label); }
-.dwg-state-text { font-size: 12px; font-weight: 600; fill: var(--ink); }
-.dwg-bubble-text { font-size: 12px; font-weight: 600; fill: var(--ink); }
-.dwg-pipe { fill: none; stroke: var(--line); stroke-width: 2.5; }
-.dwg-dotted { stroke-dasharray: 1 9; }
-.dwg-flow { fill: none; stroke: var(--flow); stroke-width: 2.5; }
-.dwg-valve-open { fill: var(--sheet); stroke: var(--ink); stroke-width: 2; }
-.dwg-valve-shut { fill: var(--ink); stroke: var(--ink); stroke-width: 2; }
-.dwg-stem { stroke: var(--ink); stroke-width: 2; }
-.dwg-arrow { fill: var(--ink); }
-.dwg-leader { stroke: var(--ink); stroke-width: 1.5; stroke-dasharray: 4 3; }
-.dwg-bubble { fill: var(--sheet); stroke: var(--ink); stroke-width: 2; }
-.dwg-outlet { fill: none; stroke: var(--ink); stroke-width: 2; }
-.dwg-outlet-shut { fill: none; stroke: var(--line); stroke-width: 2; stroke-dasharray: 3 3; }
-
-/* The lockout tag is a paper card in both themes; only its outline follows the theme ink, which keeps
-   its edge at 3:1 on the dark sheet (DESIGN.md Paper Tag Rule). */
-.tag { position: relative; width: min(320px, 100%); background: var(--tag-card); color: var(--tag-ink); border: var(--w-outline) solid var(--ink); border-radius: 10px 10px 4px 4px; }
-/* The punched hole is an element, not a pseudo element, so the accessibility audit can read the
-   background behind the tag's text. */
-.tag-hole { position: absolute; z-index: 1; top: 12px; left: 50%; width: 16px; height: 16px; margin-left: -8px; border: var(--w-outline) solid var(--tag-ink); border-radius: 50%; background: var(--sheet); }
-.tag header { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: var(--space-xs) var(--space-12); padding: 36px 16px 12px; border-radius: 8px 8px 0 0; background: var(--tag-red); color: var(--tag-card); }
-.tag header b { display: block; font: 900 var(--text-tag-legend)/0.95 var(--font-display); letter-spacing: 0.02em; }
-.tag-lane { font-size: var(--text-mono-value); font-weight: 600; line-height: 1.3; }
-.stamp { grid-row: 1 / span 2; grid-column: 2; align-self: start; padding: var(--space-xs) var(--space-sm); border: var(--w-outline) solid currentColor; border-radius: 2px; font: 600 var(--text-label-small)/1 var(--font-mono); letter-spacing: 0.08em; }
-.tag dl { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: var(--space-sm) var(--space-12); margin: 0; padding: var(--space-xs) var(--space-md) var(--space-12); }
-.tag dt { font: 600 var(--text-label-small)/1.5 var(--font-mono); letter-spacing: 0.06em; text-transform: uppercase; color: var(--tag-field); }
-.tag dd { margin: 0; font: 400 var(--text-tag-value)/1.35 var(--font-text); }
-.tag dd.mono { font-family: var(--font-mono); font-size: var(--text-mono-value); font-weight: 500; }
-.tag footer { display: flex; justify-content: space-between; padding: var(--space-sm) var(--space-md); border-top: var(--w-outline) dashed var(--tag-ink); font: 600 var(--text-label-small)/1.2 var(--font-mono); }
-/* The hole sits on the stem's end: the tag's left edge is the stem's x (36.3% of the wide drawing,
-   53.9% of the narrow one) less half the tag, kept inside the drawing. */
-/* The card rises over the stem's lower end so that 18px of stem always shows above it: a percentage
-   margin resolves against the drawing's width, the same width the drawing scales by, and the stem is
-   48 of the wide drawing's 760 units (58 of the narrow one's 360) in LaneDrawing. */
-.drawing .tag { --tw: min(320px, 100%); width: var(--tw); margin: calc(18px - 100% * 48 / 760) 0 0 clamp(0px, calc(100% * 0.363 - var(--tw) / 2), calc(100% - var(--tw))); transform: rotate(-2.5deg); transform-origin: 50% 20px; }
-
-/* Row 2: one process line with a valve per step. */
-ol.procedure { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); margin: 0; padding: 0; list-style: none; }
-.procedure.steps-5 { grid-template-columns: repeat(5, minmax(0, 1fr)); }
-/* The process line runs from each valve to the next step's numeral, never under a numeral, so the
-   accessibility audit can read the numerals' background. */
-.procedure li { max-inline-size: none; }
-.procedure li > div:last-child { padding-right: var(--space-lg); }
-.procedure .valve { display: flex; align-items: center; margin-bottom: var(--space-md); }
-.procedure .valve svg { flex: none; width: 64px; height: 36px; }
-.procedure .pipe { flex: 1; border-top: 2.5px solid var(--line); }
-.procedure li:last-child .pipe { margin-right: var(--space-lg); }
-.procedure .n { padding-right: var(--space-sm); font: 800 var(--text-numeral)/1 var(--font-display); }
-.procedure h3 { max-inline-size: 18ch; }
-.procedure p { margin: 0; max-inline-size: 34ch; font-size: var(--text-cell); line-height: 1.5; color: var(--ink-2); }
-
-/* Row 3: the refusals, each struck through by the circle-slash. */
-.refusals { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: var(--space-40); }
-ul.refuse { margin: 0; padding: 0; list-style: none; border-top: var(--w-outline) solid var(--ink); }
-/* Each item's rule runs the full column under the outline rule; only its sentence keeps the measure. */
-.refuse li { display: grid; grid-template-columns: 32px minmax(0, 1fr); gap: var(--space-md); max-inline-size: none; padding: var(--space-md) 0; border-bottom: var(--w-rule) solid var(--rule); }
-.refuse li > span { max-inline-size: var(--measure); }
-.refuse svg { width: 22px; height: 22px; margin-top: 2px; }
-
-/* Row 4: the ruled limits table, a schedule without the outline. */
-table.ruled { width: 100%; border-collapse: collapse; }
-.ruled th, .ruled td { padding: var(--space-md) var(--space-md) var(--space-md) 0; text-align: left; vertical-align: top; border-top: var(--w-rule) solid var(--rule); }
-.ruled thead th { border-top: var(--w-outline) solid var(--ink); font: 600 var(--text-label)/1 var(--font-mono); letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-2); }
-.ruled tbody th { font-weight: 600; }
-.cell-text { display: block; max-inline-size: var(--measure); }
-
-/* Row 5: the close band. */
-.close { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-lg) var(--space-40); padding: clamp(32px, 4vw, 52px) var(--gutter); }
-.close p { margin: var(--space-sm) 0 0; color: var(--ink-2); }
-
-@media (max-width: 960px) {
-  .moment, .refusals, .sheet-head { grid-template-columns: minmax(0, 1fr); }
-  .claim { border-right: 0; }
-  .drawing { padding: var(--space-lg) var(--gutter) 28px; }
-  .caption-row { padding-right: 0; }
-  ol.procedure, .procedure.steps-5 { grid-template-columns: repeat(2, minmax(0, 1fr)); row-gap: 36px; }
-}
-@media (max-width: 620px) {
-  .moment { display: flex; flex-direction: column; }
-  .claim { display: contents; }
-  .claim > * { margin-inline: var(--gutter); }
-  .landing-title { order: 1; margin-top: 28px; }
-  .drawing { order: 2; padding: var(--space-md) var(--gutter) var(--space-lg); }
-  .lede { order: 3; margin-top: var(--space-xs); }
-  .actions { order: 4; margin-top: var(--space-md); margin-bottom: 36px; }
-  .dwg-wide { display: none; }
-  .dwg-narrow { display: block; }
-  .drawing .tag { margin-top: calc(18px - 100% * 58 / 360); margin-left: clamp(0px, calc(100% * 0.539 - var(--tw) / 2), calc(100% - var(--tw))); transform: rotate(-2deg); }
-  .tag dl { grid-template-columns: minmax(0, 1fr); gap: 0; }
-  .tag dd { margin-bottom: var(--space-sm); }
-  ol.procedure, .procedure.steps-5 { grid-template-columns: minmax(0, 1fr); row-gap: 0; }
-  .procedure li { display: grid; grid-template-columns: 64px minmax(0, 1fr); column-gap: var(--space-md); }
-  .procedure li > div:last-child { padding: 0 0 28px; }
-  .procedure li:last-child > div:last-child { padding-bottom: 0; }
-  .procedure .valve { grid-row: 1 / span 2; flex-direction: column; align-items: center; margin: 0; }
-  .procedure .valve svg { width: 36px; height: 64px; transform: rotate(90deg); }
-  .procedure .pipe { border-top: 0; border-left: 2.5px solid var(--line); }
-  .procedure li:last-child .pipe { margin-right: 0; }
-  .procedure .n { padding: var(--space-xs) 0; }
-  .ruled .hide-narrow { display: none; }
-  .close .button { width: 100%; justify-content: center; }
-}
-
-@media (max-width: 960px) {
-  .titleblock { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-auto-flow: row; }
-  .titleblock > :first-child { grid-column: 1 / -1; border-bottom: var(--w-rule) solid var(--rule); }
-  .titleblock > :nth-child(2) { border-left: 0; }
-}
-@media (max-width: 620px) {
-  :root { --rail: 22px; }
-  .frame { margin: 0; border-left: 0; border-right: 0; }
-  .bar-link { display: none; }
-  .titleblock { grid-template-columns: minmax(0, 1fr); }
-  .titleblock > * { border-left: 0; border-top: var(--w-rule) solid var(--rule); }
-  .titleblock > :first-child { border-top: 0; border-bottom: 0; }
-}
-
-/* Shared by the replay and later sheets: the quiet and disabled buttons, the outlined schedule and
-   its compact and stacking variants, the operator email and the command block. */
-.button.quiet { background: transparent; color: var(--ink); box-shadow: inset 0 0 0 var(--w-outline) var(--ink); }
-.button.quiet:hover { background: var(--ground); }
-/* Disabled keeps the same box, so the controls never move between steps. */
-.button[disabled], .button[disabled]:hover { cursor: not-allowed; background: var(--rule); color: var(--label); box-shadow: none; }
-table.schedule { width: 100%; border-collapse: collapse; font-size: var(--text-cell); line-height: 1.5; border: var(--w-outline) solid var(--ink); }
-.schedule caption { caption-side: bottom; padding-top: var(--space-sm); text-align: left; font: 500 var(--text-label)/1.4 var(--font-mono); color: var(--label); }
-/* Cells meet on their first baseline, so a 13px mono time sits on the line of the 16px text beside it. */
-.schedule th, .schedule td { padding: 13px 16px; text-align: left; vertical-align: baseline; border-top: var(--w-rule) solid var(--rule); border-left: var(--w-rule) solid var(--rule); }
-.schedule thead th { border-top: 0; border-bottom: var(--w-outline) solid var(--ink); font: 600 var(--text-label)/1.3 var(--font-mono); letter-spacing: 0.05em; text-transform: uppercase; color: var(--ink-2); }
-.schedule tbody th { border-left: 0; font-weight: 600; }
+/* Schedules: the head in silkscreen caps on a recessed strip under a 2px ink rule, the rows divided
+   by rules. */
+table.schedule, table.ruled { width: 100%; border-collapse: collapse; font: 400 var(--text-cell)/1.5 var(--font-text); }
+:is(.schedule, .ruled) caption { caption-side: bottom; padding-top: var(--space-sm); text-align: left; font: 400 var(--text-silk)/1.4 var(--font-text); color: var(--label); }
+/* Cells meet on their first baseline, so a 13px mono value sits on the line of the text beside it. */
+:is(.schedule, .ruled) :is(th, td) { padding: var(--space-12) var(--space-md); text-align: left; vertical-align: baseline; border-bottom: var(--w-rule) solid var(--rule); }
+:is(.schedule, .ruled) thead th { padding-block: var(--space-12); border-top: 2px solid var(--ink); border-bottom: 0; background: var(--well); color: var(--ink); font: 700 var(--text-silk)/1.3 var(--font-silk); font-stretch: 85%; letter-spacing: 0.12em; text-transform: uppercase; vertical-align: bottom; }
+:is(.schedule, .ruled) tbody th { font-weight: 600; color: var(--ink); }
 .schedule td { color: var(--ink-2); }
-.schedule .mono, .schedule tr.us .mono { font-family: var(--font-mono); font-size: var(--text-mono-value); font-weight: 500; }
-.schedule tr.us th, .schedule tr.us td { background: var(--ground); color: var(--ink); font-weight: 600; }
-.schedule .note { display: block; margin-top: var(--space-xs); font: 600 var(--text-label)/1.3 var(--font-mono); letter-spacing: 0.05em; text-transform: uppercase; color: var(--label); }
+.schedule .mono { font-family: var(--font-mono); font-size: var(--text-mono-value); font-weight: 500; }
+.schedule tr.us th, .schedule tr.us td { background: var(--well); color: var(--ink); font-weight: 600; }
+.schedule .note { display: block; margin-top: var(--space-xs); color: var(--label); }
 .schedule.compact { font-size: var(--text-schedule-compact); line-height: 1.4; }
-.schedule.compact th, .schedule.compact td { padding: var(--space-sm) var(--space-12); }
+.schedule.compact :is(th, td) { padding: var(--space-sm) var(--space-12); }
 .schedule.compact tbody th code { display: block; margin-top: var(--space-xs); }
+.cell-text { display: block; max-inline-size: var(--measure); }
+/* The column name a stacked cell prints above itself; only the stacked rules give it content. */
+:is(.schedule, .ruled) :is(th, td)::before { display: block; font: 700 var(--text-silk-small)/1.4 var(--font-silk); font-stretch: 85%; letter-spacing: 0.12em; text-transform: uppercase; color: var(--label); }
 
-.message { max-inline-size: calc(44ch + 48px); border: var(--w-outline) solid var(--ink); background: var(--sheet); }
-.message dl { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: var(--space-sm) var(--space-md); margin: 0; padding: var(--space-12) var(--space-lg); border-bottom: var(--w-rule) solid var(--rule); font: 500 var(--text-mono-value)/1.45 var(--font-mono); }
-.message dt { color: var(--label); }
-.message dd { margin: 0; }
-.message-body { padding: var(--space-md) var(--space-lg) var(--space-lg); }
-.message-body p { margin: 0 0 var(--space-12); font-size: var(--text-cell); line-height: 1.5; color: var(--ink); }
-.message-body p:last-child { margin-bottom: 0; }
-.message-body b { font-weight: 600; }
-/* The disclosure opens the body above a rule, so it is read before the agent's paragraph. */
-.message-body .disclosure { padding-bottom: var(--space-12); border-bottom: var(--w-rule) solid var(--rule); font-size: var(--text-small); line-height: 1.45; color: var(--ink-2); }
-pre.command { margin: 0; padding: var(--space-12) var(--space-md); background: var(--ground); border: var(--w-rule) solid var(--rule); white-space: pre-wrap; overflow-wrap: anywhere; font: 500 var(--text-mono-value)/1.5 var(--font-mono); font-feature-settings: "tnum" 1; }
-/* A block code box covers every line of the command. Inline, its line boxes miss the first line of a
-   token that breaks inside itself, so axe reads two element stacks under one text node and cannot
-   compute its contrast (incomplete, elmPartiallyObscuring). The layout is the same either way. */
-pre.command code { display: block; font: inherit; }
-/* Each unit is one atomic box that moves to the next line whole while it fits. A flag with its value
-   is a unit of two token boxes: shrink-to-fit keeps it on one line until it is wider than the
-   block, and only then does it wrap, at the space between its tokens. A token wider than the
-   column breaks inside itself (overflow-wrap above), as the last resort. */
-pre.command code > span, pre.command code > span > span { display: inline-block; max-inline-size: 100%; }
+/* The landing's close band: the readout's black glass, carrying the red key. */
+.close-band { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-lg) var(--space-40); padding: clamp(40px, 5vw, 64px) var(--gutter); background: var(--window); color: var(--window-ink); }
+.close-band p { margin: var(--space-sm) 0 0; }
+.close-band :focus-visible { outline-color: var(--window-ink); }
+.close-band ::selection { background: var(--key-yellow); color: var(--key-ink); }
+
+/* The index at the foot of every page: the project line, every page and where the replay's data
+   comes from. */
+.index { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: var(--space-lg) var(--space-40); align-items: start; padding: var(--space-40) var(--gutter) var(--space-2xl); border-top: 2px solid var(--ink); font-size: var(--text-small); }
+.index p { margin: 0; }
+.index .project { font: 800 var(--text-title)/1.3 var(--font-silk); font-stretch: 75%; letter-spacing: 0.02em; text-transform: uppercase; }
+.index .status { padding-block: var(--space-12); color: var(--ink-2); }
 
 /* Replay. Which step shows is CSS alone: the root's data-step (written before first paint from a
    valid hash, then by replay.ts) against each part's data-steps list; no data-step means step 1. */
-:root.js:not([data-step]) [data-steps]:not([data-steps~="1"]),
-:root.js[data-step="1"] [data-steps]:not([data-steps~="1"]),
-:root.js[data-step="2"] [data-steps]:not([data-steps~="2"]),
-:root.js[data-step="3"] [data-steps]:not([data-steps~="3"]),
-:root.js[data-step="4"] [data-steps]:not([data-steps~="4"]) { display: none; }
-/* Without JavaScript every panel and log row reads in order, the board holds the paused step, and
-   no control that would do nothing is shown. */
-:root:not(.js) .board [data-steps]:not([data-steps~="3"]),
+:root.js:not([data-step]) [data-steps]:not([data-steps~="1"], :is(.board, .readout) *),
+:root.js[data-step="1"] [data-steps]:not([data-steps~="1"], :is(.board, .readout) *),
+:root.js[data-step="2"] [data-steps]:not([data-steps~="2"], :is(.board, .readout) *),
+:root.js[data-step="3"] [data-steps]:not([data-steps~="3"], :is(.board, .readout) *),
+:root.js[data-step="4"] [data-steps]:not([data-steps~="4"], :is(.board, .readout) *) { display: none; }
+/* On the board and the readout a part's step variants share one cell, and the ones another step
+   shows are hidden but keep their room, so the board, its step keys and the controls under it hold
+   still from step to step. */
+:root.js:not([data-step]) :is(.board, .readout) [data-steps]:not([data-steps~="1"]),
+:root.js[data-step="1"] :is(.board, .readout) [data-steps]:not([data-steps~="1"]),
+:root.js[data-step="2"] :is(.board, .readout) [data-steps]:not([data-steps~="2"]),
+:root.js[data-step="3"] :is(.board, .readout) [data-steps]:not([data-steps~="3"]),
+:root.js[data-step="4"] :is(.board, .readout) [data-steps]:not([data-steps~="4"]) { visibility: hidden; }
+.board .lane-name > [data-steps] { grid-area: 2 / 1; }
+.board .mute { grid-area: 1 / 3; }
+.readout dd[data-steps] { grid-area: 1 / 2; }
+/* Without JavaScript every panel and log row reads in order, the board and the readout hold the
+   paused step, and no control that would do nothing is shown. */
+:root:not(.js) :is(.board, .readout) [data-steps]:not([data-steps~="3"]),
 :root:not(.js) .steps, :root:not(.js) .controls, :root:not(.js) .needs-js { display: none; }
 
-/* The intro stays short so the board reaches the first viewport: the artifact leads, not the title. */
-.replay-intro { display: grid; grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); gap: var(--space-lg) var(--space-40); align-items: end; padding-block: clamp(28px, 4vw, 56px); }
-.replay-intro .intro { margin: 0; font-size: var(--text-intro); color: var(--ink-2); }
-ol.summary { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); margin: var(--space-md) 0 0; padding: 0; list-style: none; border-top: var(--w-outline) solid var(--ink); }
-.summary li { padding: var(--space-12) var(--space-md) 0 0; font-size: var(--text-cell); line-height: 1.5; }
+/* The board is the landing's pattern played through the reopen. A bank the replay has not reached
+   yet is drawn unplayed, a dashed outline with its lamps out, so the pattern keeps every column from
+   the first step and never grows. */
+:root.js:is(:not([data-step]), [data-step="1"]) .board .pad:is(.bank-2, .bank-3, .bank-4),
+:root.js[data-step="2"] .board .pad:is(.bank-3, .bank-4),
+:root.js[data-step="3"] .board .pad.bank-4,
+:root:not(.js) .board .pad.bank-4,
+.pad.unplayed { border-style: dashed; border-color: var(--label); background: transparent; }
+:root.js:is(:not([data-step]), [data-step="1"]) .board .pad:is(.bank-2, .bank-3, .bank-4)::before,
+:root.js:is(:not([data-step]), [data-step="1"]) .board .pad:is(.bank-2, .bank-3, .bank-4)::after,
+:root.js[data-step="2"] .board .pad:is(.bank-3, .bank-4)::before,
+:root.js[data-step="2"] .board .pad:is(.bank-3, .bank-4)::after,
+:root.js[data-step="3"] .board .pad.bank-4::before,
+:root.js[data-step="3"] .board .pad.bank-4::after,
+:root:not(.js) .board .pad.bank-4::before,
+:root:not(.js) .board .pad.bank-4::after,
+.pad.unplayed::before, .pad.unplayed::after { border: 0; background: var(--rule); outline: 0; }
+/* Each step plays its own bank when it shows: the playhead runs from the bank's first column, its
+   lamps lighting in turn, and on the paused step the muted pads drop to grey and the mute key
+   lights on the column the pause took. Nothing loops; reduced motion places the final state. */
+@media (prefers-reduced-motion: no-preference) {
+  :root.js:is(:not([data-step]), [data-step="1"]) .board .pad.bank-1:is(.lit, .bounce)::before,
+  :root.js[data-step="2"] .board .pad.bank-2:is(.lit, .bounce)::before,
+  :root.js[data-step="3"] .board .pad.bank-3:is(.lit, .bounce)::before,
+  :root.js[data-step="4"] .board .pad.bank-4:is(.lit, .bounce)::before { animation: lamp-on 160ms cubic-bezier(0.16, 1, 0.3, 1) calc(120ms + var(--at, 0) * 90ms) backwards; }
+  :root.js[data-step="3"] .board .pad.muted.bank-3,
+  :root.js[data-step="4"] .board .pad.muted.bank-4 { animation: pad-mute 240ms cubic-bezier(0.16, 1, 0.3, 1) calc(120ms + var(--at, 0) * 90ms) backwards; }
+  :root.js[data-step="3"] .board .mute.on { animation: mute-on 200ms cubic-bezier(0.16, 1, 0.3, 1) calc(120ms + var(--at, 0) * 90ms) backwards; }
+}
+.board .track-banks { margin-top: var(--space-sm); }
+.story { display: grid; gap: var(--space-lg); padding: 0 var(--gutter) var(--band-block); }
+
+ol.summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); margin: var(--space-sm) 0 0; padding: 0; list-style: none; border-top: 2px solid var(--ink); }
+.summary li { padding: var(--space-12) var(--space-md) 0 0; font-size: var(--text-small); line-height: 1.45; }
 .summary li + li { padding-left: var(--space-md); border-left: var(--w-rule) solid var(--rule); }
 .summary time { display: block; font: 600 var(--text-mono-value)/1.4 var(--font-mono); font-feature-settings: "tnum" 1; color: var(--label); }
 
-/* The step strip is the replay's timeline, the same process line the procedure uses. The current
-   step is told by its dot and ring alone, so no box changes size between steps. */
-ol.steps { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); margin: 0; padding: 0 var(--gutter); list-style: none; border-bottom: var(--w-rule) solid var(--rule); }
-.steps li { position: relative; max-inline-size: none; }
-.steps li::before { content: ""; position: absolute; top: 29px; left: 0; right: 0; border-top: 2.5px solid var(--line); }
-.steps .step { position: relative; display: flex; flex-direction: column; align-items: flex-start; gap: var(--space-sm); width: 100%; padding: var(--space-md) var(--space-12) var(--space-md) 0; border: 0; background: none; color: var(--ink); font: 400 var(--text-cell)/1.3 var(--font-text); text-align: left; cursor: pointer; }
-.steps .dot { width: 22px; height: 22px; border: 2px solid var(--ink); border-radius: 50%; background: var(--sheet); }
-.steps .step[aria-current="step"] .dot { background: var(--ink); box-shadow: 0 0 0 4px var(--sheet), 0 0 0 6px var(--ink); }
-.steps .step:hover .step-label { text-decoration: underline; text-underline-offset: 0.22em; }
-.steps .t { font: 600 var(--text-label)/1 var(--font-mono); font-feature-settings: "tnum" 1; color: var(--label); }
+/* The step keys are the bank row under the pattern: each step a key in its bank's colour under the
+   rule that spans its bank, the number printed top left and the lamp top right. The current step
+   lights its lamp and sets its label in ink over a bar, so the mark is not colour alone. Where the
+   row is narrow each step stacks its time and label under its key. */
+ol.steps { margin: 0; padding: 0; list-style: none; container: steps / inline-size; }
+.steps li { display: flex; max-inline-size: none; padding-top: var(--space-sm); border-top: 2px solid var(--ink); }
+.steps .step { display: flex; flex-direction: column; align-items: flex-start; gap: var(--space-xs); inline-size: 100%; min-block-size: 44px; margin: 0; padding: 0 0 var(--space-xs); border: 0; background: none; color: var(--ink-2); text-align: left; cursor: pointer; }
+.step .key { position: relative; display: block; flex: none; inline-size: 44px; block-size: 44px; border: var(--w-rule) solid var(--key-edge); border-radius: 4px; background: var(--bank); color: var(--key-ink); }
+.step .key .numeral { position: absolute; top: var(--space-xs); left: var(--space-sm); font-size: var(--text-title); }
+.step .key .lamp { position: absolute; top: var(--space-sm); right: var(--space-sm); background: var(--lamp-dark); }
+.steps .t { font: 500 var(--text-silk)/1.2 var(--font-mono); font-feature-settings: "tnum" 1; color: var(--label); }
+.steps .step-label { font: 600 var(--text-silk)/1.3 var(--font-silk); font-stretch: 85%; letter-spacing: 0.12em; text-transform: uppercase; }
+.steps .step:hover .key { border-color: var(--ink); }
+.steps .step:hover .step-label { text-decoration: underline 1px; text-underline-offset: 4px; }
+.steps .step[aria-current="step"] { color: var(--ink); }
+/* The current step's lamp is built like a bounce lamp, an LED core in a key-white bezel, because a
+   bare LED disappears on the red bank's key. */
+.steps .step[aria-current="step"] .lamp { inline-size: 12px; block-size: 12px; border: 2px solid var(--key-white); background: var(--led); outline: 1.5px solid var(--key-ink); }
+/* The weight stays put, so the current label never rewraps and moves the keys. */
+.steps .step[aria-current="step"] .step-label { text-decoration: underline 2px; text-underline-offset: 4px; }
+@container steps (width >= 820px) {
+  .steps .step { display: grid; grid-template-columns: 44px minmax(0, 1fr); align-content: start; gap: var(--space-xs) var(--space-12); }
+  .step .key { grid-row: span 2; }
+}
 
-.stage { display: grid; grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); align-items: start; }
-.board { position: sticky; top: 0; padding: clamp(24px, 3vw, 44px) var(--gutter) var(--space-40); border-right: var(--w-rule) solid var(--rule); }
-.board-drawing { max-inline-size: 420px; margin-inline: auto; }
-.dwg-board .dwg-lane { font-size: 12px; }
-.dwg-mark { fill: none; stroke: var(--ink); stroke-width: 2; }
-/* The tag hangs from the stem at the board's centre. A percentage margin resolves against the
-   drawing's width, which is what scales the stem's 30 units, so 18px of stem always shows. */
-.board .tag { margin: calc(18px - 100% * 30 / 400) auto 0; transform: rotate(-2deg); transform-origin: 50% 20px; }
-/* Beside the story the tag simply comes off; where the board stacks above the story (960px and
-   below) it keeps its slot, so the story never jumps between steps. */
-:root.js:not([data-step="3"]) .tag-slot { display: none; }
-/* Where the slot is reserved, its empty place is drawn as a phantom: the tag's outline and its stem
-   from the valve, dash-dot in Cell Rule, the drafting line for a part shown where it will go. */
-.tag-slot { position: relative; }
-.tag-phantom { display: none; position: absolute; top: 0; left: 50%; width: min(320px, 100%); height: 100%; translate: -50% 0; overflow: visible; fill: none; stroke: var(--rule); stroke-width: var(--w-rule); stroke-dasharray: 12 4 2 4; }
-.tag-phantom-card { transform: rotate(-2deg); transform-box: view-box; transform-origin: 50% 20px; }
-.board .caption-row { flex-direction: column; justify-content: center; margin-top: var(--space-lg); padding-right: 0; text-align: center; }
-.board .caption { max-inline-size: 44ch; }
-
-.narrative { display: flex; flex-direction: column; gap: var(--space-lg); padding: clamp(24px, 3vw, 44px) var(--gutter) var(--space-40); }
-.controls { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-12); }
+.controls { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-12) var(--space-lg); padding: var(--space-md) var(--gutter) var(--space-lg); }
 .controls .clock { margin: 0 0 0 auto; font: 600 var(--text-mono-value)/1.4 var(--font-mono); font-feature-settings: "tnum" 1; color: var(--label); }
-.panel { display: flex; flex-direction: column; gap: var(--space-md); }
+/* A step's panel: its title on the step's keycap beside the story, under a 2px rule. The body is the
+   container the compact schedule measures. */
+.panel { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: var(--space-lg) var(--space-40); align-items: start; padding-top: var(--space-lg); border-top: 2px solid var(--ink); }
 .panel h2 { font-size: var(--text-narrative-headline); }
-.panel > p { margin: 0; color: var(--ink-2); }
+.panel-body { display: flex; flex-direction: column; gap: var(--space-md); min-inline-size: 0; container-type: inline-size; }
+.panel-body > p { margin: 0; color: var(--ink-2); }
 .panel .lanes { color: var(--ink); font-weight: 600; }
-.lanes .state-mark { margin-right: var(--space-sm); }
-.state-mark-shut rect { fill: var(--lock); stroke: var(--lock); }
-.state-mark-shut rect.bar { fill: var(--sheet); stroke: none; }
+.panel .lanes .lamp { margin-right: var(--space-sm); vertical-align: 1px; }
 
 /* Beside the board, and on a narrow screen, the story column can be narrower than four columns of
    evidence and an unbroken tag value. There each row's dimension spans its row as a heading over its
    three readings, so no identifier breaks and nothing leaves the panel; the rows sit in one
-   anonymous table cell, which keeps the caption below the outline. The Dimension header stays for
-   screen readers only. */
-.panel { container-type: inline-size; }
+   anonymous table cell, which keeps the caption below. The Dimension header stays for screen
+   readers only. */
 @container (width < 460px) {
   .schedule.compact tr { display: grid; grid-template-columns: repeat(3, minmax(min-content, 1fr)); }
-  .schedule.compact tbody th { grid-column: 1 / -1; }
-  .schedule.compact tr > :nth-child(2) { border-left: 0; }
-  /* A gap and a rule part the column labels from the first dimension, so COUNT never reads as its label. */
+  .schedule.compact tbody th { grid-column: 1 / -1; border-bottom: 0; }
+  /* A gap parts the column labels from the first dimension, so COUNT never reads as its label. */
   .schedule.compact tbody tr:first-child > th { margin-top: var(--space-sm); }
   .schedule.compact thead th:first-child { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 }
@@ -431,67 +508,49 @@ ol.steps { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); marg
 :root.js[data-step="1"] tr[data-log-step="1"] > *,
 :root.js[data-step="2"] tr[data-log-step="2"] > *,
 :root.js[data-step="3"] tr[data-log-step="3"] > *,
-:root.js[data-step="4"] tr[data-log-step="4"] > * { background: var(--ground); }
+:root.js[data-step="4"] tr[data-log-step="4"] > * { background: var(--well); }
 
-@media (max-width: 960px) {
-  .replay-intro { grid-template-columns: minmax(0, 1fr); }
-  ol.summary { grid-template-columns: repeat(2, minmax(0, 1fr)); row-gap: var(--space-12); }
-  .summary li:nth-child(3) { padding-left: 0; border-left: 0; }
-  .stage { grid-template-columns: minmax(0, 1fr); }
-  .board { position: static; border-right: 0; border-bottom: var(--w-rule) solid var(--rule); }
-  :root.js:not([data-step="3"]) .tag-slot { display: block; visibility: hidden; }
-  :root.js:not([data-step="3"]) .tag-phantom { display: block; visibility: visible; }
-}
+.message { max-inline-size: calc(44ch + 48px); border: 2px solid var(--ink); border-radius: 4px; background: var(--ground); }
+.message dl { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: var(--space-sm) var(--space-md); margin: 0; padding: var(--space-12) var(--space-lg); border-bottom: var(--w-rule) solid var(--rule); background: var(--well); font: 500 var(--text-mono-value)/1.45 var(--font-mono); }
+.message dt { color: var(--label); }
+.message dd { margin: 0; }
+.message-body { padding: var(--space-md) var(--space-lg) var(--space-lg); }
+.message-body p { margin: 0 0 var(--space-12); font-size: var(--text-cell); line-height: 1.5; color: var(--ink); }
+.message-body p:last-child { margin-bottom: 0; }
+.message-body b { font-weight: 600; }
+/* The disclosure opens the body above a rule, so it is read before the agent's paragraph. */
+.message-body .disclosure { padding-bottom: var(--space-12); border-bottom: var(--w-rule) solid var(--rule); font-size: var(--text-small); line-height: 1.45; color: var(--ink-2); }
+
 /* A stacking schedule holds identifiers in several columns (the log's lane and its tag values),
    which never break, so it becomes one block per row only where its own column is narrower than
-   the table needs (600px measured on the replay log, 2026-10-18), never by the viewport alone. */
+   the table needs (591px measured on the replay log with Saira heads and Public Sans cells,
+   2026-10-21), never by the viewport alone. */
 .log { container-type: inline-size; }
-@container (width < 604px) {
+@container (width < 595px) {
   table.schedule.stack, .schedule.stack thead, .schedule.stack tbody, .schedule.stack tr, .schedule.stack th, .schedule.stack td { display: block; width: auto; }
   .schedule.stack thead { display: none; }
-  .schedule.stack caption { display: block; padding: var(--space-sm) var(--space-md); }
+  .schedule.stack caption { display: block; padding: var(--space-sm) 0; }
   .schedule.stack tbody tr { padding: var(--space-xs) 0 var(--space-sm); border-top: var(--w-outline) solid var(--ink); }
   .schedule.stack tbody tr:first-child { border-top: 0; }
-  .schedule.stack tbody th, .schedule.stack td { padding: var(--space-sm) var(--space-md); border: 0; }
+  .schedule.stack tbody th, .schedule.stack td { padding: var(--space-sm) 0; border: 0; }
   .schedule.stack tbody th { padding-top: var(--space-12); }
-  .schedule.stack td::before { content: attr(data-col); display: block; font: 600 var(--text-label-small)/1.4 var(--font-mono); letter-spacing: 0.06em; text-transform: uppercase; color: var(--label); }
+  .schedule.stack td::before { content: attr(data-col); }
   /* A log detail is a long value, not an identifier, so it may break as the last resort. */
   .schedule.stack td { overflow-wrap: anywhere; }
 }
-/* Deploy. The intro row, the notice, the command blocks inside procedure steps and schedule cells,
-   the role schedules and the removal list. */
-.sheet-intro { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: var(--space-lg) var(--space-40); align-items: end; padding: clamp(32px, 5vw, 72px) var(--gutter) clamp(28px, 4vw, 52px); }
-.sheet-intro > p { margin: 0; font-size: var(--text-intro); color: var(--ink-2); }
-/* The box keeps the sentence at the measure, its own padding and outline added outside it. */
-.notice { grid-column: 1 / -1; margin: var(--space-sm) 0 0; max-inline-size: calc(var(--measure) + 2 * var(--space-md) + 2 * var(--w-outline)); padding: var(--space-12) var(--space-md); border: var(--w-outline) dashed var(--ink); }
-.notice b { margin-right: var(--space-12); font: 600 var(--text-label)/1 var(--font-mono); letter-spacing: 0.05em; }
-/* An even 8px inset in the narrow step columns, so a flag and its value (-c fothering:live=live,
-   about 172px at mono-value) keeps one line in a five-column step from 1280px up. */
-.procedure pre.command { margin-top: var(--space-12); padding: var(--space-sm); }
-/* Element-qualified so a note inside a procedure step keeps its label face over .procedure p. */
-p.command-note { margin: var(--space-sm) 0 0; font: 500 var(--text-label)/1.4 var(--font-mono); color: var(--label); }
-.command-inline > span { display: inline-block; }
-/* A resource expression or a principal is a long value: it ends a line at its <wbr>s, after a slash,
-   a colon or a comma or before a capital inside a CDK export name, and breaks inside a part only if
-   that part alone is wider than the cell.
-   break-word, unlike anywhere, leaves the column's min-content at its longest part. */
-.long-value { font-family: var(--font-mono); font-feature-settings: "tnum" 1; font-size: var(--text-mono-value); font-weight: 500; overflow-wrap: break-word; }
+
+/* Deploy: the role schedules, the notes and the Deny block. */
 .roles { display: grid; gap: var(--space-2xl); }
 .role-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: var(--space-sm) var(--space-lg); margin-bottom: var(--space-md); }
 .role-head h3 { margin: 0; }
 .role-stack { margin: 0; color: var(--label); }
-.role-stack > span { margin-right: var(--space-sm); font: 600 var(--text-label)/1 var(--font-mono); letter-spacing: 0.05em; text-transform: uppercase; }
+.role-stack > span { margin-right: var(--space-sm); }
 .perm-notes { display: grid; gap: var(--space-12); margin-top: var(--space-2xl); }
 .perm-notes p { margin: 0; }
 .perm-notes p + p { color: var(--ink-2); }
-/* The Deny box reads as the exception: an emphasis-weight rule over its heading and schedule, not a
-   box around a box. */
+/* The Deny block reads as the exception: an emphasis-weight rule over its heading and schedule. */
 .deny { margin-top: var(--space-2xl); padding-top: var(--space-md); border-top: var(--w-emph) solid var(--ink); }
-ol.removal { counter-reset: removal; max-inline-size: 80ch; margin: 0; padding: 0; list-style: none; border-top: var(--w-outline) solid var(--ink); }
-.removal li { counter-increment: removal; display: grid; grid-template-columns: 44px minmax(0, 1fr); gap: var(--space-12); max-inline-size: none; padding: var(--space-md) 0; border-bottom: var(--w-rule) solid var(--rule); }
-.removal li::before { content: counter(removal); font: 800 var(--text-numeral-small)/1 var(--font-display); }
-.removal p { margin: 0; }
-.removal pre.command { margin-top: var(--space-sm); }
+.deny h3 { margin-bottom: var(--space-md); }
 
 /* Each deploy schedule keeps its table form while its own section is as wide as the table needs
    (measured on the rendered tables), and below that becomes one block per row, every cell under its
@@ -503,76 +562,81 @@ ol.removal { counter-reset: removal; max-inline-size: 80ch; margin: 0; padding: 
    matches these minimums' specificity and, later in the file, wins over them (here and below). */
 .fit td[data-col="Why"] .cell-text { min-inline-size: 12em; }
 .fit td[data-col="On removal"] .cell-text { min-inline-size: 12em; }
-/* Measured 2026-10-20 on the rendered tables with the minimums above, after the phase 2 merge: the
-   resource table needs 777px and the widest role table, the runtime role's, 937px (a long value
-   now breaks inside a CDK export name, and an action between its words); a later snapshot that
-   widens either moves its threshold. */
-@container resources (width < 780px) {
+/* Measured 2026-10-21 on the rendered tables with the minimums above and the Saira, Public Sans and
+   Source Code Pro faces: the resource table needs 756px and the widest role table 907px. */
+@container resources (width < 760px) {
   .fit-resources .fit, .fit-resources .fit :is(thead, tbody, tr, th, td) { display: block; width: auto; }
   .fit-resources .fit :is(thead, td[data-empty]) { display: none; }
   .fit-resources .fit tbody tr { padding: var(--space-xs) 0 var(--space-sm); }
   .fit-resources .fit tbody tr + tr { border-top: var(--w-outline) solid var(--ink); }
-  .fit-resources .fit :is(th, td) { padding: var(--space-sm) var(--space-md); border: 0; }
-  .fit-resources .fit :is(th, td)::before { content: attr(data-col); display: block; font: 600 var(--text-label-small)/1.4 var(--font-mono); letter-spacing: 0.06em; text-transform: uppercase; color: var(--label); }
-  .fit-resources .fit caption { display: block; padding: var(--space-sm) var(--space-md); }
+  .fit-resources .fit :is(th, td) { padding: var(--space-sm) 0; border: 0; }
+  .fit-resources .fit :is(th, td)::before { content: attr(data-col); }
+  .fit-resources .fit caption { display: block; padding: var(--space-sm) 0; }
   .fit-resources .fit :is(th, td) .cell-text { min-inline-size: 0; }
 }
-/* The longest logical id, 32 mono characters, needs 250px at the identifier step, plus the stacked
-   cell's 16px inline padding and the outline; under 286px of section it steps down to the label size
-   rather than break mid-name (UI-SPEC 9.3, E10). */
+/* The longest logical id, 32 mono characters, would break mid-name in a narrow stacked cell; under
+   286px of section it steps down to the silkscreen size instead (UI-SPEC 9.3, E10). */
 @container resources (width < 286px) {
-  .fit-resources .fit code { font-size: var(--text-label); }
+  .fit-resources .fit code { font-size: var(--text-silk); }
 }
-@container permissions (width < 940px) {
+@container permissions (width < 911px) {
   .fit-permissions .fit, .fit-permissions .fit :is(thead, tbody, tr, th, td) { display: block; width: auto; }
   .fit-permissions .fit :is(thead, td[data-empty]) { display: none; }
   .fit-permissions .fit tbody tr { padding: var(--space-xs) 0 var(--space-sm); }
   .fit-permissions .fit tbody tr + tr { border-top: var(--w-outline) solid var(--ink); }
-  .fit-permissions .fit :is(th, td) { padding: var(--space-sm) var(--space-md); border: 0; }
-  .fit-permissions .fit :is(th, td)::before { content: attr(data-col); display: block; font: 600 var(--text-label-small)/1.4 var(--font-mono); letter-spacing: 0.06em; text-transform: uppercase; color: var(--label); }
-  .fit-permissions .fit caption { display: block; padding: var(--space-sm) var(--space-md); }
+  .fit-permissions .fit :is(th, td) { padding: var(--space-sm) 0; border: 0; }
+  .fit-permissions .fit :is(th, td)::before { content: attr(data-col); }
+  .fit-permissions .fit caption { display: block; padding: var(--space-sm) 0; }
   .fit-permissions .fit :is(th, td) .cell-text { min-inline-size: 0; }
 }
 
-@media (max-width: 960px) {
-  .sheet-intro { grid-template-columns: minmax(0, 1fr); }
-}
-
-/* Privacy and AI. The intro's in-page links, the two drawings, the stored-field and model schedules,
-   the facts grid, the website list and the does and never-does lists. */
-.intro-side { display: grid; gap: var(--space-md); align-self: end; }
-.intro-side p { margin: 0; font-size: var(--text-intro); color: var(--ink-2); }
-.intro-side .jump { display: flex; flex-wrap: wrap; gap: var(--space-lg); font-size: var(--text-body); color: var(--ink); }
-.jump a { padding: var(--space-12) 0; font-weight: 600; }
-figure.filter, figure.interlock { margin: 0; }
+/* Privacy and AI: the in-page links, the two drawings, the facts, the website list, the does and
+   never-does lists. */
+.jump { display: flex; flex-wrap: wrap; gap: var(--space-lg); }
+.jump a { padding: var(--space-12) 0; font: 600 var(--text-body)/1.2 var(--font-text); }
+figure.filter, figure.interlock { margin: 0 0 clamp(28px, 4vw, 48px); }
+.dwg { display: block; inline-size: 100%; block-size: auto; }
+.dwg-narrow { display: none; }
 .dwg-filter.dwg-wide { max-inline-size: 920px; margin-inline: auto; }
 .dwg-interlock.dwg-wide { max-inline-size: 1000px; margin-inline: auto; }
 .dwg-filter.dwg-narrow { max-inline-size: 360px; margin-inline: auto; }
 .dwg-interlock.dwg-narrow { max-inline-size: 300px; margin-inline: auto; }
-.dwg-unit { fill: var(--sheet); stroke: var(--ink); stroke-width: 2; }
+/* Drawing parts are painted from the tokens, so both themes redraw them. */
+.dwg text { font-family: var(--font-mono); font-feature-settings: "tnum" 1; }
+.dwg .dwg-source-name { font-family: var(--font-silk); font-weight: 800; font-size: 15px; fill: var(--ink); }
+.dwg-lane { font-size: 13px; font-weight: 500; fill: var(--ink); }
+.dwg-caption-text { font-size: 12px; font-weight: 500; fill: var(--label); }
+.dwg-state-text { font-size: 12px; font-weight: 600; fill: var(--ink); }
+.dwg-source { fill: none; stroke: var(--ink); stroke-width: 2; }
+.dwg-unit { fill: var(--ground); stroke: var(--ink); stroke-width: 2; }
 .dwg-funnel { fill: none; stroke: var(--ink); stroke-width: 1.5; }
+.dwg-pipe { fill: none; stroke: var(--label); stroke-width: 2.5; }
+.dwg-dotted { stroke-dasharray: 1 9; }
+.dwg-stem { fill: none; stroke: var(--ink); stroke-width: 2; }
+.dwg-valve-open { fill: var(--ground); stroke: var(--ink); stroke-width: 2; }
 /* The model's box is dashed, the one part that writes no state; the action check is drawn at the
    emphasis weight, the interlock itself. */
 .dwg-model { stroke-dasharray: 6 4; }
 .dwg-check { stroke-width: 3; }
-.dwg-stem { fill: none; }
-.filter-caption { justify-content: space-between; margin: var(--space-md) 0 clamp(28px, 4vw, 48px); padding-right: 0; }
+.figure-caption { margin-top: var(--space-md); font: 400 var(--text-silk)/1.4 var(--font-text); color: var(--label); }
 .after-schedule { display: grid; gap: var(--space-12); margin-top: var(--space-lg); }
 .after-schedule p { margin: 0; color: var(--ink-2); }
-.facts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border-top: var(--w-outline) solid var(--ink); }
+.facts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border-top: 2px solid var(--ink); }
 .facts > div { padding: var(--space-md) var(--space-lg) var(--space-lg) 0; border-bottom: var(--w-rule) solid var(--rule); }
 .facts > div + div { padding-left: var(--space-lg); border-left: var(--w-rule) solid var(--rule); }
 .facts h3 { margin: 0 0 var(--space-sm); }
 .facts p { margin: 0 0 var(--space-12); color: var(--ink-2); }
 .facts p:last-child { margin-bottom: 0; }
 .decides { margin-top: var(--space-2xl); }
+.decides h3 { margin-bottom: var(--space-sm); }
 .decides p { margin: 0; color: var(--ink-2); }
 ul.site { display: grid; gap: var(--space-12); margin: 0; padding-left: var(--space-lg); }
 .split { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-xl) var(--space-2xl); }
-.split ul { margin: 0; padding: 0; list-style: none; border-top: var(--w-outline) solid var(--ink); }
+.split ul { margin: 0; padding: 0; list-style: none; border-top: 2px solid var(--ink); }
 .split li { padding: var(--space-md) 0; border-bottom: var(--w-rule) solid var(--rule); }
 .split h3 { margin-bottom: var(--space-12); }
 .split-note { margin: var(--space-md) 0 0; font-weight: 600; }
+.split .report { margin: 0; padding-top: var(--space-md); border-top: 2px solid var(--ink); }
 .wrong { display: grid; gap: var(--space-md); }
 .wrong p { margin: 0; color: var(--ink-2); }
 
@@ -586,63 +650,54 @@ ul.site { display: grid; gap: var(--space-12); margin: 0; padding-left: var(--sp
 .fit-fields .fit tbody th wbr { display: none; }
 /* A model record value is prose, so in table form it keeps a readable column. */
 .fit-model td[data-col="Value"] .cell-text { min-inline-size: 16em; }
-/* Measured 2026-10-18 on the rendered tables: the stored-field table needs 536px with its paths on
-   one line, the model record 391px with its 16em value column. */
-/* The stored-field table also stacks at 620px and below (UI-SPEC 583): there the frame runs edge to
-   edge, so its section is wider at 620px than at 657px and would otherwise switch form three times.
-   Either condition names the wrapper fields-stacked, and the stacked rules below query that name,
-   so they are written once for both. */
+/* Measured 2026-10-21 on the rendered tables with the Saira, Public Sans and Source Code Pro faces:
+   the stored-field table needs 508px with its paths on one line, the model record 366px with its
+   16em value column. */
+/* The stored-field table also stacks at 620px and below, like the statement schedules, so on a phone
+   it reads as blocks even where its section is just wide enough (a 320 to 1440 sweep on 2026-10-21:
+   one change of form, at 624px). Either condition names the wrapper fields-stacked, and the stacked
+   rules below query that name, so they are written once for both. */
 .fit-fields .fit-form { container-type: inline-size; }
-@container fields (width < 540px) { .fit-fields .fit-form { container-name: fields-stacked; } }
+@container fields (width < 512px) { .fit-fields .fit-form { container-name: fields-stacked; } }
 @media (max-width: 620px) { .fit-fields .fit-form { container-name: fields-stacked; } }
 @container fields-stacked (width >= 0px) {
   .fit-fields .fit, .fit-fields .fit :is(thead, tbody, tr, th, td) { display: block; width: auto; }
   .fit-fields .fit thead { display: none; }
   .fit-fields .fit tbody tr { padding: var(--space-xs) 0 var(--space-sm); }
   .fit-fields .fit tbody tr + tr { border-top: var(--w-outline) solid var(--ink); }
-  .fit-fields .fit :is(th, td) { padding: var(--space-sm) var(--space-md); border: 0; }
-  .fit-fields .fit :is(th, td)::before { content: attr(data-col); display: block; font: 600 var(--text-label-small)/1.4 var(--font-mono); letter-spacing: 0.06em; text-transform: uppercase; color: var(--label); }
-  .fit-fields .fit caption { display: block; padding: var(--space-sm) var(--space-md); }
+  .fit-fields .fit :is(th, td) { padding: var(--space-sm) 0; border: 0; }
+  .fit-fields .fit :is(th, td)::before { content: attr(data-col); }
+  .fit-fields .fit caption { display: block; padding: var(--space-sm) 0; }
   .fit-fields .fit :is(th, td) .cell-text { min-inline-size: 0; }
   .fit-fields .fit tbody th wbr { display: inline; }
 }
-@container model (width < 394px) {
+@container model (width < 370px) {
   .fit-model .fit, .fit-model .fit :is(thead, tbody, tr, th, td) { display: block; width: auto; }
   .fit-model .fit thead { display: none; }
   .fit-model .fit tbody tr { padding: var(--space-xs) 0 var(--space-sm); }
   .fit-model .fit tbody tr + tr { border-top: var(--w-outline) solid var(--ink); }
-  .fit-model .fit :is(th, td) { padding: var(--space-sm) var(--space-md); border: 0; }
-  .fit-model .fit :is(th, td)::before { content: attr(data-col); display: block; font: 600 var(--text-label-small)/1.4 var(--font-mono); letter-spacing: 0.06em; text-transform: uppercase; color: var(--label); }
-  .fit-model .fit caption { display: block; padding: var(--space-sm) var(--space-md); }
+  .fit-model .fit :is(th, td) { padding: var(--space-sm) 0; border: 0; }
+  .fit-model .fit :is(th, td)::before { content: attr(data-col); }
+  .fit-model .fit caption { display: block; padding: var(--space-sm) 0; }
   .fit-model .fit :is(th, td) .cell-text { min-inline-size: 0; }
-}
-
-@media (max-width: 960px) {
-  .facts, .split { grid-template-columns: minmax(0, 1fr); }
-  .facts > div + div { padding-left: 0; border-left: 0; }
-}
-@media (max-width: 620px) {
-  /* The narrow filter drawing does not move, so there is no flow to stop. */
-  .filter-caption .flow-toggle { display: none; }
 }
 
 /* Accessibility statement. The record and the hand-check schedule follow the stored-field table: each
    keeps its table form while its section is as wide as the table needs, and is one block per row at
    that width and below and at 620px and below, so each changes form once between 320 and 1440. */
-.state-mark-none rect { stroke: none; }
 .fit-record { container: record / inline-size; }
 .fit-checks { container: checks / inline-size; }
 .fit-record td[data-col="Record"] .cell-text, .fit-checks td[data-col="How checked"] .cell-text { min-inline-size: 16em; }
 /* The longest criterion name, 1.2.3, takes three lines at 173px of 600-weight text (measured
-   2026-10-18), so the column keeps 11em of text plus the cell's 16px paddings (border-box). */
+   2026-10-18 with the old faces), so the column keeps 11em of text plus the cell's paddings. */
 .fit-checks .fit tbody th { min-inline-size: calc(11em + 32px); }
 .fit-record .fit-form, .fit-checks .fit-form { container-type: inline-size; }
 /* Either condition names the wrapper statement-stacked, so the stacked rules are written once for
-   both schedules; each schedule's own section decides its own form. */
-/* Measured 2026-10-18 on the rendered tables with the 16em minimums: the record needs 409px and the
-   hand-check schedule, with its criterion column minimum, 672px. */
-@container record (width < 412px) { .fit-record .fit-form { container-name: statement-stacked; } }
-@container checks (width < 676px) { .fit-checks .fit-form { container-name: statement-stacked; } }
+   both schedules; each schedule's own section decides its own form. Measured 2026-10-21 with the
+   Saira, Public Sans and Source Code Pro faces: the record needs 381px and the hand-check schedule
+   634px. */
+@container record (width < 385px) { .fit-record .fit-form { container-name: statement-stacked; } }
+@container checks (width < 638px) { .fit-checks .fit-form { container-name: statement-stacked; } }
 @media (max-width: 620px) {
   :is(.fit-record, .fit-checks) .fit-form { container-name: statement-stacked; }
 }
@@ -651,29 +706,90 @@ ul.site { display: grid; gap: var(--space-12); margin: 0; padding-left: var(--sp
   :is(.fit-record, .fit-checks) .fit thead { display: none; }
   :is(.fit-record, .fit-checks) .fit tbody tr { padding: var(--space-xs) 0 var(--space-sm); }
   :is(.fit-record, .fit-checks) .fit tbody tr + tr { border-top: var(--w-outline) solid var(--ink); }
-  :is(.fit-record, .fit-checks) .fit :is(th, td) { padding: var(--space-sm) var(--space-md); border: 0; }
-  :is(.fit-record, .fit-checks) .fit :is(th, td)::before { content: attr(data-col); display: block; font: 600 var(--text-label-small)/1.4 var(--font-mono); letter-spacing: 0.06em; text-transform: uppercase; color: var(--label); }
-  :is(.fit-record, .fit-checks) .fit caption { display: block; padding: var(--space-sm) var(--space-md); }
+  :is(.fit-record, .fit-checks) .fit :is(th, td) { padding: var(--space-sm) 0; border: 0; }
+  :is(.fit-record, .fit-checks) .fit :is(th, td)::before { content: attr(data-col); }
+  :is(.fit-record, .fit-checks) .fit caption { display: block; padding: var(--space-sm) 0; }
   :is(.fit-record, .fit-checks) .fit :is(th, td) .cell-text { min-inline-size: 0; }
   .fit-checks .fit tbody th { min-inline-size: 0; }
   /* One state per block, so there is no column of names to keep aligned. */
   .fit-checks .fit .state-mark-none { display: none; }
 }
-/* A sentence, so Red Hat Text 400 like every other (UI-SPEC 171); the rule above it carries the weight. */
-.split .report { margin: 0; padding-top: var(--space-md); border-top: var(--w-outline) solid var(--ink); }
 
-/* The 404 page: the intro row of every sheet, its action under the paragraph. */
-.not-found-action { margin: 0; }
-@media (max-width: 620px) {
-  .not-found-action .button { width: 100%; justify-content: center; }
+/* The landing's limits table keeps every column at every width: in table form its note keeps a
+   readable column, and where its section is narrower than the table needs, and at 620px and below,
+   each row becomes a block with its note under it. Measured 2026-10-21 at 1440 with the 12em note
+   column: the table needs 499px. */
+.fit-limits { container: limits / inline-size; }
+.fit-limits td[data-col="Note"] .cell-text { min-inline-size: 12em; }
+.fit-limits .fit-form { container-type: inline-size; }
+@container limits (width < 503px) { .fit-limits .fit-form { container-name: limits-stacked; } }
+@media (max-width: 620px) { .fit-limits .fit-form { container-name: limits-stacked; } }
+@container limits-stacked (width >= 0px) {
+  .fit-limits .fit, .fit-limits .fit :is(thead, tbody, tr, th, td) { display: block; width: auto; }
+  .fit-limits .fit thead { display: none; }
+  .fit-limits .fit tbody { border-top: 2px solid var(--ink); }
+  .fit-limits .fit tbody tr { padding: var(--space-xs) 0 var(--space-sm); border-bottom: var(--w-rule) solid var(--rule); }
+  .fit-limits .fit :is(th, td) { padding: var(--space-sm) 0; border: 0; }
+  .fit-limits .fit :is(th, td)::before { content: attr(data-col); }
+  .fit-limits .fit :is(th, td) .cell-text { min-inline-size: 0; }
 }
 
+/* The marks legend on the accessibility statement: each mark drawn small beside its name, the
+   meaning under it, in as many columns as the band holds. */
+.marks dl { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(16rem, 100%), 1fr)); gap: 0 var(--space-lg); }
+.readout.marks dl > div { grid-template-columns: minmax(0, 1fr); gap: var(--space-sm); align-content: start; padding: var(--space-12) 0; }
+.marks dt { display: flex; align-items: center; gap: var(--space-12); }
+.marks .sample { display: flex; align-items: center; gap: var(--space-xs); flex: none; min-block-size: 28px; }
+.marks .pad { display: block; flex: none; inline-size: 24px; block-size: 28px; }
+.marks .pad::before { top: 5px; inline-size: 12px; block-size: 8px; }
+.marks .pad::after { bottom: 5px; inline-size: 8px; block-size: 3px; }
+.marks .pad.bounce::before { border-width: 2px; }
+.marks .sq { margin-right: 0; }
+
+@media (max-width: 960px) {
+  .first-band, .panel { grid-template-columns: minmax(0, 1fr); }
+  .band-head, .band-split { grid-template-columns: minmax(0, 1fr); }
+  ol.procedure { grid-auto-flow: row; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  ol.summary { grid-template-columns: repeat(2, minmax(0, 1fr)); row-gap: var(--space-12); }
+  .summary li:nth-child(3) { padding-left: 0; border-left: 0; }
+  .facts, .split { grid-template-columns: minmax(0, 1fr); }
+  .facts > div + div { padding-left: 0; border-left: 0; }
+  .index { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  .index .project { grid-column: 1 / -1; }
+}
+/* Where the pattern's own width gives a column less room than its widest head needs, the column
+   heads give way: each track's name and mute sit above its pads, and the bank labels under the
+   pattern keep each step's name and time. The pattern is the container, not the viewport, so the
+   heads never overlap at any width. Measured 2026-10-21 at 1440: the widest head (a mono time, or
+   "Reopen command") is 53.91px at min-content, so the replay board's twelve columns need 1063px of
+   pattern (208 + 88 + 2 x 16 for the name, mute and gaps, plus 12 x 53.91 + 11 x 8) and the landing's
+   nine need 868px; both take the board's switch. */
+@container pattern (width < 1067px) {
+  .tracks { --pad-h: 40px; }
+  .track { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "name mute" "pads pads"; gap: var(--space-sm) var(--space-md); }
+  .track .lane-name { grid-area: name; }
+  .track .pads { grid-area: pads; }
+  .track .mute { grid-area: mute; block-size: 36px; padding-inline: var(--space-12); }
+  .track-head { display: none; }
+  .track-banks { grid-template-areas: "pads pads"; }
+  .track-banks > :not(.pads) { display: none; }
+  .pads { gap: var(--space-xs); }
+  .pad::before { inline-size: 12px; block-size: 8px; }
+  .pad.bounce::before { border-width: 2px; }
+}
 @media (max-width: 620px) {
+  .top-strip nav { order: 3; flex-basis: 100%; }
+  .dwg-wide { display: none; }
+  .dwg-narrow { display: block; }
+  ol.procedure { grid-template-columns: minmax(0, 1fr); }
+  .procedure li { display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: var(--space-md); }
+  .step-key, .procedure.removal .step-key { block-size: 64px; }
+  .close-band .keybtn, .not-found-action .keybtn { justify-content: center; inline-size: 100%; }
+  .index { grid-template-columns: minmax(0, 1fr); }
   /* The sticky controls cover the top of the viewport, so focus scrolled into view lands below them. */
   :root:has(.controls) { scroll-padding-top: 120px; }
-  ol.steps { grid-template-columns: repeat(2, minmax(0, 1fr)); row-gap: var(--space-xs); }
-  .controls { position: sticky; top: 0; z-index: 2; margin: -12px 0 0; padding: var(--space-12) 0; background: var(--sheet); border-bottom: var(--w-rule) solid var(--rule); }
-  .controls .button { flex: 1 1 40%; justify-content: center; }
+  .controls { position: sticky; top: 0; z-index: 2; padding: var(--space-12) var(--gutter); background: var(--ground); border-bottom: var(--w-rule) solid var(--rule); }
+  .controls .keybtn, .controls .button { flex: 1 1 40%; justify-content: center; }
   .controls .clock { width: 100%; margin-left: 0; }
   ol.summary { grid-template-columns: minmax(0, 1fr); }
   .summary li + li { padding-left: 0; border-left: 0; }

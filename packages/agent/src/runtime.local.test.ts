@@ -219,6 +219,8 @@ describe('the agent bundle answers the AgentCore contract with the real handler 
   it(
     'names the handler bundle that throws while loading',
     () => {
+      // Planted under plantDir for the reason PLANT_PARENT gives: this build resolves from the planted
+      // root, so the size of the folders above it sets the build time (figures at PLANT_PARENT).
       const plantedRoot = join(plantDir, 'planted-handler-root');
       const handlerDir = join(plantedRoot, 'packages', 'functions', 'src', 'planted');
       mkdirSync(handlerDir, { recursive: true });

@@ -29,13 +29,11 @@ import {
   REPLAY_LAYOUT_WIDTHS,
   replayLayoutVerdict,
   replayVerdict,
-  flowTabVerdict,
-  flowVerdict,
-  HANG_WIDTHS,
-  hangVerdict,
   LOG_HEADER_TYPE,
   identifierBreakVerdict,
   lineVerdict,
+  MOTION_LIMIT_MS,
+  motionVerdict,
   overlapVerdict,
   deviceVerdict,
   fontsVerdict,
@@ -61,11 +59,9 @@ import {
   type Box,
   type CopyBuildRun,
   type DrawingReading,
-  type FlowReading,
-  type FlowState,
   type FocusStop,
-  type HangReading,
   type LinesReading,
+  type MotionReading,
   type FontsReading,
   type KeyboardReport,
   type NoScriptReading,
@@ -113,6 +109,7 @@ else {
     const site = scenario.site || {};
     for (const line of site.lines || []) console.log(line);
     if (!site.omitDone) console.log('done');
+    if (site.stderr !== undefined) console.error(site.stderr);
     process.exit(site.exitCode === undefined ? 0 : site.exitCode);
   }
   if (!existsSync(join(scenario.homeDir, '.dev-browser', 'tmp', job.axeFile))) {
@@ -121,6 +118,7 @@ else {
   }
   const stop = { domIndex: 5, tag: 'a', radioGroup: null, skipLink: true };
   const theme = { dataTheme: job.storedTheme, ground: scenario.grounds[job.storedTheme || job.osScheme] };
+  const motion = scenario.noMotion ? {} : { motion: { animations: scenario.motion === undefined ? 0 : scenario.motion } };
   for (const route of job.routes) {
     const expected = (job.expectedStatus || {})[route] || 200;
     const answered = scenario.unknownStatus !== undefined && expected !== 200 ? scenario.unknownStatus : expected;
@@ -132,11 +130,12 @@ else {
       axe: { version: '4.14.0', selected: ['html-has-lang', 'target-size', 'label-content-name-mismatch'], ran: ['html-has-lang', 'target-size', 'label-content-name-mismatch'], violations: [], incomplete: [] },
       keyboard: { focusables: [stop], positiveTabindex: [], walk: [{ ...stop, outlineStyle: 'auto', outlineWidth: '1px', boxShadow: 'none' }] },
       overflow: { scrollWidth: job.width, innerWidth: job.width },
+      ...motion,
     };
     console.log('AUDIT ' + JSON.stringify(line));
   }
   if (scenario.malformed) console.log('AUDIT {not json');
-  if (scenario.incomplete) console.log('AUDIT ' + JSON.stringify({ route: job.routes[0], status: 200, theme, axe: { version: '4.14.0', selected: ['target-size', 'label-content-name-mismatch'], ran: ['target-size', 'label-content-name-mismatch'], violations: [], incomplete: [{ id: 'color-contrast', nodes: [{ target: 'p', summary: '' }] }] }, keyboard: { focusables: [stop], positiveTabindex: [], walk: [{ ...stop, outlineStyle: 'auto', outlineWidth: '1px', boxShadow: 'none' }] }, overflow: { scrollWidth: job.width, innerWidth: job.width } }));
+  if (scenario.incomplete) console.log('AUDIT ' + JSON.stringify({ route: job.routes[0], status: 200, theme, axe: { version: '4.14.0', selected: ['target-size', 'label-content-name-mismatch'], ran: ['target-size', 'label-content-name-mismatch'], violations: [], incomplete: [{ id: 'color-contrast', nodes: [{ target: 'p', summary: '' }] }] }, keyboard: { focusables: [stop], positiveTabindex: [], walk: [{ ...stop, outlineStyle: 'auto', outlineWidth: '1px', boxShadow: 'none' }] }, overflow: { scrollWidth: job.width, innerWidth: job.width }, ...motion }));
   if (!scenario.omitDone) console.log('done');
   process.exit(scenario.exitCode === undefined ? 0 : scenario.exitCode);
 }
@@ -146,6 +145,7 @@ interface SiteScenario {
   readonly lines?: readonly string[];
   readonly omitDone?: boolean;
   readonly exitCode?: number;
+  readonly stderr?: string;
 }
 
 interface Scenario {
@@ -156,6 +156,10 @@ interface Scenario {
   readonly hang?: boolean;
   readonly malformed?: boolean;
   readonly incomplete?: boolean;
+  // How many animations the stand-in reports on each page, 0 unless a case plants more; noMotion
+  // leaves the motion reading out of every full record.
+  readonly motion?: number;
+  readonly noMotion?: boolean;
   // What --ground the stand-in reports per expected theme; tokens.json's values unless a case plants others.
   readonly grounds?: Readonly<Record<'light' | 'dark', string>>;
   readonly site?: SiteScenario;
@@ -349,6 +353,21 @@ describe('runA11yLive refuses every empty or broken run by name', () => {
     expect(lines).toContain(A11Y_MESSAGES.routeFailed('/', 'light 320px', [A11Y_MESSAGES.incomplete('color-contrast', 1, 'p')]));
   });
 
+  it('fails every route with an animation on the page under reduced motion, and passes the same run with none', async () => {
+    const moving = await audit(plantRepo({ scenario: { motion: 2 } }));
+    expect(moving.code).toBe(1);
+    expect(moving.lines).toContain(A11Y_MESSAGES.routeFailed('/', 'light 320px', [A11Y_MESSAGES.motion(2)]));
+    expect(moving.lines).toContain(A11Y_MESSAGES.routeFailed('/no-such-sheet/', 'device 1440px', [A11Y_MESSAGES.motion(2)]));
+    expect(moving.lines.at(-1)).toMatch(/^\[a11y\] FAIL: 18 of 18 audit\(s\) failed/);
+    expect((await audit(plantRepo({ scenario: { motion: 0 } }))).code).toBe(0);
+  });
+
+  it('fails a full AUDIT record that carries no motion reading as malformed', async () => {
+    const { code, lines } = await audit(plantRepo({ scenario: { noMotion: true } }));
+    expect(code).toBe(1);
+    expect(lines.some((line) => line.startsWith(`[a11y] ${A11Y_MESSAGES.malformedAudit('light 320px', 'AUDIT {"route":"/",')}`))).toBe(true);
+  });
+
   it('fails a route the driver printed no AUDIT line for', async () => {
     const planted = plantRepo();
     const stub = join(planted.globalModules, 'dev-browser', 'bin', 'dev-browser.js');
@@ -464,6 +483,7 @@ const CATALOGUE_SAMPLES: CatalogueSamples = {
   incomplete: ['color-contrast', 1, 'p'],
   overflow: [321, 320],
   viewport: [300, 320],
+  motion: [1],
   positiveTabindex: [1, '<a>'],
   noFocus: [],
   firstNotSkipLink: ['<a>'],
@@ -619,8 +639,8 @@ describe('axe verdicts (D-129)', () => {
     expect(axeReasons({ ...cleanAxe, version: '4.13.0' }, NO_ACCEPTED)).toEqual([A11Y_MESSAGES.axeVersionRan('4.13.0')]);
   });
 
-  it('judges a whole AUDIT record: status, missing results, viewport and overflow', () => {
-    const line: AuditLine = { route: '/', status: 200, theme: { dataTheme: null, ground: LIGHT_GROUND }, axe: cleanAxe, keyboard: keyboard([skip, nav, radios[0] ?? skip, button].map(withRing)), overflow: { scrollWidth: 320, innerWidth: 320 } };
+  it('judges a whole AUDIT record: status, missing results, viewport, overflow and motion', () => {
+    const line: AuditLine = { route: '/', status: 200, theme: { dataTheme: null, ground: LIGHT_GROUND }, axe: cleanAxe, keyboard: keyboard([skip, nav, radios[0] ?? skip, button].map(withRing)), overflow: { scrollWidth: 320, innerWidth: 320 }, motion: { animations: 0 } };
     expect(auditReasons(line, 320, NO_ACCEPTED)).toEqual([]);
     expect(auditReasons(line, 320, NO_ACCEPTED, 200, 'dark')).toEqual([E2E_MESSAGES.themeNotTaken('dark', LIGHT_GROUND, DARK_GROUND)]);
     const { theme: _unread, ...withoutTheme } = line;
@@ -630,6 +650,9 @@ describe('axe verdicts (D-129)', () => {
     expect(auditReasons(line, 320, NO_ACCEPTED, 404)).toEqual([A11Y_MESSAGES.status(200, 404)]);
     expect(auditReasons({ route: '/', status: 200 }, 320, NO_ACCEPTED)).toEqual([A11Y_MESSAGES.axeAbsent()]);
     expect(auditReasons({ ...line, overflow: { scrollWidth: 330, innerWidth: 300 } }, 320, NO_ACCEPTED)).toEqual([A11Y_MESSAGES.viewport(300, 320), A11Y_MESSAGES.overflow(330, 320)]);
+    expect(auditReasons({ ...line, motion: { animations: 1 } }, 320, NO_ACCEPTED)).toEqual([A11Y_MESSAGES.motion(1)]);
+    const { motion: _motion, ...withoutMotion } = line;
+    expect(auditReasons(withoutMotion, 320, NO_ACCEPTED)).toEqual([A11Y_MESSAGES.axeAbsent()]);
   });
 });
 
@@ -721,7 +744,7 @@ const healthyFonts = (route: string): FontsReading => ({
 const healthyRequests = (route: string): RequestsReading => ({
   route,
   page: `${BASE}${route}`,
-  requests: [`${BASE}${route}`, `${BASE}/tokens.css`, `${BASE}/_astro/Sheet.css`, `${BASE}/_astro/Sheet.js`, `${BASE}/_astro/red-hat-text-latin-wght-normal.woff2`],
+  requests: [`${BASE}${route}`, `${BASE}/tokens.css`, `${BASE}/_astro/Sheet.css`, `${BASE}/_astro/Sheet.js`, `${BASE}/_astro/public-sans-latin-wght-normal.woff2`],
 });
 
 const failed = (reason: string): { ok: false; reason: string } => ({ ok: false, reason });
@@ -788,15 +811,15 @@ describe('fontsVerdict (D-135, AC-59 rendered half)', () => {
   });
 
   it('fails a family with no face in document.fonts', () => {
-    const families = healthyFonts('/').families.filter((entry) => entry.family !== 'Red Hat Mono');
-    expect(fontsVerdict({ ...healthyFonts('/'), families })).toEqual(failed(E2E_MESSAGES.fontMissing('Red Hat Mono')));
+    const families = healthyFonts('/').families.filter((entry) => entry.family !== 'Source Code Pro');
+    expect(fontsVerdict({ ...healthyFonts('/'), families })).toEqual(failed(E2E_MESSAGES.fontMissing('Source Code Pro')));
   });
 
   it('fails a family whose faces have not loaded, and one whose check is false', () => {
-    const notLoaded = healthyFonts('/').families.map((entry) => (entry.family === 'Red Hat Display' ? { ...entry, loaded: false } : entry));
-    expect(fontsVerdict({ ...healthyFonts('/'), families: notLoaded })).toEqual(failed(E2E_MESSAGES.fontNotLoaded('Red Hat Display')));
-    const unchecked = healthyFonts('/').families.map((entry) => (entry.family === 'Red Hat Text' ? { ...entry, check: false } : entry));
-    expect(fontsVerdict({ ...healthyFonts('/'), families: unchecked })).toEqual(failed(E2E_MESSAGES.fontCheckFalse('Red Hat Text')));
+    const notLoaded = healthyFonts('/').families.map((entry) => (entry.family === 'Saira' ? { ...entry, loaded: false } : entry));
+    expect(fontsVerdict({ ...healthyFonts('/'), families: notLoaded })).toEqual(failed(E2E_MESSAGES.fontNotLoaded('Saira')));
+    const unchecked = healthyFonts('/').families.map((entry) => (entry.family === 'Public Sans' ? { ...entry, check: false } : entry));
+    expect(fontsVerdict({ ...healthyFonts('/'), families: unchecked })).toEqual(failed(E2E_MESSAGES.fontCheckFalse('Public Sans')));
   });
 
   it('fails when the undeclared control family reads present', () => {
@@ -831,12 +854,13 @@ describe('requestsVerdict (AC-57, AC-E52)', () => {
 });
 
 describe('storageVerdict (AC-22, D-141)', () => {
-  it('passes fothering-theme and fothering-flow in localStorage', () => {
-    expect(storageVerdict({ local: ['fothering-theme', 'fothering-flow'], session: [] })).toEqual({ ok: true });
+  it('passes fothering-theme in localStorage', () => {
+    expect(storageVerdict({ local: ['fothering-theme'], session: [] })).toEqual({ ok: true });
   });
 
-  it('fails a localStorage key outside the two, and any sessionStorage key', () => {
+  it('fails a localStorage key outside fothering-theme, the retired fothering-flow included, and any sessionStorage key', () => {
     expect(storageVerdict({ local: ['fothering-theme', 'tracking-id'], session: [] })).toEqual(failed(E2E_MESSAGES.storageKeys(['tracking-id'])));
+    expect(storageVerdict({ local: ['fothering-theme', 'fothering-flow'], session: [] })).toEqual(failed(E2E_MESSAGES.storageKeys(['fothering-flow'])));
     expect(storageVerdict({ local: [], session: ['fothering-theme'] })).toEqual(failed(E2E_MESSAGES.storageKeys(['session:fothering-theme'])));
   });
 });
@@ -1072,112 +1096,52 @@ const box = (left: number, top: number, right: number, bottom: number): Box => (
 const drawing = (texts: readonly [string, Box][]): DrawingReading => ({ box: box(0, 0, 300, 200), texts: texts.map(([text, at]) => ({ text, box: at })) });
 
 describe('overlapVerdict (AC-65)', () => {
-  it('passes a tag clear of every drawing text', () => {
-    expect(overlapVerdict({ tag: box(0, 150, 200, 400), drawings: [drawing([['fothering-bulk', box(10, 100, 120, 115)]])] })).toEqual({ ok: true });
+  it('passes every drawing text inside its drawing', () => {
+    expect(overlapVerdict({ drawings: [drawing([['domain, keyed hash', box(10, 100, 120, 115)]])] })).toEqual({ ok: true });
   });
 
-  it('fails a tag overlapping one SVG text box', () => {
-    expect(overlapVerdict({ tag: box(0, 150, 200, 400), drawings: [drawing([['SendingEnabled: false', box(150, 140, 290, 155)]])] })).toEqual({ ok: false, reason: E2E_MESSAGES.tagOverlap('SendingEnabled: false') });
-  });
-
-  it('passes a tag whose edge touches a text box', () => {
-    expect(overlapVerdict({ tag: box(0, 150, 200, 400), drawings: [drawing([['label', box(150, 135, 290, 150)]])] })).toEqual({ ok: true });
+  it('passes a text box half a pixel past its drawing, the sub-pixel rounding', () => {
+    expect(overlapVerdict({ drawings: [drawing([['dropped', box(150, 140, 300.5, 155)]])] })).toEqual({ ok: true });
   });
 
   it('fails an SVG text box one pixel past its SVG box', () => {
-    expect(overlapVerdict({ tag: null, drawings: [drawing([['SendingEnabled: false', box(150, 140, 301, 155)]])] })).toEqual({ ok: false, reason: E2E_MESSAGES.textOutside('SendingEnabled: false') });
+    expect(overlapVerdict({ drawings: [drawing([['SendingEnabled: false', box(150, 140, 301, 155)]])] })).toEqual({ ok: false, reason: E2E_MESSAGES.textOutside('SendingEnabled: false') });
   });
 });
 
-const flowState = (running: number, labels: readonly string[] = ['Run flow']): FlowState => ({ running, labels });
-const healthyFlow: FlowReading = {
-  route: '/',
-  width: 320,
-  movingOnLoad: true,
-  controls: [{ label: 'Stop flow', width: 88, height: 44 }],
-  afterClick: flowState(0),
-  afterReload: flowState(0),
-  reduced: 0,
-  storedRunningReduced: 3,
-  storedStopped: 0,
-};
-const stillRoute: FlowReading = { ...healthyFlow, movingOnLoad: false, controls: [], afterClick: flowState(0, []), afterReload: flowState(0, []), storedRunningReduced: 0 };
+// The landing's playhead run on load: fourteen lamps and keys, the mute landing last.
+const playheadRun: MotionReading['onLoad'] = { count: 14, infinite: 0, longestEnd: 1720 };
+const STILL: MotionReading['onLoad'] = { count: 0, infinite: 0, longestEnd: 0 };
+const moving = (width: number, onLoad = playheadRun, reduced = 0): MotionReading => ({ route: '/', width, onLoad, reduced });
 
-describe('flowVerdict (AC-43, AC-44, AC-E31, AC-E32, UI-SPEC E3)', () => {
-  it('passes a moving route whose visible Stop flow stops it for good, and a still route with no control', () => {
-    expect(flowVerdict(healthyFlow)).toEqual({ ok: true });
-    expect(flowVerdict(stillRoute)).toEqual({ ok: true });
+describe('motionVerdict (WCAG 2.2.2, the playhead run and reduced motion)', () => {
+  it('passes a run that settles within five seconds, and a still route that need not move', () => {
+    expect(motionVerdict(moving(320), true)).toEqual({ ok: true });
+    expect(motionVerdict({ route: '/deploy/', width: 1440, onLoad: STILL, reduced: 0 })).toEqual({ ok: true });
   });
 
-  it('fails a route moving on load with no visible flow control', () => {
-    expect(flowVerdict({ ...healthyFlow, controls: [] })).toEqual({ ok: false, reason: E2E_MESSAGES.flowNoControl(320) });
+  it('fails a route that carries the playhead run and moved nothing on load', () => {
+    expect(motionVerdict(moving(1440, STILL), true)).toEqual({ ok: false, reason: E2E_MESSAGES.motionStill(1440) });
   });
 
-  it('fails running animations left after clicking every visible control', () => {
-    expect(flowVerdict({ ...healthyFlow, afterClick: flowState(2) })).toEqual({ ok: false, reason: E2E_MESSAGES.flowStillRunning(320, 2) });
+  it('fails an animation that repeats forever', () => {
+    expect(motionVerdict(moving(320, { ...playheadRun, infinite: 1 }), true)).toEqual({ ok: false, reason: E2E_MESSAGES.motionLoops(320, 1) });
   });
 
-  it('fails a control that does not read Run flow after the click', () => {
-    expect(flowVerdict({ ...healthyFlow, afterClick: flowState(0, ['Stop flow']) })).toEqual({ ok: false, reason: E2E_MESSAGES.flowLabel(320, ['Stop flow']) });
+  it('fails an animation that ends past five seconds, and passes one that ends at five seconds exactly', () => {
+    expect(motionVerdict(moving(320, { ...playheadRun, longestEnd: MOTION_LIMIT_MS + 1 }), true)).toEqual({ ok: false, reason: E2E_MESSAGES.motionLong(320, MOTION_LIMIT_MS + 1) });
+    expect(motionVerdict(moving(320, { ...playheadRun, longestEnd: MOTION_LIMIT_MS }), true)).toEqual({ ok: true });
   });
 
-  it('fails a reload that runs the flow again after a stop', () => {
-    expect(flowVerdict({ ...healthyFlow, afterReload: flowState(3) })).toEqual({ ok: false, reason: E2E_MESSAGES.flowReloadRuns(320, 3) });
+  it('fails a route that holds an animation under reduced motion', () => {
+    expect(motionVerdict(moving(1440, playheadRun, 3), true)).toEqual({ ok: false, reason: E2E_MESSAGES.motionReduced(1440, 3) });
   });
 
-  it('fails a visible control on a route with no motion on load', () => {
-    expect(flowVerdict({ ...stillRoute, controls: healthyFlow.controls })).toEqual({ ok: false, reason: E2E_MESSAGES.flowControlWithoutMotion(320) });
-  });
-
-  it('fails a reduced-motion run with no stored choice and a running animation', () => {
-    expect(flowVerdict({ ...healthyFlow, reduced: 1 })).toEqual({ ok: false, reason: E2E_MESSAGES.flowReduced(320, 1) });
-  });
-
-  it('fails a stored running choice under reduced motion with no running animation', () => {
-    expect(flowVerdict({ ...healthyFlow, storedRunningReduced: 0 })).toEqual({ ok: false, reason: E2E_MESSAGES.flowStoredRunning(320) });
-  });
-
-  it('fails a stored stopped choice that leaves the flow running', () => {
-    expect(flowVerdict({ ...healthyFlow, storedStopped: 2 })).toEqual({ ok: false, reason: E2E_MESSAGES.flowStoredStopped(320, 2) });
-  });
-
-  it('fails a control smaller than 44 by 44 pixels', () => {
-    expect(flowVerdict({ ...healthyFlow, controls: [{ label: 'Stop flow', width: 88, height: 43 }] })).toEqual({ ok: false, reason: E2E_MESSAGES.flowSmallControl(320, 88, 43) });
-  });
-});
-
-describe('flowTabVerdict (AC-E33, held-out)', () => {
-  it('passes a Stop flow button reached before the first focusable of the next section', () => {
-    expect(flowTabVerdict({ width: 1440, flows: [{ flowStep: 6, nextStep: 7 }] })).toEqual({ ok: true });
-    expect(flowTabVerdict({ width: 1440, flows: [{ flowStep: 6, nextStep: null }] })).toEqual({ ok: true });
-  });
-
-  it('fails a Stop flow button reached after the first focusable of the next section', () => {
-    expect(flowTabVerdict({ width: 1440, flows: [{ flowStep: 9, nextStep: 7 }] })).toEqual({ ok: false, reason: E2E_MESSAGES.flowTabLate(1440) });
-  });
-
-  it('fails a Stop flow button Tab never reaches', () => {
-    expect(flowTabVerdict({ width: 320, flows: [{ flowStep: null, nextStep: 7 }] })).toEqual({ ok: false, reason: E2E_MESSAGES.flowTabUnreached(320) });
-  });
-});
-
-const hanging = (visibleStem: number, tagTop = 420, valveBottom = 400): HangReading => ({ route: '/', width: 1280, hanging: true, visibleStem, tagTop, valveBottom });
-
-describe('hangVerdict (UI-SPEC 8.1, the tag hung from the stem)', () => {
-  it('passes a tag hung below a clear stretch of stem', () => {
-    expect(hangVerdict(hanging(18))).toEqual({ ok: true });
-  });
-
-  it('fails a tag whose card meets the valve, leaving less than 12 px of stem', () => {
-    expect(hangVerdict(hanging(5))).toEqual({ ok: false, reason: E2E_MESSAGES.tagStuck(1280, 5) });
-  });
-
-  it('fails a tag whose tilted top edge reaches the valve', () => {
-    expect(hangVerdict(hanging(14, 398, 400))).toEqual({ ok: false, reason: E2E_MESSAGES.tagMeetsValve(1280) });
-  });
-
-  it('passes a route with no hung tag', () => {
-    expect(hangVerdict({ route: '/no-such-sheet/', width: 1280, hanging: false, visibleStem: 0, tagTop: 0, valveBottom: 0 })).toEqual({ ok: true });
+  it('names every failure of one reading, not only the first', () => {
+    expect(motionVerdict(moving(320, { count: 2, infinite: 1, longestEnd: 6000 }, 1))).toEqual({
+      ok: false,
+      reason: [E2E_MESSAGES.motionLoops(320, 1), E2E_MESSAGES.motionLong(320, 6000), E2E_MESSAGES.motionReduced(320, 1)].join('; '),
+    });
   });
 });
 
@@ -1310,26 +1274,20 @@ describe('noScriptVerdict (AC-10, AC-E7)', () => {
     expect(noScriptReason({ ...healthyNoScript(320), boardParts })).toBe([E2E_MESSAGES.noScriptBoard(320, '1 2 4', true), E2E_MESSAGES.noScriptBoard(320, '3', false)].join('; '));
   });
 
-  it('fails a run with no board part and one with the tag hidden', () => {
+  it('fails a run with no board part and one with the readout closure row hidden', () => {
     expect(noScriptReason({ ...healthyNoScript(320), boardParts: [] })).toBe(E2E_MESSAGES.noScriptNoBoard(320));
     expect(noScriptReason({ ...healthyNoScript(320), tagShown: false })).toBe(E2E_MESSAGES.noScriptTag(320));
   });
 });
 
-// Stacked (960 and below) the board keeps one height and draws the tag's place off the paused step;
-// beside the story the tag simply comes off, so the board's height follows the step.
+// The board sits above the step keys at every width and keeps one height on all four steps.
 const HEADER_TYPE = LOG_HEADER_TYPE;
-const MONO = '"Red Hat Mono", monospace';
+const MONO = '"Source Code Pro", monospace';
 const API_PARTS = ['Put', 'Configuration', 'Set', 'Sending', 'Options'];
 const healthyLayout = (width: number): ReplayLayoutReading => ({
   route: '/replay/',
   width,
-  steps: [1, 2, 3, 4].map((step) => ({
-    step,
-    boardHeight: width <= 960 ? 638 + (step === 2 ? 0.5 : 0) : step === 3 ? 647 : 398,
-    phantom: width <= 960 && step !== 3,
-  })),
-  phantomExposed: 0,
+  steps: [1, 2, 3, 4].map((step) => ({ step, boardHeight: (width <= 960 ? 638 : 412) + (step === 2 ? 0.5 : 0) })),
   evidence: { tableRight: 1200.5, panelRight: 1201 },
   logRows: [
     { header: '14:01:07', baselines: [1500.25, 1500.25, 1500.75, 1500.25] },
@@ -1361,27 +1319,14 @@ describe('replayLayoutVerdict (AC-6, UI-SPEC 6 and 10.3)', () => {
     for (const width of REPLAY_LAYOUT_WIDTHS) expect(replayLayoutVerdict(healthyLayout(width)), String(width)).toEqual({ ok: true });
   });
 
-  it('fails a stacked board whose height changes by more than 1 px between steps, and passes 1 px', () => {
+  it('fails a board whose height changes by more than 1 px between steps at any width, and passes 1 px', () => {
     expect(layoutReason(withStep(healthyLayout(960), 3, { boardHeight: 900 }))).toBe(E2E_MESSAGES.layoutBoardHeight(960, [638, 638.5, 900, 638]));
+    expect(layoutReason(withStep(healthyLayout(1280), 3, { boardHeight: 440 }))).toBe(E2E_MESSAGES.layoutBoardHeight(1280, [412, 412.5, 440, 412]));
     expect(replayLayoutVerdict(withStep(healthyLayout(320), 4, { boardHeight: 639 }))).toEqual({ ok: true });
   });
 
   it('fails a run that did not measure the board on all four steps', () => {
     expect(layoutReason({ ...healthyLayout(320), steps: healthyLayout(320).steps.slice(0, 3) })).toBe(E2E_MESSAGES.layoutStepsMissing(320));
-  });
-
-  it('fails a stacked reserved slot that draws no place for the tag off the paused step', () => {
-    expect(layoutReason(withStep(healthyLayout(960), 1, { phantom: false }))).toBe(E2E_MESSAGES.layoutPhantomMissing(960, 1));
-    expect(layoutReason(withStep(healthyLayout(320), 4, { phantom: false }))).toBe(E2E_MESSAGES.layoutPhantomMissing(320, 4));
-  });
-
-  it('fails a drawn tag place on the paused step, and one beside the story', () => {
-    expect(layoutReason(withStep(healthyLayout(320), 3, { phantom: true }))).toBe(E2E_MESSAGES.layoutPhantomShown(320, 3));
-    expect(layoutReason(withStep(healthyLayout(961), 2, { phantom: true }))).toBe(E2E_MESSAGES.layoutPhantomShown(961, 2));
-  });
-
-  it('fails a drawn tag place outside aria-hidden', () => {
-    expect(layoutReason({ ...healthyLayout(960), phantomExposed: 1 })).toBe(E2E_MESSAGES.layoutPhantomExposed(960, 1));
   });
 
   it('fails an evidence schedule whose right edge passes its panel, and one the run never measured', () => {
@@ -1430,7 +1375,7 @@ describe('replayLayoutVerdict (AC-6, UI-SPEC 6 and 10.3)', () => {
   });
 
   it('holds an identifier set in the face around it to its breaks, not to mono 500', () => {
-    const inherited = { text: 'fothering-bulk', weight: '700', family: '"Red Hat Display", sans-serif', lines: ['fothering-bulk'], face: 'inherit' };
+    const inherited = { text: 'fothering-bulk', weight: '700', family: '"Saira", sans-serif', lines: ['fothering-bulk'], face: 'inherit' };
     expect(replayLayoutVerdict({ ...healthyLayout(1280), identifiers: [inherited] })).toEqual({ ok: true });
     const broken = [{ ...inherited, lines: ['fothering-', 'bulk'] }];
     expect(layoutReason({ ...healthyLayout(1280), identifiers: broken })).toBe(E2E_MESSAGES.layoutIdentifierBreak(1280, 'fothering-bulk', ['fothering-', 'bulk']));
@@ -1444,9 +1389,9 @@ describe('replayLayoutVerdict (AC-6, UI-SPEC 6 and 10.3)', () => {
     expect(layoutReason({ ...healthyLayout(320), plainApiNames: ['GetConfigurationSet'] })).toBe(E2E_MESSAGES.layoutPlainApiName(320, 'GetConfigurationSet'));
   });
 
-  it('fails an identifier not set in Red Hat Mono', () => {
-    const identifiers = [{ text: 'GetConfigurationSet', weight: '500', family: '"Red Hat Text", sans-serif', lines: ['GetConfigurationSet'] }];
-    expect(layoutReason({ ...healthyLayout(1280), identifiers })).toBe(E2E_MESSAGES.layoutIdentifierFamily(1280, 'GetConfigurationSet', '"Red Hat Text", sans-serif'));
+  it('fails an identifier not set in Source Code Pro', () => {
+    const identifiers = [{ text: 'GetConfigurationSet', weight: '500', family: '"Public Sans", sans-serif', lines: ['GetConfigurationSet'] }];
+    expect(layoutReason({ ...healthyLayout(1280), identifiers })).toBe(E2E_MESSAGES.layoutIdentifierFamily(1280, 'GetConfigurationSet', '"Public Sans", sans-serif'));
   });
 
   it('fails a word-mode API name broken inside one of its words', () => {
@@ -1612,21 +1557,19 @@ describe('the built checks through the CLI and the e2e step (D-150, D-151)', () 
 
   type SiteLines = Partial<Record<'THEME' | 'DEVICE' | 'PIN' | 'STORAGE', unknown>>;
   type RouteLines = Partial<Record<'SWITCH' | 'FONTS' | 'REQUESTS' | 'LINES' | 'NARROW', (route: string) => unknown>>;
-  type WidthLines = Partial<Record<'FLOW' | 'TABFLOW' | 'HANG', (route: string, width: number) => unknown>>;
+  type WidthLines = Partial<Record<'MOTION', (route: string, width: number) => unknown>>;
   // The planted tree's landing, accessibility, deploy, privacy and replay pages, then the unknown
   // address that answers with the 404 page.
   const SITE_ROUTES = ['/', '/accessibility/', '/deploy/', '/privacy-and-ai/', '/replay/', UNKNOWN_PATH];
   const healthyLines = (route: string): LinesReading => ({ route, blocks: 1, lines: ['closed - one lane'] });
-  // The landing carries the one drawing; its tag hangs clear of the drawing text.
+  // The privacy page carries the one labelled drawing; the landing's readout carries an identifier.
   const healthyNarrow = (route: string): unknown => ({
     route,
-    tag: route === '/' ? box(0, 200, 266, 500) : null,
-    drawings: route === '/' ? [drawing([['fothering-bulk', box(10, 100, 120, 115)]])] : [],
+    drawings: route === '/privacy-and-ai/' ? [drawing([['domain, keyed hash', box(10, 100, 120, 115)]])] : [],
     identifiers: route === '/' ? [{ text: 'SendingOptions.SendingEnabled', lines: ['SendingOptions.', 'SendingEnabled'] }] : [],
   });
-  const healthyFlowLine = (route: string, width: number): FlowReading => (route === '/' ? { ...healthyFlow, route, width } : { ...stillRoute, route, width });
-  const healthyTab = (route: string, width: number): unknown => ({ route, width, flows: route === '/' ? [{ flowStep: 6, nextStep: null }] : [] });
-  const healthyHang = (route: string, width: number): HangReading => (route === '/' ? { ...hanging(18), width } : { route, width, hanging: false, visibleStem: 0, tagTop: 0, valveBottom: 0 });
+  // The landing and the replay play the playhead run on load; every other page is still.
+  const healthyMotion = (route: string, width: number): MotionReading => ({ route, width, onLoad: route === '/' || route === '/replay/' ? playheadRun : STILL, reduced: 0 });
 
   // What a healthy site driver prints: a Dark stored on a light OS, Device following the OS with no
   // reload, Dark stored on a dark OS kept when the OS turns light, then the switch, fonts and
@@ -1652,13 +1595,12 @@ describe('the built checks through the CLI and the e2e step (D-150, D-151)', () 
       ...overrides,
     };
     const perRoute = { SWITCH: healthySwitch, FONTS: healthyFonts, REQUESTS: healthyRequests, LINES: healthyLines, NARROW: healthyNarrow, ...routeOverrides } as Required<RouteLines>;
-    const perWidth = { FLOW: healthyFlowLine, TABFLOW: healthyTab, HANG: healthyHang, ...widthOverrides } as Required<WidthLines>;
+    const perWidth = { MOTION: healthyMotion, ...widthOverrides } as Required<WidthLines>;
     const printed = (check: string, value: unknown): string[] => (value === undefined ? [] : [`${check} ${JSON.stringify(value)}`]);
-    const widthsOf = (check: string): readonly number[] => (check === 'HANG' ? HANG_WIDTHS : [320, 1440]);
     return [
       ...Object.entries(checks).flatMap(([check, value]) => printed(check, value)),
       ...Object.entries(perRoute).flatMap(([check, make]) => SITE_ROUTES.flatMap((route) => printed(check, make(route)))),
-      ...Object.entries(perWidth).flatMap(([check, make]) => SITE_ROUTES.flatMap((route) => widthsOf(check).flatMap((width) => printed(check, make(route, width))))),
+      ...Object.entries(perWidth).flatMap(([check, make]) => SITE_ROUTES.flatMap((route) => [320, 1440].flatMap((width) => printed(check, make(route, width))))),
       ...replayLines,
       ...(errors.console ?? []).map((text) => `CONSOLE ${JSON.stringify({ type: 'error', text })}`),
       ...(errors.page ?? []).map((record) => `PAGEERROR ${JSON.stringify(record)}`),
@@ -1793,54 +1735,49 @@ describe('the built checks through the CLI and the e2e step (D-150, D-151)', () 
     expect(lines.at(-1)).toBe(E2E_MESSAGES.fail(E2E_MESSAGES.copyBuildLeft(left)));
   });
 
-  it('the rendered step prints the flow lines naming movingOnLoad for every route at 320 and 1440, and the measured prose blocks', async () => {
+  it('the rendered step prints the motion line naming each moving route at 320 and 1440, and the measured prose blocks', async () => {
     const { code, lines } = await e2e(renderedTree());
     expect(code).toBe(0);
-    const flow = lines.find((line) => line.startsWith('[e2e] rendered FLOW: ok, '));
-    for (const route of SITE_ROUTES) {
-      for (const width of [320, 1440]) expect(flow, `${route} ${width}`).toContain(`${route} at ${width} px movingOnLoad ${String(route === '/')}`);
+    const motion = lines.find((line) => line.startsWith('[e2e] rendered MOTION: ok, '));
+    for (const route of ['/', '/replay/']) {
+      for (const width of [320, 1440]) expect(motion, `${route} ${width}`).toContain(`${route} at ${width} px 14 animation(s) ending by 1720 ms`);
     }
+    expect(motion).not.toContain('/deploy/');
     expect(lines).toContain(E2E_MESSAGES.renderedOk('LINES', '6 prose block(s) measured at 1440 px, the longest line 17 characters'));
     expect(lines.find((line) => line.startsWith('[e2e] rendered NARROW: ok, '))).toContain('1 drawing text(s)');
-    expect(lines.find((line) => line.startsWith('[e2e] rendered TABFLOW: ok, '))).toBeDefined();
   });
 
-  it('the rendered step fails a moving route with no visible flow control, a long line, a covered label and a late Tab stop, naming the route', async () => {
+  it('the rendered step fails a looping route, a long line and a drawing label past its drawing, naming the route', async () => {
     const widthOverrides: WidthLines = {
-      FLOW: (route, width) => ({ ...healthyFlowLine(route, width), ...(route === '/' && width === 320 ? { controls: [] } : {}) }),
-      TABFLOW: (route, width) => (route === '/' ? { route, width, flows: [{ flowStep: 9, nextStep: 7 }] } : healthyTab(route, width)),
+      MOTION: (route, width) => (route === '/' && width === 320 ? { ...healthyMotion(route, width), onLoad: { ...playheadRun, infinite: 1 } } : healthyMotion(route, width)),
     };
     const routeOverrides: RouteLines = {
       LINES: (route) => ({ ...healthyLines(route), lines: [route === '/' ? 'a'.repeat(81) : 'short'] }),
-      NARROW: (route) => (route === '/' ? { route, tag: box(0, 100, 266, 500), drawings: [drawing([['fothering-bulk', box(10, 100, 120, 115)]])], identifiers: [] } : healthyNarrow(route)),
+      NARROW: (route) => (route === '/privacy-and-ai/' ? { route, drawings: [drawing([['domain, keyed hash', box(150, 140, 301, 155)]])], identifiers: [] } : healthyNarrow(route)),
     };
     const { code, lines } = await e2e(renderedTree(), {}, { lines: siteLines({}, {},routeOverrides, widthOverrides) });
     expect(code).toBe(1);
-    expect(lines).toContain(E2E_MESSAGES.renderedFailed('FLOW', `/: ${E2E_MESSAGES.flowNoControl(320)}`));
+    expect(lines).toContain(E2E_MESSAGES.renderedFailed('MOTION', `/: ${E2E_MESSAGES.motionLoops(320, 1)}`));
     expect(lines).toContain(E2E_MESSAGES.renderedFailed('LINES', E2E_MESSAGES.lineTooLong('/', 81, 'a'.repeat(81))));
-    expect(lines).toContain(E2E_MESSAGES.renderedFailed('NARROW', `/: ${E2E_MESSAGES.tagOverlap('fothering-bulk')}`));
-    expect(lines).toContain(E2E_MESSAGES.renderedFailed('TABFLOW', `/: ${E2E_MESSAGES.flowTabLate(320)}; /: ${E2E_MESSAGES.flowTabLate(1440)}`));
+    expect(lines).toContain(E2E_MESSAGES.renderedFailed('NARROW', `/privacy-and-ai/: ${E2E_MESSAGES.textOutside('domain, keyed hash')}`));
   });
 
-  it('the rendered step measures the hung tag at 320, 961, 1280 and 1440 and fails a tag stuck to the valve, naming the route and width', async () => {
-    expect(HANG_WIDTHS).toEqual([320, 961, 1280, 1440]);
-    const healthy = await e2e(renderedTree());
-    expect(healthy.lines.find((line) => line.startsWith('[e2e] rendered HANG: ok, '))).toContain('/ at 1280 px 18 px of stem');
-    const stuck = await e2e(renderedTree(), {}, { lines: siteLines({}, {},{}, { HANG: (route, width) => (route === '/' && width === 1280 ? { ...hanging(5), width } : healthyHang(route, width)) }) });
-    expect(stuck.code).toBe(1);
-    expect(stuck.lines).toContain(E2E_MESSAGES.renderedFailed('HANG', `/: ${E2E_MESSAGES.tagStuck(1280, 5)}`));
-    const none = await e2e(renderedTree(), {}, { lines: siteLines({}, {},{}, { HANG: (route, width) => ({ route, width, hanging: false, visibleStem: 0, tagTop: 0, valveBottom: 0 }) }) });
-    expect(none.lines).toContain(E2E_MESSAGES.renderedFailed('HANG', E2E_MESSAGES.noHungTag()));
+  it('the rendered step fails a replay that did not move on load and a page with an animation under reduced motion, and passes still pages', async () => {
+    const still = await e2e(renderedTree(), {}, { lines: siteLines({}, {}, {}, { MOTION: (route, width) => (route === '/replay/' && width === 1440 ? { ...healthyMotion(route, width), onLoad: STILL } : healthyMotion(route, width)) }) });
+    expect(still.code).toBe(1);
+    expect(still.lines).toContain(E2E_MESSAGES.renderedFailed('MOTION', `/replay/: ${E2E_MESSAGES.motionStill(1440)}`));
+    const reduced = await e2e(renderedTree(), {}, { lines: siteLines({}, {}, {}, { MOTION: (route, width) => ({ ...healthyMotion(route, width), reduced: route === '/deploy/' && width === 320 ? 2 : 0 }) }) });
+    expect(reduced.lines).toContain(E2E_MESSAGES.renderedFailed('MOTION', `/deploy/: ${E2E_MESSAGES.motionReduced(320, 2)}`));
   });
 
-  it('the rendered step fails a run that measured zero prose blocks, no drawing text, or no flow line for a width', async () => {
-    const routeOverrides: RouteLines = { LINES: (route) => ({ route, blocks: 0, lines: [] }), NARROW: (route) => ({ route, tag: null, drawings: [], identifiers: [] }) };
-    const widthOverrides: WidthLines = { FLOW: (route, width) => (width === 320 ? undefined : healthyFlowLine(route, width)) };
+  it('the rendered step fails a run that measured zero prose blocks, no drawing text, or no motion line for a width', async () => {
+    const routeOverrides: RouteLines = { LINES: (route) => ({ route, blocks: 0, lines: [] }), NARROW: (route) => ({ route, drawings: [], identifiers: [] }) };
+    const widthOverrides: WidthLines = { MOTION: (route, width) => (width === 320 ? undefined : healthyMotion(route, width)) };
     const { code, lines } = await e2e(renderedTree(), {}, { lines: siteLines({}, {},routeOverrides, widthOverrides) });
     expect(code).toBe(1);
     expect(lines).toContain(E2E_MESSAGES.renderedFailed('LINES', E2E_MESSAGES.noProseBlocks()));
     expect(lines).toContain(E2E_MESSAGES.renderedFailed('NARROW', E2E_MESSAGES.noDrawingText()));
-    expect(lines.find((line) => line.startsWith('[e2e] rendered FLOW: failed: '))).toContain(E2E_MESSAGES.renderedMissingRoute('FLOW', '/ at 320 px'));
+    expect(lines.find((line) => line.startsWith('[e2e] rendered MOTION: failed: '))).toContain(E2E_MESSAGES.renderedMissingRoute('MOTION', '/ at 320 px'));
   });
 
   it('the rendered step fails a route whose switch, fonts or requests verdict fails, naming the route', async () => {
@@ -1872,17 +1809,19 @@ describe('the built checks through the CLI and the e2e step (D-150, D-151)', () 
     expect(storage.lines).toContain(E2E_MESSAGES.renderedFailed('STORAGE', E2E_MESSAGES.storageKeys(['other'])));
   });
 
-  it('the rendered step fails a storage key the built privacy section does not name, and names both keys it does', async () => {
-    const both = { STORAGE: { local: ['fothering-theme', 'fothering-flow'], session: [] } };
-    const named = await e2e(renderedTree(), {}, { lines: siteLines(both) });
+  it('the rendered step fails a storage key the built privacy section does not name, and names the key it does', async () => {
+    const theme = { STORAGE: { local: ['fothering-theme'], session: [] } };
+    const named = await e2e(renderedTree(), {}, { lines: siteLines(theme) });
     expect(named.code).toBe(0);
-    expect(named.lines.find((text) => text.startsWith('[e2e] rendered STORAGE: ok, '))).toContain('fothering-flow');
+    expect(named.lines.find((text) => text.startsWith('[e2e] rendered STORAGE: ok, '))).toContain('fothering-theme');
     const unnamed = plantSite(completeSite({ 'index.html': '<p>closed - one lane</p>', 'privacy-and-ai/index.html': '' }));
     const body = readFileSync(join(unnamed.dist, 'privacy-and-ai', 'index.html'), 'utf8');
-    writeFileSync(join(unnamed.dist, 'privacy-and-ai', 'index.html'), body.replace('<code>fothering-flow</code>', ''));
-    const failedRun = await e2e(unnamed, {}, { lines: siteLines(both) });
+    const stripped = body.replace('<code>fothering-theme</code>', '');
+    expect(stripped).not.toBe(body);
+    writeFileSync(join(unnamed.dist, 'privacy-and-ai', 'index.html'), stripped);
+    const failedRun = await e2e(unnamed, {}, { lines: siteLines(theme) });
     expect(failedRun.code).toBe(1);
-    expect(failedRun.lines).toContain(E2E_MESSAGES.renderedFailed('STORAGE', E2E_MESSAGES.storageUnnamed(['fothering-flow'])));
+    expect(failedRun.lines).toContain(E2E_MESSAGES.renderedFailed('STORAGE', E2E_MESSAGES.storageUnnamed(['fothering-theme'])));
   });
 
   it('the rendered step serves the planted dist on 127.0.0.1 and hands the driver its base URL, the landing route and every route', async () => {
@@ -1945,6 +1884,24 @@ describe('the built checks through the CLI and the e2e step (D-150, D-151)', () 
     const exited = await e2e(renderedTree(), {}, { lines: siteLines(), exitCode: 2 });
     expect(exited.code).toBe(1);
     expect(exited.lines.at(-1)).toBe(E2E_MESSAGES.fail(A11Y_MESSAGES.driverExit('rendered', 2, '')));
+    const short = await e2e(renderedTree(), {}, { lines: siteLines(), exitCode: 1, stderr: 'driver failed' });
+    expect(short.lines.at(-1)).toBe(E2E_MESSAGES.fail(A11Y_MESSAGES.driverExit('rendered', 1, 'driver failed')));
+  });
+
+  it('a long stderr from a failed driver run keeps its first line beside its tail', async () => {
+    const message = 'RuntimeError: Aborted(Assertion failed: list_empty(&rt->gc_obj_list))';
+    const frames = Array.from({ length: 40 }, (_, index) => `    at frame${String(index)} (file:///daemon.mjs:${String(index)}:1)`);
+    const crashed = await e2e(renderedTree(), {}, { lines: siteLines(), exitCode: 1, stderr: [message, ...frames].join('\n') });
+    expect(crashed.code).toBe(1);
+    const failure = crashed.lines.at(-1) ?? '';
+    expect(failure).toContain(`: ${message} [...] `);
+    expect(failure).toContain('at frame39 (file:///daemon.mjs:39:1)');
+    expect(failure).not.toContain('at frame0 ');
+    // 450 characters with a 120-character first line: the line and the 400-character tail would
+    // overlap, so the text stays whole rather than showing part of the line twice.
+    const near = `${'x'.repeat(120)}\n${'y'.repeat(329)}`;
+    const nearCut = await e2e(renderedTree(), {}, { lines: siteLines(), exitCode: 1, stderr: near });
+    expect(nearCut.lines.at(-1)).toBe(E2E_MESSAGES.fail(A11Y_MESSAGES.driverExit('rendered', 1, near)));
   });
 
   it('the rendered step refuses a missing dev-browser, a missing template and a broken Workers config by name', async () => {
@@ -2065,17 +2022,16 @@ describe('the built checks through the CLI and the e2e step (D-150, D-151)', () 
       renderedMissingRoute: ['FONTS', '/'], deviceStored: ['dark'], choiceMissing: ['dark'], choiceNotStored: ['light', null],
       choiceNotKept: ['dark', null, null], osNotFollowed: ['#F5F7F8', '#F5F7F8', '#F5F7F8', '#0F1316'], invalidMissing: ['DARK'],
       invalidChecked: ['blue', null], domOrder: [['light']], boxOrder: [320, []], noBoxOrder: [], arrowStill: [null],
-      fontMissing: ['Red Hat Mono'], fontNotLoaded: ['Red Hat Mono'], fontCheckFalse: ['Red Hat Mono'], fontControl: ['x'],
+      fontMissing: ['Source Code Pro'], fontNotLoaded: ['Source Code Pro'], fontCheckFalse: ['Source Code Pro'], fontControl: ['x'],
       noRequests: [], foreignRequest: ['http://127.0.0.1:1', ['https://x.test']], storageKeys: [['x']], storageUnnamed: [['x']], storageNoPrivacy: [], storageNothingWritten: [], sizeLimit: [1],
-      noProseBlocks: [], lineTooLong: ['/', 81, 'x'], identifierBreak: ['a.b', ['a', '.b']], tagOverlap: ['x'], textOutside: ['x'], noDrawingText: [],
-      flowNoControl: [320], flowControlWithoutMotion: [320], flowSmallControl: [320, 40, 40], flowStillRunning: [320, 1], flowLabel: [320, ['Stop flow']],
-      flowReloadRuns: [320, 1], flowReduced: [320, 1], flowStoredRunning: [320], flowStoredStopped: [320, 1], flowTabUnreached: [320], flowTabLate: [320],
-      copyBuildPassed: [], copyBuildUnnamed: ['x'], copyBuildLeft: ['d'], tagStuck: [1280, 5], tagMeetsValve: [1280], noHungTag: [],
+      noProseBlocks: [], lineTooLong: ['/', 81, 'x'], identifierBreak: ['a.b', ['a', '.b']], textOutside: ['x'], noDrawingText: [],
+      motionStill: [320], motionLoops: [320, 1], motionLong: [320, 6000], motionReduced: [320, 1],
+      copyBuildPassed: [], copyBuildUnnamed: ['x'], copyBuildLeft: ['d'],
       replayNext: [320, [2, 3]], replayFourth: [320, 1], replayButtons: [320, [1]], replayPreviousEnabled: [320], replayNextEnabled: [320], replayBoxesMissing: [320],
       replayBoxMoved: [320, 'Next', 2, 3], replayDeepLink: [320, '#step-2', 1], replayDeepLinkMissing: [320, '#step-2'], replayInvalidHash: [320, '#step-0', 2],
       replaySameStep: [320, 1], replayHistory: [320, 2, 3], replayArrow: [320, 1, 1], replayArrowRadio: [320, 2, 3], replayArrowModifier: [320, 'Alt', 2, 3],
       noScriptPanels: [320, ['1']], noScriptControls: [320, 1], noScriptBoard: [320, '3', false], noScriptNoBoard: [320], noScriptTag: [320],
-      layoutStepsMissing: [320], layoutBoardHeight: [960, [638, 900]], layoutPhantomMissing: [960, 1], layoutPhantomShown: [1280, 2], layoutPhantomExposed: [960, 1],
+      layoutStepsMissing: [320], layoutBoardHeight: [960, [638, 900]],
       layoutEvidenceMissing: [961], layoutEvidenceSpill: [1280, 1220, 1201], layoutLogMissing: [1024], layoutBaseline: [1280, '14:01:07', [1498, 1500]],
       layoutIdentifiersMissing: [320], layoutIdentifierWeight: [1440, 'fothering-bulk', '600'], layoutIdentifierBreak: [960, 'a-b', ['a-', 'b']], layoutHeaderType: [1280, 'Time UTC', '500 13px', '600 12px'],
       layoutPlainApiName: [320, 'GetConfigurationSet'], layoutScroll: [320, 4, 342],

@@ -9,7 +9,6 @@ interface PageMeta {
 
 export interface SiteRoute extends PageMeta {
   readonly path: string;
-  readonly sheet: string;
   readonly label: string;
   readonly indexable: boolean;
 }
@@ -17,18 +16,16 @@ export interface SiteRoute extends PageMeta {
 // The 404 page answers at every unknown address, so it has no path of its own.
 export interface NotFoundRoute extends PageMeta {
   readonly path: null;
-  readonly drawing: string;
   readonly indexable: false;
 }
 
 export type SheetRoute = SiteRoute | NotFoundRoute;
 
 // Only routes with a built page belong here, and each page plan adds its own entry, so the sitemap
-// and the title block can never name a page the build lacks.
+// and the page index can never name a page the build lacks.
 export const ROUTES: readonly SiteRoute[] = Object.freeze([
   Object.freeze({
     path: '/',
-    sheet: 'FTH-001',
     label: 'Landing',
     title: 'Fothering: close the one SES lane that is going wrong',
     description: 'Fothering reads Amazon SES events, pauses only the configuration set that is damaging the shared reputation, reads the setting back, and tells the operator by email.',
@@ -36,7 +33,6 @@ export const ROUTES: readonly SiteRoute[] = Object.freeze([
   }),
   Object.freeze({
     path: '/replay/',
-    sheet: 'FTH-002',
     label: 'Replay',
     title: 'Incident replay: one SES lane paused and reopened',
     description: 'One SES incident in four steps: bounces arrive on one configuration set, code names the cause with counts, the lane is paused and read back, and the operator reopens it by command.',
@@ -44,7 +40,6 @@ export const ROUTES: readonly SiteRoute[] = Object.freeze([
   }),
   Object.freeze({
     path: '/deploy/',
-    sheet: 'FTH-003',
     label: 'Deploy',
     title: 'Deploy Fothering into your own AWS account',
     description: 'The steps to deploy and remove Fothering, everything the template creates, and every IAM permission it holds with the reason, generated from the template.',
@@ -52,7 +47,6 @@ export const ROUTES: readonly SiteRoute[] = Object.freeze([
   }),
   Object.freeze({
     path: '/privacy-and-ai/',
-    sheet: 'FTH-004',
     label: 'Privacy and AI',
     title: 'Privacy and AI: what Fothering keeps and what the model decides',
     description: 'Which SES event fields a Fothering deployment stores, where and for how long, how to delete them, what this site keeps, and what the AI model may and may not do.',
@@ -60,7 +54,6 @@ export const ROUTES: readonly SiteRoute[] = Object.freeze([
   }),
   Object.freeze({
     path: '/accessibility/',
-    sheet: 'FTH-005',
     label: 'Accessibility',
     title: 'Accessibility statement: Fothering',
     description: 'The WCAG 2.2 AA target for this site, the last automated audit, what was checked by hand, known limitations and how to report a problem.',
@@ -70,9 +63,8 @@ export const ROUTES: readonly SiteRoute[] = Object.freeze([
 
 export const NOT_FOUND_ROUTE: NotFoundRoute = Object.freeze({
   path: null,
-  title: 'No sheet at this address: Fothering',
-  description: 'This address is not one of the sheets of the Fothering site.',
-  drawing: 'Not in the sheet set',
+  title: 'No page at this address: Fothering',
+  description: 'This address is not one of the pages of the Fothering site.',
   indexable: false,
 });
 

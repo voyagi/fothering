@@ -16,65 +16,92 @@ const recordRows = [
   { header: 'Last automated audit', cells: [{ text: `\`${record.lastAutomatedAudit}\`` }] },
   { header: 'Tool', cells: [{ text: `\`axe-core\` ${record.axeVersion}, tags ${listed(code(record.tags))}, with ${listed(code(record.enabledRules))} enabled by name` }] },
   { header: 'Covered', cells: [{ text: `${listed([...code(record.routes), 'the page an unknown address shows'])}, at ${listed(record.widths.map(String))} pixels wide, in the ${listed(record.themes.map(themeName))} themes` }] },
-  { header: 'Also checked', cells: [{ text: 'Keyboard order, a visible focus indicator on every control, no sideways scrolling, flow animation stoppable and still under reduced motion.' }] },
+  { header: 'Also checked', cells: [{ text: 'Keyboard order, a visible focus indicator on every control, no sideways scrolling, and every lamp and key placed in its final state under reduced motion.' }] },
 ];
 
 const criterionRows = handCheckRows();
 ---
 <Sheet route={routeFor('/accessibility/')}>
-  <div class="row">
-    <div class="rail" aria-hidden="true">1</div>
-    <section class="sheet-intro" aria-labelledby="page-title">
+  <section class="first-band solo" aria-labelledby="page-title">
+    <div class="claim">
       <h1 id="page-title">Accessibility statement</h1>
-      <p>This site aims to meet WCAG 2.2 at level AA. This statement is voluntary, and it says what was tested, how, and what is still open.</p>
-    </section>
-  </div>
-
-  <div class="row">
-    <div class="rail" aria-hidden="true">2</div>
-    <section class="sheet fit-record" aria-labelledby="tested-title">
-      <div class="sheet-head">
-        <h2 id="tested-title">What was tested, and how</h2>
-        <p>The audit runs in a real browser as part of every ship check, and a test holds this record equal to its configuration.</p>
-      </div>
-      <div class="fit-form">
-        <Schedule fit columns={['Item', 'Record']} rows={recordRows} caption="Audit record, read from the accessibility record committed with the site." />
-      </div>
-    </section>
-  </div>
-
-  <div class="row">
-    <div class="rail" aria-hidden="true">3</div>
-    <section class="sheet fit-checks" aria-labelledby="hand-title">
-      <div class="sheet-head">
-        <h2 id="hand-title">Checked by hand</h2>
-        <p>Each criterion below needs a person to check it. Results appear here after the hand check in a real browser.</p>
-      </div>
-      <div class="fit-form">
-        <Schedule fit columns={['Criterion', 'Result', 'How checked']} rows={criterionRows} caption="WCAG 2.2 A and AA criteria no axe-core rule decides, from the W3C criteria list and the axe-core rule table." />
-      </div>
-    </section>
-  </div>
-
-  <div class="row">
-    <div class="rail" aria-hidden="true">4</div>
-    <section class="sheet" aria-labelledby="limits-title">
-      <div class="sheet-head">
-        <h2 id="limits-title">Known limitations, and how to report a problem</h2>
-        <p>What this statement and its audit leave open, and where to say what is wrong.</p>
-      </div>
-      <div class="split">
+      <p class="intro">This site aims to meet WCAG 2.2 at level AA. This statement is voluntary, and it says what was tested, how, and what is still open.</p>
+    </div>
+    <aside class="readout marks" aria-labelledby="marks-title">
+      <p class="readout-head" id="marks-title"><span>What the marks mean</span></p>
+      <dl>
         <div>
-          <h3 id="limits-list">Known limitations</h3>
-          <ul aria-labelledby="limits-list">
-            {record.limitations.map((limitation) => <li>{limitation.text}</li>)}
-          </ul>
+          <dt><span class="sample" aria-hidden="true"><span class="lamp on"></span></span>Lit lamp</dt>
+          <dd>Something is on: the page you are on, the theme you chose, the replay step you are on, the muted track's key.</dd>
         </div>
         <div>
-          <h3 id="report-title">Report a problem</h3>
-          <p class="report">{record.contact}</p>
+          <dt><span class="sample" aria-hidden="true"><span class="pad bank-1 bounce"></span></span>Red lamp in a white ring</dt>
+          <dd>A bounce on that lane.</dd>
         </div>
+        <div>
+          <dt><span class="sample" aria-hidden="true"><span class="pad bank-2 lit"></span></span>White lamp</dt>
+          <dd>An event on that lane, other than a bounce.</dd>
+        </div>
+        <div>
+          <dt><span class="sample" aria-hidden="true"><span class="pad bank-3 muted"></span></span>Grey key</dt>
+          <dd>A step on the muted track while its lane is closed.</dd>
+        </div>
+        <div>
+          <dt><span class="sample" aria-hidden="true"><span class="pad bank-1"></span><span class="pad bank-2"></span><span class="pad bank-3"></span><span class="pad bank-4"></span></span>Key colours</dt>
+          <dd>On the step pattern and the replay's step keys, the replay's four steps in time order: red, orange, yellow, white. Elsewhere they mark the order of sections and steps on the page.</dd>
+        </div>
+        <div>
+          <dt><span class="sample" aria-hidden="true"><span class="pad bank-2 unplayed"></span></span>Dashed key</dt>
+          <dd>A step the replay has not reached yet.</dd>
+        </div>
+        <div>
+          <dt><span class="sample" aria-hidden="true"><svg class="sq sq-solid" viewBox="0 0 12 12"><rect x="1" y="1" width="10" height="10" /></svg></span>Solid square</dt>
+          <dd>The cause Fothering acted on. In the limits table on the landing page, a part that is real today.</dd>
+        </div>
+        <div>
+          <dt><span class="sample" aria-hidden="true"><svg class="sq" viewBox="0 0 12 12"><rect x="1" y="1" width="10" height="10" /></svg></span>Outline square</dt>
+          <dd>A cause it ruled out.</dd>
+        </div>
+      </dl>
+    </aside>
+  </section>
+
+  <section class="band fit-record" aria-labelledby="tested-title">
+    <div class="band-head">
+      <h2 id="tested-title" class="keycap bank-1">What was tested, and how</h2>
+      <p>The audit runs in a real browser as part of every ship check, and a test holds this record equal to its configuration.</p>
+    </div>
+    <div class="fit-form">
+      <Schedule fit columns={['Item', 'Record']} rows={recordRows} caption="Audit record, read from the accessibility record committed with the site." />
+    </div>
+  </section>
+
+  <section class="band fit-checks" aria-labelledby="hand-title">
+    <div class="band-head">
+      <h2 id="hand-title" class="keycap bank-2">Checked by hand</h2>
+      <p>Each criterion below needs a person to check it. Results appear here after the hand check in a real browser.</p>
+    </div>
+    <div class="fit-form">
+      <Schedule fit columns={['Criterion', 'Result', 'How checked']} rows={criterionRows} caption="WCAG 2.2 A and AA criteria no axe-core rule decides, from the W3C criteria list and the axe-core rule table." />
+    </div>
+  </section>
+
+  <section class="band" aria-labelledby="limits-title">
+    <div class="band-head">
+      <h2 id="limits-title" class="keycap bank-3">Known limitations, and how to report a problem</h2>
+      <p>What this statement and its audit leave open, and where to say what is wrong.</p>
+    </div>
+    <div class="split">
+      <div>
+        <h3 id="limits-list">Known limitations</h3>
+        <ul aria-labelledby="limits-list">
+          {record.limitations.map((limitation) => <li>{limitation.text}</li>)}
+        </ul>
       </div>
-    </section>
-  </div>
+      <div>
+        <h3 id="report-title">Report a problem</h3>
+        <p class="report">{record.contact}</p>
+      </div>
+    </div>
+  </section>
 </Sheet>
