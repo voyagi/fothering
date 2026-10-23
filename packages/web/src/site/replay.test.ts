@@ -669,10 +669,10 @@ describe('the board and step grid descriptions name lane state, not traffic', ()
   it('describes one open lane in the singular', () => {
     const view = buildReplayView({ ...artifact, lanes: ['fothering-transactional', 'fothering-bulk'] });
     expect(view.boardDescriptions).toEqual([
-      'All 2 lanes are open and no track is muted. Bounces arrive on fothering-bulk.',
-      'All 2 lanes are still open. Detection code has approved one lane, and no track is muted yet.',
+      'Both lanes are open and no track is muted. Bounces arrive on fothering-bulk.',
+      'Both lanes are still open. Detection code has approved one lane, and no track is muted yet.',
       'The fothering-bulk track is muted, and the read-back confirmed it. fothering-transactional stays open.',
-      'The fothering-bulk track is unmuted and the lane is open again. All 2 lanes are open.',
+      'The fothering-bulk track is unmuted and the lane is open again. Both lanes are open.',
     ]);
     expect(view.landing.drawingDescription).toBe('fothering-transactional is open, its track not muted. The fothering-bulk track is muted: the lane is closed, and the read-back at 14:03 UTC confirmed it.');
   });

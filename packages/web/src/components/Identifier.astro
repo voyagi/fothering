@@ -5,7 +5,9 @@
 // a part (an SMTP code) is made non-breaking.
 // With `words`, an API operation name with no dot (PutConfigurationSetSendingOptions) may also end
 // a line between its capitalised words, each word one unbreakable run with no hyphen added, and an
-// IAM action after its colon too (ses: then GetConfigurationSetEventDestinations). Only the replay
+// IAM action after its colon too (ses: then GetConfigurationSetEventDestinations). A run of capitals
+// (an acronym such as SES) stays whole, since a capital starts a word only after a small letter, a
+// digit or the colon. Only the replay
 // log's Detail cells (UI-SPEC line 208) and the permission schedules' Action cells (section 17
 // item 2) pass it; the built rule identifier-break fails that break anywhere else.
 // With face="inherit" the identifier keeps the face of the text around it, as the comp sets a
@@ -18,7 +20,7 @@ interface Props {
 
 const NO_BREAK_SPACE = String.fromCharCode(0xa0);
 const { value, words = false, face = 'mono' } = Astro.props;
-const wordParts = words && !value.includes('.') ? value.split(/(?=[A-Z])/) : [];
+const wordParts = words && !value.includes('.') ? value.split(/(?<=[a-z0-9:])(?=[A-Z])/) : [];
 const byWords = wordParts.length > 1;
 const parts = byWords ? wordParts : value.split('.').map((part) => part.replaceAll(' ', NO_BREAK_SPACE));
 // Each part with its joiner, and whether a break may follow it.

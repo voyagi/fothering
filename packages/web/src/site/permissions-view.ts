@@ -102,7 +102,7 @@ export const PERMISSION_REASONS: Reasons = {
   'FotheringDetection/DetectRole/permission/Allow/dynamodb:PutItem': 'Writes a new incident, evidence or decision item to the table.',
   'FotheringDetection/DetectRole/permission/Allow/dynamodb:Query': "Reads a lane's stored events to fold the detection window.",
   'FotheringDetection/DetectRole/permission/Allow/dynamodb:UpdateItem':
-    "Moves a lane's incident marker and an incident's state on, and reserves the per-incident and per-day invocation counters before the runtime is invoked.",
+    "Moves a lane's incident marker and an incident's state on (the agent attempt it claims and the outcome it stores), reserves the per-incident and per-day invocation counters before the runtime is invoked, and adds the tokens the model spent to them after.",
   'FotheringDetection/DetectRole/permission/Allow/logs:CreateLogStream': "Opens a log stream in the detection function's own log group.",
   'FotheringDetection/DetectRole/permission/Allow/logs:PutLogEvents': "Writes the detection function's log lines to its own log group.",
   'FotheringDetection/DetectRole/permission/Allow/ses:GetConfigurationSetEventDestinations':
