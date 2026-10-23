@@ -427,11 +427,37 @@ describe('the readout number rule (WCAG 1.4.5, 05-UAT check 4)', () => {
     expect(readoutNumberRule(casesSite([readout('<b>412 sends</b>'), readout('<b>Status code</b>', '<code>412 Not Found</code>')]), context)).toEqual([]);
   });
 
+  // A clock time or a date in the head holds the digits of many a figure, so a drawn 12 that the head
+  // shows only inside 14:12 or 2026-10-12 is not shown.
+  it.each([
+    ['a clock time', 'Window 13:01 to 14:12 UTC'],
+    ['a date', 'Window 2026-10-12'],
+  ])('fails a drawn number the head shows only inside %s', (_where, head) => {
+    const twelve = readout('<b>Sends</b>', head).replace('412 sends on', '12 sends on');
+    expect(twelve).toContain('>12 sends on');
+    expect(caseFindings(readoutNumberRule, 'readout-number', [twelve]).map((finding) => finding.text)).toEqual([
+      'the readout draws 12 but does not show it as text beside its digits, only to a screen reader',
+    ]);
+  });
+
+  // The number belongs beside the digits it names: elsewhere in the readout a reader takes it for another
+  // figure, and the head counts only while the label beside the digits holds none, as on the 404 page.
+  it.each([
+    ['the readout stamp', readout('<b>Sends</b>').replace('</aside>', '<p class="stamp">412 sends replayed</p></aside>')],
+    ['a readout row', readout('<b>Sends</b>').replace('</aside>', '<dl><div><dt>Sends</dt><dd>412</dd></div></dl></aside>')],
+    ['the head while the label beside the digits holds another figure', readout('<b>413 sends</b>', '<code>412 Not Found</code>')],
+  ])('fails a number that stands only in %s, away from its drawn digits', (_where, body) => {
+    expect(body).not.toBe(readout('<b>Sends</b>'));
+    expect(caseFindings(readoutNumberRule, 'readout-number', [body]).map((finding) => finding.text)).toEqual([
+      'the readout draws 412 but does not show it as text beside its digits, only to a screen reader',
+    ]);
+  });
+
   it('fails a number only drawn and given to the screen reader, as the landing showed 412 sends', () => {
     const findings = caseFindings(readoutNumberRule, 'readout-number', [readout('<b>Sends</b>'), readout('<b>Sends</b>', 'Window 13:01 to 14:12, 4120 events')]);
     expect(findings.map((finding) => finding.text)).toEqual([
-      'the readout draws 412 but shows it as text nowhere a reader can see, only to a screen reader',
-      'the readout draws 412 but shows it as text nowhere a reader can see, only to a screen reader',
+      'the readout draws 412 but does not show it as text beside its digits, only to a screen reader',
+      'the readout draws 412 but does not show it as text beside its digits, only to a screen reader',
     ]);
   });
 
@@ -448,7 +474,7 @@ describe('the readout number rule (WCAG 1.4.5, 05-UAT check 4)', () => {
     const unspoken = readout('<b>Sends</b>').replace('class="visually-hidden"', 'class="sr-only"');
     expect(unspoken).not.toBe(readout('<b>Sends</b>'));
     expect(caseFindings(readoutNumberRule, 'readout-number', [unspoken]).map((finding) => finding.text)).toEqual([
-      'the readout draws digits but no screen-reader sentence in it gives their number, so nothing checks that a reader can see it',
+      'the readout draws digits but no screen-reader sentence beside them gives their number, so nothing checks that a reader can see it',
     ]);
   });
 
@@ -465,7 +491,7 @@ describe('the readout number rule (WCAG 1.4.5, 05-UAT check 4)', () => {
   ])('fails a number that stands only in %s', (_where, body) => {
     expect(body).not.toBe(readout('<b>Sends</b>'));
     expect(caseFindings(readoutNumberRule, 'readout-number', [body]).map((finding) => finding.text)).toEqual([
-      'the readout draws 412 but shows it as text nowhere a reader can see, only to a screen reader',
+      'the readout draws 412 but does not show it as text beside its digits, only to a screen reader',
     ]);
   });
 });

@@ -1790,9 +1790,9 @@ export function checkFileBudget(files: readonly { readonly path: string; readonl
 }
 
 // WCAG 1.4.5 (05-UAT check 4): a readout's digits are drawn segments, an image of text, so the number
-// they show is also printed in that readout where a reader can see it. The sentence a screen reader is
+// they show is also printed beside them where a reader can see it. The sentence a screen reader is
 // given does not count: it is clipped to one pixel. The drawn segments (class seg) are what the rule
-// protects, so a segment outside any readout, or a readout drawing digits with no sentence giving
+// protects, so a segment outside any readout, or drawn digits with no sentence beside them giving
 // their number, fails instead of leaving drawn digits nothing checks after a class is renamed.
 const hasClass = (element: BuiltElement, name: string): boolean => (element.attrs.class ?? '').split(/\s+/).includes(name);
 
@@ -1806,19 +1806,40 @@ function shownText(element: BuiltElement): string {
   return element.children.map((child) => (typeof child === 'string' ? child : shownText(child))).join(' ');
 }
 
-function readoutFindings(readout: BuiltElement): string[] {
+// A figure counts as shown only where it stands alone: a digit, colon, dot, hyphen or slash touching it
+// makes it part of a clock time, a date or another figure, which no reader takes for the drawn number.
+const standsAlone = (text: string, number: string): boolean => new RegExp(`(?<![\\d:./-])${number}(?![\\d:./-])`).test(text);
+
+function drawsSegments(element: BuiltElement): boolean {
+  let found = false;
+  walk(element, (inner) => {
+    if (hasClass(inner, 'seg')) found = true;
+  });
+  return found;
+}
+
+// A readout's window is its child holding the drawn digits, the sentence a screen reader is given for
+// them and the label beside them, and the number is read there alone. The readout head counts only
+// while that label holds no figure at all, as on the 404 page, whose head names the status drawn.
+function windowFindings(readout: BuiltElement, window: BuiltElement): string[] {
   const spoken: string[] = [];
-  let drawsDigits = false;
-  walk(readout, (inner) => {
+  walk(window, (inner) => {
     if (hasClass(inner, 'visually-hidden')) spoken.push(textOf(inner));
-    if (hasClass(inner, 'seg')) drawsDigits = true;
   });
   const numbers = spoken.flatMap((text) => text.match(/\d+/g) ?? []);
-  if (drawsDigits && numbers.length === 0) return ['the readout draws digits but no screen-reader sentence in it gives their number, so nothing checks that a reader can see it'];
-  const shown = shownText(readout);
+  if (numbers.length === 0) return ['the readout draws digits but no screen-reader sentence beside them gives their number, so nothing checks that a reader can see it'];
+  const beside = shownText(window);
+  const head = readout.children.find((child): child is BuiltElement => typeof child !== 'string' && hasClass(child, 'readout-head'));
+  const shown = /\d/.test(beside) || head === undefined ? beside : `${beside} ${shownText(head)}`;
   return numbers
-    .filter((number) => !new RegExp(`(?<!\\d)${number}(?!\\d)`).test(shown))
-    .map((number) => `the readout draws ${number} but shows it as text nowhere a reader can see, only to a screen reader`);
+    .filter((number) => !standsAlone(shown, number))
+    .map((number) => `the readout draws ${number} but does not show it as text beside its digits, only to a screen reader`);
+}
+
+function readoutFindings(readout: BuiltElement): string[] {
+  return readout.children
+    .filter((child): child is BuiltElement => typeof child !== 'string' && drawsSegments(child))
+    .flatMap((window) => windowFindings(readout, window));
 }
 
 export function readoutNumberRule(site: BuiltSite, _context: CheckContext): Finding[] {
