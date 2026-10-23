@@ -269,9 +269,9 @@ describe('the accessibility record (D-156, AC-53)', () => {
     expect(ACCESSIBILITY_RECORD.contact).not.toMatch(/@/);
   });
 
-  it('lists the known limitations, the drawn step pattern and digits among them', () => {
+  it('lists the known limitations, the drawn lanes and sail among them', () => {
     expect(ACCESSIBILITY_RECORD.limitations.find((limitation) => limitation.id === 'drawings')?.text).toBe(
-      "The step pattern and the readout's digits are drawn. The page text gives each lane's state and the number, and the replay's log lists every event.",
+      "The lanes, the sail and the pictures beside the headline are drawn. The page text gives each lane's state, and the replay's log lists every event.",
     );
     // axe-core 4.14.0's color-contrast rule does not skip SVG text, so the statement claims no such gap.
     expect(ACCESSIBILITY_RECORD.limitations.map((limitation) => limitation.id)).not.toContain('drawing-contrast');

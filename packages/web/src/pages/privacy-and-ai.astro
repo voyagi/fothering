@@ -19,7 +19,6 @@ import { textSegments } from '../site/identifier-text.ts';
 import { loadPermissionSnapshot, runtimeRoleHoldsNoDataAction } from '../site/permissions-view.ts';
 import { fillRegion, loadRepoFacts, readDeployRegion, readForgetCommand, readRepoText, repoRoot } from '../site/repo-facts.ts';
 import { routeFor } from '../site/route-list.ts';
-import { segmentNumber } from '../site/seven-segment.ts';
 import { identifyingFields } from '../site/stored-fields.ts';
 
 // Every statement the built checks hold this page to is read from the committed lists, the stored
@@ -81,7 +80,6 @@ const neverItems = [
 const retention = privacy('retention');
 const days = /expires (\d+) days/.exec(retention)?.[1];
 if (days === undefined) throw new Error(`privacy page: the retention statement no longer says "expires N days" (${retention}), and the readout reads its figure from there. Update the pattern here or the statement.`);
-const daysDigits = segmentNumber(days);
 
 const FILTER_TITLE = 'Event filter drawing';
 const FILTER_DESC = 'An SES event enters the ingest filter. The subject, the headers and the addresses leave through a drain line and are not stored. The receiving domain, a keyed hash, the tags and the bounce details continue to the table.';
@@ -97,13 +95,7 @@ const INTERLOCK_DESC = 'Stored events, which hold no addresses, go to detection 
     </div>
     <aside class="readout" aria-labelledby="readout-title">
       <p class="readout-head" id="readout-title"><span>Event records</span> <Identifier value={region} /></p>
-      <p class="window">
-        <svg viewBox={daysDigits.viewBox} aria-hidden="true" focusable="false">
-          {daysDigits.digits.map((digit) => <g transform={digit.transform}>{digit.segments.map((segment) => <polygon class={segment.lit ? 'seg lit' : 'seg'} points={segment.points} />)}</g>)}
-        </svg>
-        <span class="visually-hidden">Each event record expires {days} days after its mail was sent</span>
-        <span class="unit" aria-hidden="true"><b>{days} days</b><span>until a record expires</span></span>
-      </p>
+      <p class="window"><span class="figure">{days}</span> <span class="unit"><b>days</b><span>until a record expires</span></span></p>
       <dl>
         <div>
           <dt>Kept</dt>

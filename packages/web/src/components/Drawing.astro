@@ -1,0 +1,216 @@
+---
+// Fothering's own drawings: flat colour layers cut like paper, depth only by overlap, never a
+// gradient or a shadow, and no people. Every part is painted from the tokens through the .art
+// classes in site.css (the board's sail and the small sail mark carry their own), so both themes
+// redraw them. All are decorative: the text beside each one says what it shows.
+export type DrawingName = 'wordmark' | 'envelopes' | 'hull' | 'close' | 'watch' | 'cause' | 'close-lane' | 'mail' | 'sail' | 'sail-mark';
+
+interface Props {
+  name: DrawingName;
+  class?: string;
+}
+
+const { name, class: extra } = Astro.props;
+const classes = (base: string): string => [base, extra].filter((part) => part !== undefined && part !== '').join(' ');
+
+// An envelope is drawn about its own centre, 56 by 38 before scaling; its outline keeps one weight at
+// every scale.
+interface Envelope {
+  x: number;
+  y: number;
+  turn: number;
+  size: number;
+  flap: 'sun' | 'pink' | 'mint' | 'sky' | 'coral';
+}
+const placed = (envelope: Envelope): string => `translate(${String(envelope.x)} ${String(envelope.y)}) rotate(${String(envelope.turn)}) scale(${String(envelope.size)}) translate(-28 -19)`;
+
+const flying: Envelope[] = [
+  { x: 55, y: 199, turn: -12, size: 0.72, flap: 'pink' },
+  { x: 140, y: 126, turn: -24, size: 0.9, flap: 'sun' },
+  { x: 208, y: 66, turn: -32, size: 1.05, flap: 'mint' },
+];
+const bobbing: Envelope[] = [
+  { x: 26, y: 184, turn: 12, size: 0.6, flap: 'sun' },
+  { x: 270, y: 192, turn: -10, size: 0.58, flap: 'pink' },
+];
+const closeLanes: Envelope[] = [
+  { x: 64, y: 20, turn: 0, size: 0.46, flap: 'sun' },
+  { x: 214, y: 20, turn: 0, size: 0.46, flap: 'sun' },
+  { x: 72, y: 50, turn: 0, size: 0.46, flap: 'pink' },
+  { x: 128, y: 50, turn: 0, size: 0.46, flap: 'pink' },
+  { x: 40, y: 80, turn: 0, size: 0.46, flap: 'mint' },
+  { x: 156, y: 80, turn: 0, size: 0.46, flap: 'mint' },
+  { x: 268, y: 80, turn: 0, size: 0.46, flap: 'mint' },
+];
+const watched: Envelope[] = [
+  { x: 26, y: 16, turn: 0, size: 0.34, flap: 'sun' },
+  { x: 60, y: 36, turn: 0, size: 0.34, flap: 'pink' },
+  { x: 38, y: 56, turn: 0, size: 0.34, flap: 'mint' },
+];
+const stopped: Envelope[] = [
+  { x: 14, y: 38, turn: 0, size: 0.32, flap: 'pink' },
+  { x: 36, y: 38, turn: 0, size: 0.32, flap: 'pink' },
+];
+---
+{name === 'wordmark' && (
+  <svg class={classes('art')} viewBox="0 0 26 30" aria-hidden="true" focusable="false">
+    <path class="ln-thin" d="M6.5 9 L7.5 1.5 M19.5 8.5 L18.5 1.5" />
+    <path class="blue" d="M3 9 L23 8 L24 25 Q13 29 2 25 Z" />
+    <path class="paper-stitch" d="M6.6 12.2 L19.6 11.6 L20.3 22.6 Q13 25 5.9 22.6 Z" />
+  </svg>
+)}
+
+{name === 'envelopes' && (
+  <svg class={classes('art')} viewBox="0 0 260 240" aria-hidden="true" focusable="false">
+    <circle class="sun" cx="46" cy="52" r="24" />
+    <path class="paper" d="M74 92 C 70 80, 84 74, 92 80 C 96 68, 114 68, 118 80 C 128 76, 138 84, 134 92 Z" />
+    <path class="ln-thin" d="M74 92 C 70 80, 84 74, 92 80 C 96 68, 114 68, 118 80 C 128 76, 138 84, 134 92 Z" />
+    <path class="lane-band" d="M14 216 C 70 206, 110 150, 150 118 S 220 52, 248 36" />
+    <path class="dash" d="M14 216 C 70 206, 110 150, 150 118 S 220 52, 248 36" />
+    <path class="ln-thin" d="M164 108 l-18 11 M172 118 l-12 8 M92 172 l-14 7" />
+    {flying.map((envelope) => (
+      <g transform={placed(envelope)}>
+        <rect class="paper" width="56" height="38" rx="4" />
+        <path class={envelope.flap} d="M2 2 L28 23 L54 2 Z" />
+        <path class="ln-thin" d="M3 3 L28 23 L53 3" vector-effect="non-scaling-stroke" />
+        <rect class="ln-thin" width="56" height="38" rx="4" vector-effect="non-scaling-stroke" />
+      </g>
+    ))}
+  </svg>
+)}
+
+{name === 'hull' && (
+  <svg class={classes('art')} viewBox="0 0 300 250" aria-hidden="true" focusable="false">
+    <path class="sky" d="M8 176 C 20 162, 40 162, 60 168 S 100 176, 120 168 S 160 160, 180 168 S 220 176, 240 168 S 282 162, 292 172 C 300 184, 298 202, 288 210 L 12 214 C 2 206, 0 186, 8 176 Z" />
+    <rect class="ink" x="148" y="16" width="6" height="96" rx="2" />
+    <path class="ln-thin" d="M151 20 L 262 104 M151 20 L 40 112" />
+    <rect class="sun" x="64" y="80" width="68" height="9" rx="2" />
+    <rect class="ln-thin" x="64" y="80" width="68" height="9" rx="2" />
+    <rect class="paper" x="70" y="89" width="56" height="24" rx="2" />
+    <rect class="ln-thin" x="70" y="89" width="56" height="24" rx="2" />
+    <rect class="sky" x="80" y="95" width="12" height="9" rx="1.5" />
+    <rect class="sky" x="104" y="95" width="12" height="9" rx="1.5" />
+    <path class="coral" d="M34 112 L 268 104 Q 262 150 222 178 L 90 184 Q 52 170 34 112 Z" />
+    <path class="paper" d="M35 119 L 267 111 L 265.5 119 L 37 127 Z" />
+    <path class="ln-thin" d="M37 127 L 265.5 119" />
+    <path class="ln" d="M34 112 L 268 104 Q 262 150 222 178 L 90 184 Q 52 170 34 112 Z" />
+    <circle class="paper" cx="62" cy="145" r="6" />
+    <circle class="ln-thin" cx="62" cy="145" r="6" />
+    <circle class="paper" cx="88" cy="150" r="6" />
+    <circle class="ln-thin" cx="88" cy="150" r="6" />
+    <circle class="paper" cx="234" cy="140" r="6" />
+    <circle class="ln-thin" cx="234" cy="140" r="6" />
+    <circle class="stop" cx="197" cy="164" r="7" />
+    <path class="canvas" d="M112 136 L 192 132 L 197 178 Q 154 188 108 180 Z" />
+    <path class="stitch" d="M118 142 L 186 138.5 L 190 173 Q 154 181 115 175 Z" />
+    <path class="ln" d="M112 136 L 192 132 L 197 178 Q 154 188 108 180 Z" />
+    <path class="ln-thin" d="M116 137 C 111 127, 111 118, 116 106 M188 133 C 193 122, 193 113, 188 103" />
+    <circle class="ink" cx="116" cy="105" r="3.5" />
+    <circle class="ink" cx="188" cy="102" r="3.5" />
+    {bobbing.map((envelope) => (
+      <g transform={placed(envelope)}>
+        <rect class="paper" width="56" height="38" rx="4" />
+        <path class={envelope.flap} d="M2 2 L28 23 L54 2 Z" />
+        <path class="ln-thin" d="M3 3 L28 23 L53 3" vector-effect="non-scaling-stroke" />
+        <rect class="ln-thin" width="56" height="38" rx="4" vector-effect="non-scaling-stroke" />
+      </g>
+    ))}
+    <path class="blue" d="M16 192 C 30 180, 52 180, 75 186 S 125 196, 150 186 S 200 176, 225 186 S 272 194, 286 188 C 298 194, 298 214, 284 222 C 248 240, 62 242, 22 226 C 4 218, 4 200, 16 192 Z" />
+    <path class="ln" d="M16 192 C 30 180, 52 180, 75 186 S 125 196, 150 186 S 200 176, 225 186 S 272 194, 286 188 C 298 194, 298 214, 284 222 C 248 240, 62 242, 22 226 C 4 218, 4 200, 16 192 Z" />
+    <path class="foam" d="M40 206 q 12 -6 24 0 M122 212 q 12 -6 24 0 M214 206 q 12 -6 24 0 M80 224 q 12 -6 24 0 M172 226 q 12 -6 24 0" />
+  </svg>
+)}
+
+{name === 'close' && (
+  <svg class={classes('art')} viewBox="0 0 320 100" aria-hidden="true" focusable="false">
+    <path class="dash-light" d="M8 20 H312 M8 50 H312 M8 80 H312" />
+    {closeLanes.map((envelope) => (
+      <g transform={placed(envelope)}>
+        <rect class="paper" width="56" height="38" rx="4" />
+        <path class={envelope.flap} d="M2 2 L28 23 L54 2 Z" />
+        <path class="ln-thin" d="M3 3 L28 23 L53 3" vector-effect="non-scaling-stroke" />
+        <rect class="ln-thin" width="56" height="38" rx="4" vector-effect="non-scaling-stroke" />
+      </g>
+    ))}
+    <path class="ln-thin" d="M171 36 L 172 26 M189 35.5 L 188 26" />
+    <path class="canvas" d="M166 36 L 194 35 L 195 64 Q 180 68 165 64 Z" />
+    <path class="stitch" d="M170 40 L 190 39.4 L 190.6 60.4 Q 180 63 169.6 60.4 Z" />
+    <path class="ln-thin" d="M166 36 L 194 35 L 195 64 Q 180 68 165 64 Z" />
+  </svg>
+)}
+
+{name === 'watch' && (
+  <svg class={classes('art')} viewBox="0 0 88 72" aria-hidden="true" focusable="false">
+    <path class="dash" d="M4 16 H84 M4 36 H84 M4 56 H84" />
+    {watched.map((envelope) => (
+      <g transform={placed(envelope)}>
+        <rect class="paper" width="56" height="38" rx="4" />
+        <path class={envelope.flap} d="M2 2 L28 23 L54 2 Z" />
+        <path class="ln-thin" d="M3 3 L28 23 L53 3" vector-effect="non-scaling-stroke" />
+        <rect class="ln-thin" width="56" height="38" rx="4" vector-effect="non-scaling-stroke" />
+      </g>
+    ))}
+  </svg>
+)}
+
+{name === 'cause' && (
+  <svg class={classes('art')} viewBox="0 0 88 72" aria-hidden="true" focusable="false">
+    <g transform="translate(30 44) rotate(-6) scale(0.82) translate(-28 -19)">
+      <rect class="paper" width="56" height="38" rx="4" />
+      <path class="sky" d="M2 2 L28 23 L54 2 Z" />
+      <path class="ln-thin" d="M3 3 L28 23 L53 3" vector-effect="non-scaling-stroke" />
+      <rect class="ln-thin" width="56" height="38" rx="4" vector-effect="non-scaling-stroke" />
+    </g>
+    <rect class="ink" x="66" y="38" width="8" height="24" rx="4" transform="rotate(-45 70 50)" />
+    <circle class="paper" cx="56" cy="28" r="17" />
+    <rect class="blue" x="50" y="22" width="12" height="12" />
+    <circle class="ln" cx="56" cy="28" r="17" />
+  </svg>
+)}
+
+{name === 'close-lane' && (
+  <svg class={classes('art')} viewBox="0 0 88 72" aria-hidden="true" focusable="false">
+    <path class="dash" d="M4 38 H84" />
+    {stopped.map((envelope) => (
+      <g transform={placed(envelope)}>
+        <rect class="paper" width="56" height="38" rx="4" />
+        <path class={envelope.flap} d="M2 2 L28 23 L54 2 Z" />
+        <path class="ln-thin" d="M3 3 L28 23 L53 3" vector-effect="non-scaling-stroke" />
+        <rect class="ln-thin" width="56" height="38" rx="4" vector-effect="non-scaling-stroke" />
+      </g>
+    ))}
+    <path class="ln-thin" d="M55 20 L 56 8 M69 19.6 L 68 8" />
+    <path class="canvas" d="M51 20 L 73 19 L 74 54 Q 62 58 50 54 Z" />
+    <path class="stitch" d="M55 24 L 69 23.5 L 69.6 50.4 Q 62 53 54.6 50.4 Z" />
+    <path class="ln-thin" d="M51 20 L 73 19 L 74 54 Q 62 58 50 54 Z" />
+    <circle class="mint" cx="78" cy="60" r="9" />
+    <path class="ln-thin" d="M73.5 60 l3 3.2 l6 -6.4" />
+  </svg>
+)}
+
+{name === 'mail' && (
+  <svg class={classes('art')} viewBox="0 0 88 72" aria-hidden="true" focusable="false">
+    <rect class="paper" x="24" y="6" width="40" height="40" rx="2" />
+    <rect class="ln-thin" x="24" y="6" width="40" height="40" rx="2" />
+    <path class="ln-thin" d="M31 15 H57 M31 22 H57 M31 29 H49" />
+    <path class="sun" d="M14 30 L 44 50 L 74 30 V 66 H 14 Z" />
+    <path class="ln-thin" d="M14 30 L 44 50 L 74 30 V 66 H 14 Z M14 66 L 36 46 M74 66 L 52 46" />
+  </svg>
+)}
+
+{name === 'sail' && (
+  <svg viewBox="0 0 34 60" aria-hidden="true" focusable="false">
+    <path class="rope" d="M9 1 L10 16 M25 1 L24 15" />
+    <path class="canvas" d="M4 16 L30 15 L31 46 Q17 51 3 46 Z" />
+    <path class="stitch" d="M8 20 L26 19.4 L26.6 42 Q17 45.6 7.6 42 Z" />
+    <path class="edge" d="M4 16 L30 15 L31 46 Q17 51 3 46 Z" />
+  </svg>
+)}
+
+{name === 'sail-mark' && (
+  <svg class={classes('sail-mark')} viewBox="0 0 14 18" aria-hidden="true" focusable="false">
+    <path class="ln-thin" d="M3.5 4.5 L4 0.8 M10.5 4.2 L10 0.8" />
+    <path class="canvas" d="M1.5 4.5 L12.5 4 L13 15 Q7 17.5 1 15 Z" />
+    <path class="ln-thin" d="M1.5 4.5 L12.5 4 L13 15 Q7 17.5 1 15 Z" />
+  </svg>
+)}

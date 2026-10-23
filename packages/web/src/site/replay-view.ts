@@ -349,26 +349,26 @@ function lanesLines(closedLane: string, openLanes: readonly string[], held: bool
   };
 }
 
-// The board and the landing's step grid describe the lanes' state, which the tracks and their mute
-// keys stand for, never traffic: an artifact can log no delivery on an open lane and still build
-// (WR-13).
-function boardDescriptions(closedLane: string, lanes: readonly string[], openLanes: readonly string[]): string[] {
+// The board and the landing's lanes describe the lanes' state, which the slots and the sail stand
+// for, never traffic: an artifact can log no delivery on an open lane and still build (WR-13). A
+// lane is called closed only once a hold check passed; before that it is paused.
+function boardDescriptions(closedLane: string, lanes: readonly string[], openLanes: readonly string[], held: boolean): string[] {
   const allLanes = lanes.length === 1 ? 'The only lane is' : lanes.length === 2 ? 'Both lanes are' : `All ${String(lanes.length)} lanes are`;
   const stayOpen = openLanes.length === 0 ? '' : ` ${openLanes.join(', ')} ${openLanes.length === 1 ? 'stays' : 'stay'} open.`;
   return [
-    `${allLanes} open and no track is muted. Bounces arrive on ${closedLane}.`,
-    `${allLanes} still open. Detection code has approved one lane, and no track is muted yet.`,
-    `The ${closedLane} track is muted, and the read-back confirmed it.${stayOpen}`,
-    `The ${closedLane} track is unmuted and the lane is open again. ${allLanes} open.`,
+    `${allLanes} open and no lane is paused. Bounces arrive on ${closedLane}.`,
+    `${allLanes} still open. Detection code has approved one lane, and no lane is paused yet.`,
+    `The ${closedLane} lane is ${held ? 'closed' : 'paused'} under a drawn sail, and the read-back confirmed it.${stayOpen}`,
+    `The sail is gone from ${closedLane} and the lane is open again. ${allLanes} open.`,
   ];
 }
 
 // With one lane no other lane is open, so the description names the paused lane as the only one.
 function drawingDescription(closedLane: string, openLanes: readonly string[], held: boolean, pausedAt: string): string {
   const confirmed = `and the read-back at ${pausedAt} UTC confirmed it.`;
-  if (openLanes.length === 0) return `${closedLane}, the only lane from the SES account, is muted: the lane is ${held ? 'closed' : 'paused'}, ${confirmed}`;
-  const open = openLanes.length === 1 ? 'is open, its track not muted' : 'are open, their tracks not muted';
-  return `${openLanes.join(', ')} ${open}. The ${closedLane} track is muted: the lane is ${held ? 'closed' : 'paused'}, ${confirmed}`;
+  if (openLanes.length === 0) return `${closedLane}, the only lane from the SES account, is under a drawn sail: the lane is ${held ? 'closed' : 'paused'}, ${confirmed}`;
+  const open = openLanes.length === 1 ? 'is open' : 'are open';
+  return `${openLanes.join(', ')} ${open}. The ${closedLane} lane is under a drawn sail: the lane is ${held ? 'closed' : 'paused'}, ${confirmed}`;
 }
 
 function firstEventTime(events: readonly ReplayEvent[], step: number): string {
@@ -481,7 +481,7 @@ export function buildReplayView(artifact: ReplayArtifact): ReplayView {
     },
     reopenCommand: artifact.reopen.command,
     lanesLines: lanesLines(artifact.closedLane, openLanes, held),
-    boardDescriptions: boardDescriptions(artifact.closedLane, artifact.lanes, openLanes),
+    boardDescriptions: boardDescriptions(artifact.closedLane, artifact.lanes, openLanes, held),
     tag: {
       legend: held ? 'LANE CLOSED' : 'LANE PAUSED',
       lane: artifact.closedLane,
@@ -494,7 +494,7 @@ export function buildReplayView(artifact: ReplayArtifact): ReplayView {
       number: 'TAG 001',
     },
     landing: {
-      drawingTitle: `One SES account with ${String(artifact.lanes.length)} sending lanes, each lane a track`,
+      drawingTitle: `One SES account with ${String(artifact.lanes.length)} sending lanes, each lane a row of its events`,
       drawingDescription: drawingDescription(artifact.closedLane, openLanes, held, pausedAt),
     },
     eventLog: {

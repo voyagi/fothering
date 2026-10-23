@@ -63,25 +63,37 @@ describe('the token source and tokens.css (D-140, AC-39, AC-63)', () => {
     expect(page?.index).toBeGreaterThan(blocks().order[2] ?? Number.POSITIVE_INFINITY);
   });
 
-  it('holds the six R14 type tokens, the 54ch measure, and the four bank hues with their legend ink equal in both themes', () => {
+  it('holds the six R14 type tokens, the 54ch measure, and the lane, stop, note and drawing colours and the board (not its edge) in both themes', () => {
     const statics = new Map(source.static.map((token) => [token.name, token.value]));
     expect(statics.get('--text-small')).toBe('0.9375rem');
     expect(statics.get('--text-mono-value')).toBe('0.8125rem');
     for (const name of ['--text-lede', '--text-intro', '--text-narrative-headline', '--text-schedule-compact']) expect(statics.has(name), name).toBe(true);
-    // Public Sans sets up to about 1.41 characters per ch of measure (2026-10-21, 1440 px: 62ch reached 85
-    // characters and 56ch 79), so 54ch keeps every rendered line clear of the e2e LINES limit of 80 with
-    // room for CI's font rendering.
+    // The e2e LINES check measures every rendered line in Mona Sans against its limit of 80
+    // characters (2026-10-23, 1440 px: the longest of 776 prose blocks ran 76), so a wider measure
+    // fails there first.
     expect(statics.get('--measure')).toBe('54ch');
-    // A key is a physical part: its colour and the legend printed on it hold in both themes.
-    const keys = source.themed.filter((token) => /^--key-(?:red|orange|yellow|white|ink)$/.test(token.name));
-    expect(keys.map((token) => token.name)).toEqual(['--key-red', '--key-orange', '--key-yellow', '--key-white', '--key-ink']);
-    for (const key of keys) expect(key.dark, key.name).toBe(key.light);
+    // The night board is a screen: it, its lanes and the red that closes one look the same on either
+    // page, and so do the notes and the drawings. Only the board's edge changes, so it shows on navy.
+    const fixed = [
+      '--board', '--board-ink', '--board-label', '--board-rule', '--board-slot',
+      '--lane-1', '--lane-2', '--lane-3', '--stop', '--note', '--note-ink', '--note-tape',
+      '--d-blue', '--d-sky', '--d-coral', '--d-sun', '--d-pink', '--d-mint', '--d-cloth', '--d-ink', '--d-paper',
+    ];
+    const themed = new Map(source.themed.map((token) => [token.name, token]));
+    for (const name of fixed) {
+      const token = themed.get(name);
+      expect(token, name).toEqual(expect.objectContaining({ name }));
+      expect(token?.dark, name).toBe(token?.light);
+    }
+    const edge = themed.get('--board-edge');
+    expect(edge?.light).toBe(themed.get('--board')?.light);
+    expect(edge?.dark).not.toBe(edge?.light);
   });
 
   it('TOKENS is the parsed tokens.json and themedValue reads one token in one theme', () => {
     expect(TOKENS).toEqual(source);
-    expect(themedValue(TOKENS, '--ground', 'light')).toBe('#D8D9D5');
-    expect(themedValue(TOKENS, '--ground', 'dark')).toBe('#1C1C1B');
+    expect(themedValue(TOKENS, '--ground', 'light')).toBe('#FFFFFF');
+    expect(themedValue(TOKENS, '--ground', 'dark')).toBe('#121B33');
     expect(() => themedValue(TOKENS, '--no-such-token', 'dark')).toThrow('--no-such-token is not a themed token in tokens.json');
   });
 
@@ -259,11 +271,10 @@ describe('HEAD_SCRIPT in node:vm (AC-40, AC-E29, AC-E5, AC-E17)', () => {
   });
 });
 
-// Saira ships its width axis, so its faces come from wdth.css (which carries font-stretch); the
-// other two from wght.css.
+// Mona Sans ships its width axis, so its faces come from wdth.css (which carries font-stretch);
+// Source Code Pro from wght.css.
 const FACE_PACKAGES = [
-  { name: 'saira', family: 'Saira', css: 'wdth.css' },
-  { name: 'public-sans', family: 'Public Sans', css: 'wght.css' },
+  { name: 'mona-sans', family: 'Mona Sans', css: 'wdth.css' },
   { name: 'source-code-pro', family: 'Source Code Pro', css: 'wght.css' },
 ] as const;
 // Only the latin and latin-ext normal files ship; the packages also install cyrillic, greek and
@@ -312,13 +323,13 @@ const resolvedFace = (url: string): string => (url.startsWith('@fontsource-varia
 describe('the self-hosted faces (D-134, AC-59)', () => {
   const ours = (): FaceRule[] => fontFaces(readFileSync(SITE_CSS, 'utf8'));
 
-  it('declares one @font-face for each latin and latin-ext normal file the three packages install, and no other', () => {
+  it('declares one @font-face for each latin and latin-ext normal file the two packages install, and no other', () => {
     const installed = installedFaces();
-    expect(installed.size).toBe(6);
+    expect(installed.size).toBe(4);
     expect(ours().map((rule) => fileName(rule.url)).sort()).toEqual([...installed.keys()].sort());
   });
 
-  it('names each family exactly Saira, Public Sans or Source Code Pro, with font-display swap', () => {
+  it('names each family exactly Mona Sans or Source Code Pro, with font-display swap', () => {
     const installed = installedFaces();
     const rules = ours();
     expect(rules.length).toBeGreaterThan(0);
@@ -332,7 +343,7 @@ describe('the self-hosted faces (D-134, AC-59)', () => {
     const installed = installedFaces();
     const rules = ours();
     expect(rules.length).toBeGreaterThan(0);
-    // Saira's width axis rides on font-stretch, so a rule that lost it would set every width at 100%.
+    // Mona Sans's width axis rides on font-stretch, so a rule that lost it would set every width at 100%.
     expect(rules.filter((rule) => rule.descriptors.has('font-stretch')).length).toBe(2);
     for (const rule of rules) {
       const source = installed.get(fileName(rule.url))?.rule;

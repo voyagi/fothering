@@ -1,5 +1,8 @@
 # Art direction: The Muted Track
 
+Superseded 2026-10-23: the site now follows "Lanes and Sail", recorded in `DESIGN.md` at the repository
+root, which wins wherever the two differ. This file is kept as the record of the retired direction.
+
 Locked 2026-10-20. It replaces The Tagged Isolation, locked 2026-09-16. Every page of the site derives from
 this file, and `DESIGN.md` at the repository root records the tokens and rules as built. The mockups in
 `design/mockups/` belong to the retired direction and are kept only as its record.

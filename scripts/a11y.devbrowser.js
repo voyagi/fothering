@@ -48,13 +48,38 @@ for (const route of JOB.routes) {
       impact: item.impact,
       nodes: item.nodes.map((node) => ({ target: node.target.join(' '), summary: (node.failureSummary || '').slice(0, 200) })),
     });
+    // For a color-contrast node axe left undecided, what the harness needs to decide it: axe's
+    // reason and the ratio it asks for, the text's computed colour, whether any element on the way up
+    // is translucent, and the first background painted behind it, as the browser computed them.
+    const paintedBehind = (element) => {
+      let opaque = true;
+      for (let at = element; at !== null; at = at.parentElement) {
+        const style = getComputedStyle(at);
+        if (style.opacity !== '1') opaque = false;
+        if (style.backgroundImage !== 'none') return { background: style.backgroundImage, opaque };
+        if (!/, 0\)$/.test(style.backgroundColor)) return { background: style.backgroundColor, opaque };
+      }
+      return { background: 'none', opaque };
+    };
+    const contrastFacts = (node) => {
+      const check = (node.any || []).find((entry) => entry.id === 'color-contrast');
+      const data = check !== undefined && typeof check.data === 'object' && check.data !== null ? check.data : {};
+      const element = node.target.length === 1 ? document.querySelector(node.target[0]) : null;
+      const facts = { messageKey: data.messageKey, expected: data.expectedContrastRatio };
+      return element === null ? facts : { ...facts, color: getComputedStyle(element).color, ...paintedBehind(element) };
+    };
+    const shapeIncomplete = (item) => {
+      const shaped = shape(item);
+      if (item.id !== 'color-contrast') return shaped;
+      return { ...shaped, nodes: shaped.nodes.map((node, index) => ({ ...node, ...contrastFacts(item.nodes[index]) })) };
+    };
     const ran = [].concat(result.passes, result.violations, result.incomplete, result.inapplicable).map((item) => item.id);
     return {
       version: window.axe.version,
       selected,
       ran,
       violations: result.violations.map(shape),
-      incomplete: result.incomplete.map(shape),
+      incomplete: result.incomplete.map(shapeIncomplete),
     };
   }, { tags: JOB.tags, rules: JOB.rules });
 
