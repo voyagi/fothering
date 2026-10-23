@@ -381,6 +381,11 @@ describe('the README deploy commands', () => {
     expect(() => readDeployCommands('## Deploy and remove\n\n```sh\naws planted run \\\n```\n')).toThrow(/ends in a backslash/);
   });
 
+  it('never continues a command across a closing fence into the next block', () => {
+    const section = '## Deploy and remove\n\n```sh\naws planted run \\\n```\n\nThen:\n\n```sh\nnpm run build\n```\n';
+    expect(() => readDeployCommands(section)).toThrow(/ends in a backslash/);
+  });
+
   it('reads a backslash at the end of a comment as comment text, the way the shell does', () => {
     const section = '## Deploy and remove\n\n```sh\nnpx cdk bootstrap  # once \\\n# a note \\\nnpm run build\n```\n';
     expect(readDeployCommands(section)).toEqual([
@@ -594,6 +599,17 @@ describe('the deploy steps', () => {
     expect(steps[3]?.commands.map(({ command }) => command)).toEqual(['npx cdk bootstrap', 'npx cdk deploy A B C', action]);
     expect(steps[4]?.commands.map(({ command }) => command)).toEqual(['npx cdk deploy A B C -c fothering:live=live', goLive]);
     expect(removalSteps({ deployCommands: commands })[0]?.commands.map(({ command }) => command)).toEqual(['npx cdk destroy D', 'npx cdk destroy A B C']);
+  });
+
+  it('drops a narrower destroy line too, and never reads a spaced -c or --context value as a stack', () => {
+    const lines = (commands: readonly string[]) => commands.map((command) => ({ command, note: null }));
+    const base = ['npm run build', 'npx cdk bootstrap', 'npx cdk deploy --all -c fothering:live=live'];
+    const removal = removalSteps({ deployCommands: lines([...base, 'npx cdk deploy --all', 'npx cdk destroy --all', 'npx cdk destroy B']) });
+    expect(removal[0]?.commands.map(({ command }) => command)).toEqual(['npx cdk destroy --all']);
+    for (const flag of ['-c', '--context']) {
+      const steps = deploySteps({ deployCommands: lines([...base, 'npx cdk destroy --all', 'npx cdk deploy A B', `npx cdk deploy A ${flag} fothering:trial=1`]), region: 'xx-planted-9' });
+      expect(steps[3]?.commands.map(({ command }) => command), flag).toEqual(['npx cdk bootstrap', 'npx cdk deploy A B']);
+    }
   });
 
   // Read as words, each parameter value would name a stack, and D's line would cover A's trial.

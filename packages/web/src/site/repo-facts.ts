@@ -88,17 +88,21 @@ function commandOf(line: string): DeployCommand | undefined {
   return { command, note: note === undefined || note === '' ? null : note };
 }
 
-// The lines inside fenced sh blocks, and whether the last block was left open.
-function shBlockLines(lines: readonly string[]): { lines: string[]; open: boolean } {
-  const inside: string[] = [];
-  let open = false;
+// Each fenced sh block's lines, and whether the last block was left open. Blocks stay apart because
+// the shell never carries a continuation across a closing fence.
+function shBlocks(lines: readonly string[]): { blocks: string[][]; open: boolean } {
+  const blocks: string[][] = [];
+  let current: string[] | undefined;
   for (const line of lines) {
     const fence = line.trim();
-    if (!open && fence === '```sh') open = true;
-    else if (open && fence === '```') open = false;
-    else if (open) inside.push(line);
+    if (current === undefined && fence === '```sh') current = [];
+    else if (current !== undefined && fence === '```') {
+      blocks.push(current);
+      current = undefined;
+    } else current?.push(line);
   }
-  return { lines: inside, open };
+  if (current !== undefined) blocks.push(current);
+  return { blocks, open: current !== undefined };
 }
 
 // A line ending in a backslash continues on the next, as the shell reads it, so a long command the
@@ -118,9 +122,12 @@ function joinContinuations(lines: readonly string[]): string[] {
 }
 
 export function readDeployCommands(readmeText: string): DeployCommand[] {
-  const block = shBlockLines(deploySectionLines(readmeText));
-  if (block.open) throw new Error(`${README_PREFIX}: a sh block is not closed. Close it with a line holding three backticks.`);
-  const commands = joinContinuations(block.lines).map(commandOf).filter((command): command is DeployCommand => command !== undefined);
+  const { blocks, open } = shBlocks(deploySectionLines(readmeText));
+  if (open) throw new Error(`${README_PREFIX}: a sh block is not closed. Close it with a line holding three backticks.`);
+  const commands = blocks
+    .flatMap(joinContinuations)
+    .map(commandOf)
+    .filter((command): command is DeployCommand => command !== undefined);
   if (commands.length === 0) throw new Error(`${README_PREFIX}: no fenced sh block with a command. Put the deploy commands in sh blocks.`);
   return commands;
 }
@@ -308,7 +315,7 @@ export interface ForgetCommand {
 // command or function output reaches the page with no edit there. The argument lines carry an
 // example address, which no page may show, so only the command and the output name are read.
 export function readForgetCommand(docText: string): ForgetCommand {
-  const invoke = shBlockLines(docText.split(/\r?\n/)).lines.map((line) => line.trim()).find((line) => line.startsWith('aws lambda invoke'));
+  const invoke = shBlocks(docText.split(/\r?\n/)).blocks.flat().map((line) => line.trim()).find((line) => line.startsWith('aws lambda invoke'));
   if (invoke === undefined) throw new Error(`${FORGET_DOC}: no aws lambda invoke line in a sh block. Restore the command that runs the forget function.`);
   const output = /<(\w+) stack output>/.exec(docText)?.[1];
   if (output === undefined) throw new Error(`${FORGET_DOC}: no stack output names the function. Restore the --function-name <...> stack output placeholder.`);
