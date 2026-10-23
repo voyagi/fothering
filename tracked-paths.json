@@ -36,7 +36,9 @@
     "docs/deploy-the-site.md",
     "docs/architecture.md",
     "docs/architecture.mmd",
-    "docs/architecture.png"
+    "docs/architecture.png",
+    "examples/demo-transcript.md",
+    ".gitleaksignore"
   ],
   "prefixes": [
     ".github/workflows/",
