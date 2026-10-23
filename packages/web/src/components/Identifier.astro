@@ -12,6 +12,8 @@
 // item 2) pass it; the built rule identifier-break fails that break anywhere else.
 // With face="inherit" the identifier keeps the face of the text around it, as the comp sets a
 // configuration set name in running text, and only never breaks mid-name.
+import { identifierWordParts } from '../site/identifier-text.ts';
+
 interface Props {
   value: string;
   words?: boolean;
@@ -20,7 +22,7 @@ interface Props {
 
 const NO_BREAK_SPACE = String.fromCharCode(0xa0);
 const { value, words = false, face = 'mono' } = Astro.props;
-const wordParts = words && !value.includes('.') ? value.split(/(?<=[a-z0-9:])(?=[A-Z])/) : [];
+const wordParts = words && !value.includes('.') ? identifierWordParts(value) : [];
 const byWords = wordParts.length > 1;
 const parts = byWords ? wordParts : value.split('.').map((part) => part.replaceAll(' ', NO_BREAK_SPACE));
 // Each part with its joiner, and whether a break may follow it.

@@ -314,6 +314,15 @@ describe('the accessibility record (D-156, AC-53)', () => {
     expect(byResult('passed')).toHaveLength(18);
   });
 
+  // The statement says no screen reader was run, so a passed row's method may not name one: the
+  // reader would see a result recorded by a method nobody followed.
+  it('names no screen reader in the method of a passed row while the statement says none was run', () => {
+    const handCheck = ACCESSIBILITY_RECORD.limitations.find((limitation) => limitation.id === 'hand-check');
+    expect(handCheck?.text).toContain('no screen reader was run');
+    const named = HAND_CHECK_CRITERIA.filter((criterion) => criterion.result === 'passed' && /screen reader/i.test(criterion.how)).map((criterion) => criterion.number);
+    expect(named).toEqual([]);
+  });
+
   // A how-checked note is the method a person follows, never an outcome nobody has seen yet.
   it('writes every how-checked note as a method a person follows, in plain short words', () => {
     const emDash = String.fromCharCode(0x2014);

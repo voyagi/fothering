@@ -1697,26 +1697,41 @@ export function checkFileBudget(files: readonly { readonly path: string; readonl
 
 // WCAG 1.4.5 (05-UAT check 4): a readout's digits are drawn segments, an image of text, so the number
 // they show is also printed in that readout where a reader can see it. The sentence a screen reader is
-// given does not count: it is clipped to one pixel.
+// given does not count: it is clipped to one pixel. The drawn segments (class seg) are what the rule
+// protects, so a segment outside any readout, or a readout drawing digits with no sentence giving
+// their number, fails instead of leaving drawn digits nothing checks after a class is renamed.
+const hasClass = (element: BuiltElement, name: string): boolean => (element.attrs.class ?? '').split(/\s+/).includes(name);
+
 function shownText(element: BuiltElement): string {
-  if ((element.attrs.class ?? '').split(/\s+/).includes('visually-hidden')) return '';
+  if (hasClass(element, 'visually-hidden')) return '';
   return element.children.map((child) => (typeof child === 'string' ? child : shownText(child))).join(' ');
+}
+
+function readoutFindings(readout: BuiltElement): string[] {
+  const spoken: string[] = [];
+  let drawsDigits = false;
+  walk(readout, (inner) => {
+    if (hasClass(inner, 'visually-hidden')) spoken.push(textOf(inner));
+    if (hasClass(inner, 'seg')) drawsDigits = true;
+  });
+  const numbers = spoken.flatMap((text) => text.match(/\d+/g) ?? []);
+  if (drawsDigits && numbers.length === 0) return ['the readout draws digits but no screen-reader sentence in it gives their number, so nothing checks that a reader can see it'];
+  const shown = shownText(readout);
+  return numbers
+    .filter((number) => !new RegExp(`(?<!\\d)${number}(?!\\d)`).test(shown))
+    .map((number) => `the readout draws ${number} but shows it as text nowhere a reader can see, only to a screen reader`);
 }
 
 export function readoutNumberRule(site: BuiltSite, _context: CheckContext): Finding[] {
   return site.pages.flatMap((page) => {
+    const parents = parentsOf(page.root);
     const texts: string[] = [];
+    let looseSegments = 0;
     walk(page.root, (element) => {
-      if (!(element.attrs.class ?? '').split(/\s+/).includes('readout')) return;
-      const spoken: string[] = [];
-      walk(element, (inner) => {
-        if ((inner.attrs.class ?? '').split(/\s+/).includes('visually-hidden')) spoken.push(textOf(inner));
-      });
-      const shown = shownText(element);
-      for (const number of spoken.flatMap((text) => text.match(/\d+/g) ?? [])) {
-        if (!new RegExp(`(?<!\\d)${number}(?!\\d)`).test(shown)) texts.push(`the readout draws ${number} but shows it as text nowhere a reader can see, only to a screen reader`);
-      }
+      if (hasClass(element, 'seg') && ancestorWith(element, parents, (node) => hasClass(node, 'readout')) === undefined) looseSegments += 1;
+      if (hasClass(element, 'readout')) texts.push(...readoutFindings(element));
     });
+    if (looseSegments > 0) texts.push(`${String(looseSegments)} drawn digit segments sit outside any readout, so no rule checks that their number is shown as text`);
     return texts.map((text) => ({ rule: 'readout-number' as const, route: page.route, text }));
   });
 }
