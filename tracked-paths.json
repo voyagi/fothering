@@ -33,7 +33,10 @@
     "docs/measurement-protocol.md",
     "docs/live-run-policy-transactional.json",
     "docs/live-run-policy-bulk.json",
-    "docs/deploy-the-site.md"
+    "docs/deploy-the-site.md",
+    "docs/architecture.md",
+    "docs/architecture.mmd",
+    "docs/architecture.png"
   ],
   "prefixes": [
     ".github/workflows/",
