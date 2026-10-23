@@ -202,7 +202,7 @@ code { font-size: var(--text-mono-value); font-weight: 500; }
 /* The readout: the window's times in silkscreen, the sends in red segments behind black glass,
    then what was found, what was muted and what the read-back said. */
 .readout { display: grid; gap: var(--space-12); align-content: start; margin: 0; padding: var(--space-md); border: 2px solid var(--ink); border-radius: 6px; }
-.readout-head { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 0 var(--space-sm); margin: 0; }
+.readout-head { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 0 var(--space-sm); margin: 0; max-inline-size: none; }
 .window { display: flex; align-items: flex-end; gap: var(--space-md); margin: 0; padding: var(--space-12) var(--space-md); border-radius: 4px; background: var(--window); color: var(--window-ink); max-inline-size: none; }
 .window svg { flex: none; block-size: 56px; inline-size: auto; }
 .seg { fill: var(--segment-off); }

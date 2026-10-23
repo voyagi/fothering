@@ -340,6 +340,16 @@ describe('the accessibility record (D-156, AC-53)', () => {
   });
 });
 
+// The readout head is a paragraph, so the prose measure on p would hold its two ends inside 54ch
+// wherever the readout runs wider than that, as it does in one column at 960px and below.
+describe('the readout head', () => {
+  it('opts out of the prose measure so its second part reaches the right edge', () => {
+    const css = readRepoText('packages/web/src/styles/site.css', repoRoot(REPO_ROOT));
+    expect(css).toMatch(/^p, li, dd \{ max-inline-size: var\(--measure\); \}/m);
+    expect(/^\.readout-head \{[^}]*\}/m.exec(css)?.[0]).toContain('max-inline-size: none;');
+  });
+});
+
 describe('the sitemap and robots endpoints (AC-50, AC-51)', () => {
   it('sitemap GET returns XML listing each indexable route once as an absolute URL from SITE_ORIGIN, never the 404', async () => {
     const response = sitemapGet();
