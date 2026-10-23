@@ -770,4 +770,51 @@ describe('fixtureFindings', () => {
       expect(fixtureFindings('replay-incident.json', planted), head).toEqual([expect.stringMatching(/^replay-incident\.json:\d+: a 12-digit number outside capture-manifest\.json, the only file that may hold the account id$/)]);
     }
   });
+
+  // 255 is a valid octet, so only a run with an octet above it is skipped as not an address. The
+  // planted line sits mid-file, where a line count taken over the whole text would differ.
+  it('fails an address with a 255 octet on its own line, and passes a dotted run with an octet over 255', () => {
+    const planted = shippedText.replace('"Delivered, stream receipts"', '"Delivered, stream receipts, from 10.1.2.255"');
+    expect(planted).not.toBe(shippedText);
+    const lines = planted.split('\n');
+    const line = lines.findIndex((text) => text.includes('10.1.2.255')) + 1;
+    expect(line).toBeGreaterThan(1);
+    expect(line).toBeLessThan(lines.length);
+    expect(fixtureFindings('replay-incident.json', planted)).toEqual([`replay-incident.json:${String(line)}: an IP address outside 192.0.2.0/24, 198.51.100.0/24 and 203.0.113.0/24`]);
+    const version = shippedText.replace('"Delivered, stream receipts"', '"Delivered, stream receipts, build 1.2.3.256"');
+    expect(version).not.toBe(shippedText);
+    expect(fixtureFindings('replay-incident.json', version)).toEqual([]);
+  });
+});
+
+// A capture can log an open lane's delivery before the first bounce, so step one's bounce is found by
+// its kind and lane, never by its place in the log.
+describe('step one names a closed lane bounce whatever is logged first', () => {
+  const artifact = shippedArtifact();
+  const firstBounce = artifact.events.find((event) => event.kind === 'bounce' && event.lane === artifact.closedLane);
+  const delivery = artifact.events.find((event) => event.kind === 'delivery' && event.lane !== artifact.closedLane);
+  if (firstBounce === undefined || delivery === undefined) throw new Error('the shipped artifact needs a closed lane bounce and an open lane delivery');
+
+  it('builds the shipped step one when an open lane delivery is logged before the first bounce', () => {
+    const early = { ...delivery, atUtc: '2026-10-14T14:01:06Z' };
+    expect(Date.parse(early.atUtc)).toBeLessThan(Date.parse(firstBounce.atUtc));
+    const shipped = buildReplayView(artifact);
+    const view = buildReplayView({ ...artifact, events: artifact.events.map((event) => (event === delivery ? early : event)) });
+    expect(view.eventLog.rows[0]?.kind).toBe(shipped.eventLog.rows.find((row) => row.lane === delivery.lane)?.kind);
+    expect(view.steps[0]?.paragraphs).toEqual(shipped.steps[0]?.paragraphs);
+    expect(view.tag.evidence).toBe(shipped.tag.evidence);
+  });
+});
+
+describe('the paused and reopen steps start at the pause and the reopen', () => {
+  const artifact = shippedArtifact();
+
+  it('builds when each step holds only events at or before that moment, one of them exactly at it', () => {
+    const atMoments = artifact.events.filter(
+      (event) => !(event.step === 3 && Date.parse(event.atUtc) > Date.parse(artifact.pause.atUtc)) && !(event.step === 4 && Date.parse(event.atUtc) > Date.parse(artifact.reopen.atUtc)),
+    );
+    expect(atMoments.filter((event) => event.step === 3).map((event) => event.atUtc)).toEqual([artifact.pause.atUtc]);
+    expect(atMoments.filter((event) => event.step === 4).map((event) => event.atUtc)).toContain(artifact.reopen.atUtc);
+    expect(() => buildReplayView({ ...artifact, events: atMoments })).not.toThrow();
+  });
 });
