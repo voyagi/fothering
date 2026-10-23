@@ -427,6 +427,22 @@ describe('the readout number rule (WCAG 1.4.5, 05-UAT check 4)', () => {
     expect(readoutNumberRule(casesSite([readout('<b>412 sends</b>'), readout('<b>Status code</b>', '<code>412 Not Found</code>')]), context)).toEqual([]);
   });
 
+  // The sentence ends with the lane, and a lane name may end in digits: only the figure the sentence
+  // opens with is the drawn number, and a lane's digits never stand in for it.
+  it('passes a lane name ending in digits beside the drawn figure', () => {
+    const lane = readout('<b>412 sends</b><code>fothering-bulk-2</code>').replace('on fothering-bulk<', 'on fothering-bulk-2<');
+    expect(lane).toContain('>412 sends on fothering-bulk-2<');
+    expect(readoutNumberRule(casesSite([lane]), context)).toEqual([]);
+  });
+
+  it('fails a drawn figure shown only as the end of a lane name', () => {
+    const lane = readout('<b>Sends</b><code>bulk-412</code>').replace('on fothering-bulk<', 'on bulk-412<');
+    expect(lane).toContain('>412 sends on bulk-412<');
+    expect(caseFindings(readoutNumberRule, 'readout-number', [lane]).map((finding) => finding.text)).toEqual([
+      'the readout draws 412 but does not show it as text beside its digits, only to a screen reader',
+    ]);
+  });
+
   // A clock time or a date in the head holds the digits of many a figure, so a drawn 12 that the head
   // shows only inside 14:12 or 2026-10-12 is not shown.
   it.each([

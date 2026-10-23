@@ -1826,7 +1826,9 @@ function windowFindings(readout: BuiltElement, window: BuiltElement): string[] {
   walk(window, (inner) => {
     if (hasClass(inner, 'visually-hidden')) spoken.push(textOf(inner));
   });
-  const numbers = spoken.flatMap((text) => text.match(/\d+/g) ?? []);
+  // Each sentence opens with the figure the digits draw (412 sends on a lane, Status 404), and a lane
+  // name may end in digits of its own, so only a sentence's first digit run is the drawn number.
+  const numbers = spoken.flatMap((text) => text.match(/\d+/)?.[0] ?? []);
   if (numbers.length === 0) return ['the readout draws digits but no screen-reader sentence beside them gives their number, so nothing checks that a reader can see it'];
   const beside = shownText(window);
   const head = readout.children.find((child): child is BuiltElement => typeof child !== 'string' && hasClass(child, 'readout-head'));
