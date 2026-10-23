@@ -4,7 +4,7 @@
   "private": true,
   "description": "Closes the one Amazon SES sending lane that is going wrong, with evidence, and asks the operator by email before reopening it.",
   "author": "voyagi",
-  "license": "UNLICENSED",
+  "license": "Apache-2.0",
   "type": "module",
   "engines": {
     "node": ">=22.18"
