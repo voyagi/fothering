@@ -6,6 +6,10 @@ closes that one lane, and asks you by email before it opens again.
 Status: hackathon build. It ran end to end on 22 October 2026 in a real AWS account, with the
 test mail sent to the SES mailbox simulator. It has not been tried on real recipients.
 
+See it run with nothing to install: [the replay](https://fothering.taranity.com/replay/). What the demo
+video says, shot by shot: [examples/demo-transcript.md](examples/demo-transcript.md). How the parts fit
+together: [docs/architecture.md](docs/architecture.md).
+
 ## Requirements
 
 - Node.js 22.18 or later on the 22 line (Amazon Bedrock AgentCore Runtime runs Node.js 22)
