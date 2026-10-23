@@ -1,5 +1,12 @@
+import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
 import { identifierWordParts, LOG_API_NAMES, longValueParts, textSegments, type Segment } from './identifier-text.js';
+
+// A capitalised word, and a CDK logical id's hash: eight uppercase hex characters.
+const capitalised = fc.tuple(fc.constantFrom(...'ABCDEFGHIJKLMNOPQRSTUVWXYZ'), fc.stringMatching(/^[a-z]{1,8}$/)).map(([head, tail]) => `${head}${tail}`);
+const hexHash = fc.stringMatching(/^[0-9A-F]{8}$/);
+// Where each part but the last ends, as offsets into the joined text.
+const lineEnds = (parts: readonly string[]): number[] => parts.slice(0, -1).reduce<number[]>((ends, part) => [...ends, (ends.at(-1) ?? 0) + part.length], []);
 
 const TERMS = { names: ['fothering-bulk', 'fothering-transactional', 'fothering-alerts'], values: ['batch=2026-10-14-b', 'batch=2026-10-14-a'] };
 // Each segment as kind:text, so a case reads as one string.
@@ -43,6 +50,22 @@ describe('longValueParts (the deploy schedules, Schedule.astro)', () => {
   it('gives back exactly the text it was given', () => {
     for (const text of ['', 'a', 'arn:aws:s3:::bucket/key', 'FotheringIngestEventsTable165FCE28Arn', 'SESConfigSet', '1A2B3C4D']) expect(longValueParts(text).join('')).toBe(text);
   });
+
+  it('gives back any text whole, with no empty part', () => {
+    fc.assert(fc.property(fc.string({ maxLength: 40 }), (text) => {
+      const parts = longValueParts(text);
+      return parts.join('') === text && (text === '' || parts.every((part) => part !== ''));
+    }));
+  });
+
+  // CDK names a resource Word...Word<hash>Word...: no line end may fall inside the hash.
+  it('never ends a line inside a CDK hash, whatever words stand around it', () => {
+    fc.assert(fc.property(fc.array(capitalised, { minLength: 1, maxLength: 3 }), hexHash, fc.array(capitalised, { maxLength: 2 }), (before, hash, after) => {
+      const start = before.join('').length;
+      const ends = lineEnds(longValueParts(`${before.join('')}${hash}${after.join('')}`));
+      return ends.every((end) => end <= start || end >= start + hash.length);
+    }));
+  });
 });
 
 describe('identifierWordParts (the Identifier word mode, UI-SPEC line 208)', () => {
@@ -60,5 +83,12 @@ describe('identifierWordParts (the Identifier word mode, UI-SPEC line 208)', () 
   it('starts the capitalised word after an acronym', () => {
     expect(identifierWordParts('SESConfigSet')).toEqual(['SES', 'Config', 'Set']);
     expect(identifierWordParts('ses:GetVDMAttributes')).toEqual(['ses:', 'Get', 'VDM', 'Attributes']);
+  });
+
+  it('gives back any name whole, with no empty part', () => {
+    fc.assert(fc.property(fc.stringMatching(/^[a-z0-9]{0,4}:?[A-Za-z0-9]{0,20}$/), (value) => {
+      const parts = identifierWordParts(value);
+      return parts.join('') === value && (value === '' || parts.every((part) => part !== ''));
+    }));
   });
 });

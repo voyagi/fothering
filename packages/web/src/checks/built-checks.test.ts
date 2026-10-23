@@ -398,6 +398,14 @@ describe('the command pair rule (UI-SPEC line 209, the 05-12 finish review)', ()
       '/case-1/ the command token D:OperatorAddress=<address> offers no line end after a colon or equals sign inside it, so a narrow column cuts it mid-word',
     ]);
   });
+
+  // Every expected line end is there, plus one inside a word, so the finding names that one.
+  it('fails a token that offers a line end inside a word, and names it as that', () => {
+    const extra = '<pre class="command"><code><span>D:<wbr>Operator<wbr>Address=<wbr>&lt;address&gt;</span></code></pre>';
+    expect(commandPairFindings([extra])).toEqual([
+      '/case-0/ the command token D:OperatorAddress=<address> offers a line end after "Operator", inside a word, so a narrow column cuts it there',
+    ]);
+  });
 });
 
 // A readout as the pages render it: drawn digits, the sentence a screen reader is given, and the
@@ -432,6 +440,19 @@ describe('the readout number rule (WCAG 1.4.5, 05-UAT check 4)', () => {
     expect(unspoken).not.toBe(readout('<b>Sends</b>'));
     expect(caseFindings(readoutNumberRule, 'readout-number', [unspoken]).map((finding) => finding.text)).toEqual([
       'the readout draws digits but no screen-reader sentence in it gives their number, so nothing checks that a reader can see it',
+    ]);
+  });
+
+  // An SVG title or desc and an element with the hidden attribute put text in the markup that no
+  // reader sees on the page, so a number standing only there is not shown.
+  it.each([
+    ['an SVG title', readout('<b>Sends</b>').replace('<polygon', '<title>412 sends</title><polygon')],
+    ['an SVG desc', readout('<b>Sends</b>').replace('<polygon', '<desc>412 sends</desc><polygon')],
+    ['an element with the hidden attribute', readout('<b>Sends</b><b hidden>412 sends</b>')],
+  ])('fails a number that stands only in %s', (_where, body) => {
+    expect(body).not.toBe(readout('<b>Sends</b>'));
+    expect(caseFindings(readoutNumberRule, 'readout-number', [body]).map((finding) => finding.text)).toEqual([
+      'the readout draws 412 but shows it as text nowhere a reader can see, only to a screen reader',
     ]);
   });
 });
@@ -1407,6 +1428,16 @@ describe('the replay panels rule (AC-E7, AC-10 static half)', () => {
     expect(silent).not.toBe(REPLAY_CLOCK);
     expect(replayTexts(replayPanelsRule, replayBody({ clock: silent }))).toEqual([
       'the step clock does not carry role="status", so a screen reader is not told the step changed (WCAG 4.1.3)',
+    ]);
+  });
+
+  it.each(['hidden', 'aria-hidden="true"'])('fails a step clock that %s keeps from a screen reader, on itself or a wrapper', (attribute) => {
+    const name = attribute.split('=')[0] ?? '';
+    expect(replayTexts(replayPanelsRule, replayBody({ clock: REPLAY_CLOCK.replace('<p ', `<p ${attribute} `) }))).toEqual([
+      `the step clock is hidden from the accessibility tree by ${name} on <p>, so its status role announces nothing (WCAG 4.1.3)`,
+    ]);
+    expect(replayTexts(replayPanelsRule, replayBody({ clock: `<div ${attribute}>${REPLAY_CLOCK}</div>` }))).toEqual([
+      `the step clock is hidden from the accessibility tree by ${name} on <div>, so its status role announces nothing (WCAG 4.1.3)`,
     ]);
   });
 

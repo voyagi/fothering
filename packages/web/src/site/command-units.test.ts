@@ -43,4 +43,13 @@ describe('tokenRuns (UAT 05 check 1, the deploy sheet at 1440 px)', () => {
   it('gives back exactly the token it was given', () => {
     fc.assert(fc.property(fc.stringMatching(/^[a-z:=<>-]{1,12}$/), (token) => tokenRuns(token).join('') === token));
   });
+
+  // Runs of colons and equals signs included: every run but the last ends right after one, and none
+  // is empty, so no line end falls anywhere else.
+  it('ends every run but the last after a colon or equals sign, and leaves none empty', () => {
+    fc.assert(fc.property(fc.stringMatching(/^[a-z:=]{1,12}$/), (token) => {
+      const runs = tokenRuns(token);
+      return runs.every((run) => run !== '') && runs.slice(0, -1).every((run) => /[:=]$/.test(run)) && runs.slice(0, -1).every((run) => !/[:=]./.test(run));
+    }));
+  });
 });

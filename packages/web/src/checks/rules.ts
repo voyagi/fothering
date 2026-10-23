@@ -1026,6 +1026,13 @@ export function providerLabelRule(site: BuiltSite, context: CheckContext): Findi
 const HIDING_ATTRS = ['hidden', 'aria-hidden'] as const;
 const hidingAttr = (element: BuiltElement): string | undefined => HIDING_ATTRS.find((name) => element.attrs[name] !== undefined && element.attrs[name] !== 'false');
 
+// What hides an element from the accessibility tree, the element itself or an ancestor, and by which attribute.
+function hiddenBy(element: BuiltElement, parents: ReadonlyMap<BuiltElement, BuiltElement>): { readonly tag: string; readonly attr: string } | undefined {
+  const hider = hidingAttr(element) === undefined ? ancestorWith(element, parents, (node) => hidingAttr(node) !== undefined) : element;
+  const attr = hider === undefined ? undefined : hidingAttr(hider);
+  return hider === undefined || attr === undefined ? undefined : { tag: hider.tag, attr };
+}
+
 function panelFindings(page: BuiltPage): string[] {
   const panels = panelsOf(page);
   if (panels.length !== COUNTED_KINDS.length) return [`the replay page has ${String(panels.length)} step panels, 4 expected`];
@@ -1033,9 +1040,8 @@ function panelFindings(page: BuiltPage): string[] {
   const texts = steps.join(', ') === '1, 2, 3, 4' ? [] : [`the step panels read ${steps.join(', ')} in HTML order; 1, 2, 3, 4 expected`];
   const parents = parentsOf(page.root);
   panels.forEach((panel, index) => {
-    const hider = hidingAttr(panel) === undefined ? ancestorWith(panel, parents, (node) => hidingAttr(node) !== undefined) : panel;
-    const attr = hider === undefined ? undefined : hidingAttr(hider);
-    if (hider !== undefined && attr !== undefined) texts.push(`step panel ${steps[index] ?? ''} is hidden from the accessibility tree by ${attr} on <${hider.tag}>`);
+    const hidden = hiddenBy(panel, parents);
+    if (hidden !== undefined) texts.push(`step panel ${steps[index] ?? ''} is hidden from the accessibility tree by ${hidden.attr} on <${hidden.tag}>`);
   });
   return texts;
 }
@@ -1049,7 +1055,9 @@ function clockFindings(page: BuiltPage): string[] {
   });
   const [clock] = clocks;
   if (clocks.length !== 1 || clock === undefined) return [`the replay page has ${String(clocks.length)} step clocks (${CLOCK}), 1 expected`];
-  return clock.attrs.role === 'status' ? [] : ['the step clock does not carry role="status", so a screen reader is not told the step changed (WCAG 4.1.3)'];
+  if (clock.attrs.role !== 'status') return ['the step clock does not carry role="status", so a screen reader is not told the step changed (WCAG 4.1.3)'];
+  const hidden = hiddenBy(clock, parentsOf(page.root));
+  return hidden === undefined ? [] : [`the step clock is hidden from the accessibility tree by ${hidden.attr} on <${hidden.tag}>, so its status role announces nothing (WCAG 4.1.3)`];
 }
 
 // AC-E7 and AC-10's static half: the four panels sit in the HTML in step order and nothing in the
@@ -1143,9 +1151,28 @@ function renderedRuns(token: BuiltElement): string[] {
   return runs;
 }
 
+// Where each run but the last ends, as an offset into the token's text.
+function runEnds(runs: readonly string[]): number[] {
+  const ends: number[] = [];
+  let end = 0;
+  for (const run of runs.slice(0, -1)) {
+    end += run.length;
+    ends.push(end);
+  }
+  return ends;
+}
+
+// A missing line end and one inside a word are both named, each as what it is.
 function tokenBreakFindings(token: BuiltElement): string[] {
   const text = rawText(token);
-  return renderedRuns(token).join('\n') === tokenRuns(text).join('\n') ? [] : [`the command token ${text} offers no line end after a colon or equals sign inside it, so a narrow column cuts it mid-word`];
+  const runs = renderedRuns(token);
+  const rendered = runEnds(runs);
+  const expected = runEnds(tokenRuns(text));
+  const missing = expected.some((end) => !rendered.includes(end))
+    ? [`the command token ${text} offers no line end after a colon or equals sign inside it, so a narrow column cuts it mid-word`]
+    : [];
+  const inside = rendered.flatMap((end, index) => (expected.includes(end) ? [] : [`the command token ${text} offers a line end after "${runs[index] ?? ''}", inside a word, so a narrow column cuts it there`]));
+  return [...missing, ...inside];
 }
 
 function commandBlockFindings(pre: BuiltElement): string[] {
@@ -1716,8 +1743,12 @@ export function checkFileBudget(files: readonly { readonly path: string; readonl
 // their number, fails instead of leaving drawn digits nothing checks after a class is renamed.
 const hasClass = (element: BuiltElement, name: string): boolean => (element.attrs.class ?? '').split(/\s+/).includes(name);
 
+// Markup text no reader sees on the page: an SVG's title and desc, and whatever the hidden
+// attribute removes, beside the screen-reader sentence.
+const UNSHOWN_TAGS = new Set(['title', 'desc']);
+
 function shownText(element: BuiltElement): string {
-  if (hasClass(element, 'visually-hidden')) return '';
+  if (hasClass(element, 'visually-hidden') || UNSHOWN_TAGS.has(element.tag) || element.attrs.hidden !== undefined) return '';
   return element.children.map((child) => (typeof child === 'string' ? child : shownText(child))).join(' ');
 }
 
