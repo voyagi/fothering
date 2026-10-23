@@ -1072,6 +1072,16 @@ describe('the limits rule (AC-3, UI-SPEC E11)', () => {
   it('holds three fixed rows beside the replay row', () => {
     expect(LIMITS_FIXED_ROWS.map((row) => row.part)).toEqual(['Measured numbers', 'Live run', 'Deploy page']);
   });
+
+  // docs/measurement-protocol.md, No number on a page: the site may say that a run was recorded,
+  // never a figure from it, and numbers wait for more runs than three.
+  it('says the live run was recorded, keeps measured numbers at none, and promises no later run', () => {
+    const byId = new Map(LIMITS_FIXED_ROWS.map((row) => [row.id, row]));
+    expect(byId.get('live-run')).toMatchObject({ state: 'Recorded', mark: 'open', note: expect.stringMatching(/SES mailbox simulator/) });
+    expect(byId.get('measured-numbers')).toMatchObject({ state: 'None yet', mark: 'later', note: expect.stringMatching(/more .*than three/) });
+    const notes = [...LIMITS_FIXED_ROWS.map((row) => row.note), ...Object.values(PROVENANCE_LABELS).map((label) => label.limitsNote)];
+    expect(notes.filter((note) => /\b(?:planned|replaces)\b/i.test(note))).toEqual([]);
+  });
 });
 
 describe('the no-ellipsis rule (UI-SPEC E14)', () => {
