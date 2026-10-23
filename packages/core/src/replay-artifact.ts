@@ -188,8 +188,9 @@ export function reportIssue(issue: z.core.$ZodIssue): IssueReport {
 
 // Canonical JSON for the capture manifest's hash: keys sorted by UTF-16 code unit at every depth,
 // arrays kept in order, integers only. canonicalJson in evidence-record.ts orders and hashes the same
-// way but refuses a float with a TypeError, and a float here is refused as a RangeError, so the
-// artifact keeps its own until the two refusals agree.
+// way but refuses a float with a TypeError where this one throws a RangeError, and it also calls a
+// toJSON method and writes null for an undefined array member, which this one does not. A parsed
+// artifact holds neither, so the hashes agree today; the artifact keeps its own until both refusals do.
 function canonicalText(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(canonicalText).join(',')}]`;
   if (typeof value === 'object' && value !== null) {

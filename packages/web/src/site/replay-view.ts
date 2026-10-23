@@ -353,7 +353,7 @@ function lanesLines(closedLane: string, openLanes: readonly string[], held: bool
 // keys stand for, never traffic: an artifact can log no delivery on an open lane and still build
 // (WR-13).
 function boardDescriptions(closedLane: string, lanes: readonly string[], openLanes: readonly string[]): string[] {
-  const allLanes = lanes.length === 1 ? 'The only lane is' : `All ${String(lanes.length)} lanes are`;
+  const allLanes = lanes.length === 1 ? 'The only lane is' : lanes.length === 2 ? 'Both lanes are' : `All ${String(lanes.length)} lanes are`;
   const stayOpen = openLanes.length === 0 ? '' : ` ${openLanes.join(', ')} ${openLanes.length === 1 ? 'stays' : 'stay'} open.`;
   return [
     `${allLanes} open and no track is muted. Bounces arrive on ${closedLane}.`,

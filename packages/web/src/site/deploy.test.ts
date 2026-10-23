@@ -106,6 +106,13 @@ describe('the snapshot loaders', () => {
     expect(() => loadPermissionSnapshot(root)).toThrow(/^packages\/infra\/permissions\.json: not valid JSON \([\s\S]+\)\. Run npm run permissions:snapshot\.$/);
     expect(() => loadResourceSnapshot(root)).toThrow(/^packages\/infra\/resources\.json: not valid JSON \([\s\S]+\)\. Run npm run permissions:snapshot\.$/);
   });
+
+  it('name the file and the snapshot command when a snapshot is JSON but not a list', () => {
+    const root = join(PLANT, 'object-snapshots');
+    for (const name of ['permissions', 'resources']) plantFile(`object-snapshots/packages/infra/${name}.json`, '{"stack": "FotheringIngest"}');
+    expect(() => loadPermissionSnapshot(root)).toThrow('packages/infra/permissions.json: not a list. Run npm run permissions:snapshot.');
+    expect(() => loadResourceSnapshot(root)).toThrow('packages/infra/resources.json: not a list. Run npm run permissions:snapshot.');
+  });
 });
 
 describe('the resource schedule', () => {
@@ -215,6 +222,16 @@ describe('the permissions schedules', () => {
   it('names the first malformed entry', () => {
     expect(() => permissionSchedules([permission({}), permission({ kind: 'grant' })])).toThrow(/^packages\/infra\/permissions\.json: \[1\]\.kind: /);
     expect(() => permissionSchedules([{ ...permission({}), resource: 3 }])).toThrow(/^packages\/infra\/permissions\.json: \[0\]\.resource: /);
+  });
+
+  it('refuses an empty required field, an effect other than Allow or Deny, and an entry that is not an object', () => {
+    expect(() => permissionSchedules([permission({ action: '' })])).toThrow(
+      'packages/infra/permissions.json: [0].action: missing or not text. Run npm run permissions:snapshot.',
+    );
+    expect(() => permissionSchedules([permission({}), permission({ effect: 'Alow' })])).toThrow(
+      "packages/infra/permissions.json: [1].effect: 'Alow' is not one of Allow, Deny. Run npm run permissions:snapshot.",
+    );
+    expect(() => permissionSchedules([null])).toThrow('packages/infra/permissions.json: [0].stack: missing or not text. Run npm run permissions:snapshot.');
   });
 });
 
@@ -379,6 +396,11 @@ describe('the README deploy commands', () => {
 
   it('throws on a block whose last command still ends in a backslash', () => {
     expect(() => readDeployCommands('## Deploy and remove\n\n```sh\naws planted run \\\n```\n')).toThrow(/ends in a backslash/);
+  });
+
+  it('never continues a command across a closing fence into the next block', () => {
+    const section = '## Deploy and remove\n\n```sh\naws planted run \\\n```\n\nThen:\n\n```sh\nnpm run build\n```\n';
+    expect(() => readDeployCommands(section)).toThrow(/ends in a backslash/);
   });
 
   it('reads a backslash at the end of a comment as comment text, the way the shell does', () => {
@@ -594,6 +616,25 @@ describe('the deploy steps', () => {
     expect(steps[3]?.commands.map(({ command }) => command)).toEqual(['npx cdk bootstrap', 'npx cdk deploy A B C', action]);
     expect(steps[4]?.commands.map(({ command }) => command)).toEqual(['npx cdk deploy A B C -c fothering:live=live', goLive]);
     expect(removalSteps({ deployCommands: commands })[0]?.commands.map(({ command }) => command)).toEqual(['npx cdk destroy D', 'npx cdk destroy A B C']);
+  });
+
+  it('drops a narrower destroy line too, and never reads a spaced -c or --context value as a stack', () => {
+    const lines = (commands: readonly string[]) => commands.map((command) => ({ command, note: null }));
+    const base = ['npm run build', 'npx cdk bootstrap', 'npx cdk deploy --all -c fothering:live=live'];
+    const removal = removalSteps({ deployCommands: lines([...base, 'npx cdk deploy --all', 'npx cdk destroy --all', 'npx cdk destroy B']) });
+    expect(removal[0]?.commands.map(({ command }) => command)).toEqual(['npx cdk destroy --all']);
+    for (const flag of ['-c', '--context']) {
+      const steps = deploySteps({ deployCommands: lines([...base, 'npx cdk destroy --all', 'npx cdk deploy A B', `npx cdk deploy A ${flag} fothering:trial=1`]), region: 'xx-planted-9' });
+      expect(steps[3]?.commands.map(({ command }) => command), flag).toEqual(['npx cdk bootstrap', 'npx cdk deploy A B']);
+    }
+  });
+
+  // Only a strictly narrower selection is a repeat, so the step never loses its only deploy line.
+  it('keeps both lines when two deploy lines select the same stacks', () => {
+    const lines = (commands: readonly string[]) => commands.map((command) => ({ command, note: null }));
+    const base = ['npm run build', 'npx cdk bootstrap', 'npx cdk deploy --all -c fothering:live=live', 'npx cdk destroy --all'];
+    const steps = deploySteps({ deployCommands: lines([...base, 'npx cdk deploy A B', 'npx cdk deploy B A']), region: 'xx-planted-9' });
+    expect(steps[3]?.commands.map(({ command }) => command)).toEqual(['npx cdk bootstrap', 'npx cdk deploy A B', 'npx cdk deploy B A']);
   });
 
   // Read as words, each parameter value would name a stack, and D's line would cover A's trial.

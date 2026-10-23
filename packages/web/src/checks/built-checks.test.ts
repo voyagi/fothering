@@ -23,6 +23,7 @@ import {
   rightsSentence,
   statementParagraph,
   storedFieldRow,
+  REPLAY_CLOCK,
   REPLAY_LIMITS_STATE,
   REPLAY_VIEW,
   replayBody,
@@ -53,6 +54,7 @@ import {
   REPLY_PROMISE_PHRASES,
   type Statement,
 } from '../site/content.js';
+import { tokenRuns } from '../site/command-units.js';
 import { PROVENANCE_LABELS } from '../site/labels.js';
 import { denyRows, hasPauseGrant, permissionKey, permissionSchedules } from '../site/permissions-view.js';
 import { removedByText } from '../site/repo-facts.js';
@@ -64,6 +66,7 @@ import {
   accessibilityPageRule,
   accessibilityStatementRule,
   bannedNameRule,
+  readoutNumberRule,
   checkFileBudget,
   consoleDeleteRule,
   countReplayWords,
@@ -77,6 +80,7 @@ import {
   deployPermissionsRule,
   deployResourcesRule,
   exactThirtyDaysRule,
+  fontPreloadRule,
   forgetCommandRule,
   formsCookiesAnalyticsRule,
   headScriptOrderRule,
@@ -270,12 +274,12 @@ describe('runBuiltChecks', () => {
     expect([...rules].filter((rule) => ['page-metadata', 'sitemap', 'robots'].includes(rule)).sort()).toEqual(['page-metadata', 'robots', 'sitemap']);
   });
 
-  it('holds exactly the fifty-five rule ids the plans name', () => {
+  it('holds exactly the fifty-seven rule ids the plans, the 05-UAT hand check and the K2 reviews name', () => {
     expect([...RULE_IDS].sort()).toEqual([
       'accessibility-page', 'accessibility-statement', 'banned-name', 'command-pair', 'console-delete', 'dash', 'deploy-commands', 'deploy-deny', 'deploy-notice', 'deploy-page', 'deploy-permissions', 'deploy-resources',
-      'exact-30-days', 'forget-command', 'forms-cookies-analytics', 'head-script-order', 'identifier-break', 'landing-sections', 'lede', 'limits',
+      'exact-30-days', 'font-preload', 'forget-command', 'forms-cookies-analytics', 'head-script-order', 'identifier-break', 'landing-sections', 'lede', 'limits',
       'model-id', 'model-role-forbidden', 'model-role-present', 'model-role-required',
-      'no-delete-control', 'no-ellipsis', 'no-inline-style', 'one-caller', 'page-metadata', 'pre-r6-words', 'privacy-page', 'privacy-statements', 'provenance-wording', 'provider-label', 'region-claim', 'replay-lanes',
+      'no-delete-control', 'no-ellipsis', 'no-inline-style', 'one-caller', 'page-metadata', 'pre-r6-words', 'privacy-page', 'privacy-statements', 'provenance-wording', 'provider-label', 'readout-number', 'region-claim', 'replay-lanes',
       'replay-page', 'replay-panels', 'replay-summary', 'replay-word-count', 'reply-promise', 'robots', 'script-hash',
       'ses-percentage-link', 'ses-rate-wording', 'sitemap', 'six-rights', 'stored-field-rows', 'switch-markup', 'theme-token-blocks', 'third-party-reference', 'type-token-declared',
       'type-token-use', 'unit-figure', 'website-facts',
@@ -349,8 +353,10 @@ describe('the identifier break rule (AC-65, AC-E55, UI-SPEC line 208)', () => {
 });
 
 // A command block as the CommandBlock component renders it: each unit a span directly in the code
-// element, a flag and its value one span holding the two token spans.
-const unitSpan = (unit: string): string => (unit.includes(' ') ? `<span>${unit.split(' ').map((token) => `<span>${token}</span>`).join(' ')}</span>` : `<span>${unit}</span>`);
+// element, a flag and its value one span holding the two token spans, a line end offered after each
+// colon inside a token.
+const tokenText = (token: string): string => tokenRuns(token).join('<wbr>');
+const unitSpan = (unit: string): string => (unit.includes(' ') ? `<span>${unit.split(' ').map((token) => `<span>${tokenText(token)}</span>`).join(' ')}</span>` : `<span>${tokenText(unit)}</span>`);
 const commandMarkup = (lines: readonly (readonly string[])[]): string => `<pre class="command"><code>${lines.map((units) => units.map(unitSpan).join(' ')).join('\n')}</code></pre>`;
 const commandPairFindings = (bodies: readonly string[]): string[] => runBuiltChecks(casesSite(bodies), context)
   .filter((finding) => String(finding.rule) === 'command-pair').map((finding) => `${finding.route} ${finding.text}`);
@@ -377,6 +383,131 @@ describe('the command pair rule (UI-SPEC line 209, the 05-12 finish review)', ()
       '/case-0/ the command block holds "  " between its units, where only one space or a line break belongs, so the copied text is not the command',
       '/case-1/ the command block holds "," between its units, where only one space or a line break belongs, so the copied text is not the command',
       '/case-2/ the command block holds "#" outside its code element, so the copied text is not the command',
+    ]);
+  });
+
+  it('passes a token that offers a line end after its colon and equals sign, in a pair and standing alone', () => {
+    expect(commandPairFindings([commandMarkup([['npx', 'cdk', 'deploy', 'D', '--parameters D:OperatorAddress=&lt;address&gt;'], ['fothering:live=live']])])).toEqual([]);
+  });
+
+  it('fails a token with no line end after a colon or equals sign, as the deploy sheet rendered the stack parameters at 1440 px', () => {
+    const bare = '<pre class="command"><code><span><span>--parameters</span> <span>D:OperatorAddress=&lt;address&gt;</span></span> <span>a:b</span></code></pre>';
+    const half = '<pre class="command"><code><span>D:<wbr>OperatorAddress=&lt;address&gt;</span></code></pre>';
+    expect(commandPairFindings([bare, half])).toEqual([
+      '/case-0/ the command token D:OperatorAddress=<address> offers no line end after a colon or equals sign inside it, so a narrow column cuts it mid-word',
+      '/case-0/ the command token a:b offers no line end after a colon or equals sign inside it, so a narrow column cuts it mid-word',
+      '/case-1/ the command token D:OperatorAddress=<address> offers no line end after a colon or equals sign inside it, so a narrow column cuts it mid-word',
+    ]);
+  });
+
+  // Every expected line end is there, plus one inside a word, so the finding names that one.
+  it('fails a token that offers a line end inside a word, and names it as that', () => {
+    const extra = '<pre class="command"><code><span>D:<wbr>Operator<wbr>Address=<wbr>&lt;address&gt;</span></code></pre>';
+    expect(commandPairFindings([extra])).toEqual([
+      '/case-0/ the command token D:OperatorAddress=<address> offers a line end after "Operator", inside a word, so a narrow column cuts it there',
+    ]);
+  });
+
+  // A <wbr> inside an inline element still offers its line end, so the rule reads the token at every depth.
+  it('fails a token whose extra line end sits inside an inline element in it', () => {
+    const nested = '<pre class="command"><code><span>D:<wbr>Oper<em>ator<wbr>Address</em>=<wbr>&lt;address&gt;</span></code></pre>';
+    expect(commandPairFindings([nested])).toEqual([
+      '/case-0/ the command token D:OperatorAddress=<address> offers a line end after "Operator", inside a word, so a narrow column cuts it there',
+    ]);
+  });
+});
+
+// A readout as the pages render it: drawn digits, the sentence a screen reader is given, and the
+// unit beside the digits, hidden from the screen reader because the sentence already says it.
+const readout = (unit: string, head = 'Window'): string => `<aside class="readout"><p class="readout-head">${head}</p><p class="window"><svg aria-hidden="true"><polygon class="seg lit"></polygon></svg>`
+  + `<span class="visually-hidden">412 sends on fothering-bulk</span><span class="unit" aria-hidden="true">${unit}</span></p></aside>`;
+
+describe('the readout number rule (WCAG 1.4.5, 05-UAT check 4)', () => {
+  it('passes a number printed beside its drawn digits or in the readout head, as the 404 page prints its status', () => {
+    expect(readoutNumberRule(casesSite([readout('<b>412 sends</b>'), readout('<b>Status code</b>', '<code>412 Not Found</code>')]), context)).toEqual([]);
+  });
+
+  // The sentence ends with the lane, and a lane name may end in digits: only the figure the sentence
+  // opens with is the drawn number, and a lane's digits never stand in for it.
+  it('passes a lane name ending in digits beside the drawn figure', () => {
+    const lane = readout('<b>412 sends</b><code>fothering-bulk-2</code>').replace('on fothering-bulk<', 'on fothering-bulk-2<');
+    expect(lane).toContain('>412 sends on fothering-bulk-2<');
+    expect(readoutNumberRule(casesSite([lane]), context)).toEqual([]);
+  });
+
+  it('fails a drawn figure shown only as the end of a lane name', () => {
+    const lane = readout('<b>Sends</b><code>bulk-412</code>').replace('on fothering-bulk<', 'on bulk-412<');
+    expect(lane).toContain('>412 sends on bulk-412<');
+    expect(caseFindings(readoutNumberRule, 'readout-number', [lane]).map((finding) => finding.text)).toEqual([
+      'the readout draws 412 but does not show it as text beside its digits, only to a screen reader',
+    ]);
+  });
+
+  // A clock time or a date in the head holds the digits of many a figure, so a drawn 12 that the head
+  // shows only inside 14:12 or 2026-10-12 is not shown.
+  it.each([
+    ['a clock time', 'Window 13:01 to 14:12 UTC'],
+    ['a date', 'Window 2026-10-12'],
+  ])('fails a drawn number the head shows only inside %s', (_where, head) => {
+    const twelve = readout('<b>Sends</b>', head).replace('412 sends on', '12 sends on');
+    expect(twelve).toContain('>12 sends on');
+    expect(caseFindings(readoutNumberRule, 'readout-number', [twelve]).map((finding) => finding.text)).toEqual([
+      'the readout draws 12 but does not show it as text beside its digits, only to a screen reader',
+    ]);
+  });
+
+  // The number belongs beside the digits it names: elsewhere in the readout a reader takes it for another
+  // figure, and the head counts only while the label beside the digits holds none, as on the 404 page.
+  it.each([
+    ['the readout stamp', readout('<b>Sends</b>').replace('</aside>', '<p class="stamp">412 sends replayed</p></aside>')],
+    ['a readout row', readout('<b>Sends</b>').replace('</aside>', '<dl><div><dt>Sends</dt><dd>412</dd></div></dl></aside>')],
+    ['the head while the label beside the digits holds another figure', readout('<b>413 sends</b>', '<code>412 Not Found</code>')],
+  ])('fails a number that stands only in %s, away from its drawn digits', (_where, body) => {
+    expect(body).not.toBe(readout('<b>Sends</b>'));
+    expect(caseFindings(readoutNumberRule, 'readout-number', [body]).map((finding) => finding.text)).toEqual([
+      'the readout draws 412 but does not show it as text beside its digits, only to a screen reader',
+    ]);
+  });
+
+  it('fails a number only drawn and given to the screen reader, as the landing showed 412 sends', () => {
+    const findings = caseFindings(readoutNumberRule, 'readout-number', [readout('<b>Sends</b>'), readout('<b>Sends</b>', 'Window 13:01 to 14:12, 4120 events')]);
+    expect(findings.map((finding) => finding.text)).toEqual([
+      'the readout draws 412 but does not show it as text beside its digits, only to a screen reader',
+      'the readout draws 412 but does not show it as text beside its digits, only to a screen reader',
+    ]);
+  });
+
+  // The rule finds readouts by class, so a redesign that renamed a class would leave drawn digits it
+  // never reads; both shapes fail rather than pass with nothing checked.
+  it('fails drawn digits that sit outside any readout, as a renamed readout class would leave them', () => {
+    const loose = '<p class="window"><svg aria-hidden="true"><polygon class="seg lit"></polygon><polygon class="seg"></polygon></svg><span class="visually-hidden">412 sends</span></p>';
+    expect(caseFindings(readoutNumberRule, 'readout-number', [loose]).map((finding) => finding.text)).toEqual([
+      '2 drawn digit segments sit outside any readout, so no rule checks that their number is shown as text',
+    ]);
+  });
+
+  it('fails a readout that draws digits but gives a screen reader no number, as a renamed hidden sentence would', () => {
+    const unspoken = readout('<b>Sends</b>').replace('class="visually-hidden"', 'class="sr-only"');
+    expect(unspoken).not.toBe(readout('<b>Sends</b>'));
+    expect(caseFindings(readoutNumberRule, 'readout-number', [unspoken]).map((finding) => finding.text)).toEqual([
+      'the readout draws digits but no screen-reader sentence beside them gives their number, so nothing checks that a reader can see it',
+    ]);
+  });
+
+  // An SVG title or desc and an element with the hidden attribute put text in the markup that no
+  // reader sees on the page, so a number standing only there is not shown.
+  it.each([
+    ['an SVG title', readout('<b>Sends</b>').replace('<polygon', '<title>412 sends</title><polygon')],
+    ['an SVG desc', readout('<b>Sends</b>').replace('<polygon', '<desc>412 sends</desc><polygon')],
+    ['an element with the hidden attribute', readout('<b>Sends</b><b hidden>412 sends</b>')],
+    ['a script', readout('<b>Sends</b><script type="application/json">412</script>')],
+    ['a style element', readout('<b>Sends</b><style>.n::after { content: "412"; }</style>')],
+    ['a template', readout('<b>Sends</b><template><b>412 sends</b></template>')],
+    ['a noscript', readout('<b>Sends</b><noscript>412 sends</noscript>')],
+  ])('fails a number that stands only in %s', (_where, body) => {
+    expect(body).not.toBe(readout('<b>Sends</b>'));
+    expect(caseFindings(readoutNumberRule, 'readout-number', [body]).map((finding) => finding.text)).toEqual([
+      'the readout draws 412 but does not show it as text beside its digits, only to a screen reader',
     ]);
   });
 });
@@ -559,6 +690,52 @@ describe('the third-party reference rule (AC-59 static half, AC-E49)', () => {
       'tokens.css': '@font-face { src: url("/_astro/red-hat-text.woff2"); } .x { background: url(data:image/png;base64,AAAA); }',
     });
     expect(thirdPartyReferenceRule(clean, context)).toEqual([]);
+  });
+});
+
+// Two families as the built CSS declares them, one name quoted and one bare, the first in a latin
+// and a latin-ext file.
+const FACES_CSS = [
+  '@font-face{font-family:"Public Sans Variable";src:url(/_astro/public-sans-latin.A1.woff2)format("woff2-variations")}',
+  '@font-face{font-family:"Public Sans Variable";src:url(/_astro/public-sans-latin-ext.B2.woff2)format("woff2-variations")}',
+  '@font-face{font-family:Saira;src:url(/_astro/saira-latin.C3.woff2)format("woff2-variations")}',
+].join('');
+const fontPreload = (href: string, attrs = ' type="font/woff2" crossorigin'): string => `<link rel="preload" href="${href}" as="font"${attrs}>`;
+const SAIRA_PRELOAD = fontPreload('/_astro/saira-latin.C3.woff2');
+const SANS_PRELOAD = fontPreload('/_astro/public-sans-latin.A1.woff2');
+const preloadSite = (links: readonly (readonly string[])[]): BuiltSite =>
+  siteOf({ '_astro/Sheet.css': FACES_CSS, ...Object.fromEntries(links.map((head, index) => [`case-${index}/index.html`, page('<p>x</p>', `<title>t</title>${head.join('')}`)])) });
+const preloadTexts = (links: readonly (readonly string[])[]): string[] => {
+  const findings = fontPreloadRule(preloadSite(links), context);
+  expect(findings.every((finding) => finding.rule === 'font-preload')).toBe(true);
+  return findings.map((finding) => `${finding.route} ${finding.text}`).sort();
+};
+
+describe('the font preload rule', () => {
+  it('passes a page that preloads one file of each declared family, as woff2 with crossorigin', () => {
+    expect(preloadTexts([[SAIRA_PRELOAD, SANS_PRELOAD]])).toEqual([]);
+  });
+
+  // The layout test reads the import lines, so only the built page shows the links stopped coming out.
+  it('fails a page that emits no font preload, once per declared family', () => {
+    expect(preloadTexts([[]])).toEqual([
+      '/case-0/ the page preloads no file of the Public Sans Variable face, so it swaps in after the first paint and shifts the first band',
+      '/case-0/ the page preloads no file of the Saira face, so it swaps in after the first paint and shifts the first band',
+    ]);
+  });
+
+  it('fails a preload no @font-face loads, one without crossorigin or the woff2 type, and a family preloaded twice', () => {
+    expect(preloadTexts([
+      [SAIRA_PRELOAD, SANS_PRELOAD, fontPreload('/_astro/gone.D4.woff2')],
+      [SAIRA_PRELOAD, fontPreload('/_astro/public-sans-latin.A1.woff2', ' type="font/woff2"')],
+      [SAIRA_PRELOAD, fontPreload('/_astro/public-sans-latin.A1.woff2', ' crossorigin')],
+      [SAIRA_PRELOAD, SANS_PRELOAD, fontPreload('/_astro/public-sans-latin-ext.B2.woff2')],
+    ])).toEqual([
+      '/case-0/ the font preload /_astro/gone.D4.woff2 names a file no built @font-face rule loads, so it is fetched for nothing',
+      '/case-1/ the font preload /_astro/public-sans-latin.A1.woff2 has no crossorigin attribute, so the browser fetches the font a second time',
+      '/case-2/ the font preload /_astro/public-sans-latin.A1.woff2 does not carry type="font/woff2"',
+      '/case-3/ the page preloads 2 files of the Public Sans Variable face, 1 expected, so the others are fetched for nothing',
+    ]);
   });
 });
 
@@ -1344,6 +1521,45 @@ describe('the replay panels rule (AC-E7, AC-10 static half)', () => {
   it('fails a replay page with three step panels', () => {
     expect(replayTexts(replayPanelsRule, replayBody({ panels: [PANEL_1, PANEL_2, PANEL_3] }))).toEqual(['the replay page has 3 step panels, 4 expected']);
   });
+
+  // The accessibility page records WCAG 4.1.3 passed through this role, so a redesign that drops it
+  // fails the build instead of leaving that result standing.
+  it('fails a step clock without the status role', () => {
+    const silent = REPLAY_CLOCK.replace(' role="status"', '');
+    expect(silent).not.toBe(REPLAY_CLOCK);
+    expect(replayTexts(replayPanelsRule, replayBody({ clock: silent }))).toEqual([
+      'the step clock does not carry role="status", so a screen reader is not told the step changed (WCAG 4.1.3)',
+    ]);
+  });
+
+  it.each(['hidden', 'aria-hidden="true"'])('fails a step clock that %s keeps from a screen reader, on itself or a wrapper', (attribute) => {
+    const name = attribute.split('=')[0] ?? '';
+    expect(replayTexts(replayPanelsRule, replayBody({ clock: REPLAY_CLOCK.replace('<p ', `<p ${attribute} `) }))).toEqual([
+      `the step clock is hidden from the accessibility tree by ${name} on <p>, so its status role announces nothing (WCAG 4.1.3)`,
+    ]);
+    expect(replayTexts(replayPanelsRule, replayBody({ clock: `<div ${attribute}>${REPLAY_CLOCK}</div>` }))).toEqual([
+      `the step clock is hidden from the accessibility tree by ${name} on <div>, so its status role announces nothing (WCAG 4.1.3)`,
+    ]);
+  });
+
+  // hidden="false" is an invalid value, which is the hidden state; aria-hidden="false" hides nothing.
+  it('fails a step clock and a step panel carrying hidden="false", and passes them with aria-hidden="false"', () => {
+    expect(replayTexts(replayPanelsRule, replayBody({ clock: REPLAY_CLOCK.replace('<p ', '<p hidden="false" ') }))).toEqual([
+      'the step clock is hidden from the accessibility tree by hidden on <p>, so its status role announces nothing (WCAG 4.1.3)',
+    ]);
+    expect(replayTexts(replayPanelsRule, replayBody({ clock: `<div hidden="false">${REPLAY_CLOCK}</div>` }))).toEqual([
+      'the step clock is hidden from the accessibility tree by hidden on <div>, so its status role announces nothing (WCAG 4.1.3)',
+    ]);
+    const panels = [PANEL_1, PANEL_2.replace('data-steps="2"', 'data-steps="2" hidden="false"'), PANEL_3, PANEL_4];
+    expect(replayTexts(replayPanelsRule, replayBody({ panels }))).toEqual(['step panel 2 is hidden from the accessibility tree by hidden on <section>']);
+    const shown = [PANEL_1, PANEL_2.replace('data-steps="2"', 'data-steps="2" aria-hidden="false"'), PANEL_3, PANEL_4];
+    expect(replayTexts(replayPanelsRule, replayBody({ panels: shown, clock: REPLAY_CLOCK.replace('<p ', '<p aria-hidden="false" ') }))).toEqual([]);
+  });
+
+  it('fails a replay page with no step clock or with two', () => {
+    expect(replayTexts(replayPanelsRule, replayBody({ clock: '' }))).toEqual(['the replay page has 0 step clocks (data-replay-clock), 1 expected']);
+    expect(replayTexts(replayPanelsRule, replayBody({ clock: REPLAY_CLOCK.repeat(2) }))).toEqual(['the replay page has 2 step clocks (data-replay-clock), 1 expected']);
+  });
 });
 
 describe('the type token use rule (AC-63 use half)', () => {
@@ -1862,9 +2078,9 @@ describe('the accessibility statement rule (AC-53, UI-SPEC E13)', () => {
     ]);
   });
 
-  it('judges each row by its own recorded state, so the schedule before the hand check passes with every row not yet checked', () => {
+  it('judges each row by its own recorded state, so the schedule after the hand check passes with every row passed or not applicable', () => {
     const states = new Set(HAND_CHECK_CRITERIA.map((criterion) => criterion.result));
-    expect([...states]).toEqual(['not-yet-checked']);
+    expect([...states].sort()).toEqual(['not-applicable', 'passed']);
     expect(accessibilityTexts(accessibilityStatementRule, accessibilityBody())).toEqual([]);
   });
 });

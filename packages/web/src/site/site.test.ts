@@ -304,11 +304,23 @@ describe('the accessibility record (D-156, AC-53)', () => {
     }
   });
 
-  // UI-SPEC E13 empty state: no person has checked any criterion before the S5 real-browser session,
-  // so no row may show a result. S5 records every result, and replaces this case, in one commit.
-  it('shows every criterion as not yet checked before the hand check in a real browser', () => {
-    const recorded = HAND_CHECK_CRITERIA.filter((criterion) => criterion.result !== 'not-yet-checked').map((criterion) => `${criterion.number} ${criterion.result}`);
-    expect(recorded).toEqual([]);
+  // The 05-UAT check 4 run recorded every row: what the site has nothing of does not apply, the rest
+  // passed, and nothing is left not yet checked or failed.
+  it('records the real-browser result of every criterion, none left open and none failed', () => {
+    const byResult = (result: HandCheckResult) => HAND_CHECK_CRITERIA.filter((criterion) => criterion.result === result).map((criterion) => criterion.number);
+    expect(byResult('not-yet-checked')).toEqual([]);
+    expect(byResult('failed')).toEqual([]);
+    expect(byResult('not-applicable')).toEqual(['1.2.3', '1.2.4', '1.2.5', '1.4.13', '2.1.4', '2.5.1', '2.5.4', '2.5.7', '3.2.6', '3.3.1', '3.3.3', '3.3.4', '3.3.7', '3.3.8']);
+    expect(byResult('passed')).toHaveLength(18);
+  });
+
+  // The statement says no screen reader was run, so a passed row's method may not name one: the
+  // reader would see a result recorded by a method nobody followed.
+  it('names no screen reader in the method of a passed row while the statement says none was run', () => {
+    const handCheck = ACCESSIBILITY_RECORD.limitations.find((limitation) => limitation.id === 'hand-check');
+    expect(handCheck?.text).toContain('no screen reader was run');
+    const named = HAND_CHECK_CRITERIA.filter((criterion) => criterion.result === 'passed' && /screen reader/i.test(criterion.how)).map((criterion) => criterion.number);
+    expect(named).toEqual([]);
   });
 
   // A how-checked note is the method a person follows, never an outcome nobody has seen yet.
@@ -337,6 +349,16 @@ describe('the accessibility record (D-156, AC-53)', () => {
     expect(others.map((cell) => cell?.mark)).not.toContain('failed');
     expect(new Set(rows.map((row) => row.cells[0]?.mark)).size).toBe(results.length);
     expect(rows[0]).toMatchObject({ header: `${first.number} ${first.name}`, attrs: { 'data-criterion': first.number }, cells: [{ text: 'Failed' }, { text: first.how }] });
+  });
+});
+
+// The readout head is a paragraph, so the prose measure on p would hold its two ends inside 54ch
+// wherever the readout runs wider than that, as it does in one column at 960px and below.
+describe('the readout head', () => {
+  it('opts out of the prose measure so its second part reaches the right edge', () => {
+    const css = readRepoText('packages/web/src/styles/site.css', repoRoot(REPO_ROOT));
+    expect(css).toMatch(/^p, li, dd \{ max-inline-size: var\(--measure\); \}/m);
+    expect(/^\.readout-head \{[^}]*\}/m.exec(css)?.[0]).toContain('max-inline-size: none;');
   });
 });
 

@@ -22,6 +22,7 @@ import {
   type ForbiddenClaim,
   type Statement,
 } from '../site/content.js';
+import { tokenRuns } from '../site/command-units.js';
 import { PROVENANCE_LABELS } from '../site/labels.js';
 import { hasPauseGrant, permissionKey, permissionSchedules } from '../site/permissions-view.js';
 import type { ReplayView } from '../site/replay-view.js';
@@ -88,6 +89,8 @@ export const RULE_IDS = Object.freeze([
   'model-id',
   'accessibility-page',
   'accessibility-statement',
+  'readout-number',
+  'font-preload',
 ] as const);
 
 export type RuleId = (typeof RULE_IDS)[number];
@@ -396,6 +399,48 @@ export function thirdPartyReferenceRule(site: BuiltSite, _context: CheckContext)
   });
   const inCss = site.css.flatMap((file) => cssUrls(file.text).filter(isThirdParty).map((url) => ({ rule, route: fileRoute(file.file), text: `CSS url ${clip(url)}` })));
   return [...onPages, ...inCss];
+}
+
+// Each file a built @font-face rule loads, with the family it declares.
+function fontFaceFiles(site: BuiltSite): Map<string, string> {
+  const files = new Map<string, string>();
+  for (const sheet of site.css) {
+    for (const match of sheet.text.matchAll(/@font-face\s*\{([^}]*)\}/gi)) {
+      const body = match[1] ?? '';
+      const family = /font-family\s*:\s*([^;]+)/i.exec(body)?.[1]?.trim().replace(/^(['"])(.*)\1$/, '$2');
+      if (family !== undefined) for (const url of cssUrls(body)) files.set(url, family);
+    }
+  }
+  return files;
+}
+
+// The layout preloads one file per family, because a face that swaps in only once the stylesheet is
+// parsed lands after the first paint and shifts the first band (layout shift about 0.2 on /deploy/ and
+// /replay/). Read from the built pages, so a layout that stops emitting the links fails: every family
+// the built CSS declares is preloaded once, from a file a @font-face rule loads, as a woff2 font with
+// crossorigin, without which the browser fetches the font a second time.
+export function fontPreloadRule(site: BuiltSite, _context: CheckContext): Finding[] {
+  const faces = fontFaceFiles(site);
+  const families = [...new Set(faces.values())].sort();
+  return site.pages.flatMap((page) => {
+    const texts: string[] = [];
+    const preloaded = new Map<string, number>();
+    const fontPreloads = page.links.filter((link) => (link.rel ?? '').toLowerCase().split(/\s+/).includes('preload') && link.as === 'font');
+    for (const link of fontPreloads) {
+      const href = link.href ?? '';
+      const family = faces.get(href);
+      if (family === undefined) texts.push(`the font preload ${clip(href)} names a file no built @font-face rule loads, so it is fetched for nothing`);
+      else preloaded.set(family, (preloaded.get(family) ?? 0) + 1);
+      if (link.type !== 'font/woff2') texts.push(`the font preload ${clip(href)} does not carry type="font/woff2"`);
+      if (link.crossorigin === undefined) texts.push(`the font preload ${clip(href)} has no crossorigin attribute, so the browser fetches the font a second time`);
+    }
+    for (const family of families) {
+      const count = preloaded.get(family) ?? 0;
+      if (count === 0) texts.push(`the page preloads no file of the ${family} face, so it swaps in after the first paint and shifts the first band`);
+      else if (count > 1) texts.push(`the page preloads ${String(count)} files of the ${family} face, 1 expected, so the others are fetched for nothing`);
+    }
+    return texts.map((text) => ({ rule: 'font-preload' as const, route: page.route, text }));
+  });
 }
 
 const REQUIRED_METAS: readonly (readonly [string, string])[] = [
@@ -1021,8 +1066,20 @@ export function providerLabelRule(site: BuiltSite, context: CheckContext): Findi
   return onReplay(site, 'provider-label', (page) => providerFindings(page, context.replay));
 }
 
-const HIDING_ATTRS = ['hidden', 'aria-hidden'] as const;
-const hidingAttr = (element: BuiltElement): string | undefined => HIDING_ATTRS.find((name) => element.attrs[name] !== undefined && element.attrs[name] !== 'false');
+// hidden hides whatever its value, hidden="false" included, since an invalid value is the hidden
+// state; aria-hidden hides unless it reads false.
+function hidingAttr(element: BuiltElement): string | undefined {
+  if (element.attrs.hidden !== undefined) return 'hidden';
+  const aria = element.attrs['aria-hidden'];
+  return aria !== undefined && aria !== 'false' ? 'aria-hidden' : undefined;
+}
+
+// What hides an element from the accessibility tree, the element itself or an ancestor, and by which attribute.
+function hiddenBy(element: BuiltElement, parents: ReadonlyMap<BuiltElement, BuiltElement>): { readonly tag: string; readonly attr: string } | undefined {
+  const hider = hidingAttr(element) === undefined ? ancestorWith(element, parents, (node) => hidingAttr(node) !== undefined) : element;
+  const attr = hider === undefined ? undefined : hidingAttr(hider);
+  return hider === undefined || attr === undefined ? undefined : { tag: hider.tag, attr };
+}
 
 function panelFindings(page: BuiltPage): string[] {
   const panels = panelsOf(page);
@@ -1031,17 +1088,32 @@ function panelFindings(page: BuiltPage): string[] {
   const texts = steps.join(', ') === '1, 2, 3, 4' ? [] : [`the step panels read ${steps.join(', ')} in HTML order; 1, 2, 3, 4 expected`];
   const parents = parentsOf(page.root);
   panels.forEach((panel, index) => {
-    const hider = hidingAttr(panel) === undefined ? ancestorWith(panel, parents, (node) => hidingAttr(node) !== undefined) : panel;
-    const attr = hider === undefined ? undefined : hidingAttr(hider);
-    if (hider !== undefined && attr !== undefined) texts.push(`step panel ${steps[index] ?? ''} is hidden from the accessibility tree by ${attr} on <${hider.tag}>`);
+    const hidden = hiddenBy(panel, parents);
+    if (hidden !== undefined) texts.push(`step panel ${steps[index] ?? ''} is hidden from the accessibility tree by ${hidden.attr} on <${hidden.tag}>`);
   });
   return texts;
 }
 
+const CLOCK = 'data-replay-clock';
+
+function clockFindings(page: BuiltPage): string[] {
+  const clocks: BuiltElement[] = [];
+  walk(page.root, (element) => {
+    if (element.attrs[CLOCK] !== undefined) clocks.push(element);
+  });
+  const [clock] = clocks;
+  if (clocks.length !== 1 || clock === undefined) return [`the replay page has ${String(clocks.length)} step clocks (${CLOCK}), 1 expected`];
+  if (clock.attrs.role !== 'status') return ['the step clock does not carry role="status", so a screen reader is not told the step changed (WCAG 4.1.3)'];
+  const hidden = hiddenBy(clock, parentsOf(page.root));
+  return hidden === undefined ? [] : [`the step clock is hidden from the accessibility tree by ${hidden.attr} on <${hidden.tag}>, so its status role announces nothing (WCAG 4.1.3)`];
+}
+
 // AC-E7 and AC-10's static half: the four panels sit in the HTML in step order and nothing in the
-// markup hides them, so CSS alone decides what shows and removing the js class shows all four.
+// markup hides them, so CSS alone decides what shows and removing the js class shows all four. The
+// one step clock carries the status role, the method the accessibility page records WCAG 4.1.3
+// passed by (05-UAT check 4).
 export function replayPanelsRule(site: BuiltSite, _context: CheckContext): Finding[] {
-  return onReplay(site, 'replay-panels', panelFindings);
+  return onReplay(site, 'replay-panels', (page) => [...panelFindings(page), ...clockFindings(page)]);
 }
 
 // AC-63's use half. tokens.css itself writes var(--text-small) for the compact alias, which is a
@@ -1091,7 +1163,9 @@ export function identifierBreakRule(site: BuiltSite, _context: CheckContext): Fi
 // UI-SPEC line 209 and the 05-12 finish review: a command block wraps only between its units, the
 // spans directly inside its code element, and a flag with the value after it is one unit. Between
 // units and inside a pair stands one space or a line break and nothing else, and nothing sits
-// outside the code element, so the copied text is the command itself.
+// outside the code element, so the copied text is the command itself. A token offers a line end
+// after each colon and equals sign inside it (05-UAT check 1), so a narrow step cuts a stack
+// parameter there.
 const SEPARATOR = /^[ \n]$/;
 const isLoneToken = (text: string): boolean => text !== '' && !/\s/.test(text);
 
@@ -1115,15 +1189,57 @@ function splitPairFindings(code: BuiltElement): string[] {
   return texts;
 }
 
+// A token's runs as rendered: the text between its <wbr>s, at any depth inside it, so a <wbr> inside
+// an inline element offers its line end like one directly in the token.
+function renderedRuns(token: BuiltElement): string[] {
+  const runs = [''];
+  const visit = (element: BuiltElement): void => {
+    for (const child of element.children) {
+      if (typeof child === 'string') runs[runs.length - 1] += child;
+      else if (child.tag === 'wbr') runs.push('');
+      else visit(child);
+    }
+  };
+  visit(token);
+  return runs;
+}
+
+// Where each run but the last ends, as an offset into the token's text.
+function runEnds(runs: readonly string[]): number[] {
+  const ends: number[] = [];
+  let end = 0;
+  for (const run of runs.slice(0, -1)) {
+    end += run.length;
+    ends.push(end);
+  }
+  return ends;
+}
+
+// A missing line end and one inside a word are both named, each as what it is.
+function tokenBreakFindings(token: BuiltElement): string[] {
+  const text = rawText(token);
+  const runs = renderedRuns(token);
+  const rendered = runEnds(runs);
+  const expected = runEnds(tokenRuns(text));
+  const missing = expected.some((end) => !rendered.includes(end))
+    ? [`the command token ${text} offers no line end after a colon or equals sign inside it, so a narrow column cuts it mid-word`]
+    : [];
+  const inside = rendered.flatMap((end, index) => (expected.includes(end) ? [] : [`the command token ${text} offers a line end after "${runs[index] ?? ''}", inside a word, so a narrow column cuts it there`]));
+  return [...missing, ...inside];
+}
+
 function commandBlockFindings(pre: BuiltElement): string[] {
   const codes = pre.children.filter((child): child is BuiltElement => typeof child !== 'string' && child.tag === 'code');
   const outside = pre.children.filter((child) => typeof child === 'string' || child.tag !== 'code').map((child) => (typeof child === 'string' ? child : rawText(child))).join('');
   const texts = outside === '' ? [] : [`the command block holds ${JSON.stringify(outside)} outside its code element, so the copied text is not the command`];
   for (const code of codes) {
     texts.push(...separatorFindings(code), ...splitPairFindings(code));
-    // A pair is a unit holding token spans; a single token's span holds only its text.
+    // A pair is a unit holding token spans; a single token's span holds its text and its <wbr>s.
     for (const unit of code.children) {
-      if (typeof unit !== 'string' && unit.children.some((child) => typeof child !== 'string')) texts.push(...separatorFindings(unit));
+      if (typeof unit === 'string') continue;
+      const tokens = unit.children.filter((child): child is BuiltElement => typeof child !== 'string' && child.tag === 'span');
+      if (tokens.length > 0) texts.push(...separatorFindings(unit));
+      for (const token of tokens.length > 0 ? tokens : [unit]) texts.push(...tokenBreakFindings(token));
     }
   }
   return texts;
@@ -1673,6 +1789,75 @@ export function checkFileBudget(files: readonly { readonly path: string; readonl
   return violations;
 }
 
+// WCAG 1.4.5 (05-UAT check 4): a readout's digits are drawn segments, an image of text, so the number
+// they show is also printed beside them where a reader can see it. The sentence a screen reader is
+// given does not count: it is clipped to one pixel. The drawn segments (class seg) are what the rule
+// protects, so a segment outside any readout, or drawn digits with no sentence beside them giving
+// their number, fails instead of leaving drawn digits nothing checks after a class is renamed.
+const hasClass = (element: BuiltElement, name: string): boolean => (element.attrs.class ?? '').split(/\s+/).includes(name);
+
+// Markup text no reader sees on the page: an SVG's title and desc, what script, style and template
+// hold, noscript's content while scripts run, and whatever the hidden attribute removes, beside the
+// screen-reader sentence.
+const UNSHOWN_TAGS = new Set(['title', 'desc', 'script', 'style', 'template', 'noscript']);
+
+function shownText(element: BuiltElement): string {
+  if (hasClass(element, 'visually-hidden') || UNSHOWN_TAGS.has(element.tag) || element.attrs.hidden !== undefined) return '';
+  return element.children.map((child) => (typeof child === 'string' ? child : shownText(child))).join(' ');
+}
+
+// A figure counts as shown only where it stands alone: a digit, colon, dot, hyphen or slash touching it
+// makes it part of a clock time, a date or another figure, which no reader takes for the drawn number.
+const standsAlone = (text: string, number: string): boolean => new RegExp(`(?<![\\d:./-])${number}(?![\\d:./-])`).test(text);
+
+function drawsSegments(element: BuiltElement): boolean {
+  let found = false;
+  walk(element, (inner) => {
+    if (hasClass(inner, 'seg')) found = true;
+  });
+  return found;
+}
+
+// A readout's window is its child holding the drawn digits, the sentence a screen reader is given for
+// them and the label beside them, and the number is read there alone. The readout head counts only
+// while that label holds no figure at all, as on the 404 page, whose head names the status drawn.
+function windowFindings(readout: BuiltElement, window: BuiltElement): string[] {
+  const spoken: string[] = [];
+  walk(window, (inner) => {
+    if (hasClass(inner, 'visually-hidden')) spoken.push(textOf(inner));
+  });
+  // Each sentence opens with the figure the digits draw (412 sends on a lane, Status 404), and a lane
+  // name may end in digits of its own, so only a sentence's first digit run is the drawn number.
+  const numbers = spoken.flatMap((text) => text.match(/\d+/)?.[0] ?? []);
+  if (numbers.length === 0) return ['the readout draws digits but no screen-reader sentence beside them gives their number, so nothing checks that a reader can see it'];
+  const beside = shownText(window);
+  const head = readout.children.find((child): child is BuiltElement => typeof child !== 'string' && hasClass(child, 'readout-head'));
+  const shown = /\d/.test(beside) || head === undefined ? beside : `${beside} ${shownText(head)}`;
+  return numbers
+    .filter((number) => !standsAlone(shown, number))
+    .map((number) => `the readout draws ${number} but does not show it as text beside its digits, only to a screen reader`);
+}
+
+function readoutFindings(readout: BuiltElement): string[] {
+  return readout.children
+    .filter((child): child is BuiltElement => typeof child !== 'string' && drawsSegments(child))
+    .flatMap((window) => windowFindings(readout, window));
+}
+
+export function readoutNumberRule(site: BuiltSite, _context: CheckContext): Finding[] {
+  return site.pages.flatMap((page) => {
+    const parents = parentsOf(page.root);
+    const texts: string[] = [];
+    let looseSegments = 0;
+    walk(page.root, (element) => {
+      if (hasClass(element, 'seg') && ancestorWith(element, parents, (node) => hasClass(node, 'readout')) === undefined) looseSegments += 1;
+      if (hasClass(element, 'readout')) texts.push(...readoutFindings(element));
+    });
+    if (looseSegments > 0) texts.push(`${String(looseSegments)} drawn digit segments sit outside any readout, so no rule checks that their number is shown as text`);
+    return texts.map((text) => ({ rule: 'readout-number' as const, route: page.route, text }));
+  });
+}
+
 type Rule = (site: BuiltSite, context: CheckContext) => Finding[];
 
 const RULES: Readonly<Record<RuleId, Rule>> = {
@@ -1731,6 +1916,8 @@ const RULES: Readonly<Record<RuleId, Rule>> = {
   'model-id': modelIdRule,
   'accessibility-page': accessibilityPageRule,
   'accessibility-statement': accessibilityStatementRule,
+  'readout-number': readoutNumberRule,
+  'font-preload': fontPreloadRule,
 };
 
 // Every rule runs over the whole site and every hit is kept, so one report names them all.

@@ -66,3 +66,29 @@ export function textSegments(text: string, terms: IdentifierTerms, apiNames: rea
   ].filter((term) => term.text !== '').sort((first, second) => second.text.length - first.text.length);
   return text.split('`').flatMap((part, index) => (index % 2 === 1 ? [{ kind: 'code' as const, text: part }] : plainSegments(part, listed)));
 }
+
+// Where a schedule's long value (a resource expression, a principal, a CDK export name) may end a
+// line, three rules joined:
+//   after a slash, a colon or a comma (arn:aws:iam::<account>:role/ then the role name);
+//   where a capital follows a small letter (Fothering then Ingest);
+//   where a capitalised word starts after a digit or a capital (165FCE28 then Arn, SES then Config).
+// A CDK logical id's eight-character hex hash (165FCE28) is uppercase with no small letter, so no rule
+// splits inside it.
+const AFTER_SEPARATOR = String.raw`(?<=[/:,])`;
+const SMALL_THEN_CAPITAL = String.raw`(?<=[a-z])(?=[A-Z])`;
+const WORD_AFTER_DIGIT_OR_CAPITAL = String.raw`(?<=[0-9A-Z])(?=[A-Z][a-z])`;
+const LONG_VALUE_BREAKS = new RegExp([AFTER_SEPARATOR, SMALL_THEN_CAPITAL, WORD_AFTER_DIGIT_OR_CAPITAL].join('|'));
+
+export function longValueParts(text: string): string[] {
+  return text.split(LONG_VALUE_BREAKS);
+}
+
+// The words of an API operation name or an IAM action in the Identifier component's word mode: a
+// capital starts a word after a small letter, a digit or the colon (ses: then Get, then
+// Configuration), and a capitalised word starts after a run of capitals (SES then Config), so an
+// acronym stays whole and never glues to the word after it.
+const IDENTIFIER_WORD_STARTS = new RegExp([String.raw`(?<=[a-z0-9:])(?=[A-Z])`, WORD_AFTER_DIGIT_OR_CAPITAL].join('|'));
+
+export function identifierWordParts(value: string): string[] {
+  return value.split(IDENTIFIER_WORD_STARTS);
+}
