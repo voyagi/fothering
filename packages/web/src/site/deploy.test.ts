@@ -106,6 +106,13 @@ describe('the snapshot loaders', () => {
     expect(() => loadPermissionSnapshot(root)).toThrow(/^packages\/infra\/permissions\.json: not valid JSON \([\s\S]+\)\. Run npm run permissions:snapshot\.$/);
     expect(() => loadResourceSnapshot(root)).toThrow(/^packages\/infra\/resources\.json: not valid JSON \([\s\S]+\)\. Run npm run permissions:snapshot\.$/);
   });
+
+  it('name the file and the snapshot command when a snapshot is JSON but not a list', () => {
+    const root = join(PLANT, 'object-snapshots');
+    for (const name of ['permissions', 'resources']) plantFile(`object-snapshots/packages/infra/${name}.json`, '{"stack": "FotheringIngest"}');
+    expect(() => loadPermissionSnapshot(root)).toThrow('packages/infra/permissions.json: not a list. Run npm run permissions:snapshot.');
+    expect(() => loadResourceSnapshot(root)).toThrow('packages/infra/resources.json: not a list. Run npm run permissions:snapshot.');
+  });
 });
 
 describe('the resource schedule', () => {
@@ -215,6 +222,16 @@ describe('the permissions schedules', () => {
   it('names the first malformed entry', () => {
     expect(() => permissionSchedules([permission({}), permission({ kind: 'grant' })])).toThrow(/^packages\/infra\/permissions\.json: \[1\]\.kind: /);
     expect(() => permissionSchedules([{ ...permission({}), resource: 3 }])).toThrow(/^packages\/infra\/permissions\.json: \[0\]\.resource: /);
+  });
+
+  it('refuses an empty required field, an effect other than Allow or Deny, and an entry that is not an object', () => {
+    expect(() => permissionSchedules([permission({ action: '' })])).toThrow(
+      'packages/infra/permissions.json: [0].action: missing or not text. Run npm run permissions:snapshot.',
+    );
+    expect(() => permissionSchedules([permission({}), permission({ effect: 'Alow' })])).toThrow(
+      "packages/infra/permissions.json: [1].effect: 'Alow' is not one of Allow, Deny. Run npm run permissions:snapshot.",
+    );
+    expect(() => permissionSchedules([null])).toThrow('packages/infra/permissions.json: [0].stack: missing or not text. Run npm run permissions:snapshot.');
   });
 });
 
