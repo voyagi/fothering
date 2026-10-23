@@ -343,6 +343,15 @@ describe('the self-hosted faces (D-134, AC-59)', () => {
     }
   });
 
+  // A preload naming a file no @font-face uses would be fetched twice: once preloaded, once by the rule.
+  it('preloads from the layout exactly one latin face per family, each a file site.css declares', () => {
+    const layout = readFileSync(join(REPO_ROOT, 'packages', 'web', 'src', 'layouts', 'Sheet.astro'), 'utf8');
+    const preloaded = [...layout.matchAll(/^import \w+ from '([^']+\.woff2)\?url';$/gm)].map((match) => match[1] ?? '');
+    const declared = new Map(ours().map((rule) => [rule.url, unquoted(rule.descriptors.get('font-family'))]));
+    expect(preloaded.filter((url) => /-latin-(?:wght|wdth)-normal\.woff2$/.test(url))).toEqual(preloaded);
+    expect(preloaded.map((url) => declared.get(url)).sort()).toEqual(FACE_PACKAGES.map((face) => face.family).sort());
+  });
+
   it('points every src at an installed latin or latin-ext normal woff2 file, never italic, never another origin', () => {
     const rules = ours();
     expect(rules.length).toBeGreaterThan(0);

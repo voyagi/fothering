@@ -4,6 +4,9 @@ import { loadReplayArtifact } from '../site/replay-view.ts';
 import { headMeta, ROUTES, type SheetRoute } from '../site/route-list.ts';
 import { HEAD_SCRIPT } from '../theme/head-script.ts';
 import '../styles/site.css';
+import publicSansLatin from '@fontsource-variable/public-sans/files/public-sans-latin-wght-normal.woff2?url';
+import sairaLatin from '@fontsource-variable/saira/files/saira-latin-wdth-normal.woff2?url';
+import sourceCodeProLatin from '@fontsource-variable/source-code-pro/files/source-code-pro-latin-wght-normal.woff2?url';
 
 interface Props {
   route: SheetRoute;
@@ -23,6 +26,10 @@ const stripRoutes = STRIP_PATHS.map((path) => ROUTES.find((entry) => entry.path 
 const { provenance } = loadReplayArtifact(process.cwd());
 const status = PROVENANCE_LABELS[provenance].titleBlockStatus;
 const currentMark = (path: string): 'page' | undefined => (path === route.path ? 'page' : undefined);
+// The faces swap in, so a latin face found only once site.css has been parsed lands after the
+// first paint and reflows the first band (layout shift about 0.2 on /deploy/ and /replay/).
+// Preloaded, the three are fetched beside the stylesheet.
+const PRELOADED_FACES = [sairaLatin, publicSansLatin, sourceCodeProLatin];
 ---
 <!doctype html>
 <html lang="en">
@@ -32,6 +39,7 @@ const currentMark = (path: string): 'page' | undefined => (path === route.path ?
     <meta name="color-scheme" content="light dark" />
     <script is:inline set:html={HEAD_SCRIPT}></script>
     <link rel="stylesheet" href="/tokens.css" />
+    {PRELOADED_FACES.map((href) => <link rel="preload" href={href} as="font" type="font/woff2" crossorigin />)}
     <title>{head.title}</title>
     {head.metas.map((attrs) => <meta {...attrs} />)}
     {head.links.map((attrs) => <link {...attrs} />)}
