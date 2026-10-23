@@ -589,6 +589,40 @@ describe('fix templates (D-64)', () => {
   });
 });
 
+const MAIL_FROM = 'bounce.news.example.com';
+const DMARC_PRESENT: Readonly<Record<string, DnsTxtOutcome>> = { [`_dmarc.${NEWS}`]: { kind: 'records', records: ['v=DMARC1; p=none'] } };
+const DKIM_FAILED = 'smtp; 550 5.7.20 no passing DKIM signature found';
+
+/** The bulk lane spikes on bounces carrying `diagnosticCode`; the digest lane sends from the same domain. */
+function sharedDomainStory(diagnosticCode: string, identity: IdentityAuthFacts, txtAnswers: Readonly<Record<string, DnsTxtOutcome>>): PairedCase {
+  return {
+    name: `a shared from-domain with bounces carrying ${diagnosticCode}`,
+    laneMap: WITH_DIGEST,
+    story: {
+      lanes: [
+        {
+          configurationSet: BULK,
+          fromDomain: NEWS,
+          groups: [
+            { bucketOffset: 0, count: 40, batch: 'import-0915', permanentBounces: 15, diagnosticCode },
+            { bucketOffset: 1, count: 160, batch: 'import-0901' },
+          ],
+        },
+        { configurationSet: DIGEST, fromDomain: NEWS, groups: [{ bucketOffset: 1, count: 150, batch: 'digest-0901' }] },
+      ],
+      identities: [identity],
+      txtAnswers,
+    },
+    expected: {
+      lane: BULK,
+      outcome: 'refused',
+      reason: 'not-lane-scoped',
+      isolation: 'spread-domain',
+      sharedCause: { kind: 'from-domain', value: NEWS, lanes: [BULK, DIGEST] },
+    },
+  };
+}
+
 describe('the evidence record is assembled once with its question or fix (D-70)', () => {
   it('assembles the isolating incident approved with one option, its rows, totals and share', () => {
     const record = recordOf(ISOLATING);
@@ -617,6 +651,56 @@ describe('the evidence record is assembled once with its question or fix (D-70)'
 
   it('names _dmarc.<from-domain> in the shared DMARC fix', () => {
     expect(recordOf(twinNamed('a missing DMARC record on a shared from-domain')).fix?.text).toContain(`_dmarc.${NEWS}`);
+  });
+
+  // The fix templates are pinned above with hand-made values; these drive the identity and the MAIL
+  // FROM domain out of the configuration rows' own lookups, which only a real cycle produces.
+  it.each([
+    [
+      'a failed DKIM',
+      sharedDomainStory(DKIM_FAILED, { ...DKIM_SIGNING, dkimStatus: 'FAILED' }, DMARC_PRESENT),
+      ['dkim:cause', 'mail-from:not-applicable', 'dmarc:ruled-out', 'spf:not-applicable'],
+      'missing-dkim',
+      ['SES identity example.com'],
+    ],
+    [
+      'a failed custom MAIL FROM',
+      sharedDomainStory(
+        SPF_FAILED,
+        { ...DKIM_SIGNING, mailFromDomain: MAIL_FROM, mailFromStatus: 'FAILED' },
+        { ...DMARC_PRESENT, [MAIL_FROM]: { kind: 'records', records: ['v=spf1 include:amazonses.com ~all'] } },
+      ),
+      ['dkim:ruled-out', 'mail-from:cause', 'dmarc:ruled-out', 'spf:ruled-out'],
+      'failed-mail-from',
+      ['SES identity example.com', `MAIL FROM domain ${MAIL_FROM}`],
+    ],
+    [
+      'a missing SPF record at the custom MAIL FROM domain',
+      sharedDomainStory(SPF_FAILED, { ...DKIM_SIGNING, mailFromDomain: MAIL_FROM, mailFromStatus: 'SUCCESS' }, { ...DMARC_PRESENT, [MAIL_FROM]: { kind: 'missing' } }),
+      ['dkim:ruled-out', 'mail-from:ruled-out', 'dmarc:ruled-out', 'spf:cause'],
+      'missing-spf',
+      [`record was found at ${MAIL_FROM}`],
+    ],
+  ] as const)('refuses %s on a shared from-domain with its own fix, naming what the rows read', (_name, paired, rows, kind, names) => {
+    const bulk = cycleOf(paired.laneMap, paired.story).analyses.find((analysis) => analysis.lane.configurationSet === BULK);
+    expect(bulk?.configurationRows.map((row) => `${row.record}:${row.verdict}`)).toEqual(rows);
+    expect(mismatches(paired, decideCycle)).toEqual([]);
+    const record = recordOf(paired);
+    expect(record.fix?.kind).toBe(kind);
+    for (const name of names) expect(record.fix?.text).toContain(name);
+    expect(record.approvedOptions).toEqual([]);
+  });
+
+  it('refuses to decide a lane the lane map lacks or to assemble one lane with another lane\'s decision', () => {
+    const shared = twinNamed('the batch spread to a second lane');
+    const { analyses } = cycleOf(shared.laneMap, shared.story);
+    expect(() => decideCycle(analyses, COMMITTED)).toThrow(`configuration set ${DIGEST} is not in the lane map`);
+    const decision = decideCycle(analyses, shared.laneMap).get(BULK);
+    const digest = analyses.find((analysis) => analysis.lane.configurationSet === DIGEST);
+    if (decision === undefined || digest === undefined) throw new Error('the cycle holds both lanes');
+    expect(() => assembleEvidenceRecord({ incidentId: '0'.repeat(32), analysis: digest, decision, analyses, expiresAt: CYCLE_EXPIRES_AT })).toThrow(
+      `the decision for ${BULK} cannot be assembled with the analysis of ${DIGEST}`,
+    );
   });
 
   it('asks a question and carries no fix or option for an unknown decision', () => {
