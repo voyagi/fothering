@@ -90,6 +90,7 @@ export const RULE_IDS = Object.freeze([
   'accessibility-page',
   'accessibility-statement',
   'readout-number',
+  'font-preload',
 ] as const);
 
 export type RuleId = (typeof RULE_IDS)[number];
@@ -398,6 +399,48 @@ export function thirdPartyReferenceRule(site: BuiltSite, _context: CheckContext)
   });
   const inCss = site.css.flatMap((file) => cssUrls(file.text).filter(isThirdParty).map((url) => ({ rule, route: fileRoute(file.file), text: `CSS url ${clip(url)}` })));
   return [...onPages, ...inCss];
+}
+
+// Each file a built @font-face rule loads, with the family it declares.
+function fontFaceFiles(site: BuiltSite): Map<string, string> {
+  const files = new Map<string, string>();
+  for (const sheet of site.css) {
+    for (const match of sheet.text.matchAll(/@font-face\s*\{([^}]*)\}/gi)) {
+      const body = match[1] ?? '';
+      const family = /font-family\s*:\s*([^;]+)/i.exec(body)?.[1]?.trim().replace(/^(['"])(.*)\1$/, '$2');
+      if (family !== undefined) for (const url of cssUrls(body)) files.set(url, family);
+    }
+  }
+  return files;
+}
+
+// The layout preloads one file per family, because a face that swaps in only once the stylesheet is
+// parsed lands after the first paint and shifts the first band (layout shift about 0.2 on /deploy/ and
+// /replay/). Read from the built pages, so a layout that stops emitting the links fails: every family
+// the built CSS declares is preloaded once, from a file a @font-face rule loads, as a woff2 font with
+// crossorigin, without which the browser fetches the font a second time.
+export function fontPreloadRule(site: BuiltSite, _context: CheckContext): Finding[] {
+  const faces = fontFaceFiles(site);
+  const families = [...new Set(faces.values())].sort();
+  return site.pages.flatMap((page) => {
+    const texts: string[] = [];
+    const preloaded = new Map<string, number>();
+    const fontPreloads = page.links.filter((link) => (link.rel ?? '').toLowerCase().split(/\s+/).includes('preload') && link.as === 'font');
+    for (const link of fontPreloads) {
+      const href = link.href ?? '';
+      const family = faces.get(href);
+      if (family === undefined) texts.push(`the font preload ${clip(href)} names a file no built @font-face rule loads, so it is fetched for nothing`);
+      else preloaded.set(family, (preloaded.get(family) ?? 0) + 1);
+      if (link.type !== 'font/woff2') texts.push(`the font preload ${clip(href)} does not carry type="font/woff2"`);
+      if (link.crossorigin === undefined) texts.push(`the font preload ${clip(href)} has no crossorigin attribute, so the browser fetches the font a second time`);
+    }
+    for (const family of families) {
+      const count = preloaded.get(family) ?? 0;
+      if (count === 0) texts.push(`the page preloads no file of the ${family} face, so it swaps in after the first paint and shifts the first band`);
+      else if (count > 1) texts.push(`the page preloads ${String(count)} files of the ${family} face, 1 expected, so the others are fetched for nothing`);
+    }
+    return texts.map((text) => ({ rule: 'font-preload' as const, route: page.route, text }));
+  });
 }
 
 const REQUIRED_METAS: readonly (readonly [string, string])[] = [
@@ -1023,8 +1066,13 @@ export function providerLabelRule(site: BuiltSite, context: CheckContext): Findi
   return onReplay(site, 'provider-label', (page) => providerFindings(page, context.replay));
 }
 
-const HIDING_ATTRS = ['hidden', 'aria-hidden'] as const;
-const hidingAttr = (element: BuiltElement): string | undefined => HIDING_ATTRS.find((name) => element.attrs[name] !== undefined && element.attrs[name] !== 'false');
+// hidden hides whatever its value, hidden="false" included, since an invalid value is the hidden
+// state; aria-hidden hides unless it reads false.
+function hidingAttr(element: BuiltElement): string | undefined {
+  if (element.attrs.hidden !== undefined) return 'hidden';
+  const aria = element.attrs['aria-hidden'];
+  return aria !== undefined && aria !== 'false' ? 'aria-hidden' : undefined;
+}
 
 // What hides an element from the accessibility tree, the element itself or an ancestor, and by which attribute.
 function hiddenBy(element: BuiltElement, parents: ReadonlyMap<BuiltElement, BuiltElement>): { readonly tag: string; readonly attr: string } | undefined {
@@ -1141,13 +1189,18 @@ function splitPairFindings(code: BuiltElement): string[] {
   return texts;
 }
 
-// A token's runs as rendered: the text between its <wbr>s.
+// A token's runs as rendered: the text between its <wbr>s, at any depth inside it, so a <wbr> inside
+// an inline element offers its line end like one directly in the token.
 function renderedRuns(token: BuiltElement): string[] {
   const runs = [''];
-  for (const child of token.children) {
-    if (typeof child !== 'string' && child.tag === 'wbr') runs.push('');
-    else runs[runs.length - 1] += typeof child === 'string' ? child : rawText(child);
-  }
+  const visit = (element: BuiltElement): void => {
+    for (const child of element.children) {
+      if (typeof child === 'string') runs[runs.length - 1] += child;
+      else if (child.tag === 'wbr') runs.push('');
+      else visit(child);
+    }
+  };
+  visit(token);
   return runs;
 }
 
@@ -1743,9 +1796,10 @@ export function checkFileBudget(files: readonly { readonly path: string; readonl
 // their number, fails instead of leaving drawn digits nothing checks after a class is renamed.
 const hasClass = (element: BuiltElement, name: string): boolean => (element.attrs.class ?? '').split(/\s+/).includes(name);
 
-// Markup text no reader sees on the page: an SVG's title and desc, and whatever the hidden
-// attribute removes, beside the screen-reader sentence.
-const UNSHOWN_TAGS = new Set(['title', 'desc']);
+// Markup text no reader sees on the page: an SVG's title and desc, what script, style and template
+// hold, noscript's content while scripts run, and whatever the hidden attribute removes, beside the
+// screen-reader sentence.
+const UNSHOWN_TAGS = new Set(['title', 'desc', 'script', 'style', 'template', 'noscript']);
 
 function shownText(element: BuiltElement): string {
   if (hasClass(element, 'visually-hidden') || UNSHOWN_TAGS.has(element.tag) || element.attrs.hidden !== undefined) return '';
@@ -1840,6 +1894,7 @@ const RULES: Readonly<Record<RuleId, Rule>> = {
   'accessibility-page': accessibilityPageRule,
   'accessibility-statement': accessibilityStatementRule,
   'readout-number': readoutNumberRule,
+  'font-preload': fontPreloadRule,
 };
 
 // Every rule runs over the whole site and every hit is kept, so one report names them all.

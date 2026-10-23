@@ -80,6 +80,7 @@ import {
   deployPermissionsRule,
   deployResourcesRule,
   exactThirtyDaysRule,
+  fontPreloadRule,
   forgetCommandRule,
   formsCookiesAnalyticsRule,
   headScriptOrderRule,
@@ -273,10 +274,10 @@ describe('runBuiltChecks', () => {
     expect([...rules].filter((rule) => ['page-metadata', 'sitemap', 'robots'].includes(rule)).sort()).toEqual(['page-metadata', 'robots', 'sitemap']);
   });
 
-  it('holds exactly the fifty-six rule ids the plans and the 05-UAT hand check name', () => {
+  it('holds exactly the fifty-seven rule ids the plans, the 05-UAT hand check and the K2 reviews name', () => {
     expect([...RULE_IDS].sort()).toEqual([
       'accessibility-page', 'accessibility-statement', 'banned-name', 'command-pair', 'console-delete', 'dash', 'deploy-commands', 'deploy-deny', 'deploy-notice', 'deploy-page', 'deploy-permissions', 'deploy-resources',
-      'exact-30-days', 'forget-command', 'forms-cookies-analytics', 'head-script-order', 'identifier-break', 'landing-sections', 'lede', 'limits',
+      'exact-30-days', 'font-preload', 'forget-command', 'forms-cookies-analytics', 'head-script-order', 'identifier-break', 'landing-sections', 'lede', 'limits',
       'model-id', 'model-role-forbidden', 'model-role-present', 'model-role-required',
       'no-delete-control', 'no-ellipsis', 'no-inline-style', 'one-caller', 'page-metadata', 'pre-r6-words', 'privacy-page', 'privacy-statements', 'provenance-wording', 'provider-label', 'readout-number', 'region-claim', 'replay-lanes',
       'replay-page', 'replay-panels', 'replay-summary', 'replay-word-count', 'reply-promise', 'robots', 'script-hash',
@@ -406,6 +407,14 @@ describe('the command pair rule (UI-SPEC line 209, the 05-12 finish review)', ()
       '/case-0/ the command token D:OperatorAddress=<address> offers a line end after "Operator", inside a word, so a narrow column cuts it there',
     ]);
   });
+
+  // A <wbr> inside an inline element still offers its line end, so the rule reads the token at every depth.
+  it('fails a token whose extra line end sits inside an inline element in it', () => {
+    const nested = '<pre class="command"><code><span>D:<wbr>Oper<em>ator<wbr>Address</em>=<wbr>&lt;address&gt;</span></code></pre>';
+    expect(commandPairFindings([nested])).toEqual([
+      '/case-0/ the command token D:OperatorAddress=<address> offers a line end after "Operator", inside a word, so a narrow column cuts it there',
+    ]);
+  });
 });
 
 // A readout as the pages render it: drawn digits, the sentence a screen reader is given, and the
@@ -449,6 +458,10 @@ describe('the readout number rule (WCAG 1.4.5, 05-UAT check 4)', () => {
     ['an SVG title', readout('<b>Sends</b>').replace('<polygon', '<title>412 sends</title><polygon')],
     ['an SVG desc', readout('<b>Sends</b>').replace('<polygon', '<desc>412 sends</desc><polygon')],
     ['an element with the hidden attribute', readout('<b>Sends</b><b hidden>412 sends</b>')],
+    ['a script', readout('<b>Sends</b><script type="application/json">412</script>')],
+    ['a style element', readout('<b>Sends</b><style>.n::after { content: "412"; }</style>')],
+    ['a template', readout('<b>Sends</b><template><b>412 sends</b></template>')],
+    ['a noscript', readout('<b>Sends</b><noscript>412 sends</noscript>')],
   ])('fails a number that stands only in %s', (_where, body) => {
     expect(body).not.toBe(readout('<b>Sends</b>'));
     expect(caseFindings(readoutNumberRule, 'readout-number', [body]).map((finding) => finding.text)).toEqual([
@@ -635,6 +648,52 @@ describe('the third-party reference rule (AC-59 static half, AC-E49)', () => {
       'tokens.css': '@font-face { src: url("/_astro/red-hat-text.woff2"); } .x { background: url(data:image/png;base64,AAAA); }',
     });
     expect(thirdPartyReferenceRule(clean, context)).toEqual([]);
+  });
+});
+
+// Two families as the built CSS declares them, one name quoted and one bare, the first in a latin
+// and a latin-ext file.
+const FACES_CSS = [
+  '@font-face{font-family:"Public Sans Variable";src:url(/_astro/public-sans-latin.A1.woff2)format("woff2-variations")}',
+  '@font-face{font-family:"Public Sans Variable";src:url(/_astro/public-sans-latin-ext.B2.woff2)format("woff2-variations")}',
+  '@font-face{font-family:Saira;src:url(/_astro/saira-latin.C3.woff2)format("woff2-variations")}',
+].join('');
+const fontPreload = (href: string, attrs = ' type="font/woff2" crossorigin'): string => `<link rel="preload" href="${href}" as="font"${attrs}>`;
+const SAIRA_PRELOAD = fontPreload('/_astro/saira-latin.C3.woff2');
+const SANS_PRELOAD = fontPreload('/_astro/public-sans-latin.A1.woff2');
+const preloadSite = (links: readonly (readonly string[])[]): BuiltSite =>
+  siteOf({ '_astro/Sheet.css': FACES_CSS, ...Object.fromEntries(links.map((head, index) => [`case-${index}/index.html`, page('<p>x</p>', `<title>t</title>${head.join('')}`)])) });
+const preloadTexts = (links: readonly (readonly string[])[]): string[] => {
+  const findings = fontPreloadRule(preloadSite(links), context);
+  expect(findings.every((finding) => finding.rule === 'font-preload')).toBe(true);
+  return findings.map((finding) => `${finding.route} ${finding.text}`).sort();
+};
+
+describe('the font preload rule', () => {
+  it('passes a page that preloads one file of each declared family, as woff2 with crossorigin', () => {
+    expect(preloadTexts([[SAIRA_PRELOAD, SANS_PRELOAD]])).toEqual([]);
+  });
+
+  // The layout test reads the import lines, so only the built page shows the links stopped coming out.
+  it('fails a page that emits no font preload, once per declared family', () => {
+    expect(preloadTexts([[]])).toEqual([
+      '/case-0/ the page preloads no file of the Public Sans Variable face, so it swaps in after the first paint and shifts the first band',
+      '/case-0/ the page preloads no file of the Saira face, so it swaps in after the first paint and shifts the first band',
+    ]);
+  });
+
+  it('fails a preload no @font-face loads, one without crossorigin or the woff2 type, and a family preloaded twice', () => {
+    expect(preloadTexts([
+      [SAIRA_PRELOAD, SANS_PRELOAD, fontPreload('/_astro/gone.D4.woff2')],
+      [SAIRA_PRELOAD, fontPreload('/_astro/public-sans-latin.A1.woff2', ' type="font/woff2"')],
+      [SAIRA_PRELOAD, fontPreload('/_astro/public-sans-latin.A1.woff2', ' crossorigin')],
+      [SAIRA_PRELOAD, SANS_PRELOAD, fontPreload('/_astro/public-sans-latin-ext.B2.woff2')],
+    ])).toEqual([
+      '/case-0/ the font preload /_astro/gone.D4.woff2 names a file no built @font-face rule loads, so it is fetched for nothing',
+      '/case-1/ the font preload /_astro/public-sans-latin.A1.woff2 has no crossorigin attribute, so the browser fetches the font a second time',
+      '/case-2/ the font preload /_astro/public-sans-latin.A1.woff2 does not carry type="font/woff2"',
+      '/case-3/ the page preloads 2 files of the Public Sans Variable face, 1 expected, so the others are fetched for nothing',
+    ]);
   });
 });
 
@@ -1439,6 +1498,20 @@ describe('the replay panels rule (AC-E7, AC-10 static half)', () => {
     expect(replayTexts(replayPanelsRule, replayBody({ clock: `<div ${attribute}>${REPLAY_CLOCK}</div>` }))).toEqual([
       `the step clock is hidden from the accessibility tree by ${name} on <div>, so its status role announces nothing (WCAG 4.1.3)`,
     ]);
+  });
+
+  // hidden="false" is an invalid value, which is the hidden state; aria-hidden="false" hides nothing.
+  it('fails a step clock and a step panel carrying hidden="false", and passes them with aria-hidden="false"', () => {
+    expect(replayTexts(replayPanelsRule, replayBody({ clock: REPLAY_CLOCK.replace('<p ', '<p hidden="false" ') }))).toEqual([
+      'the step clock is hidden from the accessibility tree by hidden on <p>, so its status role announces nothing (WCAG 4.1.3)',
+    ]);
+    expect(replayTexts(replayPanelsRule, replayBody({ clock: `<div hidden="false">${REPLAY_CLOCK}</div>` }))).toEqual([
+      'the step clock is hidden from the accessibility tree by hidden on <div>, so its status role announces nothing (WCAG 4.1.3)',
+    ]);
+    const panels = [PANEL_1, PANEL_2.replace('data-steps="2"', 'data-steps="2" hidden="false"'), PANEL_3, PANEL_4];
+    expect(replayTexts(replayPanelsRule, replayBody({ panels }))).toEqual(['step panel 2 is hidden from the accessibility tree by hidden on <section>']);
+    const shown = [PANEL_1, PANEL_2.replace('data-steps="2"', 'data-steps="2" aria-hidden="false"'), PANEL_3, PANEL_4];
+    expect(replayTexts(replayPanelsRule, replayBody({ panels: shown, clock: REPLAY_CLOCK.replace('<p ', '<p aria-hidden="false" ') }))).toEqual([]);
   });
 
   it('fails a replay page with no step clock or with two', () => {
