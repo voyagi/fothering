@@ -437,7 +437,7 @@ export interface AccessibilityRecord {
 // from the build clock (AC-E12), and names the last automated run that passed.
 export const ACCESSIBILITY_RECORD: AccessibilityRecord = Object.freeze({
   target: 'WCAG 2.2, level AA',
-  lastAutomatedAudit: '2026-10-18',
+  lastAutomatedAudit: '2026-10-23',
   axeVersion: '4.14.0',
   tags: Object.freeze(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa']),
   enabledRules: Object.freeze(['target-size', 'label-content-name-mismatch']),
