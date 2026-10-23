@@ -629,6 +629,14 @@ describe('the deploy steps', () => {
     }
   });
 
+  // Only a strictly narrower selection is a repeat, so the step never loses its only deploy line.
+  it('keeps both lines when two deploy lines select the same stacks', () => {
+    const lines = (commands: readonly string[]) => commands.map((command) => ({ command, note: null }));
+    const base = ['npm run build', 'npx cdk bootstrap', 'npx cdk deploy --all -c fothering:live=live', 'npx cdk destroy --all'];
+    const steps = deploySteps({ deployCommands: lines([...base, 'npx cdk deploy A B', 'npx cdk deploy B A']), region: 'xx-planted-9' });
+    expect(steps[3]?.commands.map(({ command }) => command)).toEqual(['npx cdk bootstrap', 'npx cdk deploy A B', 'npx cdk deploy B A']);
+  });
+
   // Read as words, each parameter value would name a stack, and D's line would cover A's trial.
   it('reads a --parameters value, spaced or joined, as the option it belongs to and never as a stack', () => {
     const lines = (commands: readonly string[]) => commands.map((command) => ({ command, note: null }));
