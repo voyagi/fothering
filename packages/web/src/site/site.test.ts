@@ -304,11 +304,14 @@ describe('the accessibility record (D-156, AC-53)', () => {
     }
   });
 
-  // UI-SPEC E13 empty state: no person has checked any criterion before the S5 real-browser session,
-  // so no row may show a result. S5 records every result, and replaces this case, in one commit.
-  it('shows every criterion as not yet checked before the hand check in a real browser', () => {
-    const recorded = HAND_CHECK_CRITERIA.filter((criterion) => criterion.result !== 'not-yet-checked').map((criterion) => `${criterion.number} ${criterion.result}`);
-    expect(recorded).toEqual([]);
+  // The 05-UAT check 4 run recorded every row: what the site has nothing of does not apply, the rest
+  // passed, and nothing is left not yet checked or failed.
+  it('records the real-browser result of every criterion, none left open and none failed', () => {
+    const byResult = (result: HandCheckResult) => HAND_CHECK_CRITERIA.filter((criterion) => criterion.result === result).map((criterion) => criterion.number);
+    expect(byResult('not-yet-checked')).toEqual([]);
+    expect(byResult('failed')).toEqual([]);
+    expect(byResult('not-applicable')).toEqual(['1.2.3', '1.2.4', '1.2.5', '1.4.13', '2.1.4', '2.5.1', '2.5.4', '2.5.7', '3.2.6', '3.3.1', '3.3.3', '3.3.4', '3.3.7', '3.3.8']);
+    expect(byResult('passed')).toHaveLength(18);
   });
 
   // A how-checked note is the method a person follows, never an outcome nobody has seen yet.

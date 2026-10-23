@@ -360,42 +360,43 @@ export interface HandCheckCriterion {
 const NO_FORM = 'Check that the site has no form and no text input, only the three theme radios.';
 
 // D-156: the WCAG 2.2 A and AA criteria no axe-core 4.14.0 rule decides, as 05-RESEARCH.md derived
-// them from the W3C criteria list and axe's rule table. No person has checked any of them yet, so
-// every row is not yet checked, the ones the research expects not to apply included (UI-SPEC E13).
-// The real-browser hand check records each result here, not applicable among them, in one commit.
+// them from the W3C criteria list and axe's rule table. Each result comes from the 05-UAT check 4 run
+// in Chromium on 2026-10-23 (keyboard and pointer, 320 and 1440 px, Light, Dark and Device). Not
+// applicable means the site has nothing the criterion governs. 1.4.5 failed on the readouts' drawn
+// numbers and passed only after the fix that prints each number beside its digits.
 export const HAND_CHECK_CRITERIA: readonly HandCheckCriterion[] = Object.freeze([
-  { number: '1.2.3', name: 'Audio Description or Media Alternative (Prerecorded)', result: 'not-yet-checked', how: 'Check that the site has no prerecorded video or audio.' },
-  { number: '1.2.4', name: 'Captions (Live)', result: 'not-yet-checked', how: 'Check that the site has no live video or audio.' },
-  { number: '1.2.5', name: 'Audio Description (Prerecorded)', result: 'not-yet-checked', how: 'Check that the site has no prerecorded video.' },
-  { number: '1.3.2', name: 'Meaningful Sequence', result: 'not-yet-checked', how: 'Check that every page keeps its meaning when read with a screen reader and with styles turned off.' },
-  { number: '1.3.3', name: 'Sensory Characteristics', result: 'not-yet-checked', how: 'Check that no instruction relies on shape, colour, size, position or sound alone.' },
-  { number: '1.4.5', name: 'Images of Text', result: 'not-yet-checked', how: "Check that every word is text and that the readout's drawn digits are also given as text beside them." },
-  { number: '1.4.10', name: 'Reflow', result: 'not-yet-checked', how: 'Check that at 320 pixels wide and at the largest zoom no page scrolls sideways or cuts content off.' },
-  { number: '1.4.11', name: 'Non-text Contrast', result: 'not-yet-checked', how: 'Check that the state marks, keys, lamps, theme switch and focus rings meet the contrast minimum in Light and Dark.' },
-  { number: '1.4.13', name: 'Content on Hover or Focus', result: 'not-yet-checked', how: 'Check that hovering over or focusing any link or control opens no tooltip or pop-up over the page.' },
-  { number: '2.1.2', name: 'No Keyboard Trap', result: 'not-yet-checked', how: 'Check that focus can leave every control when tabbing forwards and backwards with the keyboard alone.' },
-  { number: '2.1.4', name: 'Character Key Shortcuts', result: 'not-yet-checked', how: 'Check that pressing letter, number and punctuation keys on every page triggers no shortcut.' },
-  { number: '2.3.1', name: 'Three Flashes or Below Threshold', result: 'not-yet-checked', how: 'Check that nothing on the site flashes, the playhead run included.' },
-  { number: '2.4.3', name: 'Focus Order', result: 'not-yet-checked', how: 'Check that tabbing through every page moves focus in reading order, not only in page source order.' },
-  { number: '2.4.5', name: 'Multiple Ways', result: 'not-yet-checked', how: 'Check that the index at the foot of every page links to every other page.' },
-  { number: '2.4.6', name: 'Headings and Labels', result: 'not-yet-checked', how: 'Check that every heading and control label says what its section or control is for.' },
-  { number: '2.4.7', name: 'Focus Visible', result: 'not-yet-checked', how: 'Check that every link, button and radio shows its focus outline or ring in Light, Dark and Device.' },
-  { number: '2.4.11', name: 'Focus Not Obscured (Minimum)', result: 'not-yet-checked', how: 'Check that at 320 pixels wide no focused element hides behind the sticky replay controls.' },
-  { number: '2.5.1', name: 'Pointer Gestures', result: 'not-yet-checked', how: 'Check that nothing on the site needs a multipoint or path-based gesture.' },
-  { number: '2.5.2', name: 'Pointer Cancellation', result: 'not-yet-checked', how: 'Check that pressing a button, link or radio and sliding off before release does nothing.' },
-  { number: '2.5.4', name: 'Motion Actuation', result: 'not-yet-checked', how: 'Check that nothing on the site responds to moving or shaking the device.' },
-  { number: '2.5.7', name: 'Dragging Movements', result: 'not-yet-checked', how: 'Check that nothing on the site needs dragging.' },
-  { number: '3.2.1', name: 'On Focus', result: 'not-yet-checked', how: 'Check that focusing any control never changes the page, opens anything or moves focus.' },
-  { number: '3.2.2', name: 'On Input', result: 'not-yet-checked', how: 'Check that choosing a theme by keyboard or pointer changes only the colours, with focus kept on the radio.' },
-  { number: '3.2.3', name: 'Consistent Navigation', result: 'not-yet-checked', how: 'Check that the top strip and the index at the foot list their links in one order on every page.' },
-  { number: '3.2.4', name: 'Consistent Identification', result: 'not-yet-checked', how: 'Check that each control or link keeps one name for one function on every page, theme switch included.' },
-  { number: '3.2.6', name: 'Consistent Help', result: 'not-yet-checked', how: 'Check that any help or contact route repeated across pages sits in the same order on each.' },
-  { number: '3.3.1', name: 'Error Identification', result: 'not-yet-checked', how: NO_FORM },
-  { number: '3.3.3', name: 'Error Suggestion', result: 'not-yet-checked', how: NO_FORM },
-  { number: '3.3.4', name: 'Error Prevention (Legal, Financial, Data)', result: 'not-yet-checked', how: 'Check that nothing on the site submits data or commits a transaction.' },
-  { number: '3.3.7', name: 'Redundant Entry', result: 'not-yet-checked', how: 'Check that the site asks for no information, so nothing has to be entered twice.' },
-  { number: '3.3.8', name: 'Accessible Authentication (Minimum)', result: 'not-yet-checked', how: 'Check that the site has no sign-in or other authentication step.' },
-  { number: '4.1.3', name: 'Status Messages', result: 'not-yet-checked', how: "Check that a screen reader announces the replay's step clock while focus stays on the step control." },
+  { number: '1.2.3', name: 'Audio Description or Media Alternative (Prerecorded)', result: 'not-applicable', how: 'Check that the site has no prerecorded video or audio.' },
+  { number: '1.2.4', name: 'Captions (Live)', result: 'not-applicable', how: 'Check that the site has no live video or audio.' },
+  { number: '1.2.5', name: 'Audio Description (Prerecorded)', result: 'not-applicable', how: 'Check that the site has no prerecorded video.' },
+  { number: '1.3.2', name: 'Meaningful Sequence', result: 'passed', how: 'Check that every page keeps its meaning when read with a screen reader and with styles turned off.' },
+  { number: '1.3.3', name: 'Sensory Characteristics', result: 'passed', how: 'Check that no instruction relies on shape, colour, size, position or sound alone.' },
+  { number: '1.4.5', name: 'Images of Text', result: 'passed', how: "Check that every word is text and that the readout's drawn digits are also given as text beside them." },
+  { number: '1.4.10', name: 'Reflow', result: 'passed', how: 'Check that at 320 pixels wide and at the largest zoom no page scrolls sideways or cuts content off.' },
+  { number: '1.4.11', name: 'Non-text Contrast', result: 'passed', how: 'Check that the state marks, keys, lamps, theme switch and focus rings meet the contrast minimum in Light and Dark.' },
+  { number: '1.4.13', name: 'Content on Hover or Focus', result: 'not-applicable', how: 'Check that hovering over or focusing any link or control opens no tooltip or pop-up over the page.' },
+  { number: '2.1.2', name: 'No Keyboard Trap', result: 'passed', how: 'Check that focus can leave every control when tabbing forwards and backwards with the keyboard alone.' },
+  { number: '2.1.4', name: 'Character Key Shortcuts', result: 'not-applicable', how: 'Check that pressing letter, number and punctuation keys on every page triggers no shortcut.' },
+  { number: '2.3.1', name: 'Three Flashes or Below Threshold', result: 'passed', how: 'Check that nothing on the site flashes, the playhead run included.' },
+  { number: '2.4.3', name: 'Focus Order', result: 'passed', how: 'Check that tabbing through every page moves focus in reading order, not only in page source order.' },
+  { number: '2.4.5', name: 'Multiple Ways', result: 'passed', how: 'Check that the index at the foot of every page links to every other page.' },
+  { number: '2.4.6', name: 'Headings and Labels', result: 'passed', how: 'Check that every heading and control label says what its section or control is for.' },
+  { number: '2.4.7', name: 'Focus Visible', result: 'passed', how: 'Check that every link, button and radio shows its focus outline or ring in Light, Dark and Device.' },
+  { number: '2.4.11', name: 'Focus Not Obscured (Minimum)', result: 'passed', how: 'Check that at 320 pixels wide no focused element hides behind the sticky replay controls.' },
+  { number: '2.5.1', name: 'Pointer Gestures', result: 'not-applicable', how: 'Check that nothing on the site needs a multipoint or path-based gesture.' },
+  { number: '2.5.2', name: 'Pointer Cancellation', result: 'passed', how: 'Check that pressing a button, link or radio and sliding off before release does nothing.' },
+  { number: '2.5.4', name: 'Motion Actuation', result: 'not-applicable', how: 'Check that nothing on the site responds to moving or shaking the device.' },
+  { number: '2.5.7', name: 'Dragging Movements', result: 'not-applicable', how: 'Check that nothing on the site needs dragging.' },
+  { number: '3.2.1', name: 'On Focus', result: 'passed', how: 'Check that focusing any control never changes the page, opens anything or moves focus.' },
+  { number: '3.2.2', name: 'On Input', result: 'passed', how: 'Check that choosing a theme by keyboard or pointer changes only the colours, with focus kept on the radio.' },
+  { number: '3.2.3', name: 'Consistent Navigation', result: 'passed', how: 'Check that the top strip and the index at the foot list their links in one order on every page.' },
+  { number: '3.2.4', name: 'Consistent Identification', result: 'passed', how: 'Check that each control or link keeps one name for one function on every page, theme switch included.' },
+  { number: '3.2.6', name: 'Consistent Help', result: 'not-applicable', how: 'Check that any help or contact route repeated across pages sits in the same order on each.' },
+  { number: '3.3.1', name: 'Error Identification', result: 'not-applicable', how: NO_FORM },
+  { number: '3.3.3', name: 'Error Suggestion', result: 'not-applicable', how: NO_FORM },
+  { number: '3.3.4', name: 'Error Prevention (Legal, Financial, Data)', result: 'not-applicable', how: 'Check that nothing on the site submits data or commits a transaction.' },
+  { number: '3.3.7', name: 'Redundant Entry', result: 'not-applicable', how: 'Check that the site asks for no information, so nothing has to be entered twice.' },
+  { number: '3.3.8', name: 'Accessible Authentication (Minimum)', result: 'not-applicable', how: 'Check that the site has no sign-in or other authentication step.' },
+  { number: '4.1.3', name: 'Status Messages', result: 'passed', how: "Check that a screen reader announces the replay's step clock while focus stays on the step control." },
 ]);
 
 // The state mark each result carries in the hand-check schedule: dashed for not yet checked, filled
@@ -447,7 +448,7 @@ export const ACCESSIBILITY_RECORD: AccessibilityRecord = Object.freeze({
   themes: Object.freeze(['light', 'dark', 'device']),
   limitations: Object.freeze([
     { id: 'drawings', text: "The step pattern and the readout's digits are drawn. The page text gives each lane's state and the number, and the replay's log lists every event." },
-    { id: 'hand-check', text: 'An automated audit cannot decide every criterion. Those listed under Checked by hand need a person in a real browser.' },
+    { id: 'hand-check', text: 'An automated audit cannot decide every criterion. Those listed under Checked one by one were checked in Chromium only, and no screen reader was run.' },
   ]),
   contact: `To report an accessibility problem, ${CONTROLLER.contact}.`,
 });
