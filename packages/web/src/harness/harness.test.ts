@@ -665,7 +665,7 @@ const SKY_FADE = 'linear-gradient(rgb(217, 230, 255), rgb(255, 255, 255) 92%)';
 const SKY: Rgb = [217, 230, 255];
 const WHITE: Rgb = [255, 255, 255];
 const onFade = (color: string, change: Record<string, unknown> = {}): AxeReport['incomplete'][number]['nodes'][number] =>
-  ({ target: '.intro', summary: '', messageKey: 'bgGradient', expected: '4.5:1', color, background: SKY_FADE, opaque: true, ...change });
+  ({ target: '.intro', summary: '', messageKey: 'bgGradient', expected: '4.5:1', color, background: SKY_FADE, opaque: true, backgroundWhole: true, stackClear: true, ...change });
 const contrastOf = (nodes: AxeReport['incomplete'][number]['nodes']): AxeReport => ({ ...cleanAxe, incomplete: [{ id: 'color-contrast', nodes }] });
 const INK = 'rgb(10, 16, 36)';
 // A grey that reads at 4.5:1 on white and not on the sky end of the fade, and one below 3:1 on the sky.
@@ -722,6 +722,10 @@ describe('color-contrast on a gradient (the sky fade)', () => {
     for (const change of [
       { messageKey: 'bgImage' },
       { opaque: false },
+      { backgroundWhole: false },
+      { backgroundWhole: undefined },
+      { stackClear: false },
+      { stackClear: undefined },
       { color: 'rgba(10, 16, 36, 0.8)' },
       { background: 'rgb(255, 255, 255)' },
       { expected: undefined },

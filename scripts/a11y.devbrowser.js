@@ -48,6 +48,25 @@ for (const route of JOB.routes) {
       impact: item.impact,
       nodes: item.nodes.map((node) => ({ target: node.target.join(' '), summary: (node.failureSummary || '').slice(0, 200) })),
     });
+    // Whether a gradient fills its element's box (the default size, repeat, position and clip), and
+    // whether hit testing at the text's centre, scrolled into view, meets only the text, its own
+    // ancestors and then that element. Hit testing returns a pseudo-element as its element and skips
+    // pointer-events: none, so neither is seen here. The window is scrolled, never the element:
+    // Chromium moves the next Tab's starting point to an element scrolled into view, which the
+    // keyboard walk below would read as a page whose first Tab skips the skip link.
+    const gradientFacts = (element, holder) => {
+      const style = getComputedStyle(holder);
+      const backgroundWhole = style.backgroundSize === 'auto' && style.backgroundRepeat === 'repeat' && style.backgroundPosition === '0% 0%' && style.backgroundClip === 'border-box';
+      const [left, top] = [window.scrollX, window.scrollY];
+      const before = element.getBoundingClientRect();
+      window.scrollTo({ left, top: top + before.top + before.height / 2 - window.innerHeight / 2, behavior: 'instant' });
+      const box = element.getBoundingClientRect();
+      const stack = box.width > 0 && box.height > 0 ? document.elementsFromPoint(box.left + box.width / 2, box.top + box.height / 2) : [];
+      window.scrollTo({ left, top, behavior: 'instant' });
+      const reached = stack.indexOf(holder);
+      const stackClear = reached >= 0 && stack.slice(0, reached).every((hit) => element.contains(hit) || hit.contains(element));
+      return { backgroundWhole, stackClear };
+    };
     // For a color-contrast node axe left undecided, what the harness needs to decide it: axe's
     // reason and the ratio it asks for, the text's computed colour, whether any element on the way up
     // is translucent, and the first background painted behind it, as the browser computed them.
@@ -56,7 +75,7 @@ for (const route of JOB.routes) {
       for (let at = element; at !== null; at = at.parentElement) {
         const style = getComputedStyle(at);
         if (style.opacity !== '1') opaque = false;
-        if (style.backgroundImage !== 'none') return { background: style.backgroundImage, opaque };
+        if (style.backgroundImage !== 'none') return { background: style.backgroundImage, opaque, ...gradientFacts(element, at) };
         if (!/, 0\)$/.test(style.backgroundColor)) return { background: style.backgroundColor, opaque };
       }
       return { background: 'none', opaque };

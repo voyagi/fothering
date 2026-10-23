@@ -1,6 +1,7 @@
 // Contrast for page text axe-core leaves undecided because it sits on a CSS gradient: the first band
 // of every page fades from the sky into the ground. axe names the reason (bgGradient) and the ratio
-// the text needs, and the driver reads the text colour and the gradient as the browser computed them;
+// the text needs, and the driver reads the text colour and the gradient as the browser computed them,
+// with whether the gradient fills its element and whether anything else lies between the text and it;
 // this module decides from those readings, and refuses any reading it cannot read whole.
 
 export type Rgb = readonly [number, number, number];
@@ -12,6 +13,12 @@ export interface ContrastReading {
   readonly color?: string;
   readonly background?: string;
   readonly opaque?: boolean;
+  // The gradient's element keeps the default background size, repeat, position and clip, so the
+  // gradient covers its whole box.
+  readonly backgroundWhole?: boolean;
+  // Hit testing at the text's centre meets only the text, its own ancestors and then the gradient's
+  // element, so nothing from elsewhere on the page is painted between them.
+  readonly stackClear?: boolean;
 }
 
 export type GradientVerdict =
@@ -111,10 +118,12 @@ const neededRatio = (expected: string): number | null => {
 };
 
 // Decides a color-contrast node only when axe gave up because of a gradient and every reading is
-// whole: the ratio axe asks for, an opaque text colour with no transparency on the way up, and a
-// gradient whose every stop is read. Anything short of that stays undecided and fails the audit.
+// whole: the ratio axe asks for, an opaque text colour with no transparency on the way up, a
+// gradient whose every stop is read, that fills its element, with nothing else between it and the
+// text. Anything short of that stays undecided and fails the audit.
 export function gradientVerdict(reading: ContrastReading): GradientVerdict {
   if (reading.messageKey !== 'bgGradient' || reading.opaque !== true) return UNDECIDED;
+  if (reading.backgroundWhole !== true || reading.stackClear !== true) return UNDECIDED;
   const needed = neededRatio(stringField(reading.expected));
   const colour = opaqueRgb(stringField(reading.color));
   const stops = gradientStops(stringField(reading.background));
