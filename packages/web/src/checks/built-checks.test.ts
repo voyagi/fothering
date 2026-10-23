@@ -23,6 +23,7 @@ import {
   rightsSentence,
   statementParagraph,
   storedFieldRow,
+  REPLAY_CLOCK,
   REPLAY_LIMITS_STATE,
   REPLAY_VIEW,
   replayBody,
@@ -1397,6 +1398,21 @@ describe('the replay panels rule (AC-E7, AC-10 static half)', () => {
 
   it('fails a replay page with three step panels', () => {
     expect(replayTexts(replayPanelsRule, replayBody({ panels: [PANEL_1, PANEL_2, PANEL_3] }))).toEqual(['the replay page has 3 step panels, 4 expected']);
+  });
+
+  // The accessibility page records WCAG 4.1.3 passed through this role, so a redesign that drops it
+  // fails the build instead of leaving that result standing.
+  it('fails a step clock without the status role', () => {
+    const silent = REPLAY_CLOCK.replace(' role="status"', '');
+    expect(silent).not.toBe(REPLAY_CLOCK);
+    expect(replayTexts(replayPanelsRule, replayBody({ clock: silent }))).toEqual([
+      'the step clock does not carry role="status", so a screen reader is not told the step changed (WCAG 4.1.3)',
+    ]);
+  });
+
+  it('fails a replay page with no step clock or with two', () => {
+    expect(replayTexts(replayPanelsRule, replayBody({ clock: '' }))).toEqual(['the replay page has 0 step clocks (data-replay-clock), 1 expected']);
+    expect(replayTexts(replayPanelsRule, replayBody({ clock: REPLAY_CLOCK.repeat(2) }))).toEqual(['the replay page has 2 step clocks (data-replay-clock), 1 expected']);
   });
 });
 

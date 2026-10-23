@@ -205,14 +205,18 @@ export interface ReplayParts {
   readonly tag?: string;
   readonly caption?: string;
   readonly intro?: string;
+  readonly clock?: string;
   readonly extra?: string;
 }
+
+// The step clock as replay.astro renders it before the script fills it.
+export const REPLAY_CLOCK = '<p class="clock" role="status" data-replay-clock></p>';
 
 // The replay every replay rule passes, with any one part replaced.
 export function replayBody(parts: ReplayParts = {}, view: ReplayView = REPLAY_VIEW): string {
   const caption = parts.caption ?? `<p data-wordcount="caption">${view.caption}</p>`;
   return `<main data-replay><h1>${view.h1}</h1>${parts.intro ?? `<p>${view.intro}</p>`}${parts.summary ?? replaySummary(view)}`
-    + `<div>${parts.tag ?? replayTag(view)}${caption}</div>${(parts.panels ?? replayPanels(view)).join('')}${parts.extra ?? ''}</main>`;
+    + `<div>${parts.tag ?? replayTag(view)}${caption}</div>${parts.clock ?? REPLAY_CLOCK}${(parts.panels ?? replayPanels(view)).join('')}${parts.extra ?? ''}</main>`;
 }
 
 // The six R14 type steps, each used once through var(), the way the shared sheet uses them.

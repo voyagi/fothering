@@ -1040,10 +1040,24 @@ function panelFindings(page: BuiltPage): string[] {
   return texts;
 }
 
+const CLOCK = 'data-replay-clock';
+
+function clockFindings(page: BuiltPage): string[] {
+  const clocks: BuiltElement[] = [];
+  walk(page.root, (element) => {
+    if (element.attrs[CLOCK] !== undefined) clocks.push(element);
+  });
+  const [clock] = clocks;
+  if (clocks.length !== 1 || clock === undefined) return [`the replay page has ${String(clocks.length)} step clocks (${CLOCK}), 1 expected`];
+  return clock.attrs.role === 'status' ? [] : ['the step clock does not carry role="status", so a screen reader is not told the step changed (WCAG 4.1.3)'];
+}
+
 // AC-E7 and AC-10's static half: the four panels sit in the HTML in step order and nothing in the
-// markup hides them, so CSS alone decides what shows and removing the js class shows all four.
+// markup hides them, so CSS alone decides what shows and removing the js class shows all four. The
+// one step clock carries the status role, the method the accessibility page records WCAG 4.1.3
+// passed by (05-UAT check 4).
 export function replayPanelsRule(site: BuiltSite, _context: CheckContext): Finding[] {
-  return onReplay(site, 'replay-panels', panelFindings);
+  return onReplay(site, 'replay-panels', (page) => [...panelFindings(page), ...clockFindings(page)]);
 }
 
 // AC-63's use half. tokens.css itself writes var(--text-small) for the compact alias, which is a

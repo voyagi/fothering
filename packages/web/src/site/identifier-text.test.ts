@@ -55,4 +55,10 @@ describe('identifierWordParts (the Identifier word mode, UI-SPEC line 208)', () 
     expect(identifierWordParts('GetSES')).toEqual(['Get', 'SES']);
     expect(identifierWordParts('S3Bucket')).toEqual(['S3', 'Bucket']);
   });
+
+  // The same acronym rule longValueParts follows, so an acronym never glues to the word after it.
+  it('starts the capitalised word after an acronym', () => {
+    expect(identifierWordParts('SESConfigSet')).toEqual(['SES', 'Config', 'Set']);
+    expect(identifierWordParts('ses:GetVDMAttributes')).toEqual(['ses:', 'Get', 'VDM', 'Attributes']);
+  });
 });
