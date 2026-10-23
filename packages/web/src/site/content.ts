@@ -373,10 +373,10 @@ export const HAND_CHECK_CRITERIA: readonly HandCheckCriterion[] = Object.freeze(
   { number: '1.2.3', name: 'Audio Description or Media Alternative (Prerecorded)', result: 'not-applicable', how: 'Check that the site has no prerecorded video or audio.' },
   { number: '1.2.4', name: 'Captions (Live)', result: 'not-applicable', how: 'Check that the site has no live video or audio.' },
   { number: '1.2.5', name: 'Audio Description (Prerecorded)', result: 'not-applicable', how: 'Check that the site has no prerecorded video.' },
-  { number: '1.3.2', name: 'Meaningful Sequence', result: 'passed', how: 'Check that every page keeps its meaning when read with a screen reader and with styles turned off.' },
+  { number: '1.3.2', name: 'Meaningful Sequence', result: 'passed', how: 'Check that every page keeps its meaning when its text is read in source order.' },
   { number: '1.3.3', name: 'Sensory Characteristics', result: 'passed', how: 'Check that no instruction relies on shape, colour, size, position or sound alone.' },
   { number: '1.4.5', name: 'Images of Text', result: 'passed', how: "Check that every word, the readout's number included, is text and never a picture of text." },
-  { number: '1.4.10', name: 'Reflow', result: 'passed', how: 'Check that at 320 pixels wide and at the largest zoom no page scrolls sideways or cuts content off.' },
+  { number: '1.4.10', name: 'Reflow', result: 'passed', how: 'Check that at 320 pixels wide no page scrolls sideways or cuts content off.' },
   { number: '1.4.11', name: 'Non-text Contrast', result: 'passed', how: "Check that state marks, filled and outlined slots, the sail, the switch's choice and focus rings reach 3:1 per theme." },
   { number: '1.4.13', name: 'Content on Hover or Focus', result: 'not-applicable', how: 'Check that hovering over or focusing any link or control opens no tooltip or pop-up over the page.' },
   { number: '2.1.2', name: 'No Keyboard Trap', result: 'passed', how: 'Check that focus can leave every control when tabbing forwards and backwards with the keyboard alone.' },
@@ -401,7 +401,7 @@ export const HAND_CHECK_CRITERIA: readonly HandCheckCriterion[] = Object.freeze(
   { number: '3.3.4', name: 'Error Prevention (Legal, Financial, Data)', result: 'not-applicable', how: 'Check that nothing on the site submits data or commits a transaction.' },
   { number: '3.3.7', name: 'Redundant Entry', result: 'not-applicable', how: 'Check that the site asks for no information, so nothing has to be entered twice.' },
   { number: '3.3.8', name: 'Accessible Authentication (Minimum)', result: 'not-applicable', how: 'Check that the site has no sign-in or other authentication step.' },
-  { number: '4.1.3', name: 'Status Messages', result: 'passed', how: "Check that a screen reader announces the replay's step clock while focus stays on the step control." },
+  { number: '4.1.3', name: 'Status Messages', result: 'passed', how: "Check that the replay's step clock carries the status role while focus stays on the step control." },
 ]);
 
 // The state mark each result carries in the hand-check schedule: dashed for not yet checked, filled

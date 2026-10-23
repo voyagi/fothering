@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { LOG_API_NAMES, textSegments, type Segment } from './identifier-text.js';
+import { identifierWordParts, LOG_API_NAMES, longValueParts, textSegments, type Segment } from './identifier-text.js';
 
 const TERMS = { names: ['fothering-bulk', 'fothering-transactional', 'fothering-alerts'], values: ['batch=2026-10-14-b', 'batch=2026-10-14-a'] };
 // Each segment as kind:text, so a case reads as one string.
@@ -23,5 +23,36 @@ describe('textSegments (UI-SPEC lines 207 and 208)', () => {
 
   it('keeps backtick spans as code and leaves a longer token that only starts with a name alone', () => {
     expect(shown(textSegments('`GetConfigurationSet` reads it for fothering-bulky', TERMS))).toBe('code:GetConfigurationSet|text: reads it for fothering-bulky');
+  });
+});
+
+describe('longValueParts (the deploy schedules, Schedule.astro)', () => {
+  it('ends a part after a slash, a colon or a comma', () => {
+    expect(longValueParts('arn:aws:iam::<account>:role/FotheringRole,x')).toEqual(['arn:', 'aws:', 'iam:', ':', '<account>:', 'role/', 'Fothering', 'Role,', 'x']);
+  });
+
+  it('never splits inside a CDK hex hash, and starts the word after it on its own', () => {
+    expect(longValueParts('FotheringIngestEventsTable165FCE28Arn')).toEqual(['Fothering', 'Ingest', 'Events', 'Table165FCE28', 'Arn']);
+    expect(longValueParts('FotheringActionABCDEF12Arn')).toEqual(['Fothering', 'Action', 'ABCDEF12', 'Arn']);
+  });
+
+  it('keeps an acronym whole and starts the capitalised word after it', () => {
+    expect(longValueParts('SESConfigSet')).toEqual(['SES', 'Config', 'Set']);
+  });
+
+  it('gives back exactly the text it was given', () => {
+    for (const text of ['', 'a', 'arn:aws:s3:::bucket/key', 'FotheringIngestEventsTable165FCE28Arn', 'SESConfigSet', '1A2B3C4D']) expect(longValueParts(text).join('')).toBe(text);
+  });
+});
+
+describe('identifierWordParts (the Identifier word mode, UI-SPEC line 208)', () => {
+  it('starts a word at each capital after a small letter, and after the colon of an IAM action', () => {
+    expect(identifierWordParts('PutConfigurationSetSendingOptions')).toEqual(['Put', 'Configuration', 'Set', 'Sending', 'Options']);
+    expect(identifierWordParts('ses:GetConfigurationSetEventDestinations')).toEqual(['ses:', 'Get', 'Configuration', 'Set', 'Event', 'Destinations']);
+  });
+
+  it('keeps a run of capitals whole and starts a word after a digit', () => {
+    expect(identifierWordParts('GetSES')).toEqual(['Get', 'SES']);
+    expect(identifierWordParts('S3Bucket')).toEqual(['S3', 'Bucket']);
   });
 });

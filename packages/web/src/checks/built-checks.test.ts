@@ -416,6 +416,23 @@ describe('the readout number rule (WCAG 1.4.5, 05-UAT check 4)', () => {
       'the readout draws 412 but shows it as text nowhere a reader can see, only to a screen reader',
     ]);
   });
+
+  // The rule finds readouts by class, so a redesign that renamed a class would leave drawn digits it
+  // never reads; both shapes fail rather than pass with nothing checked.
+  it('fails drawn digits that sit outside any readout, as a renamed readout class would leave them', () => {
+    const loose = '<p class="window"><svg aria-hidden="true"><polygon class="seg lit"></polygon><polygon class="seg"></polygon></svg><span class="visually-hidden">412 sends</span></p>';
+    expect(caseFindings(readoutNumberRule, 'readout-number', [loose]).map((finding) => finding.text)).toEqual([
+      '2 drawn digit segments sit outside any readout, so no rule checks that their number is shown as text',
+    ]);
+  });
+
+  it('fails a readout that draws digits but gives a screen reader no number, as a renamed hidden sentence would', () => {
+    const unspoken = readout('<b>Sends</b>').replace('class="visually-hidden"', 'class="sr-only"');
+    expect(unspoken).not.toBe(readout('<b>Sends</b>'));
+    expect(caseFindings(readoutNumberRule, 'readout-number', [unspoken]).map((finding) => finding.text)).toEqual([
+      'the readout draws digits but no screen-reader sentence in it gives their number, so nothing checks that a reader can see it',
+    ]);
+  });
 });
 
 describe('the SES rate wording rule (AC-54, AC-E41, AC-P5)', () => {
