@@ -260,10 +260,12 @@ export function holdCheckWindow(holdEndMs: number, nowMs: number): HoldCheckWind
 /**
  * R2 and Pitfall 5: counts Send records accepted at or after the hold end, compared as integer epoch
  * milliseconds. A Delivery record says nothing about acceptance, and the fold keeps a count, never a record.
+ * The live store hands the fold raw items, so a Send whose mail time is not an integer counts too: it
+ * cannot be shown to precede the hold end, and only a count of 0 lets the check write closed.
  */
 export function holdFold(holdEndMs: number): LaneFold<number> {
   const acceptedAfterHold = (record: EventRecord): boolean =>
-    record.kind === 'send' && record.eventType === 'Send' && Number.isInteger(record.mailTimestampMs) && record.mailTimestampMs >= holdEndMs;
+    record.kind === 'send' && record.eventType === 'Send' && (!Number.isSafeInteger(record.mailTimestampMs) || record.mailTimestampMs >= holdEndMs);
   return { initial: 0, step: (count, page) => count + page.filter(acceptedAfterHold).length };
 }
 
@@ -292,13 +294,13 @@ export interface FreshnessInput {
   nowMs: number;
 }
 
-// AC-E10: an opening window end that is not a safe integer, or a lane that could not be read, fails
-// closed, since the lane it hides may hold the newer incident.
+// AC-E10: an opening window end that is not a safe integer from 0 up, or a lane that could not be read,
+// fails closed, since the lane it hides may hold the newer incident.
 function isNewerElsewhere(other: OtherLaneReading, recordToBucketMs: number): boolean {
   if (other.kind === 'no-open-incident') return false;
   if (other.kind === 'unreadable') return true;
   const { openingToBucketMs } = other;
-  return typeof openingToBucketMs !== 'number' || !Number.isSafeInteger(openingToBucketMs) || openingToBucketMs > recordToBucketMs;
+  return typeof openingToBucketMs !== 'number' || !Number.isSafeInteger(openingToBucketMs) || openingToBucketMs < 0 || openingToBucketMs > recordToBucketMs;
 }
 
 /**
