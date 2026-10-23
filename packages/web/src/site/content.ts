@@ -366,9 +366,10 @@ const NO_FORM = 'Check that the site has no form and no text input, only the thr
 // numbers and passed only after the fix that prints each number beside its digits. Every passed row
 // was checked again on the new look in Chromium on 2026-10-23 (320, 500 and 1440 px, Light, Dark and
 // Device), which moved the phone top bar's switch under the pages so focus follows the screen (2.4.3).
-// An empty slot (1.16:1), a bounce's white ring (2.35:1 on orange) and the switch's outer edge stay
-// under 3:1 and are not needed for 1.4.11: each column prints its event's kind and time above the
-// lanes, and the switch names its options in text.
+// For 1.4.11, a bounce's white ring (2.35:1 on orange, 1.93:1 on green) is edged in board colour,
+// which reaches 6.1:1 or more on every lane. An empty slot (1.16:1) and the switch's outer edge stay
+// under 3:1 and are not needed: an empty slot only marks where no event sits, every lit slot reaches
+// 3:1 against it, and the switch names its options in text.
 export const HAND_CHECK_CRITERIA: readonly HandCheckCriterion[] = Object.freeze([
   { number: '1.2.3', name: 'Audio Description or Media Alternative (Prerecorded)', result: 'not-applicable', how: 'Check that the site has no prerecorded video or audio.' },
   { number: '1.2.4', name: 'Captions (Live)', result: 'not-applicable', how: 'Check that the site has no live video or audio.' },

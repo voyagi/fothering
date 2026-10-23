@@ -287,8 +287,9 @@ code { font-size: var(--text-mono-value); font-weight: 500; }
 /* A slot with no event on this lane is a dim groove; an event lights the slot in the lane's colour. */
 .pad { position: relative; block-size: var(--pad-h); border: 2px solid transparent; border-radius: var(--r-pill); background: var(--board-slot); }
 .pad:is(.lit, .bounce) { background: var(--lane); box-shadow: var(--glow) color-mix(in srgb, var(--lane) 45%, transparent); }
-/* A bounce is a red core in a white ring on the lit slot, so it reads on every lane colour. */
-.pad.bounce::before { content: ""; position: absolute; left: 50%; top: 50%; inline-size: 12px; block-size: 12px; translate: -50% -50%; border: 2px solid var(--d-paper); border-radius: 50%; background: var(--stop); }
+/* A bounce is a red core in a white ring on the lit slot. The ring is edged in board colour, which
+   meets every lane colour at 3:1 where white alone does not (WCAG 1.4.11). */
+.pad.bounce::before { content: ""; position: absolute; left: 50%; top: 50%; inline-size: 12px; block-size: 12px; translate: -50% -50%; border: 2px solid var(--d-paper); border-radius: 50%; background: var(--stop); box-shadow: 0 0 0 2px var(--board); }
 /* On the closed lane, from the slot the pause took, every slot keeps its place as an outline; an event
    recorded there keeps a small dot inside. */
 .pad.muted { border-color: var(--lane); background: var(--board); box-shadow: none; }

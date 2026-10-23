@@ -386,7 +386,7 @@ Spacing follows 4, 8, 12, 16, 24, 32, 40, 48 and 64px.
 
 ## Elevation & Depth
 
-The page is flat. Depth is tonal and by overlap: the sky fade at the top of the first band, the night board as a dark screen on the light or navy page, notes set on the page with a strip of tape over their top edge, and in drawings, paper layers cut over one another. The only shadow-like effects are light, not lift: a lit slot on the board glows in its lane colour, and rings mark state (the white ring around a bounce core, the double ring around the current replay step). Nothing casts a drop shadow.
+The page is flat. Depth is tonal and by overlap: the sky fade at the top of the first band, the night board as a dark screen on the light or navy page, notes set on the page with a strip of tape over their top edge, and in drawings, paper layers cut over one another. The only shadow-like effects are light, not lift: a lit slot on the board glows in its lane colour, and rings mark state (the white ring around a bounce core, edged in board colour, the double ring around the current replay step). Nothing casts a drop shadow.
 
 ### Shadow Vocabulary
 - **Lane glow** (`box-shadow: 0 0 14px color-mix(in srgb, var(--lane) 45%, transparent)`): a lit or bounce slot on the board only.
@@ -422,7 +422,7 @@ A pill box of three segments, Device, Light and Dark, on the well with a 1px rul
 Top bar links are 600 small text in second ink, at least 44px tall, hover to ink with an underline. The current page is ink with a 3px sea-blue underline offset 8px, so the mark is not colour alone. The index at the foot of every page, on tint, names the project line, all five pages and where the replay data comes from.
 
 ### Night Board (signature)
-The product at work: a 16px dark screen in both themes. Each lane is a row of the lane's name in mono in its lane colour with its state under it, a run of pill slots (24px tall, 10px apart), and a state cell at the end. A slot with no event is a dim groove (board-slot). An event lights the slot in its lane colour with the lane glow. A bounce adds a 12px red core inside a 2px white ring, so it reads on every lane colour. Each slot is one event in the artifact, never invented traffic.
+The product at work: a 16px dark screen in both themes. Each lane is a row of the lane's name in mono in its lane colour with its state under it, a run of pill slots (24px tall, 10px apart), and a state cell at the end. A slot with no event is a dim groove (board-slot). An event lights the slot in its lane colour with the lane glow. A bounce adds a 12px red core inside a 2px white ring, edged by 2px of board colour so the mark meets every lane colour at 3:1 or more. Each slot is one event in the artifact, never invented traffic.
 
 On the closed lane, from the slot the pause took, every slot keeps its place as an outline in the lane colour, and an event there keeps a 6px dot inside. The sail (56 by 99px) stands on the boundary between the last lit slot and the first outlined one. The lane's state cell is a red pill with a small sail mark and the word Closed, set only after a hold check passed. Before that the lane reads Paused. The state cell is a state, never a control.
 
