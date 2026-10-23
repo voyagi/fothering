@@ -366,7 +366,7 @@ Contrast, computed with the WCAG 2.x relative luminance formula from the hex val
 
 The page is a column: a top bar at least 72px tall with a 1px rule under it, the first band under the sky fade, then full-width bands up to 1240px plus gutters, the close band on the landing, and the index at the foot. The gutter is clamp(16px, 4vw, 56px) and a band's block padding is clamp(56px, 8vw, 104px). Bands after the first are parted by a 1px rule.
 
-The top bar holds the wordmark with its small blue mark (a fothering sail on its two ropes) at the left, the three working pages (Replay, Deploy, Privacy and AI), and the theme switch in a pill box of its own at the far right. On phones (620px and below) the wordmark and switch share the first row and the pages take the second.
+The top bar holds the wordmark with its small blue mark (a fothering sail on its two ropes) at the left, the three working pages (Replay, Deploy, Privacy and AI), and the theme switch in a pill box of its own at the far right. On phones (620px and below) the wordmark takes the first row, the pages the second and the switch the third, the order keyboard focus takes.
 
 The landing's hero is a three-column grid: the headline spans all three, then the lede and both pills sit in a 640px centre column between the envelopes drawing on the left and the hull drawing on the right. At 1100px and below the left drawing goes and the hull moves under the actions. At 620px the hero aligns left.
 

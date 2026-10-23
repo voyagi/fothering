@@ -865,11 +865,12 @@ ul.site { display: grid; gap: var(--space-12); margin: 0; padding-left: var(--sp
   .sail { inline-size: 34px; block-size: 60px; }
 }
 @media (max-width: 620px) {
-  /* The wordmark and the theme switch share the first row, the pages take the second. */
+  /* The wordmark takes the first row, the pages the second and the theme switch the third, so focus
+     meets them in the order they show (WCAG 2.4.3). */
   .top-strip { gap: var(--space-sm) var(--space-12); }
   .wordmark { font-size: 1.25rem; }
   .theme label > span { min-inline-size: 52px; min-block-size: 36px; padding: 0 var(--space-sm); }
-  .top-strip nav { order: 3; flex-basis: 100%; }
+  .top-strip nav { flex-basis: 100%; }
   /* A long lede reads better from a straight left edge on a phone. */
   .hero { text-align: left; }
   .hero .landing-title { justify-self: start; }
