@@ -1,6 +1,6 @@
 import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
-import { commandText, commandUnits, type CommandUnit } from './command-units.js';
+import { commandText, commandUnits, tokenRuns, type CommandUnit } from './command-units.js';
 
 // Each line's units as one string, a unit's tokens joined by a plus sign, so a case reads whole.
 const shown = (lines: readonly (readonly CommandUnit[])[]): string[] => lines.map((units) => units.map((unit) => unit.join('+')).join(' | '));
@@ -24,5 +24,23 @@ describe('commandUnits (UI-SPEC line 209, the 05-12 finish review)', () => {
     const command = fc.array(fc.array(token, { minLength: 1, maxLength: 6 }), { minLength: 1, maxLength: 3 })
       .map((lines) => lines.map((tokens) => tokens.join(' ')).join('\n'));
     fc.assert(fc.property(command, (text) => commandText(commandUnits(text)) === text));
+  });
+});
+
+describe('tokenRuns (UAT 05 check 1, the deploy sheet at 1440 px)', () => {
+  it('ends a run after each colon and equals sign inside a token, so a stack parameter breaks between its parts', () => {
+    expect(tokenRuns('FotheringAction:OperatorAddress=<address>')).toEqual(['FotheringAction:', 'OperatorAddress=', '<address>']);
+    expect(tokenRuns('fothering:live=live')).toEqual(['fothering:', 'live=', 'live']);
+  });
+
+  it('leaves a token with no inner colon or equals sign whole, a trailing one included', () => {
+    expect(tokenRuns('--parameters')).toEqual(['--parameters']);
+    expect(tokenRuns('eu-central-1')).toEqual(['eu-central-1']);
+    expect(tokenRuns('stack:')).toEqual(['stack:']);
+    expect(tokenRuns('key=')).toEqual(['key=']);
+  });
+
+  it('gives back exactly the token it was given', () => {
+    fc.assert(fc.property(fc.stringMatching(/^[a-z:=<>-]{1,12}$/), (token) => tokenRuns(token).join('') === token));
   });
 });

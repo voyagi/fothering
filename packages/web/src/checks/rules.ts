@@ -22,6 +22,7 @@ import {
   type ForbiddenClaim,
   type Statement,
 } from '../site/content.js';
+import { tokenRuns } from '../site/command-units.js';
 import { PROVENANCE_LABELS } from '../site/labels.js';
 import { hasPauseGrant, permissionKey, permissionSchedules } from '../site/permissions-view.js';
 import type { ReplayView } from '../site/replay-view.js';
@@ -1091,7 +1092,9 @@ export function identifierBreakRule(site: BuiltSite, _context: CheckContext): Fi
 // UI-SPEC line 209 and the 05-12 finish review: a command block wraps only between its units, the
 // spans directly inside its code element, and a flag with the value after it is one unit. Between
 // units and inside a pair stands one space or a line break and nothing else, and nothing sits
-// outside the code element, so the copied text is the command itself.
+// outside the code element, so the copied text is the command itself. A token offers a line end
+// after each colon and equals sign inside it (05-UAT check 1), so a narrow step cuts a stack
+// parameter there.
 const SEPARATOR = /^[ \n]$/;
 const isLoneToken = (text: string): boolean => text !== '' && !/\s/.test(text);
 
@@ -1115,15 +1118,33 @@ function splitPairFindings(code: BuiltElement): string[] {
   return texts;
 }
 
+// A token's runs as rendered: the text between its <wbr>s.
+function renderedRuns(token: BuiltElement): string[] {
+  const runs = [''];
+  for (const child of token.children) {
+    if (typeof child !== 'string' && child.tag === 'wbr') runs.push('');
+    else runs[runs.length - 1] += typeof child === 'string' ? child : rawText(child);
+  }
+  return runs;
+}
+
+function tokenBreakFindings(token: BuiltElement): string[] {
+  const text = rawText(token);
+  return renderedRuns(token).join('\n') === tokenRuns(text).join('\n') ? [] : [`the command token ${text} offers no line end after a colon or equals sign inside it, so a narrow column cuts it mid-word`];
+}
+
 function commandBlockFindings(pre: BuiltElement): string[] {
   const codes = pre.children.filter((child): child is BuiltElement => typeof child !== 'string' && child.tag === 'code');
   const outside = pre.children.filter((child) => typeof child === 'string' || child.tag !== 'code').map((child) => (typeof child === 'string' ? child : rawText(child))).join('');
   const texts = outside === '' ? [] : [`the command block holds ${JSON.stringify(outside)} outside its code element, so the copied text is not the command`];
   for (const code of codes) {
     texts.push(...separatorFindings(code), ...splitPairFindings(code));
-    // A pair is a unit holding token spans; a single token's span holds only its text.
+    // A pair is a unit holding token spans; a single token's span holds its text and its <wbr>s.
     for (const unit of code.children) {
-      if (typeof unit !== 'string' && unit.children.some((child) => typeof child !== 'string')) texts.push(...separatorFindings(unit));
+      if (typeof unit === 'string') continue;
+      const tokens = unit.children.filter((child): child is BuiltElement => typeof child !== 'string' && child.tag === 'span');
+      if (tokens.length > 0) texts.push(...separatorFindings(unit));
+      for (const token of tokens.length > 0 ? tokens : [unit]) texts.push(...tokenBreakFindings(token));
     }
   }
   return texts;

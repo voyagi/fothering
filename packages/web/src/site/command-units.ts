@@ -21,6 +21,14 @@ function lineUnits(tokens: readonly string[]): CommandUnit[] {
   return units;
 }
 
+// A token wider than its column otherwise breaks wherever the column runs out (FotheringAction:
+// OperatorAddre / ss in a quarter-width deploy step at 1440 px). A run ends after each inner colon
+// and equals sign, so a line can end between a stack, its parameter and the value. Chromium already
+// breaks before the < of <address>; the explicit run keeps that in a browser that does not.
+export function tokenRuns(token: string): string[] {
+  return token.split(/(?<=[:=])(?=.)/);
+}
+
 export function commandUnits(command: string): CommandUnit[][] {
   return command.split('\n').map((line) => lineUnits(line.split(' ')));
 }

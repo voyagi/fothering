@@ -3,11 +3,11 @@
 // unit is one argument, or a flag with the value after it (-c fothering:live=live), so a line never
 // ends inside --sending-enabled after its hyphens nor between a flag and its value. A unit moves to
 // the next line whole while it fits; only a pair wider than the column breaks, at its own space, and
-// only an argument wider than the column breaks inside itself, as the last resort. The command-pair
-// built check holds the rendered markup to this.
+// an argument wider than the column ends a line after a colon or equals sign inside it, and breaks
+// anywhere else only as the last resort. The command-pair built check holds the rendered markup to this.
 // A note (the README's trailing comment) sits under the block, never inside it, so what is copied
 // from the block is exactly the command line.
-import { commandUnits } from '../site/command-units.js';
+import { commandUnits, tokenRuns } from '../site/command-units.js';
 
 interface Props {
   command: string;
@@ -16,11 +16,11 @@ interface Props {
 }
 
 const { command, provenance, note } = Astro.props;
-const lines = commandUnits(command);
+const lines = commandUnits(command).map((units) => units.map((unit) => unit.map(tokenRuns)));
 ---
 <pre class="command" data-provenance={provenance}><code>{lines.map((units, lineIndex) => (
   <Fragment>{lineIndex > 0 && '\n'}{units.map((unit, index) => (
-    <Fragment>{index > 0 && ' '}{unit.length === 1 ? <span>{unit[0]}</span> : <span>{unit.map((token, tokenIndex) => <Fragment>{tokenIndex > 0 && ' '}<span>{token}</span></Fragment>)}</span>}</Fragment>
+    <Fragment>{index > 0 && ' '}{unit.length === 1 ? <span>{unit[0]?.map((run, runIndex) => <Fragment>{runIndex > 0 && <wbr />}{run}</Fragment>)}</span> : <span>{unit.map((token, tokenIndex) => <Fragment>{tokenIndex > 0 && ' '}<span>{token.map((run, runIndex) => <Fragment>{runIndex > 0 && <wbr />}{run}</Fragment>)}</span></Fragment>)}</span>}</Fragment>
   ))}</Fragment>
 ))}</code></pre>
 {note !== undefined && note !== null && <p class="command-note">{note}</p>}

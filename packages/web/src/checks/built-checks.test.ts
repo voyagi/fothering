@@ -53,6 +53,7 @@ import {
   REPLY_PROMISE_PHRASES,
   type Statement,
 } from '../site/content.js';
+import { tokenRuns } from '../site/command-units.js';
 import { PROVENANCE_LABELS } from '../site/labels.js';
 import { denyRows, hasPauseGrant, permissionKey, permissionSchedules } from '../site/permissions-view.js';
 import { removedByText } from '../site/repo-facts.js';
@@ -349,8 +350,10 @@ describe('the identifier break rule (AC-65, AC-E55, UI-SPEC line 208)', () => {
 });
 
 // A command block as the CommandBlock component renders it: each unit a span directly in the code
-// element, a flag and its value one span holding the two token spans.
-const unitSpan = (unit: string): string => (unit.includes(' ') ? `<span>${unit.split(' ').map((token) => `<span>${token}</span>`).join(' ')}</span>` : `<span>${unit}</span>`);
+// element, a flag and its value one span holding the two token spans, a line end offered after each
+// colon inside a token.
+const tokenText = (token: string): string => tokenRuns(token).join('<wbr>');
+const unitSpan = (unit: string): string => (unit.includes(' ') ? `<span>${unit.split(' ').map((token) => `<span>${tokenText(token)}</span>`).join(' ')}</span>` : `<span>${tokenText(unit)}</span>`);
 const commandMarkup = (lines: readonly (readonly string[])[]): string => `<pre class="command"><code>${lines.map((units) => units.map(unitSpan).join(' ')).join('\n')}</code></pre>`;
 const commandPairFindings = (bodies: readonly string[]): string[] => runBuiltChecks(casesSite(bodies), context)
   .filter((finding) => String(finding.rule) === 'command-pair').map((finding) => `${finding.route} ${finding.text}`);
@@ -377,6 +380,20 @@ describe('the command pair rule (UI-SPEC line 209, the 05-12 finish review)', ()
       '/case-0/ the command block holds "  " between its units, where only one space or a line break belongs, so the copied text is not the command',
       '/case-1/ the command block holds "," between its units, where only one space or a line break belongs, so the copied text is not the command',
       '/case-2/ the command block holds "#" outside its code element, so the copied text is not the command',
+    ]);
+  });
+
+  it('passes a token that offers a line end after its colon and equals sign, in a pair and standing alone', () => {
+    expect(commandPairFindings([commandMarkup([['npx', 'cdk', 'deploy', 'D', '--parameters D:OperatorAddress=&lt;address&gt;'], ['fothering:live=live']])])).toEqual([]);
+  });
+
+  it('fails a token with no line end after a colon or equals sign, as the deploy sheet rendered the stack parameters at 1440 px', () => {
+    const bare = '<pre class="command"><code><span><span>--parameters</span> <span>D:OperatorAddress=&lt;address&gt;</span></span> <span>a:b</span></code></pre>';
+    const half = '<pre class="command"><code><span>D:<wbr>OperatorAddress=&lt;address&gt;</span></code></pre>';
+    expect(commandPairFindings([bare, half])).toEqual([
+      '/case-0/ the command token D:OperatorAddress=<address> offers no line end after a colon or equals sign inside it, so a narrow column cuts it mid-word',
+      '/case-0/ the command token a:b offers no line end after a colon or equals sign inside it, so a narrow column cuts it mid-word',
+      '/case-1/ the command token D:OperatorAddress=<address> offers no line end after a colon or equals sign inside it, so a narrow column cuts it mid-word',
     ]);
   });
 });
