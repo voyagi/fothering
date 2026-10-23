@@ -125,8 +125,8 @@ export function readDeployCommands(readmeText: string): DeployCommand[] {
   const { blocks, open } = shBlocks(deploySectionLines(readmeText));
   if (open) throw new Error(`${README_PREFIX}: a sh block is not closed. Close it with a line holding three backticks.`);
   const commands = blocks
-    .flatMap(joinContinuations)
-    .map(commandOf)
+    .flatMap((block) => joinContinuations(block))
+    .map((line) => commandOf(line))
     .filter((command): command is DeployCommand => command !== undefined);
   if (commands.length === 0) throw new Error(`${README_PREFIX}: no fenced sh block with a command. Put the deploy commands in sh blocks.`);
   return commands;

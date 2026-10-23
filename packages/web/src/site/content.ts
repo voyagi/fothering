@@ -371,7 +371,7 @@ export const HAND_CHECK_CRITERIA: readonly HandCheckCriterion[] = Object.freeze(
   { number: '1.3.2', name: 'Meaningful Sequence', result: 'passed', how: 'Check that every page keeps its meaning when its text is read in source order.' },
   { number: '1.3.3', name: 'Sensory Characteristics', result: 'passed', how: 'Check that no instruction relies on shape, colour, size, position or sound alone.' },
   { number: '1.4.5', name: 'Images of Text', result: 'passed', how: "Check that every word is text and that the readout's drawn digits are also given as text beside them." },
-  { number: '1.4.10', name: 'Reflow', result: 'passed', how: 'Check that at 320 pixels wide and at the largest zoom no page scrolls sideways or cuts content off.' },
+  { number: '1.4.10', name: 'Reflow', result: 'passed', how: 'Check that at 320 pixels wide no page scrolls sideways or cuts content off.' },
   { number: '1.4.11', name: 'Non-text Contrast', result: 'passed', how: 'Check that the state marks, keys, lamps, theme switch and focus rings meet the contrast minimum in Light and Dark.' },
   { number: '1.4.13', name: 'Content on Hover or Focus', result: 'not-applicable', how: 'Check that hovering over or focusing any link or control opens no tooltip or pop-up over the page.' },
   { number: '2.1.2', name: 'No Keyboard Trap', result: 'passed', how: 'Check that focus can leave every control when tabbing forwards and backwards with the keyboard alone.' },
