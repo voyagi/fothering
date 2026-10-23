@@ -209,7 +209,8 @@ export interface ReplayParts {
   readonly extra?: string;
 }
 
-// The step clock as replay.astro renders it before the script fills it.
+// The step clock as replay.astro renders it, its step text left out: the rule reads only the
+// marker and the role.
 export const REPLAY_CLOCK = '<p class="clock" role="status" data-replay-clock></p>';
 
 // The replay every replay rule passes, with any one part replaced.
