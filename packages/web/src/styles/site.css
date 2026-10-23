@@ -308,14 +308,30 @@ code { font-size: var(--text-mono-value); font-weight: 500; }
 .sail .rope { fill: none; stroke: var(--board-ink); stroke-width: 1.5; stroke-linecap: round; }
 .sail .stitch { fill: none; stroke: var(--d-ink); stroke-width: 1.2; stroke-dasharray: 3 3; }
 .sail .edge { fill: none; stroke: var(--stop); stroke-width: 2.5; stroke-linejoin: round; }
+/* The sail's place: one class per board width and one per column, through the 64 columns of four full
+   steps (replay-view.ts MAX_BANK_SPAN), since the CSP refuses inline styles. */
 .of-1 { --count: 1; } .of-2 { --count: 2; } .of-3 { --count: 3; } .of-4 { --count: 4; } .of-5 { --count: 5; } .of-6 { --count: 6; }
 .of-7 { --count: 7; } .of-8 { --count: 8; } .of-9 { --count: 9; } .of-10 { --count: 10; } .of-11 { --count: 11; } .of-12 { --count: 12; }
 .of-13 { --count: 13; } .of-14 { --count: 14; } .of-15 { --count: 15; } .of-16 { --count: 16; } .of-17 { --count: 17; } .of-18 { --count: 18; }
 .of-19 { --count: 19; } .of-20 { --count: 20; } .of-21 { --count: 21; } .of-22 { --count: 22; } .of-23 { --count: 23; } .of-24 { --count: 24; }
+.of-25 { --count: 25; } .of-26 { --count: 26; } .of-27 { --count: 27; } .of-28 { --count: 28; } .of-29 { --count: 29; } .of-30 { --count: 30; }
+.of-31 { --count: 31; } .of-32 { --count: 32; } .of-33 { --count: 33; } .of-34 { --count: 34; } .of-35 { --count: 35; } .of-36 { --count: 36; }
+.of-37 { --count: 37; } .of-38 { --count: 38; } .of-39 { --count: 39; } .of-40 { --count: 40; } .of-41 { --count: 41; } .of-42 { --count: 42; }
+.of-43 { --count: 43; } .of-44 { --count: 44; } .of-45 { --count: 45; } .of-46 { --count: 46; } .of-47 { --count: 47; } .of-48 { --count: 48; }
+.of-49 { --count: 49; } .of-50 { --count: 50; } .of-51 { --count: 51; } .of-52 { --count: 52; } .of-53 { --count: 53; } .of-54 { --count: 54; }
+.of-55 { --count: 55; } .of-56 { --count: 56; } .of-57 { --count: 57; } .of-58 { --count: 58; } .of-59 { --count: 59; } .of-60 { --count: 60; }
+.of-61 { --count: 61; } .of-62 { --count: 62; } .of-63 { --count: 63; } .of-64 { --count: 64; }
 .c-0 { --col: 0; } .c-1 { --col: 1; } .c-2 { --col: 2; } .c-3 { --col: 3; } .c-4 { --col: 4; } .c-5 { --col: 5; } .c-6 { --col: 6; }
 .c-7 { --col: 7; } .c-8 { --col: 8; } .c-9 { --col: 9; } .c-10 { --col: 10; } .c-11 { --col: 11; } .c-12 { --col: 12; }
 .c-13 { --col: 13; } .c-14 { --col: 14; } .c-15 { --col: 15; } .c-16 { --col: 16; } .c-17 { --col: 17; } .c-18 { --col: 18; }
-.c-19 { --col: 19; } .c-20 { --col: 20; } .c-21 { --col: 21; } .c-22 { --col: 22; } .c-23 { --col: 23; }
+.c-19 { --col: 19; } .c-20 { --col: 20; } .c-21 { --col: 21; } .c-22 { --col: 22; } .c-23 { --col: 23; } .c-24 { --col: 24; }
+.c-25 { --col: 25; } .c-26 { --col: 26; } .c-27 { --col: 27; } .c-28 { --col: 28; } .c-29 { --col: 29; } .c-30 { --col: 30; }
+.c-31 { --col: 31; } .c-32 { --col: 32; } .c-33 { --col: 33; } .c-34 { --col: 34; } .c-35 { --col: 35; } .c-36 { --col: 36; }
+.c-37 { --col: 37; } .c-38 { --col: 38; } .c-39 { --col: 39; } .c-40 { --col: 40; } .c-41 { --col: 41; } .c-42 { --col: 42; }
+.c-43 { --col: 43; } .c-44 { --col: 44; } .c-45 { --col: 45; } .c-46 { --col: 46; } .c-47 { --col: 47; } .c-48 { --col: 48; }
+.c-49 { --col: 49; } .c-50 { --col: 50; } .c-51 { --col: 51; } .c-52 { --col: 52; } .c-53 { --col: 53; } .c-54 { --col: 54; }
+.c-55 { --col: 55; } .c-56 { --col: 56; } .c-57 { --col: 57; } .c-58 { --col: 58; } .c-59 { --col: 59; } .c-60 { --col: 60; }
+.c-61 { --col: 61; } .c-62 { --col: 62; } .c-63 { --col: 63; }
 /* Each step's label spans its slots under one rule, and wraps inside that width. */
 .track-banks .pads > span { display: flex; flex-wrap: wrap; align-content: start; gap: 0 var(--space-sm); padding-top: var(--space-sm); border-top: 2px solid var(--bank, var(--board-rule)); font: 600 var(--text-tag)/1.35 var(--font-text); color: var(--board-ink); }
 .cols-1 { grid-column: span 1; } .cols-2 { grid-column: span 2; } .cols-3 { grid-column: span 3; } .cols-4 { grid-column: span 4; }

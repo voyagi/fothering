@@ -7,6 +7,7 @@ import { afterAll, describe, expect, it } from 'vitest';
 import { PROVENANCE_LABELS } from './labels.js';
 import { readRepoText, repoRoot } from './repo-facts.js';
 import { buildReplayView, fixtureFindings, loadReplayArtifact, MAX_BANK_SPAN } from './replay-view.js';
+import { buildTrackGrid } from './track-grid.js';
 
 const WEB_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const REPO_ROOT = resolve(WEB_ROOT, '../..');
@@ -404,11 +405,11 @@ describe('buildReplayView refusals', () => {
   });
 
   // A step filled to a given size with copies of its own last event, which keeps the time order.
-  const withStepSize = (step: number, size: number): ReplayArtifact => {
-    const own = artifact.events.filter((event) => event.step === step);
+  const withStepSize = (step: number, size: number, base: ReplayArtifact = artifact): ReplayArtifact => {
+    const own = base.events.filter((event) => event.step === step);
     const last = own.at(-1);
     if (last === undefined) throw new Error(`the shipped artifact has no step ${String(step)} event`);
-    return { ...artifact, events: [...artifact.events, ...Array.from({ length: size - own.length }, () => ({ ...last }))] };
+    return { ...base, events: [...base.events, ...Array.from({ length: size - own.length }, () => ({ ...last }))] };
   };
 
   it('builds a step of exactly as many events as a step key spans, and refuses one more by name', () => {
@@ -422,6 +423,19 @@ describe('buildReplayView refusals', () => {
     const css = readFileSync(join(WEB_ROOT, 'src', 'styles', 'site.css'), 'utf8');
     expect(css).toContain(`.cols-${String(MAX_BANK_SPAN)} { grid-column: span ${String(MAX_BANK_SPAN)}; }`);
     expect(css).not.toContain(`.cols-${String(MAX_BANK_SPAN + 1)} `);
+  });
+
+  // Every step at its cap is the widest board the replay builds. The sail stands on one column of it,
+  // placed by one class per board width and one per column, since the page's CSP refuses inline styles.
+  it('carries a sail position for every column of the widest board the replay builds', () => {
+    const widest = [1, 2, 3, 4].reduce((candidate, step) => withStepSize(step, MAX_BANK_SPAN, candidate), artifact);
+    expect(buildReplayView(widest).eventLog.rows).toHaveLength(4 * MAX_BANK_SPAN);
+    const columns = buildTrackGrid(widest, 4).columns.length;
+    expect(columns).toBe(4 * MAX_BANK_SPAN);
+    const css = readFileSync(join(WEB_ROOT, 'src', 'styles', 'site.css'), 'utf8');
+    const widths = Array.from({ length: columns }, (_, index) => `.of-${String(index + 1)} { --count: ${String(index + 1)}; }`);
+    const places = Array.from({ length: columns }, (_, index) => `.c-${String(index)} { --col: ${String(index)}; }`);
+    expect([...widths, ...places].filter((rule) => !css.includes(rule))).toEqual([]);
   });
 });
 

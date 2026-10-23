@@ -153,7 +153,8 @@ function refuse(path: string, problem: string, fix: string): never {
 const STEP_NUMBERS = [1, 2, 3, 4] as const;
 // The stylesheet carries column span classes up to .cols-16, so a step's label or key spans at most
 // this many pads. The landing continues a longer bank in single cells; the replay's step keys are one
-// list item a step, so the replay refuses a step it could not draw under its own pads.
+// list item a step, so the replay refuses a step it could not draw under its own pads. The sail's
+// position classes reach the board of four full steps, 64 columns (replay.test.ts pins both).
 export const MAX_BANK_SPAN = 16;
 const STEP_LABELS = ['Bounces arrive', 'Cause named', 'Paused, read back', 'Reopened by command'] as const;
 const DIMENSION_LABELS: Record<EvidenceRow['dimension'], string> = { tag: 'Tag', provider: 'Provider', configuration: 'Configuration' };
