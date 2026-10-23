@@ -25,7 +25,7 @@ export const PROVENANCE_LABELS = {
     titleBlockStatus: 'fixture',
     limitsState: 'Fixture',
     limitsMark: 'later',
-    limitsNote: "Built from AWS's documented event examples. A live run replaces it.",
+    limitsNote: "Built from AWS's documented event examples, not from the live run.",
     timeWording: 'Times are illustrative.',
   },
   generated: {
@@ -34,7 +34,7 @@ export const PROVENANCE_LABELS = {
     titleBlockStatus: 'fixture',
     limitsState: 'Fixture',
     limitsMark: 'later',
-    limitsNote: "Generated for this site in the shape of AWS's documented SES events. A live run replaces it.",
+    limitsNote: "Generated for this site in the shape of AWS's documented SES events, not from the live run.",
     timeWording: 'Times are illustrative.',
   },
   'simulator-captured': {

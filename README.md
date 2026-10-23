@@ -3,7 +3,8 @@
 When one stream of the mail you send through Amazon SES starts bouncing, Fothering works out why,
 closes that one lane, and asks you by email before it opens again.
 
-Status: early build, not yet runnable end to end.
+Status: hackathon build. It ran end to end on 22 October 2026 in a real AWS account, with the
+test mail sent to the SES mailbox simulator. It has not been tried on real recipients.
 
 ## Requirements
 
