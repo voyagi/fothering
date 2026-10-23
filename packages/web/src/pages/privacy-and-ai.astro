@@ -102,7 +102,7 @@ const INTERLOCK_DESC = 'Stored events, which hold no addresses, go to detection 
           {daysDigits.digits.map((digit) => <g transform={digit.transform}>{digit.segments.map((segment) => <polygon class={segment.lit ? 'seg lit' : 'seg'} points={segment.points} />)}</g>)}
         </svg>
         <span class="visually-hidden">Each event record expires {days} days after its mail was sent</span>
-        <span class="unit" aria-hidden="true"><b>Days</b><span>until a record expires</span></span>
+        <span class="unit" aria-hidden="true"><b>{days} days</b><span>until a record expires</span></span>
       </p>
       <dl>
         <div>

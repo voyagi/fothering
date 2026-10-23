@@ -89,6 +89,7 @@ export const RULE_IDS = Object.freeze([
   'model-id',
   'accessibility-page',
   'accessibility-statement',
+  'readout-number',
 ] as const);
 
 export type RuleId = (typeof RULE_IDS)[number];
@@ -1694,6 +1695,32 @@ export function checkFileBudget(files: readonly { readonly path: string; readonl
   return violations;
 }
 
+// WCAG 1.4.5 (05-UAT check 4): a readout's digits are drawn segments, an image of text, so the number
+// they show is also printed in that readout where a reader can see it. The sentence a screen reader is
+// given does not count: it is clipped to one pixel.
+function shownText(element: BuiltElement): string {
+  if ((element.attrs.class ?? '').split(/\s+/).includes('visually-hidden')) return '';
+  return element.children.map((child) => (typeof child === 'string' ? child : shownText(child))).join(' ');
+}
+
+export function readoutNumberRule(site: BuiltSite, _context: CheckContext): Finding[] {
+  return site.pages.flatMap((page) => {
+    const texts: string[] = [];
+    walk(page.root, (element) => {
+      if (!(element.attrs.class ?? '').split(/\s+/).includes('readout')) return;
+      const spoken: string[] = [];
+      walk(element, (inner) => {
+        if ((inner.attrs.class ?? '').split(/\s+/).includes('visually-hidden')) spoken.push(textOf(inner));
+      });
+      const shown = shownText(element);
+      for (const number of spoken.flatMap((text) => text.match(/\d+/g) ?? [])) {
+        if (!new RegExp(`(?<!\\d)${number}(?!\\d)`).test(shown)) texts.push(`the readout draws ${number} but shows it as text nowhere a reader can see, only to a screen reader`);
+      }
+    });
+    return texts.map((text) => ({ rule: 'readout-number' as const, route: page.route, text }));
+  });
+}
+
 type Rule = (site: BuiltSite, context: CheckContext) => Finding[];
 
 const RULES: Readonly<Record<RuleId, Rule>> = {
@@ -1752,6 +1779,7 @@ const RULES: Readonly<Record<RuleId, Rule>> = {
   'model-id': modelIdRule,
   'accessibility-page': accessibilityPageRule,
   'accessibility-statement': accessibilityStatementRule,
+  'readout-number': readoutNumberRule,
 };
 
 // Every rule runs over the whole site and every hit is kept, so one report names them all.

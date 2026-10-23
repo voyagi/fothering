@@ -101,7 +101,7 @@ const logRows = view.eventLog.rows.map((row) => ({
             {sends.digits.map((digit) => <g transform={digit.transform}>{digit.segments.map((segment) => <polygon class={segment.lit ? 'seg lit' : 'seg'} points={segment.points} />)}</g>)}
           </svg>
           <span class="visually-hidden">{artifact.window.sends} sends on {artifact.closedLane}</span>
-          <span class="unit" aria-hidden="true"><b>Sends</b><Identifier value={artifact.closedLane} /></span>
+          <span class="unit" aria-hidden="true"><b>{artifact.window.sends} sends</b><Identifier value={artifact.closedLane} /></span>
         </p>
         <dl>
           <div>

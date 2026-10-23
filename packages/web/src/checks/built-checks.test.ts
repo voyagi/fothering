@@ -65,6 +65,7 @@ import {
   accessibilityPageRule,
   accessibilityStatementRule,
   bannedNameRule,
+  readoutNumberRule,
   checkFileBudget,
   consoleDeleteRule,
   countReplayWords,
@@ -271,12 +272,12 @@ describe('runBuiltChecks', () => {
     expect([...rules].filter((rule) => ['page-metadata', 'sitemap', 'robots'].includes(rule)).sort()).toEqual(['page-metadata', 'robots', 'sitemap']);
   });
 
-  it('holds exactly the fifty-five rule ids the plans name', () => {
+  it('holds exactly the fifty-six rule ids the plans and the 05-UAT hand check name', () => {
     expect([...RULE_IDS].sort()).toEqual([
       'accessibility-page', 'accessibility-statement', 'banned-name', 'command-pair', 'console-delete', 'dash', 'deploy-commands', 'deploy-deny', 'deploy-notice', 'deploy-page', 'deploy-permissions', 'deploy-resources',
       'exact-30-days', 'forget-command', 'forms-cookies-analytics', 'head-script-order', 'identifier-break', 'landing-sections', 'lede', 'limits',
       'model-id', 'model-role-forbidden', 'model-role-present', 'model-role-required',
-      'no-delete-control', 'no-ellipsis', 'no-inline-style', 'one-caller', 'page-metadata', 'pre-r6-words', 'privacy-page', 'privacy-statements', 'provenance-wording', 'provider-label', 'region-claim', 'replay-lanes',
+      'no-delete-control', 'no-ellipsis', 'no-inline-style', 'one-caller', 'page-metadata', 'pre-r6-words', 'privacy-page', 'privacy-statements', 'provenance-wording', 'provider-label', 'readout-number', 'region-claim', 'replay-lanes',
       'replay-page', 'replay-panels', 'replay-summary', 'replay-word-count', 'reply-promise', 'robots', 'script-hash',
       'ses-percentage-link', 'ses-rate-wording', 'sitemap', 'six-rights', 'stored-field-rows', 'switch-markup', 'theme-token-blocks', 'third-party-reference', 'type-token-declared',
       'type-token-use', 'unit-figure', 'website-facts',
@@ -394,6 +395,25 @@ describe('the command pair rule (UI-SPEC line 209, the 05-12 finish review)', ()
       '/case-0/ the command token D:OperatorAddress=<address> offers no line end after a colon or equals sign inside it, so a narrow column cuts it mid-word',
       '/case-0/ the command token a:b offers no line end after a colon or equals sign inside it, so a narrow column cuts it mid-word',
       '/case-1/ the command token D:OperatorAddress=<address> offers no line end after a colon or equals sign inside it, so a narrow column cuts it mid-word',
+    ]);
+  });
+});
+
+// A readout as the pages render it: drawn digits, the sentence a screen reader is given, and the
+// unit beside the digits, hidden from the screen reader because the sentence already says it.
+const readout = (unit: string, head = 'Window'): string => `<aside class="readout"><p class="readout-head">${head}</p><p class="window"><svg aria-hidden="true"><polygon class="seg lit"></polygon></svg>`
+  + `<span class="visually-hidden">412 sends on fothering-bulk</span><span class="unit" aria-hidden="true">${unit}</span></p></aside>`;
+
+describe('the readout number rule (WCAG 1.4.5, 05-UAT check 4)', () => {
+  it('passes a number printed beside its drawn digits or in the readout head, as the 404 page prints its status', () => {
+    expect(readoutNumberRule(casesSite([readout('<b>412 sends</b>'), readout('<b>Status code</b>', '<code>412 Not Found</code>')]), context)).toEqual([]);
+  });
+
+  it('fails a number only drawn and given to the screen reader, as the landing showed 412 sends', () => {
+    const findings = caseFindings(readoutNumberRule, 'readout-number', [readout('<b>Sends</b>'), readout('<b>Sends</b>', 'Window 13:01 to 14:12, 4120 events')]);
+    expect(findings.map((finding) => finding.text)).toEqual([
+      'the readout draws 412 but shows it as text nowhere a reader can see, only to a screen reader',
+      'the readout draws 412 but shows it as text nowhere a reader can see, only to a screen reader',
     ]);
   });
 });
