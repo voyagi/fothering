@@ -37,7 +37,10 @@
     "docs/architecture.md",
     "docs/architecture.mmd",
     "docs/architecture.png",
+    "docs/website-record-of-processing.md",
     "examples/demo-transcript.md",
+    "examples/live-run-1-email-failed/README.md",
+    "examples/live-run-1-email-failed/items-incident.json",
     ".gitleaksignore"
   ],
   "prefixes": [

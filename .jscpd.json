@@ -21,6 +21,7 @@
     "design/mockups/**",
     "package-lock.json",
     "**/fixtures/**/*.json",
+    "examples/**/*.json",
     "packages/web/public/font-licences.txt"
   ]
 }

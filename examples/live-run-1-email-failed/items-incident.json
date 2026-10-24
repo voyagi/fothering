@@ -1,0 +1,897 @@
+{
+    "Items": [
+        {
+            "claimedAtMs": {
+                "N": "1792666885806"
+            },
+            "configurationSet": {
+                "S": "fothering-bulk"
+            },
+            "decisionOutcome": {
+                "S": "close"
+            },
+            "email": {
+                "M": {
+                    "attempts": {
+                        "N": "3"
+                    },
+                    "claimedAtMs": {
+                        "N": "1792668085868"
+                    },
+                    "failed": {
+                        "BOOL": true
+                    },
+                    "kind": {
+                        "S": "closed"
+                    },
+                    "messageId": {
+                        "NULL": true
+                    },
+                    "sentAtMs": {
+                        "NULL": true
+                    }
+                }
+            },
+            "expiresAt": {
+                "N": "1795263545"
+            },
+            "holdCheckedAtMs": {
+                "N": "1792667485720"
+            },
+            "holdCheckedThroughMs": {
+                "N": "1792667485720"
+            },
+            "holdEndMs": {
+                "N": "1792666952186"
+            },
+            "incidentId": {
+                "S": "d83695d46344c9f1d1c447375cb61157"
+            },
+            "lanes": {
+                "L": [
+                    {
+                        "M": {
+                            "configurationRefusals": {
+                                "L": [
+                                    {
+                                        "S": "transactional"
+                                    }
+                                ]
+                            },
+                            "configurationSet": {
+                                "S": "fothering-transactional"
+                            },
+                            "state": {
+                                "S": "no-open-incident"
+                            }
+                        }
+                    },
+                    {
+                        "M": {
+                            "configurationRefusals": {
+                                "L": []
+                            },
+                            "configurationSet": {
+                                "S": "fothering-bulk"
+                            },
+                            "state": {
+                                "S": "incident-open"
+                            }
+                        }
+                    },
+                    {
+                        "M": {
+                            "configurationRefusals": {
+                                "L": [
+                                    {
+                                        "S": "operator-alert"
+                                    },
+                                    {
+                                        "S": "transactional"
+                                    }
+                                ]
+                            },
+                            "configurationSet": {
+                                "S": "fothering-alerts"
+                            },
+                            "state": {
+                                "S": "no-open-incident"
+                            }
+                        }
+                    }
+                ]
+            },
+            "outcome": {
+                "S": "closed"
+            },
+            "pauseRequestedAtMs": {
+                "N": "1792666892186"
+            },
+            "pk": {
+                "S": "INCIDENT#d83695d46344c9f1d1c447375cb61157"
+            },
+            "readBack": {
+                "BOOL": false
+            },
+            "readBackAtMs": {
+                "N": "1792666894249"
+            },
+            "reason": {
+                "NULL": true
+            },
+            "reopen": {
+                "M": {
+                    "attempts": {
+                        "N": "1"
+                    },
+                    "claimedAtMs": {
+                        "N": "1792671542990"
+                    },
+                    "outcome": {
+                        "S": "reopened"
+                    },
+                    "readBackAtMs": {
+                        "N": "1792671545310"
+                    },
+                    "requestedAtMs": {
+                        "N": "1792671543125"
+                    }
+                }
+            },
+            "sendsAfterHold": {
+                "N": "0"
+            },
+            "sesFacts": {
+                "S": "read"
+            },
+            "version": {
+                "N": "12"
+            },
+            "sk": {
+                "S": "CLOSURE"
+            }
+        },
+        {
+            "outputTokens": {
+                "N": "245"
+            },
+            "expiresAt": {
+                "N": "1795258825"
+            },
+            "modelCalls": {
+                "N": "1"
+            },
+            "sk": {
+                "S": "COUNTER"
+            },
+            "invocations": {
+                "N": "1"
+            },
+            "inputTokens": {
+                "N": "2276"
+            },
+            "pk": {
+                "S": "INCIDENT#d83695d46344c9f1d1c447375cb61157"
+            }
+        },
+        {
+            "promptSha256": {
+                "S": "f1478b8f2a587ade71dd1e06dc253b8d08ff655dc913c00cc5b14fd83055e5cc"
+            },
+            "expiresAt": {
+                "N": "1795258825"
+            },
+            "modelCalls": {
+                "N": "1"
+            },
+            "decidedAtMs": {
+                "N": "1792666825161"
+            },
+            "pinned": {
+                "M": {
+                    "maxTokens": {
+                        "N": "1024"
+                    },
+                    "modelId": {
+                        "S": "anthropic.claude-sonnet-4-6"
+                    },
+                    "profileId": {
+                        "S": "eu.anthropic.claude-sonnet-4-6"
+                    },
+                    "thinking": {
+                        "S": "disabled"
+                    }
+                }
+            },
+            "usage": {
+                "M": {
+                    "inputTokens": {
+                        "N": "2276"
+                    },
+                    "outputTokens": {
+                        "N": "245"
+                    },
+                    "totalTokens": {
+                        "N": "2521"
+                    }
+                }
+            },
+            "pk": {
+                "S": "INCIDENT#d83695d46344c9f1d1c447375cb61157"
+            },
+            "outcome": {
+                "S": "close"
+            },
+            "attempt": {
+                "N": "1"
+            },
+            "optionId": {
+                "S": "opt-96c289bfa389f25f06165009"
+            },
+            "explanation": {
+                "S": "This lane's hard-bounce ratio hit 20.00% across 120 sends, triggering the spike. The batch dimension pinpoints the cause: the batch tagged \"stale-import\" produced a 100.00% hard-bounce ratio across its 24 sends (20.00% share), while the batch tagged \"clean-import\" had a 0.00% hard-bounce ratio across 96 sends. DKIM and DMARC configuration rows for taranity.com are both present and ruled out as causes. The approved action is pausing the fothering-bulk lane until the stale-import list is cleaned or removed."
+            },
+            "sk": {
+                "S": "DECISION"
+            }
+        },
+        {
+            "pk": {
+                "S": "INCIDENT#d83695d46344c9f1d1c447375cb61157"
+            },
+            "expiresAt": {
+                "N": "1795258818"
+            },
+            "record": {
+                "M": {
+                    "approvedOptions": {
+                        "L": [
+                            {
+                                "M": {
+                                    "optionId": {
+                                        "S": "opt-96c289bfa389f25f06165009"
+                                    }
+                                }
+                            }
+                        ]
+                    },
+                    "configurationRows": {
+                        "L": [
+                            {
+                                "M": {
+                                    "corroboration": {
+                                        "M": {
+                                            "corroboratingBounces": {
+                                                "N": "0"
+                                            },
+                                            "permanentBounces": {
+                                                "N": "24"
+                                            }
+                                        }
+                                    },
+                                    "fromDomain": {
+                                        "S": "taranity.com"
+                                    },
+                                    "lookups": {
+                                        "L": [
+                                            {
+                                                "M": {
+                                                    "identity": {
+                                                        "S": "taranity.com"
+                                                    },
+                                                    "kind": {
+                                                        "S": "ses"
+                                                    },
+                                                    "operation": {
+                                                        "S": "GetEmailIdentity"
+                                                    }
+                                                }
+                                            }
+                                        ]
+                                    },
+                                    "record": {
+                                        "S": "dkim"
+                                    },
+                                    "state": {
+                                        "S": "present"
+                                    },
+                                    "verdict": {
+                                        "S": "ruled-out"
+                                    }
+                                }
+                            },
+                            {
+                                "M": {
+                                    "corroboration": {
+                                        "M": {
+                                            "corroboratingBounces": {
+                                                "N": "0"
+                                            },
+                                            "permanentBounces": {
+                                                "N": "24"
+                                            }
+                                        }
+                                    },
+                                    "fromDomain": {
+                                        "S": "taranity.com"
+                                    },
+                                    "lookups": {
+                                        "L": [
+                                            {
+                                                "M": {
+                                                    "identity": {
+                                                        "S": "taranity.com"
+                                                    },
+                                                    "kind": {
+                                                        "S": "ses"
+                                                    },
+                                                    "operation": {
+                                                        "S": "GetEmailIdentity"
+                                                    }
+                                                }
+                                            }
+                                        ]
+                                    },
+                                    "record": {
+                                        "S": "mail-from"
+                                    },
+                                    "state": {
+                                        "S": "not-applicable"
+                                    },
+                                    "verdict": {
+                                        "S": "not-applicable"
+                                    }
+                                }
+                            },
+                            {
+                                "M": {
+                                    "corroboration": {
+                                        "M": {
+                                            "corroboratingBounces": {
+                                                "N": "0"
+                                            },
+                                            "permanentBounces": {
+                                                "N": "24"
+                                            }
+                                        }
+                                    },
+                                    "fromDomain": {
+                                        "S": "taranity.com"
+                                    },
+                                    "lookups": {
+                                        "L": [
+                                            {
+                                                "M": {
+                                                    "kind": {
+                                                        "S": "dns"
+                                                    },
+                                                    "name": {
+                                                        "S": "_dmarc.taranity.com"
+                                                    },
+                                                    "outcome": {
+                                                        "S": "records"
+                                                    },
+                                                    "recordType": {
+                                                        "S": "TXT"
+                                                    }
+                                                }
+                                            }
+                                        ]
+                                    },
+                                    "record": {
+                                        "S": "dmarc"
+                                    },
+                                    "state": {
+                                        "S": "present"
+                                    },
+                                    "verdict": {
+                                        "S": "ruled-out"
+                                    }
+                                }
+                            },
+                            {
+                                "M": {
+                                    "corroboration": {
+                                        "M": {
+                                            "corroboratingBounces": {
+                                                "N": "0"
+                                            },
+                                            "permanentBounces": {
+                                                "N": "24"
+                                            }
+                                        }
+                                    },
+                                    "fromDomain": {
+                                        "S": "taranity.com"
+                                    },
+                                    "lookups": {
+                                        "L": [
+                                            {
+                                                "M": {
+                                                    "identity": {
+                                                        "S": "taranity.com"
+                                                    },
+                                                    "kind": {
+                                                        "S": "ses"
+                                                    },
+                                                    "operation": {
+                                                        "S": "GetEmailIdentity"
+                                                    }
+                                                }
+                                            }
+                                        ]
+                                    },
+                                    "record": {
+                                        "S": "spf"
+                                    },
+                                    "state": {
+                                        "S": "not-applicable"
+                                    },
+                                    "verdict": {
+                                        "S": "not-applicable"
+                                    }
+                                }
+                            }
+                        ]
+                    },
+                    "decision": {
+                        "M": {
+                            "bound": {
+                                "NULL": true
+                            },
+                            "closeability": {
+                                "M": {
+                                    "reasons": {
+                                        "L": []
+                                    },
+                                    "state": {
+                                        "S": "closeable"
+                                    }
+                                }
+                            },
+                            "noData": {
+                                "BOOL": false
+                            },
+                            "otherSpikingLanes": {
+                                "L": []
+                            },
+                            "outcome": {
+                                "S": "approved"
+                            },
+                            "reason": {
+                                "S": "approved"
+                            },
+                            "sharedCause": {
+                                "NULL": true
+                            }
+                        }
+                    },
+                    "expiresAt": {
+                        "N": "1795258818"
+                    },
+                    "fix": {
+                        "NULL": true
+                    },
+                    "hash": {
+                        "S": "0352ffb5864a1c6e69144804a3a29e8416bb5227784ed02861433dd40629866f"
+                    },
+                    "incidentId": {
+                        "S": "d83695d46344c9f1d1c447375cb61157"
+                    },
+                    "isolation": {
+                        "S": "confined"
+                    },
+                    "lane": {
+                        "M": {
+                            "configurationSet": {
+                                "S": "fothering-bulk"
+                            },
+                            "lane": {
+                                "S": "fothering-bulk"
+                            }
+                        }
+                    },
+                    "laneTotals": {
+                        "M": {
+                            "complaintRatio": {
+                                "S": "0.00%"
+                            },
+                            "complaints": {
+                                "N": "0"
+                            },
+                            "hardBounceRatio": {
+                                "S": "20.00%"
+                            },
+                            "label": {
+                                "M": {
+                                    "complaintRatio": {
+                                        "S": "Fothering lane complaint ratio (complaints over recipient-sends)"
+                                    },
+                                    "hardBounceRatio": {
+                                        "S": "Fothering lane hard-bounce ratio (permanent bounces over recipient-sends)"
+                                    }
+                                }
+                            },
+                            "permanentBounces": {
+                                "N": "24"
+                            },
+                            "recipientSends": {
+                                "N": "120"
+                            },
+                            "triggers": {
+                                "L": [
+                                    {
+                                        "S": "hard-bounce"
+                                    }
+                                ]
+                            },
+                            "verdict": {
+                                "S": "spike"
+                            }
+                        }
+                    },
+                    "question": {
+                        "NULL": true
+                    },
+                    "rows": {
+                        "L": [
+                            {
+                                "M": {
+                                    "complaintRatio": {
+                                        "S": "0.00%"
+                                    },
+                                    "complaints": {
+                                        "N": "0"
+                                    },
+                                    "dimension": {
+                                        "S": "batch"
+                                    },
+                                    "fromBucketMs": {
+                                        "N": "1792663500000"
+                                    },
+                                    "hardBounceRatio": {
+                                        "S": "0.00%"
+                                    },
+                                    "kind": {
+                                        "S": "value"
+                                    },
+                                    "permanentBounces": {
+                                        "N": "0"
+                                    },
+                                    "sends": {
+                                        "N": "96"
+                                    },
+                                    "sharePercent": {
+                                        "S": "80.00%"
+                                    },
+                                    "thresholds": {
+                                        "L": [
+                                            {
+                                                "M": {
+                                                    "denominator": {
+                                                        "N": "100"
+                                                    },
+                                                    "minEvents": {
+                                                        "N": "3"
+                                                    },
+                                                    "minSends": {
+                                                        "N": "20"
+                                                    },
+                                                    "numerator": {
+                                                        "N": "5"
+                                                    },
+                                                    "ratio": {
+                                                        "S": "hard-bounce"
+                                                    }
+                                                }
+                                            }
+                                        ]
+                                    },
+                                    "toBucketMs": {
+                                        "N": "1792666800000"
+                                    },
+                                    "value": {
+                                        "S": "clean-import"
+                                    },
+                                    "verdict": {
+                                        "S": "ruled-out"
+                                    }
+                                }
+                            },
+                            {
+                                "M": {
+                                    "complaintRatio": {
+                                        "S": "0.00%"
+                                    },
+                                    "complaints": {
+                                        "N": "0"
+                                    },
+                                    "dimension": {
+                                        "S": "batch"
+                                    },
+                                    "fromBucketMs": {
+                                        "N": "1792663500000"
+                                    },
+                                    "hardBounceRatio": {
+                                        "S": "100.00%"
+                                    },
+                                    "kind": {
+                                        "S": "value"
+                                    },
+                                    "permanentBounces": {
+                                        "N": "24"
+                                    },
+                                    "sends": {
+                                        "N": "24"
+                                    },
+                                    "sharePercent": {
+                                        "S": "20.00%"
+                                    },
+                                    "thresholds": {
+                                        "L": [
+                                            {
+                                                "M": {
+                                                    "denominator": {
+                                                        "N": "100"
+                                                    },
+                                                    "minEvents": {
+                                                        "N": "3"
+                                                    },
+                                                    "minSends": {
+                                                        "N": "20"
+                                                    },
+                                                    "numerator": {
+                                                        "N": "5"
+                                                    },
+                                                    "ratio": {
+                                                        "S": "hard-bounce"
+                                                    }
+                                                }
+                                            }
+                                        ]
+                                    },
+                                    "toBucketMs": {
+                                        "N": "1792666800000"
+                                    },
+                                    "value": {
+                                        "S": "stale-import"
+                                    },
+                                    "verdict": {
+                                        "S": "cause"
+                                    }
+                                }
+                            },
+                            {
+                                "M": {
+                                    "complaintRatio": {
+                                        "S": "0.00%"
+                                    },
+                                    "complaints": {
+                                        "N": "0"
+                                    },
+                                    "dimension": {
+                                        "S": "template"
+                                    },
+                                    "fromBucketMs": {
+                                        "N": "1792663500000"
+                                    },
+                                    "hardBounceRatio": {
+                                        "S": "20.00%"
+                                    },
+                                    "kind": {
+                                        "S": "no-value"
+                                    },
+                                    "permanentBounces": {
+                                        "N": "24"
+                                    },
+                                    "sends": {
+                                        "N": "120"
+                                    },
+                                    "sharePercent": {
+                                        "S": "100.00%"
+                                    },
+                                    "thresholds": {
+                                        "L": [
+                                            {
+                                                "M": {
+                                                    "denominator": {
+                                                        "N": "100"
+                                                    },
+                                                    "minEvents": {
+                                                        "N": "3"
+                                                    },
+                                                    "minSends": {
+                                                        "N": "20"
+                                                    },
+                                                    "numerator": {
+                                                        "N": "5"
+                                                    },
+                                                    "ratio": {
+                                                        "S": "hard-bounce"
+                                                    }
+                                                }
+                                            }
+                                        ]
+                                    },
+                                    "toBucketMs": {
+                                        "N": "1792666800000"
+                                    },
+                                    "value": {
+                                        "NULL": true
+                                    },
+                                    "verdict": {
+                                        "S": "elevated"
+                                    }
+                                }
+                            },
+                            {
+                                "M": {
+                                    "complaintRatio": {
+                                        "S": "0.00%"
+                                    },
+                                    "complaints": {
+                                        "N": "0"
+                                    },
+                                    "dimension": {
+                                        "S": "campaign"
+                                    },
+                                    "fromBucketMs": {
+                                        "N": "1792663500000"
+                                    },
+                                    "hardBounceRatio": {
+                                        "S": "20.00%"
+                                    },
+                                    "kind": {
+                                        "S": "no-value"
+                                    },
+                                    "permanentBounces": {
+                                        "N": "24"
+                                    },
+                                    "sends": {
+                                        "N": "120"
+                                    },
+                                    "sharePercent": {
+                                        "S": "100.00%"
+                                    },
+                                    "thresholds": {
+                                        "L": [
+                                            {
+                                                "M": {
+                                                    "denominator": {
+                                                        "N": "100"
+                                                    },
+                                                    "minEvents": {
+                                                        "N": "3"
+                                                    },
+                                                    "minSends": {
+                                                        "N": "20"
+                                                    },
+                                                    "numerator": {
+                                                        "N": "5"
+                                                    },
+                                                    "ratio": {
+                                                        "S": "hard-bounce"
+                                                    }
+                                                }
+                                            }
+                                        ]
+                                    },
+                                    "toBucketMs": {
+                                        "N": "1792666800000"
+                                    },
+                                    "value": {
+                                        "NULL": true
+                                    },
+                                    "verdict": {
+                                        "S": "elevated"
+                                    }
+                                }
+                            }
+                        ]
+                    },
+                    "schemaVersion": {
+                        "N": "1"
+                    },
+                    "share": {
+                        "M": {
+                            "label": {
+                                "S": "share of the countable events Fothering stores for its lane-map sets"
+                            },
+                            "laneCountableEvents": {
+                                "N": "240"
+                            },
+                            "percent": {
+                                "S": "90.91%"
+                            },
+                            "storedCountableEvents": {
+                                "N": "264"
+                            }
+                        }
+                    },
+                    "window": {
+                        "M": {
+                            "fromBucketMs": {
+                                "N": "1792663500000"
+                            },
+                            "toBucketMs": {
+                                "N": "1792666800000"
+                            }
+                        }
+                    }
+                }
+            },
+            "sk": {
+                "S": "EVIDENCE"
+            }
+        },
+        {
+            "agentClaim": {
+                "M": {
+                    "attempt": {
+                        "N": "1"
+                    },
+                    "claimedAtMs": {
+                        "N": "1792666825161"
+                    }
+                }
+            },
+            "expiresAt": {
+                "N": "1795262118"
+            },
+            "pk": {
+                "S": "INCIDENT#d83695d46344c9f1d1c447375cb61157"
+            },
+            "state": {
+                "M": {
+                    "configurationSet": {
+                        "S": "fothering-bulk"
+                    },
+                    "falseRecoveries": {
+                        "N": "0"
+                    },
+                    "falseSpikes": {
+                        "N": "0"
+                    },
+                    "incidentId": {
+                        "S": "d83695d46344c9f1d1c447375cb61157"
+                    },
+                    "openingFinalized": {
+                        "BOOL": false
+                    },
+                    "openingWindow": {
+                        "M": {
+                            "fromBucketMs": {
+                                "N": "1792663500000"
+                            },
+                            "toBucketMs": {
+                                "N": "1792666800000"
+                            }
+                        }
+                    },
+                    "pendingRecovery": {
+                        "M": {
+                            "fromBucketMs": {
+                                "N": "1792666800000"
+                            },
+                            "toBucketMs": {
+                                "N": "1792670100000"
+                            }
+                        }
+                    },
+                    "status": {
+                        "S": "open"
+                    }
+                }
+            },
+            "version": {
+                "N": "3"
+            },
+            "sk": {
+                "S": "STATE"
+            }
+        }
+    ],
+    "Count": 5,
+    "ScannedCount": 5,
+    "ConsumedCapacity": null
+}
