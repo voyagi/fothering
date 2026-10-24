@@ -84,9 +84,10 @@ export function longValueParts(text: string): string[] {
 }
 
 // The words of an API operation name or an IAM action in the Identifier component's word mode: a
-// capital starts a word only after a small letter, a digit or the colon (ses: then Get, then
-// Configuration), so a run of capitals (an acronym such as SES) stays whole.
-const IDENTIFIER_WORD_STARTS = /(?<=[a-z0-9:])(?=[A-Z])/;
+// capital starts a word after a small letter, a digit or the colon (ses: then Get, then
+// Configuration), and a capitalised word starts after a run of capitals (SES then Config), so an
+// acronym stays whole and never glues to the word after it.
+const IDENTIFIER_WORD_STARTS = new RegExp([String.raw`(?<=[a-z0-9:])(?=[A-Z])`, WORD_AFTER_DIGIT_OR_CAPITAL].join('|'));
 
 export function identifierWordParts(value: string): string[] {
   return value.split(IDENTIFIER_WORD_STARTS);
