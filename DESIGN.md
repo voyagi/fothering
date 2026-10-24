@@ -48,6 +48,7 @@ colors:
   d-cloth: "#F6ECD6"
   d-ink: "#0A1024"
   d-paper: "#FFFFFF"
+  d-mist: "#F2F6FF"
 typography:
   landing-headline:
     fontFamily: "Mona Sans, sans-serif"
@@ -197,6 +198,8 @@ components:
     typography: "{typography.button}"
     rounded: "{rounded.pill}"
     height: "52px"
+  button-on-blue-hover:
+    backgroundColor: "{colors.d-mist}"
   theme-switch:
     backgroundColor: "{colors.well}"
     textColor: "{colors.ink-2}"
@@ -305,6 +308,7 @@ A white and navy page with a single sea-blue accent, a fixed night board carryin
 ### Tertiary
 - **Order colours** (d-blue, d-coral, d-mint, d-sun): procedure step discs, replay step rules and the step keys take these in page order, blue, coral, mint, then sun for the fourth step and every one after it. Text on d-blue is d-paper, on the others d-ink.
 - **Drawing colours** (d-sky, d-pink, d-cloth, d-paper, d-ink): the cut-paper drawings only. d-cloth is the sail's cloth. d-sun is also the selection colour and the stamp colour on the board.
+- **Mist** (d-mist): the close band's white pill on hover, Light's tint held in both themes so the pill's d-blue text keeps 5.98:1 in Dark too.
 
 ### Neutral
 - **Ground** (ground / ground-dark): the page. Dark is a lifted navy rather than black, so the board reads as a screen on it.
@@ -411,7 +415,7 @@ Pills, confident and plain.
 - **Primary:** sea-blue fill with white text in button type, an 18px arrow drawn as SVG.
 - **Hover / Focus:** fill darkens to accent-hover, the arrow moves 4px right over 200ms on cubic-bezier(0.16, 1, 0.3, 1), pressed drops 1px. Focus is the 3px sea-blue outline. Reduced motion removes the travel and the press.
 - **Outline:** ink border and ink text on the ground, hover fills with the well.
-- **On blue:** in the close band the pill turns white with sea-blue text.
+- **On blue:** in the close band the pill turns white with sea-blue text, and hover fills it with d-mist in both themes.
 - **Disabled:** rule fill, label text, no arrow travel.
 - **Quiet:** the replay's step button, an ink text button underlined at 1.5px, 2.5px on hover.
 

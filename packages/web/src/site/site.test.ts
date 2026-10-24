@@ -388,6 +388,27 @@ describe('the bounce mark', () => {
   });
 });
 
+// The token one site.css rule gives one property, read from the rule that opens its own line.
+const ruleToken = (css: string, selector: string, property: string): string => {
+  const rule = css.split('\n').find((line) => line.startsWith(`${selector} {`)) ?? '';
+  const token = new RegExp(`[{;]\\s*${property}: var\\((--[\\w-]+)\\);`).exec(rule)?.[1];
+  if (token === undefined) throw new Error(`site.css has no "${selector}" rule setting ${property} from a token`);
+  return token;
+};
+
+// The close band's pill is white with sea-blue text in both themes, so its hover ground must stay
+// pale in both too: a themed ground turns navy in Dark and drops the text to about 2.4:1.
+describe('the close band pill', () => {
+  it('keeps its text at 4.5:1 or more on its ground and on its hover ground in both themes', () => {
+    const css = readRepoText('packages/web/src/styles/site.css', repoRoot(REPO_ROOT));
+    const text = ruleToken(css, '.close-band .keybtn', 'color');
+    const grounds = [ruleToken(css, '.close-band .keybtn', 'background'), ruleToken(css, '.close-band .keybtn:hover', 'background')];
+    for (const theme of ['light', 'dark'] as const) {
+      for (const ground of grounds) expect(contrastRatio(hexRgb(themedValue(TOKENS, text, theme)), hexRgb(themedValue(TOKENS, ground, theme))), `${text} on ${ground} in ${theme}`).toBeGreaterThanOrEqual(4.5);
+    }
+  });
+});
+
 describe('the sitemap and robots endpoints (AC-50, AC-51)', () => {
   it('sitemap GET returns XML listing each indexable route once as an absolute URL from SITE_ORIGIN, never the 404', async () => {
     const response = sitemapGet();

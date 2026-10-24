@@ -479,7 +479,7 @@ table.schedule, table.ruled { width: 100%; border-collapse: collapse; font: 400 
 .close-band p { margin: var(--space-sm) auto 0; }
 .close-band .art { inline-size: min(320px, 70%); }
 .close-band .keybtn { border-color: var(--d-paper); background: var(--d-paper); color: var(--d-blue); }
-.close-band .keybtn:hover { background: var(--tint); }
+.close-band .keybtn:hover { background: var(--d-mist); }
 .close-band :focus-visible { outline-color: var(--d-paper); }
 .close-band ::selection { background: var(--d-sun); color: var(--d-ink); }
 

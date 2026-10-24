@@ -77,7 +77,7 @@ describe('the token source and tokens.css (D-140, AC-39, AC-63)', () => {
     const fixed = [
       '--board', '--board-ink', '--board-label', '--board-rule', '--board-slot',
       '--lane-1', '--lane-2', '--lane-3', '--stop', '--note', '--note-ink', '--note-tape',
-      '--d-blue', '--d-sky', '--d-coral', '--d-sun', '--d-pink', '--d-mint', '--d-cloth', '--d-ink', '--d-paper',
+      '--d-blue', '--d-sky', '--d-coral', '--d-sun', '--d-pink', '--d-mint', '--d-cloth', '--d-ink', '--d-paper', '--d-mist',
     ];
     const themed = new Map(source.themed.map((token) => [token.name, token]));
     for (const name of fixed) {
