@@ -777,7 +777,7 @@ describe('the rules over the less common shapes', () => {
 const TWO_SHEETS = { 'index.html': '<p>landing</p>', 'replay/index.html': '<p>replay</p>' };
 
 describe('the page metadata rule (AC-49, AC-E37)', () => {
-  it('passes a site whose every route, the 404 page included, carries the six items with its own title and description', () => {
+  it('passes a site whose every route, the 404 page included, carries the eight items with its own title and description', () => {
     expect(pageMetadataRule(siteOf(completeSite({ ...TWO_SHEETS, '404.html': '<p>none</p>' })), context)).toEqual([]);
   });
 

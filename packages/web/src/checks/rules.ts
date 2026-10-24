@@ -448,6 +448,8 @@ const REQUIRED_METAS: readonly (readonly [string, string])[] = [
   ['property', 'og:title'],
   ['property', 'og:description'],
   ['property', 'og:type'],
+  ['property', 'og:image'],
+  ['property', 'og:image:alt'],
   ['name', 'twitter:card'],
 ];
 
