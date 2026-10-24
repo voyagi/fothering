@@ -1,5 +1,7 @@
 # Fothering
 
+![Fothering for Amazon SES: closes that lane and nothing else. A night board of three SES configuration sets from the live run of 22 October 2026 shows fothering-bulk closed at 16:35 UTC after 20 of 100 bounced, while fothering-transactional and fothering-alerts stay open.](docs/card.png)
+
 When one stream of the mail you send through Amazon SES starts bouncing, Fothering works out why,
 closes that one lane, and asks you by email before it opens again.
 
