@@ -109,3 +109,31 @@ describe('another open lane whose STATE stores an opening window end out of rang
     expect(result.outcome).toBe('paused');
   });
 });
+
+describe('a STATE read that throws, as a throttled or failing table would', () => {
+  async function actWithStateReads(throwing: boolean): Promise<{ outcome: unknown; mutations: string[] }> {
+    const store = createFixtureTableState();
+    await seedIncidents({ store, runtime: closeRuntime, scenarios: [BAD_BATCH], nowMs: NOW_MS });
+    const { deps, sesState } = buildTestActionRoot({ store, now: () => PAUSED_AT_MS });
+    const decisionStore = deps.ports.decisionStore;
+    const getItem = decisionStore.getItem.bind(decisionStore);
+    decisionStore.getItem = async (key, nowMs) => {
+      if (throwing && key.sk === 'STATE') throw new Error('ProvisionedThroughputExceededException');
+      return getItem(key, nowMs);
+    };
+
+    await runActionCycle(deps);
+
+    return { outcome: (await storedClosure(deps, INCIDENT_ID, PAUSED_AT_MS))?.outcome, mutations: mutationsOf(sesState) };
+  }
+
+  it('refuses the close with no SES mutation, never reading the fault as a fresh record', async () => {
+    const result = await actWithStateReads(true);
+    expect(result.outcome).toBe('refused');
+    expect(result.mutations).toEqual([]);
+  });
+
+  it('pauses when the same reads answer, as a control', async () => {
+    expect((await actWithStateReads(false)).outcome).toBe('paused');
+  });
+});
