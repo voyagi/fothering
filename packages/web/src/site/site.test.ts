@@ -284,6 +284,13 @@ describe('the link preview and icon files', () => {
     expect(svg).toMatch(/^<svg xmlns="http:\/\/www\.w3\.org\/2000\/svg" viewBox="0 0 32 32">/);
     expect(svg).toContain('@media (prefers-color-scheme:dark){.rope{stroke:#eef2ff}}');
   });
+
+  // The _headers policy (default-src 'self') reaches the SVG too, and a browser that applies it there
+  // drops the style element, so the light ropes must not depend on it.
+  it('draws the ropes in ink without the style element, which only switches them for dark mode', () => {
+    const svg = readFileSync(join(PUBLIC, 'favicon.svg'), 'utf8');
+    expect(svg).toMatch(/<path class="rope" [^>]*stroke="#0a1024"/);
+  });
 });
 
 // 05-RESEARCH.md, "Derived list for the accessibility statement (D-156)": the WCAG 2.2 A and AA
