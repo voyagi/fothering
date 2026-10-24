@@ -2,7 +2,7 @@
 
 - Status: accepted
 - Date: 2026-09-16
-- Revised: 2026-09-27 (agent bundle corrected to CommonJS, site workspace path recorded, fallback order corrected); 2026-10-16 (site stack as built: Astro 7.3.8, wrangler kept out of the repo until the deploy, browser checks, fonts and built-HTML parsing recorded, reopening by command, fixture replay); 2026-10-21 (site fonts replaced with Saira, Public Sans and Source Code Pro for the site redesign; the flow control is gone)
+- Revised: 2026-09-27 (agent bundle corrected to CommonJS, site workspace path recorded, fallback order corrected); 2026-10-16 (site stack as built: Astro 7.3.8, wrangler kept out of the repo until the deploy, browser checks, fonts and built-HTML parsing recorded, reopening by command, fixture replay); 2026-10-21 (site fonts replaced with Saira, Public Sans and Source Code Pro for the site redesign; the flow control is gone); 2026-10-23 (site fonts replaced with Mona Sans and Source Code Pro for the second redesign)
 
 ## Context
 
@@ -32,7 +32,7 @@ Three constraints shape every choice below:
 | Site | Astro, static output, at `packages/web` inside the existing `packages/*` workspace glob | 7.3.8 |
 | Site host | Cloudflare Workers with static assets; `wrangler` is not a dependency of the repo until the owner's deploy, which runs a pinned 4.x | |
 | Browser checks | `dev-browser` driving its own Chromium, with `axe-core` for the WCAG 2.2 AA audit | `dev-browser` 0.2.9, `axe-core` 4.14.0 |
-| Fonts | `@fontsource-variable` Saira (headlines, labels, keys), Public Sans (text and table cells) and Source Code Pro (identifiers), self-hosted | Saira 5.3.0, Public Sans 5.3.0, Source Code Pro 5.3.1 |
+| Fonts | `@fontsource-variable` Mona Sans (headlines, text, labels and table cells, with its width axis) and Source Code Pro (identifiers), self-hosted | Mona Sans 5.3.0, Source Code Pro 5.3.1 |
 | Built-HTML parsing | `parse5` | 8.0.1 |
 | Schemas | zod | 4.x |
 | Tests | vitest, fast-check, StrykerJS | vitest 4.1.x |

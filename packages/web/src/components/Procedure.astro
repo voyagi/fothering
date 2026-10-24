@@ -1,11 +1,13 @@
 ---
-// A procedure is a row of keys read in order, each step's number printed on its key, because the
-// steps are a real sequence. The keys take the banks in order (red, orange, yellow, then white for
-// the fourth step and every one after it). The printed number is hidden from assistive technology:
-// the list carries the number. Step text marks code spans with backticks, and each span renders as
-// an identifier; a step's commands come from the README reader, never from here.
+// A procedure is a row of steps read in order, each step's number on a coloured disc, because the
+// steps are a real sequence. The discs take the order colours (blue, coral, mint, then sun for the
+// fourth step and every one after it). The printed number is hidden from assistive technology: the
+// list carries the number. A step may carry a small drawing over its disc. Step text marks code
+// spans with backticks, and each span renders as an identifier; a step's commands come from the
+// README reader, never from here.
 import { textSegments } from '../site/identifier-text.ts';
 import CommandBlock from './CommandBlock.astro';
+import Drawing, { type DrawingName } from './Drawing.astro';
 import Identifier from './Identifier.astro';
 
 interface Command {
@@ -20,6 +22,7 @@ interface Step {
   // Set when the step's text carries an artifact value.
   provenance?: string;
   commands?: readonly Command[];
+  icon?: DrawingName;
 }
 
 interface Props {
@@ -34,6 +37,7 @@ const bankOf = (index: number): string => `bank-${String(Math.min(index + 1, 4))
 <ol class={removal ? 'procedure removal' : 'procedure'}>
   {steps.map((step, index) => (
     <li>
+      {step.icon !== undefined && <Drawing name={step.icon} class="icon" />}
       <span class={`step-key ${bankOf(index)}`} aria-hidden="true"><span class="numeral">{index + 1}</span></span>
       <div>
         {step.title !== undefined && <h3>{step.title}</h3>}

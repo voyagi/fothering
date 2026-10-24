@@ -1,42 +1,24 @@
 /* Own family names rather than the packages' "... Variable" ones, so document.fonts.check on the
    names DESIGN.md uses can only pass when these faces load. Descriptors are copied from each
-   package's installed CSS: Saira's from wdth.css, so its width axis rides on font-stretch, and
-   Public Sans's and Source Code Pro's from wght.css. Only latin and latin-ext ship. */
+   package's installed CSS: Mona Sans's from wdth.css, so its width axis rides on font-stretch, and
+   Source Code Pro's from wght.css. Only latin and latin-ext ship. */
 @font-face {
-  font-family: 'Saira';
+  font-family: 'Mona Sans';
   font-style: normal;
   font-display: swap;
-  font-weight: 100 900;
-  font-stretch: 50% 125%;
-  src: url('@fontsource-variable/saira/files/saira-latin-ext-wdth-normal.woff2') format('woff2-variations');
+  font-weight: 200 900;
+  font-stretch: 75% 125%;
+  src: url('@fontsource-variable/mona-sans/files/mona-sans-latin-ext-wdth-normal.woff2') format('woff2-variations');
   unicode-range: U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF;
 }
 
 @font-face {
-  font-family: 'Saira';
+  font-family: 'Mona Sans';
   font-style: normal;
   font-display: swap;
-  font-weight: 100 900;
-  font-stretch: 50% 125%;
-  src: url('@fontsource-variable/saira/files/saira-latin-wdth-normal.woff2') format('woff2-variations');
-  unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD;
-}
-
-@font-face {
-  font-family: 'Public Sans';
-  font-style: normal;
-  font-display: swap;
-  font-weight: 100 900;
-  src: url('@fontsource-variable/public-sans/files/public-sans-latin-ext-wght-normal.woff2') format('woff2-variations');
-  unicode-range: U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF;
-}
-
-@font-face {
-  font-family: 'Public Sans';
-  font-style: normal;
-  font-display: swap;
-  font-weight: 100 900;
-  src: url('@fontsource-variable/public-sans/files/public-sans-latin-wght-normal.woff2') format('woff2-variations');
+  font-weight: 200 900;
+  font-stretch: 75% 125%;
+  src: url('@fontsource-variable/mona-sans/files/mona-sans-latin-wdth-normal.woff2') format('woff2-variations');
   unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD;
 }
 
@@ -58,121 +40,120 @@
   unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD;
 }
 
-/* The Muted Track. A grey chassis printed in silkscreen ink; step keys in four bank colours that
-   hold in both themes; one LED red that lights only what is on; a black readout window. Colours,
-   type sizes, the measure and the spacing steps come from tokens.css, which also paints the page
-   ground and ink; this file adds the faces, the geometry and the parts.
-   Saira is the silkscreen and headline voice and takes its width from font-stretch, which the font
-   shorthand resets, so every rule that sets a Saira width writes font-stretch after the shorthand. */
+/* Lanes in daylight. A white page under a sea-blue sky, navy ink, one sea-blue accent for what acts.
+   The product at work sits on the night board: each configuration set a lane of light, the closed
+   lane stopped under a drawn sail. Paper-yellow notes carry what the evidence says. Colours, type
+   sizes, the measure and the spacing steps come from tokens.css, which also paints the page ground
+   and ink; this file adds the faces, the geometry and the parts. */
 :root {
-  --font-silk: 'Saira', sans-serif;
-  --font-text: 'Public Sans', sans-serif;
+  --font-text: 'Mona Sans', sans-serif;
   --font-mono: 'Source Code Pro', monospace;
-  --gutter: clamp(16px, 3.75vw, 48px);
-  --band-block: clamp(48px, 7vw, 88px);
-  --strip: 72px;
-  /* An unlit lamp on a coloured key is the key's own colour, darkened. */
-  --lamp-dark: color-mix(in srgb, var(--key-ink) 30%, transparent);
-  /* Browsers round border widths down to whole device pixels, so below 1.5 device pixels per CSS
-     pixel a 1.5px outline would draw as a 1px rule; the weights step up there and stay three lines. */
+  --gutter: clamp(16px, 4vw, 56px);
+  --band-block: clamp(56px, 8vw, 104px);
+  --bar: 72px;
+  --wide: 1240px;
+  --r-pill: 999px;
+  --r-card: 16px;
+  --r-box: 10px;
   --w-rule: 1px;
   --w-outline: 1.5px;
-  --w-emph: 2.5px;
-  accent-color: var(--key-red);
+  --w-emph: 3px;
+  --glow: 0 0 14px;
+  accent-color: var(--accent-fill);
   caret-color: var(--ink);
   scrollbar-color: var(--label) var(--well);
 }
 @media (max-resolution: 1.49dppx) {
-  :root { --w-outline: 2px; --w-emph: 3px; }
+  :root { --w-outline: 2px; }
 }
 
 *, *::before, *::after { box-sizing: border-box; }
 html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
-body { margin: 0; font: 400 var(--text-body)/1.55 var(--font-text); }
-::selection { background: var(--key-yellow); color: var(--key-ink); }
-a { color: inherit; text-underline-offset: 0.22em; text-decoration-thickness: 1px; }
-a:hover { text-decoration-thickness: 2px; }
-:focus-visible { outline: 2px solid var(--ink); outline-offset: 3px; }
+/* The page is a column, so a short page still keeps its index at the foot of the window. */
+body { display: flex; flex-direction: column; min-block-size: 100vh; margin: 0; font: 400 var(--text-body)/1.6 var(--font-text); font-stretch: 100%; }
+#main { flex: 1 0 auto; }
+::selection { background: var(--d-sun); color: var(--d-ink); }
+a { color: var(--accent); text-underline-offset: 0.2em; text-decoration-thickness: 1.5px; }
+a:hover { text-decoration-thickness: 2.5px; }
+:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; border-radius: 4px; }
 #main:focus { outline: none; }
-h1, h2, h3 { margin: 0; text-wrap: balance; text-transform: uppercase; }
-h1 { font: 800 var(--text-display)/0.98 var(--font-silk); font-stretch: 75%; letter-spacing: 0.005em; }
-h2 { font: 800 var(--text-headline)/1 var(--font-silk); font-stretch: 75%; letter-spacing: 0.01em; }
-h3 { font: 700 var(--text-title)/1.25 var(--font-silk); font-stretch: 85%; letter-spacing: 0.06em; }
+h1, h2, h3 { margin: 0; text-wrap: balance; color: var(--ink); }
+h1 { font: 850 var(--text-display)/1.04 var(--font-text); font-stretch: 105%; letter-spacing: -0.02em; }
+h2 { font: 800 var(--text-headline)/1.1 var(--font-text); font-stretch: 105%; letter-spacing: -0.015em; }
+h3 { font: 700 var(--text-title)/1.3 var(--font-text); font-stretch: 100%; letter-spacing: -0.005em; }
 p, li, dd { max-inline-size: var(--measure); }
 .mono, code { font-family: var(--font-mono); font-feature-settings: "tnum" 1; }
 code { font-size: var(--text-mono-value); font-weight: 500; }
 .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 
-.skip { position: absolute; left: var(--space-12); top: -64px; z-index: 5; padding: var(--space-12) var(--space-md); border-radius: 4px; background: var(--ink); color: var(--ground); font: 700 var(--text-silk)/1 var(--font-silk); font-stretch: 85%; letter-spacing: 0.14em; text-transform: uppercase; text-decoration: none; }
+.skip { position: absolute; left: var(--space-12); top: -64px; z-index: 5; padding: var(--space-12) var(--space-md); border-radius: var(--r-pill); background: var(--ink); color: var(--ground); font: 700 var(--text-small)/1 var(--font-text); text-decoration: none; }
 .skip:focus { top: var(--space-12); }
 
-/* Silkscreen: what the chassis prints beside its controls. Saira caps, a little condensed, spaced. */
+/* Small labels: the head of a fact, a column, a stamp. Mona Sans semibold, a touch wide, in label
+   grey; never all capitals except a stamp, which is a tag. */
 .silk, .state, .schedule .note, .readout dt, .findings dt, .readout-head, .role-stack > span, .decode .k {
-  font: 600 var(--text-silk)/1.3 var(--font-silk);
-  font-stretch: 85%;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  color: var(--ink-2);
+  font: 600 var(--text-label)/1.35 var(--font-text);
+  font-stretch: 108%;
+  letter-spacing: 0.01em;
+  color: var(--label);
 }
 
-/* A lamp is off until something is on. Only the LED red lights one. */
-.lamp { display: inline-block; flex: none; inline-size: 8px; block-size: 8px; border-radius: 50%; background: var(--led-off); }
-.lamp.on { background: var(--led); }
+/* A lamp is the small round mark beside a state. Only the sail's red marks what is closed. */
+.lamp { display: inline-block; flex: none; inline-size: 10px; block-size: 10px; border-radius: 50%; background: var(--rule); }
+.lamp.on { background: var(--stop); box-shadow: 0 0 0 2px var(--ground); }
 
-/* The top strip: the wordmark, the three working pages with their lamps, and the theme module in a
-   box of its own. */
-.top-strip { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-sm) var(--space-xl); min-block-size: var(--strip); padding: var(--space-sm) var(--gutter); border-bottom: 2px solid var(--ink); }
-.wordmark { margin-right: auto; padding-block: var(--space-sm); font: 800 var(--text-wordmark)/1 var(--font-silk); font-stretch: 70%; letter-spacing: 0.02em; text-decoration: none; }
+/* The top bar: the wordmark with its sail, the three working pages, and the theme switch in a box of
+   its own at the far right. */
+.top-strip { position: relative; z-index: 2; display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-sm) var(--space-xl); min-block-size: var(--bar); padding: var(--space-sm) var(--gutter); background: var(--ground); border-bottom: var(--w-rule) solid var(--rule); }
+.wordmark { display: inline-flex; align-items: center; gap: 10px; margin-right: auto; padding-block: var(--space-sm); color: var(--ink); font: 850 var(--text-wordmark)/1 var(--font-text); font-stretch: 112%; letter-spacing: -0.02em; text-decoration: none; }
+.wordmark svg { inline-size: 26px; block-size: 30px; flex: none; }
 .top-strip ul, .index ul { display: flex; flex-wrap: wrap; gap: 0 var(--space-lg); margin: 0; padding: 0; list-style: none; }
 .top-strip li, .index li { max-inline-size: none; }
-.top-strip nav a, .index nav a { display: inline-flex; align-items: center; gap: var(--space-sm); min-block-size: 44px; font: 600 var(--text-silk)/1 var(--font-silk); font-stretch: 85%; letter-spacing: 0.14em; text-transform: uppercase; text-decoration: none; }
-.top-strip nav a:hover, .index nav a:hover { text-decoration: underline 1px; text-underline-offset: 6px; }
-/* The current page lights its lamp and carries a bar under its name, so the mark is not colour alone. */
-.top-strip a[aria-current="page"], .index a[aria-current="page"] { text-decoration: underline 2px; text-underline-offset: 6px; }
-.top-strip a[aria-current="page"] .lamp { background: var(--led); }
+.top-strip nav a, .index nav a { display: inline-flex; align-items: center; gap: var(--space-sm); min-block-size: 44px; color: var(--ink-2); font: 600 var(--text-small)/1 var(--font-text); font-stretch: 104%; text-decoration: none; }
+.top-strip nav a:hover, .index nav a:hover { color: var(--ink); text-decoration: underline 1.5px; text-underline-offset: 8px; }
+/* The current page is in full ink with a blue bar under its name, so the mark is not colour alone. */
+.top-strip a[aria-current="page"], .index a[aria-current="page"] { color: var(--ink); text-decoration: underline 3px var(--accent); text-underline-offset: 8px; }
+.top-strip nav .lamp { display: none; }
 
-/* The theme module: a recessed box of three keys, each with a lamp and its word. The native radios
-   sit over their keys, so the group keeps one Tab stop and its arrow keys. */
-.theme { display: flex; align-items: center; gap: var(--space-xs); margin: 0; padding: var(--space-xs) var(--space-sm) var(--space-xs) var(--space-12); min-inline-size: 0; border: var(--w-rule) solid var(--rule); border-radius: 6px; background: var(--well); }
-/* Floated, the legend leaves the border and prints inside the box like the module's own label. */
-.theme legend { float: left; inline-size: min-content; margin-right: var(--space-sm); padding: 0; font: 600 var(--text-silk-small)/1.25 var(--font-silk); font-stretch: 85%; letter-spacing: 0.14em; text-transform: uppercase; color: var(--label); }
+/* The theme switch: a pill box of three segments. The native radios sit over their segments, so the
+   group keeps one Tab stop and its arrow keys. */
+.theme { display: flex; align-items: center; gap: 2px; margin: 0; padding: 4px; min-inline-size: 0; border: var(--w-rule) solid var(--rule); border-radius: var(--r-pill); background: var(--well); }
+.theme legend { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .theme label { position: relative; cursor: pointer; }
 .theme input { position: absolute; inset: 0; margin: 0; opacity: 0; cursor: pointer; }
-.theme label > span { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--space-xs); min-inline-size: 48px; min-block-size: 48px; padding: 0 var(--space-xs); border-radius: 4px; font: 600 var(--text-silk-small)/1 var(--font-silk); font-stretch: 85%; letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink-2); }
-.theme .cap { display: block; inline-size: 32px; block-size: 14px; border: 2px solid var(--ink); border-radius: 3px; background: var(--ground); }
-.theme label:hover .cap { background: var(--key-white); }
-/* The pressed key is filled, its lamp lit and its word in full ink, so the choice reads without colour. */
-.theme input:checked + span { color: var(--ink); }
-.theme input:checked + span .cap { background: var(--ink); }
-.theme input:checked + span .lamp { background: var(--led); }
-.theme input:focus-visible + span { outline: 2px solid var(--ink); outline-offset: 0; }
+.theme label > span { display: flex; align-items: center; justify-content: center; min-inline-size: 64px; min-block-size: 40px; padding: 0 var(--space-12); border-radius: var(--r-pill); font: 600 var(--text-label)/1 var(--font-text); font-stretch: 104%; color: var(--ink-2); }
+.theme .lamp, .theme .cap { display: none; }
+.theme label:hover > span { color: var(--ink); background: var(--ground); }
+/* The chosen segment is filled with ink and its word set bold, so the choice reads without colour. */
+.theme input:checked + span { background: var(--ink); color: var(--ground); font-weight: 750; }
+.theme input:focus-visible + span { outline: 3px solid var(--accent); outline-offset: 2px; }
 @media (forced-colors: active) {
-  .theme .cap { forced-color-adjust: none; border-color: CanvasText; background: Canvas; }
-  .theme input:checked + span .cap { background: CanvasText; }
+  .theme input:checked + span { forced-color-adjust: none; background: CanvasText; color: Canvas; }
 }
 /* Device already follows the OS through CSS alone, so without JavaScript the switch would be a
    control that does nothing. */
 :root:not(.js) .theme { display: none; }
 
-/* The four banks own every keyed row: a key takes its bank's colour, which holds in both themes. */
-.bank-1 { --bank: var(--key-red); }
-.bank-2 { --bank: var(--key-orange); }
-.bank-3 { --bank: var(--key-yellow); }
-.bank-4 { --bank: var(--key-white); }
+/* Order colours: section heads, step numbers and the replay's steps take them in page order. */
+.bank-1 { --bank: var(--d-blue); --bank-ink: var(--d-paper); }
+.bank-2 { --bank: var(--d-coral); --bank-ink: var(--d-ink); }
+.bank-3 { --bank: var(--d-mint); --bank-ink: var(--d-ink); }
+.bank-4 { --bank: var(--d-sun); --bank-ink: var(--d-ink); }
 
-/* Buttons are keys: the red key acts, the outlined key is the alternative. Hover moves the arrow. */
-.keybtn { display: inline-flex; align-items: center; gap: var(--space-12); min-block-size: 48px; padding: var(--space-12) var(--space-lg); border: 2px solid var(--key-red); border-radius: 4px; background: var(--key-red); color: var(--key-ink); font: 700 var(--text-small)/1.2 var(--font-silk); font-stretch: 85%; letter-spacing: 0.12em; text-transform: uppercase; text-decoration: none; cursor: pointer; }
-.keybtn.outline { border-color: var(--ink); background: transparent; color: var(--ink); }
+/* Buttons are pills: the blue pill acts, the outlined pill is the alternative. Hover moves the arrow. */
+.keybtn { display: inline-flex; align-items: center; justify-content: center; gap: var(--space-sm); min-block-size: 52px; padding: 0 var(--space-lg); border: 2px solid var(--accent-fill); border-radius: var(--r-pill); background: var(--accent-fill); color: var(--on-accent); font: 650 var(--text-body)/1.2 var(--font-text); font-stretch: 104%; text-decoration: none; cursor: pointer; }
+.keybtn:hover { border-color: var(--accent-hover); background: var(--accent-hover); }
+.keybtn.outline { border-color: var(--ink); background: var(--ground); color: var(--ink); }
 .keybtn.outline:hover { background: var(--well); }
-.keybtn svg { inline-size: 16px; block-size: 16px; flex: none; transition: translate 200ms cubic-bezier(0.16, 1, 0.3, 1); }
+.keybtn svg { inline-size: 18px; block-size: 18px; flex: none; transition: translate 200ms cubic-bezier(0.16, 1, 0.3, 1); }
 .keybtn:hover svg { translate: 4px 0; }
 .keybtn:active { translate: 0 1px; }
 .keybtn[disabled] { border-color: var(--rule); background: var(--rule); color: var(--label); cursor: not-allowed; }
 .keybtn[disabled] svg { translate: none; }
 .textlink { padding-block: var(--space-12); font: 600 var(--text-body)/1.2 var(--font-text); }
 /* The quiet step button is a text button; disabled, it drops its underline. */
-.button.quiet { min-block-size: 48px; padding: var(--space-12) var(--space-xs); border: 0; background: none; color: var(--ink); font: 700 var(--text-small)/1.2 var(--font-silk); font-stretch: 85%; letter-spacing: 0.12em; text-transform: uppercase; text-decoration: underline 1px; text-underline-offset: 0.3em; cursor: pointer; }
-.button.quiet:hover { text-decoration-thickness: 2px; }
+.button.quiet { min-block-size: 52px; padding: 0 var(--space-md); border: 2px solid transparent; border-radius: var(--r-pill); background: none; color: var(--ink); font: 650 var(--text-body)/1.2 var(--font-text); text-decoration: underline 1.5px; text-underline-offset: 0.3em; cursor: pointer; }
+.button.quiet:hover { text-decoration-thickness: 2.5px; }
 .button.quiet[disabled] { color: var(--label); text-decoration: none; cursor: not-allowed; }
 @media (forced-colors: active) {
   .keybtn { border-color: ButtonText; }
@@ -182,135 +163,241 @@ code { font-size: var(--text-mono-value); font-weight: 500; }
   .keybtn:active { translate: none; }
 }
 
-/* The first band: the claim, and beside it on the landing the readout module. */
-.first-band { display: grid; grid-template-columns: minmax(0, 1fr) minmax(320px, 400px); gap: var(--space-xl) var(--space-40); align-items: start; padding: var(--space-40) var(--gutter) var(--space-xl); }
+/* The first band of every page sits under the sky: a pale blue fade into the page. */
+.first-band, .hero { background: linear-gradient(to bottom, var(--sky), var(--ground) 92%); }
+.first-band { display: grid; grid-template-columns: minmax(0, 1fr) minmax(300px, 400px); gap: var(--space-xl) var(--space-3xl); align-items: start; padding: clamp(40px, 6vw, 80px) var(--gutter) var(--space-2xl); }
 .first-band.solo { grid-template-columns: minmax(0, 1fr); }
-/* Beside the readout, 24px tighter, so at 1280 x 800 the landing's whole pattern and its provenance
-   caption sit in the first viewport. */
-@media (min-width: 961px) { .first-band { padding-block: var(--space-lg); } }
-/* The deploy steps close the first band under a 2px rule, their heading set plain. */
-.steps-block { display: grid; gap: var(--space-lg); padding-top: var(--space-lg); border-top: 2px solid var(--ink); }
+/* A first band with a drawing: the claim left, the drawing right, everything after it full width. */
+.first-band.solo.with-art { grid-template-columns: minmax(0, 1fr) minmax(0, 300px); }
+.first-band.with-art > .claim { grid-column: 1; grid-row: 1; }
+.first-band.with-art > .band-art { grid-column: 2; grid-row: 1; align-self: center; max-inline-size: 300px; }
+.first-band.with-art > :not(.claim, .band-art) { grid-column: 1 / -1; }
+.steps-block { display: grid; gap: var(--space-lg); padding-top: var(--space-xl); border-top: var(--w-rule) solid var(--rule); }
 .steps-head { display: grid; gap: var(--space-sm); }
 .steps-head p { margin: 0; color: var(--ink-2); }
 .claim { display: flex; flex-direction: column; gap: var(--space-lg); min-inline-size: 0; }
 .claim p { margin: 0; }
-.landing-title { font-size: var(--text-landing-headline); }
 .lede { max-inline-size: 58ch; font-size: var(--text-lede); line-height: 1.55; color: var(--ink-2); }
-.intro { font-size: var(--text-intro); line-height: 1.55; color: var(--ink-2); }
+.intro { font-size: var(--text-intro); line-height: 1.6; color: var(--ink-2); }
 .actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-12) var(--space-md); }
 
-/* The readout: the window's times in silkscreen, the sends in red segments behind black glass,
-   then what was found, what was muted and what the read-back said. */
-.readout { display: grid; gap: var(--space-12); align-content: start; margin: 0; padding: var(--space-md); border: 2px solid var(--ink); border-radius: 6px; }
-.readout-head { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 0 var(--space-sm); margin: 0; max-inline-size: none; }
-.window { display: flex; align-items: flex-end; gap: var(--space-md); margin: 0; padding: var(--space-12) var(--space-md); border-radius: 4px; background: var(--window); color: var(--window-ink); max-inline-size: none; }
-.window svg { flex: none; block-size: 56px; inline-size: auto; }
-.seg { fill: var(--segment-off); }
-.seg.lit { fill: var(--led); }
-.window .unit { display: grid; gap: var(--space-xs); padding-bottom: var(--space-xs); }
-.window .unit b { font: 600 var(--text-segment-unit)/1 var(--font-silk); font-stretch: 85%; letter-spacing: 0.14em; }
-.window code { color: var(--window-ink); }
-.window .unit > span { font-size: var(--text-small); line-height: 1.3; }
-.readout dl { margin: 0; }
-.readout dl > div { display: grid; grid-template-columns: 88px minmax(0, 1fr); gap: var(--space-12); align-items: baseline; padding: var(--space-sm) 0; border-top: var(--w-rule) solid var(--ink); }
-.readout dd { margin: 0; max-inline-size: none; font-size: var(--text-small); line-height: 1.45; color: var(--ink-2); }
-.readout .legend { margin-left: var(--space-sm); font: 700 var(--text-silk-small)/1 var(--font-silk); font-stretch: 85%; letter-spacing: 0.14em; color: var(--ink); }
-.readout .lamp { margin-right: var(--space-sm); vertical-align: 1px; }
-.stamp { justify-self: start; align-self: flex-start; margin: 0; padding: var(--space-xs) var(--space-sm); border: 2px solid currentColor; border-radius: 3px; font: 700 var(--text-silk-small)/1 var(--font-silk); font-stretch: 85%; letter-spacing: 0.14em; text-transform: uppercase; }
+/* The landing's hero: the headline centred across the band over three lines, then the lede and both
+   pills between the two drawings. The claim's parts sit on the hero's own grid. */
+.hero { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 640px) minmax(0, 1fr); align-items: center; gap: var(--space-lg) var(--space-xl); padding: clamp(32px, 3vw, 40px) var(--gutter) clamp(28px, 2.5vw, 32px); text-align: center; }
+.hero .claim { display: contents; }
+.hero .landing-title { grid-column: 1 / -1; grid-row: 1; justify-self: center; max-inline-size: min(100%, 1120px); }
+.hero .lede { grid-column: 2; grid-row: 2; margin-inline: auto; }
+.hero .actions { grid-column: 2; grid-row: 3; justify-content: center; }
+.landing-title { font-size: var(--text-landing-headline); font-weight: 900; line-height: 1.02; font-stretch: 108%; letter-spacing: -0.03em; }
+/* The one marked phrase: sea blue over a drawn stroke, never broken across lines. */
+.landing-title .mark { position: relative; display: inline-block; white-space: nowrap; color: var(--accent); }
+.landing-title .mark svg { position: absolute; left: -2%; bottom: -0.16em; inline-size: 104%; block-size: 0.26em; overflow: visible; }
+.landing-title .mark path { fill: none; stroke: var(--accent); stroke-width: 7; stroke-linecap: round; }
+.art { display: block; inline-size: 100%; block-size: auto; }
+.hero-art { align-self: center; }
+.hero-art.left { grid-column: 1; grid-row: 2 / 4; justify-self: end; max-inline-size: 230px; }
+.hero-art.right { grid-column: 3; grid-row: 2 / 4; justify-self: start; max-inline-size: 260px; }
+
+/* Drawings: flat colour layers cut like paper, depth only by overlap, no gradient and no shadow. Every
+   part is painted from the tokens. The outline and the solid ink follow the theme's ink, so on the
+   dark ground a drawing keeps its edges; the stitching sits on canvas, so it keeps the fixed ink. */
+.art .ink { fill: var(--ink); }
+.art .ln { fill: none; stroke: var(--ink); stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; }
+.art .ln-thin { fill: none; stroke: var(--ink); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.art .dash { fill: none; stroke: var(--accent); stroke-width: 3; stroke-linecap: round; stroke-dasharray: 2 10; }
+.art .dash-light { fill: none; stroke: var(--d-paper); stroke-width: 3; stroke-linecap: round; stroke-dasharray: 2 10; }
+.art .lane-band { fill: none; stroke: var(--d-sky); stroke-width: 30; stroke-linecap: round; }
+.art .foam { fill: none; stroke: var(--d-paper); stroke-width: 2.5; stroke-linecap: round; }
+.art .stitch { fill: none; stroke: var(--d-ink); stroke-width: 1.5; stroke-dasharray: 4 4; }
+.art .paper-stitch { fill: none; stroke: var(--d-paper); stroke-width: 1.4; stroke-dasharray: 2.5 2.5; }
+.art .paper { fill: var(--d-paper); }
+.art .blue { fill: var(--d-blue); }
+.art .sky { fill: var(--d-sky); }
+.art .coral { fill: var(--d-coral); }
+.art .sun { fill: var(--d-sun); }
+.art .pink { fill: var(--d-pink); }
+.art .mint { fill: var(--d-mint); }
+.art .canvas { fill: var(--d-cloth); }
+.art .sea { fill: var(--d-sky); }
+.art .stop { fill: var(--stop); }
+
+/* The screen: the product at work, on the night board. On the landing the lanes come first and the
+   readout's facts follow under them in one fixed sweep. The replay's screen holds the readout alone.
+   Both themes draw it dark; a screen is a screen. */
+.screen { margin: 0 var(--gutter) var(--space-xl); padding: clamp(16px, 2.4vw, 32px); border: var(--w-rule) solid var(--board-edge); border-radius: var(--r-card); background: var(--board); color: var(--board-ink); container: screen / inline-size; }
+.screen-wrap { max-inline-size: calc(var(--wide) + 2 * var(--gutter)); margin-inline: auto; }
+.screen :focus-visible { outline-color: var(--board-ink); }
+.screen ::selection { background: var(--d-sun); color: var(--d-ink); }
+.screen a { color: var(--board-ink); }
+
+/* The readout: the window, the sends as one large figure, then the cause, the closed lane and the
+   read-back, each one truth, read left to right. */
+.readout { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--space-md); align-content: start; margin: 0; }
+.readout-head { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 0 var(--space-md); margin: 0; max-inline-size: none; }
+.screen .readout-head, .screen .readout dt { color: var(--board-label); }
+.window { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--space-xs) var(--space-md); margin: 0; max-inline-size: none; }
+.window .figure { font: 900 var(--text-figure)/0.95 var(--font-text); font-stretch: 112%; letter-spacing: -0.03em; font-feature-settings: "tnum" 1; }
+.window .unit { display: grid; gap: 2px; font-size: var(--text-small); line-height: 1.35; }
+.window .unit b { font-weight: 650; }
+.window code { color: inherit; }
+.readout dl { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--space-md) var(--space-lg); margin: 0; }
+.readout dl > div { display: grid; gap: var(--space-xs); align-content: start; padding-top: var(--space-12); border-top: var(--w-rule) solid var(--board-rule); }
+.readout dd { margin: 0; max-inline-size: none; font-size: var(--text-small); line-height: 1.45; }
+.screen .readout dd { color: var(--board-ink); }
+.readout .legend { display: table; margin: 6px 0 0; padding: 3px 10px; border-radius: var(--r-pill); background: var(--stop); color: var(--d-ink); font: 750 var(--text-tag)/1.3 var(--font-text); font-stretch: 108%; letter-spacing: 0.04em; }
+.readout .lamp, .readout .sail-mark { margin-right: var(--space-sm); vertical-align: -2px; }
+.sail-mark { display: inline-block; inline-size: 14px; block-size: 18px; }
+.sail-mark .canvas { fill: var(--d-cloth); }
+.sail-mark .ln-thin { fill: none; stroke: var(--stop); stroke-width: 2; }
+.stamp { justify-self: start; align-self: flex-start; margin: 0; padding: 4px 12px; border: var(--w-rule) solid currentColor; border-radius: var(--r-pill); font: 700 var(--text-tag)/1.3 var(--font-text); font-stretch: 112%; letter-spacing: 0.06em; text-transform: uppercase; }
+.screen .stamp { color: var(--d-sun); }
+/* The screen's readout lays its parts out on a grid: the window and its figure left, the three facts
+   right, the stamp on the head row. */
+.screen .readout { grid-template-columns: minmax(200px, 1fr) minmax(0, 3fr); grid-template-areas: "head head" "window facts"; gap: var(--space-md) var(--space-xl); padding-bottom: var(--space-lg); border-bottom: var(--w-rule) solid var(--board-rule); }
+.screen .readout-head { grid-area: head; }
+.screen .window { grid-area: window; }
+.screen .readout dl { grid-area: facts; }
+.screen .readout .stamp { grid-area: head; justify-self: end; }
+.screen .readout-head { padding-right: 9rem; }
+/* On the landing the lanes come first and the board's facts follow under them, so the first lane
+   shows in the first viewport. */
+.screen > .pattern:first-child .tracks { padding-top: 0; }
+.screen > .board-caption { margin-bottom: 0; max-inline-size: none; }
+.screen > .pattern + .readout { margin-top: var(--space-lg); padding-top: var(--space-lg); padding-bottom: 0; border-top: var(--w-rule) solid var(--board-rule); border-bottom: 0; }
 /* Committed solid, alternatives in outline: the cause acted on is the one filled square, and every
    cause ruled out is the same square in outline. */
 .sq { display: inline-block; inline-size: 12px; block-size: 12px; margin-right: 6px; vertical-align: -1px; }
-.sq rect { fill: none; stroke: var(--ink); stroke-width: 2px; }
-.sq-solid rect { fill: var(--ink); }
+.sq rect { fill: none; stroke: currentColor; stroke-width: 2px; }
+.sq-solid rect { fill: currentColor; }
 
-/* The step pattern: each lane a track of pads, one pad per recorded event, banked by replay step.
-   A row is its own grid, so on a narrow screen the lane's name and mute key restack above its pads
-   and no pad is ever cropped. */
-.pattern, .board { margin: 0; padding: 0 var(--gutter) var(--space-xl); container: pattern / inline-size; }
-.tracks { --pad-h: 44px; display: grid; gap: var(--space-sm); padding-top: var(--space-12); border-top: 2px solid var(--ink); }
-.track { display: grid; grid-template-columns: 13rem minmax(0, 1fr) 5.5rem; gap: 0 var(--space-md); align-items: center; }
-.pads { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: var(--space-sm); }
-.track-head .pads > span { display: grid; gap: 2px; align-self: end; text-align: center; font: 600 var(--text-silk-small)/1.2 var(--font-silk); font-stretch: 85%; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-2); }
-.track-head .pads time { font: 500 var(--text-silk-small)/1.2 var(--font-mono); letter-spacing: 0; text-transform: none; color: var(--label); }
-.track-head > .silk { align-self: end; }
-.lane-name { display: grid; gap: 2px; min-inline-size: 0; margin: 0; font-size: var(--text-small); line-height: 1.3; color: var(--label); }
-.lane-name code { color: var(--ink); }
-.pad { position: relative; block-size: var(--pad-h); border: var(--w-rule) solid var(--key-edge); border-radius: 4px; background: var(--bank); }
-.pad.muted { background: var(--key-muted); }
-/* The pad's lamp sits at its top edge; the slot at its foot is the key's own texture. */
-.pad::before, .pad::after { content: ""; position: absolute; left: 50%; translate: -50% 0; border-radius: 2px; }
-.pad::before { top: var(--space-sm); inline-size: 16px; block-size: 10px; background: var(--lamp-dark); }
-.pad::after { bottom: var(--space-sm); inline-size: 10px; block-size: 4px; background: var(--lamp-dark); }
-.pad.lit::before { background: var(--key-white); outline: 1.5px solid var(--key-ink); }
-/* A bounce lamp is a red core in a white bezel, so it holds on the red bank. */
-.pad.bounce::before { border: 3px solid var(--key-white); background: var(--led); outline: 1.5px solid var(--key-ink); }
-/* A track's mute is a state, not a control: unlit it is a silkscreen label printed into a recessed well,
-   with no raised edge, so it never reads as a key to press. The transparent border keeps the box the
-   lit key fills. */
-.mute { display: flex; align-items: center; justify-content: center; gap: var(--space-sm); block-size: var(--pad-h); border: 2px solid transparent; border-radius: 4px; background: var(--well); color: var(--ink-2); cursor: default; font: 700 var(--text-silk-small)/1 var(--font-silk); font-stretch: 85%; letter-spacing: 0.14em; text-transform: uppercase; }
-/* The one key lit at full strength: the muted track's. */
-.mute.on { border-color: var(--key-red); background: var(--key-red); color: var(--key-ink); }
-.mute.on .lamp { background: var(--led); outline: 2px solid var(--key-ink); }
-/* Each bank's label spans its pads under one rule, and wraps inside that width. */
-.track-banks .pads > span { display: flex; flex-wrap: wrap; align-content: start; gap: 0 var(--space-sm); padding-top: var(--space-xs); border-top: 2px solid var(--ink); font: 600 var(--text-silk-small)/1.3 var(--font-silk); font-stretch: 85%; letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink-2); }
+/* The lanes: each configuration set a lane of light, one slot per recorded event, in the lane's own
+   colour. A row is its own grid, so on a narrow screen the lane's name restacks above its slots and
+   no slot is ever cropped. */
+.pattern, .board { margin: 0; padding: 0; container: pattern / inline-size; }
+.tracks { --pad-h: 24px; --pad-gap: 10px; display: grid; gap: var(--space-md); padding-top: var(--space-md); }
+.track { --lane: var(--lane-1); display: grid; grid-template-columns: 13rem minmax(0, 1fr) 6.5rem; gap: 0 var(--space-md); align-items: center; }
+.track.lane-2 { --lane: var(--lane-2); }
+.track.lane-3 { --lane: var(--lane-3); }
+.pads { position: relative; display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: var(--pad-gap); }
+.track-head .pads > span { display: grid; gap: 2px; align-self: end; text-align: center; font: 600 var(--text-tag)/1.25 var(--font-text); font-stretch: 100%; color: var(--board-label); }
+.track-head .pads time { font: 500 var(--text-tag)/1.25 var(--font-mono); color: var(--board-label); }
+.track-head > .silk { align-self: end; color: var(--board-label); }
+.lane-name { display: grid; gap: 2px; min-inline-size: 0; margin: 0; font-size: var(--text-small); line-height: 1.3; color: var(--board-label); }
+.lane-name code { color: var(--lane); font-size: var(--text-mono-value); }
+/* A slot with no event on this lane is a dim groove; an event lights the slot in the lane's colour. */
+.pad { position: relative; block-size: var(--pad-h); border: 2px solid transparent; border-radius: var(--r-pill); background: var(--board-slot); }
+.pad:is(.lit, .bounce) { background: var(--lane); box-shadow: var(--glow) color-mix(in srgb, var(--lane) 45%, transparent); }
+/* A bounce is a red core in a white ring on the lit slot. The ring is edged in board colour, which
+   meets every lane colour at 3:1 where white alone does not (WCAG 1.4.11). */
+.pad.bounce::before { content: ""; position: absolute; left: 50%; top: 50%; inline-size: 12px; block-size: 12px; translate: -50% -50%; border: 2px solid var(--d-paper); border-radius: 50%; background: var(--stop); box-shadow: 0 0 0 2px var(--board); }
+/* On the closed lane, from the slot the pause took, every slot keeps its place as an outline; an event
+   recorded there keeps a small dot inside. */
+.pad.muted { border-color: var(--lane); background: var(--board); box-shadow: none; }
+.pad.muted.lit::after { content: ""; position: absolute; left: 50%; top: 50%; inline-size: 6px; block-size: 6px; translate: -50% -50%; border-radius: 50%; background: var(--lane); }
+/* A lane's state at the end of its row: an open lane says nothing more, the closed one carries a red
+   tag with its sail. It is a state, never a control. */
+.mute { display: flex; align-items: center; justify-content: flex-start; gap: var(--space-sm); block-size: 32px; color: var(--board-label); cursor: default; font: 650 var(--text-label)/1 var(--font-text); }
+.mute .lamp { display: none; }
+.mute.on { justify-content: center; padding: 0 var(--space-12); border-radius: var(--r-pill); background: var(--stop); color: var(--d-ink); }
+.mute.on .sail-mark .ln-thin { stroke: var(--d-ink); }
+/* The sail drawn over the closed lane at the slot the pause took: it stands on the boundary between
+   the last lit slot and the first outlined one, large enough to be the board's one focal mark. In the
+   pause column the other lanes hold no event, so the sail covers only empty slots there. */
+.sail { position: absolute; z-index: 1; top: 50%; left: calc((100% + var(--pad-gap)) * var(--col, 0) / var(--count, 1) - var(--pad-gap) / 2); inline-size: 56px; block-size: 99px; translate: -50% -50%; pointer-events: none; }
+.sail svg { display: block; inline-size: 100%; block-size: 100%; overflow: visible; }
+.sail .canvas { fill: var(--d-cloth); }
+.sail .rope { fill: none; stroke: var(--board-ink); stroke-width: 1.5; stroke-linecap: round; }
+.sail .stitch { fill: none; stroke: var(--d-ink); stroke-width: 1.2; stroke-dasharray: 3 3; }
+.sail .edge { fill: none; stroke: var(--stop); stroke-width: 2.5; stroke-linejoin: round; }
+/* The sail's place: one class per board width and one per column, through the 64 columns of four full
+   steps (replay-view.ts MAX_BANK_SPAN), since the CSP refuses inline styles. */
+.of-1 { --count: 1; } .of-2 { --count: 2; } .of-3 { --count: 3; } .of-4 { --count: 4; } .of-5 { --count: 5; } .of-6 { --count: 6; }
+.of-7 { --count: 7; } .of-8 { --count: 8; } .of-9 { --count: 9; } .of-10 { --count: 10; } .of-11 { --count: 11; } .of-12 { --count: 12; }
+.of-13 { --count: 13; } .of-14 { --count: 14; } .of-15 { --count: 15; } .of-16 { --count: 16; } .of-17 { --count: 17; } .of-18 { --count: 18; }
+.of-19 { --count: 19; } .of-20 { --count: 20; } .of-21 { --count: 21; } .of-22 { --count: 22; } .of-23 { --count: 23; } .of-24 { --count: 24; }
+.of-25 { --count: 25; } .of-26 { --count: 26; } .of-27 { --count: 27; } .of-28 { --count: 28; } .of-29 { --count: 29; } .of-30 { --count: 30; }
+.of-31 { --count: 31; } .of-32 { --count: 32; } .of-33 { --count: 33; } .of-34 { --count: 34; } .of-35 { --count: 35; } .of-36 { --count: 36; }
+.of-37 { --count: 37; } .of-38 { --count: 38; } .of-39 { --count: 39; } .of-40 { --count: 40; } .of-41 { --count: 41; } .of-42 { --count: 42; }
+.of-43 { --count: 43; } .of-44 { --count: 44; } .of-45 { --count: 45; } .of-46 { --count: 46; } .of-47 { --count: 47; } .of-48 { --count: 48; }
+.of-49 { --count: 49; } .of-50 { --count: 50; } .of-51 { --count: 51; } .of-52 { --count: 52; } .of-53 { --count: 53; } .of-54 { --count: 54; }
+.of-55 { --count: 55; } .of-56 { --count: 56; } .of-57 { --count: 57; } .of-58 { --count: 58; } .of-59 { --count: 59; } .of-60 { --count: 60; }
+.of-61 { --count: 61; } .of-62 { --count: 62; } .of-63 { --count: 63; } .of-64 { --count: 64; }
+.c-0 { --col: 0; } .c-1 { --col: 1; } .c-2 { --col: 2; } .c-3 { --col: 3; } .c-4 { --col: 4; } .c-5 { --col: 5; } .c-6 { --col: 6; }
+.c-7 { --col: 7; } .c-8 { --col: 8; } .c-9 { --col: 9; } .c-10 { --col: 10; } .c-11 { --col: 11; } .c-12 { --col: 12; }
+.c-13 { --col: 13; } .c-14 { --col: 14; } .c-15 { --col: 15; } .c-16 { --col: 16; } .c-17 { --col: 17; } .c-18 { --col: 18; }
+.c-19 { --col: 19; } .c-20 { --col: 20; } .c-21 { --col: 21; } .c-22 { --col: 22; } .c-23 { --col: 23; } .c-24 { --col: 24; }
+.c-25 { --col: 25; } .c-26 { --col: 26; } .c-27 { --col: 27; } .c-28 { --col: 28; } .c-29 { --col: 29; } .c-30 { --col: 30; }
+.c-31 { --col: 31; } .c-32 { --col: 32; } .c-33 { --col: 33; } .c-34 { --col: 34; } .c-35 { --col: 35; } .c-36 { --col: 36; }
+.c-37 { --col: 37; } .c-38 { --col: 38; } .c-39 { --col: 39; } .c-40 { --col: 40; } .c-41 { --col: 41; } .c-42 { --col: 42; }
+.c-43 { --col: 43; } .c-44 { --col: 44; } .c-45 { --col: 45; } .c-46 { --col: 46; } .c-47 { --col: 47; } .c-48 { --col: 48; }
+.c-49 { --col: 49; } .c-50 { --col: 50; } .c-51 { --col: 51; } .c-52 { --col: 52; } .c-53 { --col: 53; } .c-54 { --col: 54; }
+.c-55 { --col: 55; } .c-56 { --col: 56; } .c-57 { --col: 57; } .c-58 { --col: 58; } .c-59 { --col: 59; } .c-60 { --col: 60; }
+.c-61 { --col: 61; } .c-62 { --col: 62; } .c-63 { --col: 63; }
+/* Each step's label spans its slots under one rule, and wraps inside that width. */
+.track-banks .pads > span { display: flex; flex-wrap: wrap; align-content: start; gap: 0 var(--space-sm); padding-top: var(--space-sm); border-top: 2px solid var(--bank, var(--board-rule)); font: 600 var(--text-tag)/1.35 var(--font-text); color: var(--board-ink); }
 .cols-1 { grid-column: span 1; } .cols-2 { grid-column: span 2; } .cols-3 { grid-column: span 3; } .cols-4 { grid-column: span 4; }
 .cols-5 { grid-column: span 5; } .cols-6 { grid-column: span 6; } .cols-7 { grid-column: span 7; } .cols-8 { grid-column: span 8; }
 .cols-9 { grid-column: span 9; } .cols-10 { grid-column: span 10; } .cols-11 { grid-column: span 11; } .cols-12 { grid-column: span 12; }
 .cols-13 { grid-column: span 13; } .cols-14 { grid-column: span 14; } .cols-15 { grid-column: span 15; } .cols-16 { grid-column: span 16; }
-.track-banks time { font: 500 var(--text-silk-small)/1.3 var(--font-mono); letter-spacing: 0; color: var(--label); }
-:is(.pattern, .board) figcaption { margin-top: var(--space-md); font: 400 var(--text-silk)/1.4 var(--font-text); color: var(--ink-2); }
+.track-banks time { font: 500 var(--text-tag)/1.35 var(--font-mono); color: var(--board-label); }
+:is(.pattern, .board) figcaption, .screen > .board-caption { margin-top: var(--space-lg); padding-top: var(--space-md); border-top: var(--w-rule) solid var(--board-rule); font: 400 var(--text-label)/1.5 var(--font-text); color: var(--board-label); }
 
-/* The readout's detail, under the pattern: what the cause rests on, what was ruled out, and what
-   reopens the lane. */
-.findings { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(16rem, 100%), 1fr)); gap: var(--space-lg) var(--space-40); margin: 0; padding: 0 var(--gutter) var(--space-2xl); }
-.findings > div { display: grid; gap: var(--space-sm); align-content: start; padding-top: var(--space-12); border-top: 2px solid var(--ink); }
-.findings dd { margin: 0; color: var(--ink-2); }
+/* The evidence, under the screen, on paper-yellow notes: what the cause rests on, what was ruled out,
+   and what reopens the lane. Only real things go on a note. */
+.findings { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(17rem, 100%), 1fr)); gap: var(--space-lg); max-inline-size: calc(var(--wide) + 2 * var(--gutter)); margin: 0 auto; padding: var(--space-md) var(--gutter) clamp(32px, 5vw, 64px); }
+.findings > div { position: relative; display: grid; gap: var(--space-sm); align-content: start; padding: var(--space-lg) var(--space-lg) var(--space-lg); border-radius: 4px; background: var(--note); color: var(--note-ink); }
+/* The tape is an element, not a pseudo-element: axe-core cannot tell whether a pseudo-element covers
+   the text beside it and leaves the note's contrast undecided, while an element it can place. */
+.findings .tape { position: absolute; top: -10px; left: 50%; inline-size: 72px; block-size: 20px; translate: -50% 0; rotate: -3deg; background: var(--note-tape); }
+.findings > div:nth-child(2) .tape { rotate: 2deg; }
+.findings dt { color: var(--note-ink); font-weight: 750; font-size: var(--text-small); }
+.findings dd { margin: 0; color: var(--note-ink); }
 .findings dd ul { display: grid; gap: var(--space-xs); margin: 0; padding: 0; list-style: none; }
+.findings code { color: var(--note-ink); }
 
-/* The motion grammar: on first view the playhead runs once across the pattern, each event's lamp
-   lighting in turn, and each muted pad drops to grey as the playhead passes it; the mute key lights
-   on the column the pause took. Nothing loops. Reduced motion places the final state. */
+/* The motion grammar: on first view the lanes fill left to right, one slot after another, the closed
+   lane's slots past the pause turn to outlines, and the sail settles over the lane. Nothing loops.
+   Reduced motion places the final state. */
 .at-1 { --at: 1; } .at-2 { --at: 2; } .at-3 { --at: 3; } .at-4 { --at: 4; } .at-5 { --at: 5; }
 .at-6 { --at: 6; } .at-7 { --at: 7; } .at-8 { --at: 8; } .at-9 { --at: 9; } .at-10 { --at: 10; }
 .at-11 { --at: 11; } .at-12 { --at: 12; } .at-13 { --at: 13; } .at-14 { --at: 14; } .at-15 { --at: 15; }
-@keyframes lamp-on { from { border-color: transparent; background: var(--lamp-dark); outline-color: transparent; } }
-@keyframes pad-mute { from { background: var(--bank); } }
-@keyframes mute-on { from { border-color: transparent; background: var(--well); color: var(--ink-2); } }
+@keyframes slot-on { from { background: var(--board-slot); box-shadow: none; scale: 0.6 1; } }
+@keyframes slot-close { from { border-color: transparent; background: var(--lane); } }
+@keyframes sail-set { from { opacity: 0; translate: -50% -110%; } }
+@keyframes tag-on { from { background: var(--board-slot); color: var(--board-label); } }
 @media (prefers-reduced-motion: no-preference) {
-  .pattern :is(.pad.lit, .pad.bounce)::before { animation: lamp-on 160ms cubic-bezier(0.16, 1, 0.3, 1) calc(400ms + var(--at, 0) * 90ms) backwards; }
-  .pattern .pad.muted { animation: pad-mute 240ms cubic-bezier(0.16, 1, 0.3, 1) calc(400ms + var(--at, 0) * 90ms) backwards; }
-  .pattern .mute.on { animation: mute-on 200ms cubic-bezier(0.16, 1, 0.3, 1) calc(400ms + var(--at, 0) * 90ms) backwards; }
+  .pattern .pad:is(.lit, .bounce):not(.muted) { animation: slot-on 220ms cubic-bezier(0.16, 1, 0.3, 1) calc(300ms + var(--at, 0) * 70ms) backwards; }
+  .pattern .pad.muted { animation: slot-close 260ms cubic-bezier(0.16, 1, 0.3, 1) calc(300ms + var(--at, 0) * 70ms) backwards; }
+  .pattern .sail { animation: sail-set 520ms cubic-bezier(0.16, 1, 0.3, 1) calc(420ms + var(--at, 0) * 70ms) backwards; }
+  .pattern .mute.on { animation: tag-on 220ms cubic-bezier(0.16, 1, 0.3, 1) calc(420ms + var(--at, 0) * 70ms) backwards; }
 }
 
-/* After the first band each section is headed by its title on a keycap, in page order red,
-   orange, yellow, white. */
-.band { padding: var(--band-block) var(--gutter); border-top: 2px solid var(--ink); }
+/* After the first band each section opens with its heading, with no bar or mark above it, then its
+   paragraph beside it. */
+.band { max-inline-size: calc(var(--wide) + 2 * var(--gutter)); margin-inline: auto; padding: var(--band-block) var(--gutter); }
+.band + .band { border-top: var(--w-rule) solid var(--rule); }
 .band-head { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: var(--space-md) var(--space-40); align-items: start; margin-bottom: clamp(28px, 4vw, 48px); }
-.band-head p { margin: 0; padding-top: var(--space-sm); color: var(--ink-2); }
+.band-head p { margin: 0; padding-top: var(--space-xs); color: var(--ink-2); }
 .band-split { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: var(--space-xl) var(--space-40); align-items: start; }
 .band-intro { display: grid; justify-items: start; gap: var(--space-md); }
 .band-intro p { margin: 0; color: var(--ink-2); }
-.keycap { position: relative; justify-self: start; padding: var(--space-12) var(--space-40) var(--space-12) var(--space-md); border: var(--w-rule) solid var(--key-edge); border-radius: 6px; background: var(--bank); color: var(--key-ink); }
-.keycap::after { content: ""; position: absolute; top: var(--space-sm); right: var(--space-sm); inline-size: 14px; block-size: 8px; border-radius: 2px; background: var(--lamp-dark); }
-.keycap::selection { background: var(--key-ink); color: var(--key-white); }
+.keycap::selection { background: var(--d-sun); color: var(--d-ink); }
 
-/* A procedure is a row of keys read left to right, each step's number printed on its key; the
-   list carries the number for assistive technology. */
-ol.procedure { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: var(--space-lg) var(--space-md); margin: 0; padding: 0; list-style: none; }
-.procedure li { display: flex; flex-direction: column; gap: var(--space-12); min-inline-size: 0; max-inline-size: none; }
-.step-key { position: relative; display: block; block-size: 72px; padding: var(--space-sm) var(--space-12); border: var(--w-rule) solid var(--key-edge); border-radius: 6px; background: var(--bank); color: var(--key-ink); }
-.step-key::after { content: ""; position: absolute; right: var(--space-12); bottom: var(--space-12); inline-size: 16px; block-size: 10px; border-radius: 2px; background: var(--lamp-dark); }
-/* A block, so its box spans the key: axe leaves text incomplete when a pseudo element (the key's lamp)
-   is over a quarter of the text's own box, which the narrow glyph 1 alone was. */
-.numeral { display: block; font: 800 var(--text-numeral)/1 var(--font-silk); font-stretch: 75%; }
-/* The smaller key holds the main keys' numeral: a glyph box running past the key's edge (the headline
-   size did at 1440) leaves axe unable to tell what the numeral sits on. */
-.procedure.removal .step-key { block-size: 64px; }
+/* A procedure reads left to right, each step's number on a coloured disc; the list carries the
+   number for assistive technology. On the landing a small drawing heads each step. */
+ol.procedure { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: var(--space-xl) var(--space-lg); margin: 0; padding: 0; list-style: none; }
+.procedure li { display: flex; flex-direction: column; gap: var(--space-md); min-inline-size: 0; max-inline-size: none; }
+.procedure .icon { display: block; inline-size: 88px; block-size: 72px; }
+.step-key { display: grid; place-items: center; inline-size: 44px; block-size: 44px; border-radius: 50%; background: var(--bank); color: var(--bank-ink); }
+.numeral { display: block; font: 850 var(--text-numeral)/1 var(--font-text); font-stretch: 108%; font-feature-settings: "tnum" 1; }
+.procedure.removal .step-key { inline-size: 40px; block-size: 40px; }
 .procedure h3 { margin-bottom: var(--space-xs); }
-.procedure p { margin: 0; font-size: var(--text-small); line-height: 1.5; color: var(--ink-2); }
+.procedure p { margin: 0; font-size: var(--text-small); line-height: 1.55; color: var(--ink-2); }
 
-/* A command as a reader would paste it, on a recessed well. */
-pre.command { margin: var(--space-12) 0 0; padding: var(--space-sm) var(--space-12); border-radius: 4px; background: var(--well); color: var(--ink); white-space: pre-wrap; overflow-wrap: anywhere; font: 500 var(--text-mono-value)/1.5 var(--font-mono); font-feature-settings: "tnum" 1; }
+/* A command as a reader would paste it, on the night board's colour, like a terminal. */
+pre.command { margin: var(--space-12) 0 0; padding: var(--space-12) var(--space-md); border-radius: var(--r-box); background: var(--board); color: var(--board-ink); white-space: pre-wrap; overflow-wrap: anywhere; font: 500 var(--text-mono-value)/1.55 var(--font-mono); font-feature-settings: "tnum" 1; }
+pre.command ::selection { background: var(--d-sun); color: var(--d-ink); }
+pre.command:focus-visible { outline-color: var(--accent); }
 /* A block code box covers every line of the command. Inline, its line boxes miss the first line of a
    token that breaks inside itself, so axe reads two element stacks under one text node and cannot
    compute its contrast (incomplete, elmPartiallyObscuring). The layout is the same either way. */
@@ -321,21 +408,20 @@ pre.command code { display: block; font: inherit; color: inherit; }
    column breaks inside itself (overflow-wrap above), as the last resort. */
 pre.command code > span, pre.command code > span > span { display: inline-block; max-inline-size: 100%; }
 /* Element-qualified so a note inside a procedure step keeps its own face over .procedure p. */
-p.command-note { margin: var(--space-sm) 0 0; font: 400 var(--text-silk)/1.4 var(--font-text); color: var(--label); }
+p.command-note { margin: var(--space-sm) 0 0; font: 400 var(--text-label)/1.45 var(--font-text); color: var(--label); }
 .command-inline > span { display: inline-block; }
 
-/* A notice: an unlit lamp and its silkscreen label, boxed, for what is not built yet. */
-.notice { display: flex; align-items: flex-start; gap: var(--space-12); max-inline-size: calc(var(--measure) + 64px); margin: 0; padding: var(--space-12) var(--space-md); border: 2px solid var(--ink); border-radius: 4px; }
-.notice .lamp { margin-top: 0.5em; }
-.notice p { margin: 0; }
-.notice b { margin-right: var(--space-sm); font: 700 var(--text-silk)/1 var(--font-silk); font-stretch: 85%; letter-spacing: 0.14em; text-transform: uppercase; }
+/* A notice: a hollow dot and its bold label in a tinted box, for what is not built yet. */
+.notice { display: flex; align-items: flex-start; gap: var(--space-12); max-inline-size: calc(var(--measure) + 64px); margin: 0; padding: var(--space-md) var(--space-lg); border: var(--w-rule) solid var(--rule); border-radius: var(--r-box); background: var(--tint); }
+.notice .lamp { margin-top: 0.45em; border: 2px solid var(--label); background: var(--tint); }
+.notice p { margin: 0; color: var(--ink-2); }
+.notice b { margin-right: var(--space-sm); color: var(--ink); font-weight: 750; }
 
 /* An identifier ends a line only at the <wbr> after a dot; nothing here may add another break. */
 .identifier { white-space: normal; overflow-wrap: normal; word-break: normal; hyphens: none; }
 .identifier > span { white-space: nowrap; }
-/* A copyable value keeps the exact spelling AWS gives it, inside silkscreen caps too (eu-central-1 in a
-   readout head, never EU-CENTRAL-1). A name set in the face around it keeps its own case as well, so
-   the replay title reads fothering-bulk in Saira, never FOTHERING-BULK. */
+/* A copyable value keeps the exact spelling AWS gives it everywhere. A name set in the face around it
+   keeps its own case as well. */
 code.identifier { text-transform: none; letter-spacing: 0; }
 .identifier[data-identifier-face="inherit"] { text-transform: none; }
 /* A role's name is its heading, an identifier at the heading's size. */
@@ -357,42 +443,51 @@ code.identifier { text-transform: none; letter-spacing: 0; }
 .state-mark-failed rect.bar { fill: var(--ink); stroke: none; }
 .state-mark-none rect { stroke: none; }
 
-/* The refusals: one row each, the refusal in silkscreen caps, its reason in running text. */
-ul.refuse { margin: 0; padding: 0; list-style: none; border-top: 2px solid var(--ink); }
-.refuse li { max-inline-size: none; padding: var(--space-lg) 0; border-bottom: var(--w-rule) solid var(--rule); }
-.refuse b { display: block; margin-bottom: var(--space-xs); font: 700 var(--text-title)/1.3 var(--font-silk); font-stretch: 85%; letter-spacing: 0.04em; text-transform: uppercase; }
+/* The refusals: a ruled list, one row each, the refusal set bold, its reason in running text, a coral
+   cross before it. */
+ul.refuse { display: grid; margin: 0; padding: 0; list-style: none; border-bottom: var(--w-rule) solid var(--rule); }
+.refuse li { position: relative; max-inline-size: none; padding: var(--space-lg) 0 var(--space-lg) 64px; border-top: var(--w-rule) solid var(--rule); }
+.refuse li::before, .refuse li::after { content: ""; position: absolute; left: 24px; top: 30px; inline-size: 22px; block-size: 4px; border-radius: 2px; background: var(--d-coral); rotate: 45deg; }
+.refuse li::after { rotate: -45deg; }
+.refuse b { display: block; margin-bottom: var(--space-xs); font: 750 var(--text-title)/1.35 var(--font-text); color: var(--ink); }
 .refuse li > span { display: block; max-inline-size: var(--measure); color: var(--ink-2); }
 
-/* Schedules: the head in silkscreen caps on a recessed strip under a 2px ink rule, the rows divided
-   by rules. */
+/* Schedules: the head in semibold label grey over a rule, the rows divided by rules. */
 table.schedule, table.ruled { width: 100%; border-collapse: collapse; font: 400 var(--text-cell)/1.5 var(--font-text); }
-:is(.schedule, .ruled) caption { caption-side: bottom; padding-top: var(--space-sm); text-align: left; font: 400 var(--text-silk)/1.4 var(--font-text); color: var(--label); }
+:is(.schedule, .ruled) caption { caption-side: bottom; padding-top: var(--space-sm); text-align: left; font: 400 var(--text-label)/1.45 var(--font-text); color: var(--label); }
 /* Cells meet on their first baseline, so a 13px mono value sits on the line of the text beside it. */
 :is(.schedule, .ruled) :is(th, td) { padding: var(--space-12) var(--space-md); text-align: left; vertical-align: baseline; border-bottom: var(--w-rule) solid var(--rule); }
-:is(.schedule, .ruled) thead th { padding-block: var(--space-12); border-top: 2px solid var(--ink); border-bottom: 0; background: var(--well); color: var(--ink); font: 700 var(--text-silk)/1.3 var(--font-silk); font-stretch: 85%; letter-spacing: 0.12em; text-transform: uppercase; vertical-align: bottom; }
-:is(.schedule, .ruled) tbody th { font-weight: 600; color: var(--ink); }
+:is(.schedule, .ruled) thead th { padding-block: var(--space-12); border-bottom: 2px solid var(--ink); background: var(--well); color: var(--ink); font: 650 var(--text-label)/1.35 var(--font-text); font-stretch: 104%; vertical-align: bottom; }
+:is(.schedule, .ruled) thead th:first-child { border-top-left-radius: var(--r-box); }
+:is(.schedule, .ruled) thead th:last-child { border-top-right-radius: var(--r-box); }
+:is(.schedule, .ruled) tbody th { font-weight: 650; color: var(--ink); }
 .schedule td { color: var(--ink-2); }
 .schedule .mono { font-family: var(--font-mono); font-size: var(--text-mono-value); font-weight: 500; }
-.schedule tr.us th, .schedule tr.us td { background: var(--well); color: var(--ink); font-weight: 600; }
+.schedule tr.us th, .schedule tr.us td { background: var(--note); color: var(--note-ink); font-weight: 650; }
+.schedule tr.us code { color: var(--note-ink); }
 .schedule .note { display: block; margin-top: var(--space-xs); color: var(--label); }
 .schedule.compact { font-size: var(--text-schedule-compact); line-height: 1.4; }
 .schedule.compact :is(th, td) { padding: var(--space-sm) var(--space-12); }
 .schedule.compact tbody th code { display: block; margin-top: var(--space-xs); }
 .cell-text { display: block; max-inline-size: var(--measure); }
 /* The column name a stacked cell prints above itself; only the stacked rules give it content. */
-:is(.schedule, .ruled) :is(th, td)::before { display: block; font: 700 var(--text-silk-small)/1.4 var(--font-silk); font-stretch: 85%; letter-spacing: 0.12em; text-transform: uppercase; color: var(--label); }
+:is(.schedule, .ruled) :is(th, td)::before { display: block; font: 650 var(--text-tag)/1.45 var(--font-text); font-stretch: 104%; color: var(--label); }
 
-/* The landing's close band: the readout's black glass, carrying the red key. */
-.close-band { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-lg) var(--space-40); padding: clamp(40px, 5vw, 64px) var(--gutter); background: var(--window); color: var(--window-ink); }
-.close-band p { margin: var(--space-sm) 0 0; }
-.close-band :focus-visible { outline-color: var(--window-ink); }
-.close-band ::selection { background: var(--key-yellow); color: var(--key-ink); }
+/* The landing's close band: the sea blue owns the band, the white pill acts. */
+.close-band { display: grid; justify-items: center; gap: var(--space-lg); padding: clamp(56px, 8vw, 104px) var(--gutter); background: var(--accent-fill); color: var(--on-accent); text-align: center; }
+.close-band h2 { color: var(--on-accent); font-size: clamp(2rem, 1.4rem + 2vw, 3.25rem); font-weight: 900; font-stretch: 108%; letter-spacing: -0.025em; }
+.close-band p { margin: var(--space-sm) auto 0; }
+.close-band .art { inline-size: min(320px, 70%); }
+.close-band .keybtn { border-color: var(--d-paper); background: var(--d-paper); color: var(--d-blue); }
+.close-band .keybtn:hover { background: var(--d-mist); }
+.close-band :focus-visible { outline-color: var(--d-paper); }
+.close-band ::selection { background: var(--d-sun); color: var(--d-ink); }
 
 /* The index at the foot of every page: the project line, every page and where the replay's data
    comes from. */
-.index { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: var(--space-lg) var(--space-40); align-items: start; padding: var(--space-40) var(--gutter) var(--space-2xl); border-top: 2px solid var(--ink); font-size: var(--text-small); }
+.index { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: var(--space-lg) var(--space-40); align-items: start; padding: var(--space-2xl) var(--gutter) var(--space-3xl); border-top: var(--w-rule) solid var(--rule); background: var(--tint); font-size: var(--text-small); }
 .index p { margin: 0; }
-.index .project { font: 800 var(--text-title)/1.3 var(--font-silk); font-stretch: 75%; letter-spacing: 0.02em; text-transform: uppercase; }
+.index .project { font: 800 var(--text-title)/1.35 var(--font-text); font-stretch: 108%; color: var(--ink); }
 .index .status { padding-block: var(--space-12); color: var(--ink-2); }
 
 /* Replay. Which step shows is CSS alone: the root's data-step (written before first paint from a
@@ -412,20 +507,20 @@ table.schedule, table.ruled { width: 100%; border-collapse: collapse; font: 400 
 :root.js[data-step="4"] :is(.board, .readout) [data-steps]:not([data-steps~="4"]) { visibility: hidden; }
 .board .lane-name > [data-steps] { grid-area: 2 / 1; }
 .board .mute { grid-area: 1 / 3; }
-.readout dd[data-steps] { grid-area: 1 / 2; }
+.readout dd[data-steps] { grid-area: 2 / 1; }
 /* Without JavaScript every panel and log row reads in order, the board and the readout hold the
    paused step, and no control that would do nothing is shown. */
 :root:not(.js) :is(.board, .readout) [data-steps]:not([data-steps~="3"]),
 :root:not(.js) .steps, :root:not(.js) .controls, :root:not(.js) .needs-js { display: none; }
 
-/* The board is the landing's pattern played through the reopen. A bank the replay has not reached
-   yet is drawn unplayed, a dashed outline with its lamps out, so the pattern keeps every column from
-   the first step and never grows. */
+/* The board is the landing's lanes played through the reopen. A step the replay has not reached yet
+   is drawn unplayed, a dashed outline, so the lanes keep every slot from the first step and never
+   grow. */
 :root.js:is(:not([data-step]), [data-step="1"]) .board .pad:is(.bank-2, .bank-3, .bank-4),
 :root.js[data-step="2"] .board .pad:is(.bank-3, .bank-4),
 :root.js[data-step="3"] .board .pad.bank-4,
 :root:not(.js) .board .pad.bank-4,
-.pad.unplayed { border-style: dashed; border-color: var(--label); background: transparent; }
+.pad.unplayed { border: 2px dashed var(--board-label); background: var(--board); box-shadow: none; }
 :root.js:is(:not([data-step]), [data-step="1"]) .board .pad:is(.bank-2, .bank-3, .bank-4)::before,
 :root.js:is(:not([data-step]), [data-step="1"]) .board .pad:is(.bank-2, .bank-3, .bank-4)::after,
 :root.js[data-step="2"] .board .pad:is(.bank-3, .bank-4)::before,
@@ -434,62 +529,60 @@ table.schedule, table.ruled { width: 100%; border-collapse: collapse; font: 400 
 :root.js[data-step="3"] .board .pad.bank-4::after,
 :root:not(.js) .board .pad.bank-4::before,
 :root:not(.js) .board .pad.bank-4::after,
-.pad.unplayed::before, .pad.unplayed::after { border: 0; background: var(--rule); outline: 0; }
-/* Each step plays its own bank when it shows: the playhead runs from the bank's first column, its
-   lamps lighting in turn, and on the paused step the muted pads drop to grey and the mute key
-   lights on the column the pause took. Nothing loops; reduced motion places the final state. */
+.pad.unplayed::before, .pad.unplayed::after { display: none; }
+/* Each step plays its own slots when it shows: the lanes fill from the step's first slot, and on the
+   paused step the closed lane's slots turn to outlines and the sail settles. Nothing loops; reduced
+   motion places the final state. */
 @media (prefers-reduced-motion: no-preference) {
-  :root.js:is(:not([data-step]), [data-step="1"]) .board .pad.bank-1:is(.lit, .bounce)::before,
-  :root.js[data-step="2"] .board .pad.bank-2:is(.lit, .bounce)::before,
-  :root.js[data-step="3"] .board .pad.bank-3:is(.lit, .bounce)::before,
-  :root.js[data-step="4"] .board .pad.bank-4:is(.lit, .bounce)::before { animation: lamp-on 160ms cubic-bezier(0.16, 1, 0.3, 1) calc(120ms + var(--at, 0) * 90ms) backwards; }
+  :root.js:is(:not([data-step]), [data-step="1"]) .board .pad.bank-1:is(.lit, .bounce):not(.muted),
+  :root.js[data-step="2"] .board .pad.bank-2:is(.lit, .bounce):not(.muted),
+  :root.js[data-step="3"] .board .pad.bank-3:is(.lit, .bounce):not(.muted),
+  :root.js[data-step="4"] .board .pad.bank-4:is(.lit, .bounce):not(.muted) { animation: slot-on 220ms cubic-bezier(0.16, 1, 0.3, 1) calc(120ms + var(--at, 0) * 70ms) backwards; }
   :root.js[data-step="3"] .board .pad.muted.bank-3,
-  :root.js[data-step="4"] .board .pad.muted.bank-4 { animation: pad-mute 240ms cubic-bezier(0.16, 1, 0.3, 1) calc(120ms + var(--at, 0) * 90ms) backwards; }
-  :root.js[data-step="3"] .board .mute.on { animation: mute-on 200ms cubic-bezier(0.16, 1, 0.3, 1) calc(120ms + var(--at, 0) * 90ms) backwards; }
+  :root.js[data-step="4"] .board .pad.muted.bank-4 { animation: slot-close 260ms cubic-bezier(0.16, 1, 0.3, 1) calc(120ms + var(--at, 0) * 70ms) backwards; }
+  :root.js[data-step="3"] .board .sail { animation: sail-set 520ms cubic-bezier(0.16, 1, 0.3, 1) calc(240ms + var(--at, 0) * 70ms) backwards; }
+  :root.js[data-step="3"] .board .mute.on { animation: tag-on 220ms cubic-bezier(0.16, 1, 0.3, 1) calc(240ms + var(--at, 0) * 70ms) backwards; }
 }
-.board .track-banks { margin-top: var(--space-sm); }
-.story { display: grid; gap: var(--space-lg); padding: 0 var(--gutter) var(--band-block); }
+.board .track-banks { margin-top: var(--space-md); }
+.story { display: grid; gap: var(--space-lg); max-inline-size: calc(var(--wide) + 2 * var(--gutter)); margin-inline: auto; padding: 0 var(--gutter) clamp(32px, 5vw, 64px); }
 
-ol.summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); margin: var(--space-sm) 0 0; padding: 0; list-style: none; border-top: 2px solid var(--ink); }
-.summary li { padding: var(--space-12) var(--space-md) 0 0; font-size: var(--text-small); line-height: 1.45; }
-.summary li + li { padding-left: var(--space-md); border-left: var(--w-rule) solid var(--rule); }
-.summary time { display: block; font: 600 var(--text-mono-value)/1.4 var(--font-mono); font-feature-settings: "tnum" 1; color: var(--label); }
+ol.summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--space-md); margin: var(--space-sm) 0 0; padding: 0; list-style: none; }
+.summary li { padding: var(--space-md); border: var(--w-rule) solid var(--rule); border-radius: var(--r-box); background: var(--ground); font-size: var(--text-small); line-height: 1.45; }
+.summary time { display: block; margin-bottom: var(--space-xs); font: 600 var(--text-mono-value)/1.4 var(--font-mono); font-feature-settings: "tnum" 1; color: var(--accent); }
 
-/* The step keys are the bank row under the pattern: each step a key in its bank's colour under the
-   rule that spans its bank, the number printed top left and the lamp top right. The current step
-   lights its lamp and sets its label in ink over a bar, so the mark is not colour alone. Where the
-   row is narrow each step stacks its time and label under its key. */
+/* The step keys are the row under the lanes: each step a numbered disc in its order colour under the
+   rule that spans its slots. The current step sets its label in full ink over a bar and rings its
+   disc, so the mark is not colour alone. Where the row is narrow each step stacks its time and label
+   under its disc. */
 ol.steps { margin: 0; padding: 0; list-style: none; container: steps / inline-size; }
-.steps li { display: flex; max-inline-size: none; padding-top: var(--space-sm); border-top: 2px solid var(--ink); }
-.steps .step { display: flex; flex-direction: column; align-items: flex-start; gap: var(--space-xs); inline-size: 100%; min-block-size: 44px; margin: 0; padding: 0 0 var(--space-xs); border: 0; background: none; color: var(--ink-2); text-align: left; cursor: pointer; }
-.step .key { position: relative; display: block; flex: none; inline-size: 44px; block-size: 44px; border: var(--w-rule) solid var(--key-edge); border-radius: 4px; background: var(--bank); color: var(--key-ink); }
-.step .key .numeral { position: absolute; top: var(--space-xs); left: var(--space-sm); font-size: var(--text-title); }
-.step .key .lamp { position: absolute; top: var(--space-sm); right: var(--space-sm); background: var(--lamp-dark); }
-.steps .t { font: 500 var(--text-silk)/1.2 var(--font-mono); font-feature-settings: "tnum" 1; color: var(--label); }
-.steps .step-label { font: 600 var(--text-silk)/1.3 var(--font-silk); font-stretch: 85%; letter-spacing: 0.12em; text-transform: uppercase; }
-.steps .step:hover .key { border-color: var(--ink); }
-.steps .step:hover .step-label { text-decoration: underline 1px; text-underline-offset: 4px; }
-.steps .step[aria-current="step"] { color: var(--ink); }
-/* The current step's lamp is built like a bounce lamp, an LED core in a key-white bezel, because a
-   bare LED disappears on the red bank's key. */
-.steps .step[aria-current="step"] .lamp { inline-size: 12px; block-size: 12px; border: 2px solid var(--key-white); background: var(--led); outline: 1.5px solid var(--key-ink); }
+.steps li { display: flex; max-inline-size: none; padding-top: var(--space-sm); border-top: 2px solid var(--bank); }
+.steps .step { display: flex; flex-direction: column; align-items: flex-start; gap: var(--space-xs); inline-size: 100%; min-block-size: 44px; margin: 0; padding: 0 0 var(--space-xs); border: 0; border-radius: var(--r-box); background: none; color: var(--board-label); text-align: left; cursor: pointer; }
+.step .key { position: relative; display: grid; place-items: center; flex: none; inline-size: 40px; block-size: 40px; border-radius: 50%; background: var(--bank); color: var(--bank-ink); }
+.step .key .numeral { font-size: var(--text-small); }
+.step .key .lamp { display: none; }
+.steps .t { font: 500 var(--text-label)/1.25 var(--font-mono); font-feature-settings: "tnum" 1; color: var(--board-label); }
+.steps .step-label { font: 650 var(--text-label)/1.3 var(--font-text); color: var(--board-ink); }
+.steps .step:hover .key { box-shadow: 0 0 0 2px var(--board-ink); }
+.steps .step:hover .step-label { text-decoration: underline 1.5px; text-underline-offset: 4px; }
+.steps .step[aria-current="step"] { color: var(--board-ink); }
+.steps .step[aria-current="step"] .key { box-shadow: 0 0 0 3px var(--board), 0 0 0 5px var(--board-ink); }
 /* The weight stays put, so the current label never rewraps and moves the keys. */
 .steps .step[aria-current="step"] .step-label { text-decoration: underline 2px; text-underline-offset: 4px; }
 @container steps (width >= 820px) {
-  .steps .step { display: grid; grid-template-columns: 44px minmax(0, 1fr); align-content: start; gap: var(--space-xs) var(--space-12); }
+  .steps .step { display: grid; grid-template-columns: 40px minmax(0, 1fr); align-content: start; gap: var(--space-xs) var(--space-12); }
   .step .key { grid-row: span 2; }
 }
 
-.controls { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-12) var(--space-lg); padding: var(--space-md) var(--gutter) var(--space-lg); }
+.controls { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-12) var(--space-lg); max-inline-size: calc(var(--wide) + 2 * var(--gutter)); margin-inline: auto; padding: var(--space-xs) var(--gutter) var(--space-xl); }
 .controls .clock { margin: 0 0 0 auto; font: 600 var(--text-mono-value)/1.4 var(--font-mono); font-feature-settings: "tnum" 1; color: var(--label); }
-/* A step's panel: its title on the step's keycap beside the story, under a 2px rule. The body is the
-   container the compact schedule measures. */
-.panel { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: var(--space-lg) var(--space-40); align-items: start; padding-top: var(--space-lg); border-top: 2px solid var(--ink); }
+/* A step's panel: its title beside the story, under a rule. The body is the container the compact
+   schedule measures. */
+.panel { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: var(--space-lg) var(--space-40); align-items: start; padding-top: var(--space-xl); border-top: var(--w-rule) solid var(--rule); }
 .panel h2 { font-size: var(--text-narrative-headline); }
 .panel-body { display: flex; flex-direction: column; gap: var(--space-md); min-inline-size: 0; container-type: inline-size; }
 .panel-body > p { margin: 0; color: var(--ink-2); }
-.panel .lanes { color: var(--ink); font-weight: 600; }
-.panel .lanes .lamp { margin-right: var(--space-sm); vertical-align: 1px; }
+.panel .lanes { color: var(--ink); font-weight: 650; }
+.panel .lanes .sail-mark { margin-right: var(--space-sm); vertical-align: -3px; }
 
 /* Beside the board, and on a narrow screen, the story column can be narrower than four columns of
    evidence and an unbroken tag value. There each row's dimension spans its row as a heading over its
@@ -508,29 +601,30 @@ ol.steps { margin: 0; padding: 0; list-style: none; container: steps / inline-si
 :root.js[data-step="1"] tr[data-log-step="1"] > *,
 :root.js[data-step="2"] tr[data-log-step="2"] > *,
 :root.js[data-step="3"] tr[data-log-step="3"] > *,
-:root.js[data-step="4"] tr[data-log-step="4"] > * { background: var(--well); }
+:root.js[data-step="4"] tr[data-log-step="4"] > * { background: var(--tint); }
 
-.message { max-inline-size: calc(44ch + 48px); border: 2px solid var(--ink); border-radius: 4px; background: var(--ground); }
-.message dl { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: var(--space-sm) var(--space-md); margin: 0; padding: var(--space-12) var(--space-lg); border-bottom: var(--w-rule) solid var(--rule); background: var(--well); font: 500 var(--text-mono-value)/1.45 var(--font-mono); }
+/* The operator email, shown as a message in a mail client: its headers on a grey strip, the
+   disclosure above a rule, then the body. */
+.message { max-inline-size: calc(46ch + 48px); overflow: hidden; border: var(--w-rule) solid var(--rule); border-radius: var(--r-card); background: var(--ground); }
+.message dl { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: var(--space-sm) var(--space-md); margin: 0; padding: var(--space-md) var(--space-lg); border-bottom: var(--w-rule) solid var(--rule); background: var(--well); font: 500 var(--text-mono-value)/1.45 var(--font-mono); }
 .message dt { color: var(--label); }
 .message dd { margin: 0; }
 .message-body { padding: var(--space-md) var(--space-lg) var(--space-lg); }
-.message-body p { margin: 0 0 var(--space-12); font-size: var(--text-cell); line-height: 1.5; color: var(--ink); }
+.message-body p { margin: 0 0 var(--space-12); font-size: var(--text-cell); line-height: 1.55; color: var(--ink); }
 .message-body p:last-child { margin-bottom: 0; }
-.message-body b { font-weight: 600; }
+.message-body b { font-weight: 650; }
 /* The disclosure opens the body above a rule, so it is read before the agent's paragraph. */
 .message-body .disclosure { padding-bottom: var(--space-12); border-bottom: var(--w-rule) solid var(--rule); font-size: var(--text-small); line-height: 1.45; color: var(--ink-2); }
 
 /* A stacking schedule holds identifiers in several columns (the log's lane and its tag values),
    which never break, so it becomes one block per row only where its own column is narrower than
-   the table needs (591px measured on the replay log with Saira heads and Public Sans cells,
-   2026-10-21), never by the viewport alone. */
+   the table needs, never by the viewport alone. */
 .log { container-type: inline-size; }
 @container (width < 595px) {
   table.schedule.stack, .schedule.stack thead, .schedule.stack tbody, .schedule.stack tr, .schedule.stack th, .schedule.stack td { display: block; width: auto; }
   .schedule.stack thead { display: none; }
   .schedule.stack caption { display: block; padding: var(--space-sm) 0; }
-  .schedule.stack tbody tr { padding: var(--space-xs) 0 var(--space-sm); border-top: var(--w-outline) solid var(--ink); }
+  .schedule.stack tbody tr { padding: var(--space-xs) 0 var(--space-sm); border-top: var(--w-outline) solid var(--rule); }
   .schedule.stack tbody tr:first-child { border-top: 0; }
   .schedule.stack tbody th, .schedule.stack td { padding: var(--space-sm) 0; border: 0; }
   .schedule.stack tbody th { padding-top: var(--space-12); }
@@ -548,8 +642,8 @@ ol.steps { margin: 0; padding: 0; list-style: none; container: steps / inline-si
 .perm-notes { display: grid; gap: var(--space-12); margin-top: var(--space-2xl); }
 .perm-notes p { margin: 0; }
 .perm-notes p + p { color: var(--ink-2); }
-/* The Deny block reads as the exception: an emphasis-weight rule over its heading and schedule. */
-.deny { margin-top: var(--space-2xl); padding-top: var(--space-md); border-top: var(--w-emph) solid var(--ink); }
+/* The Deny block reads as the exception: a coral bar over its heading and schedule. */
+.deny { margin-top: var(--space-2xl); padding-top: var(--space-md); border-top: var(--w-emph) solid var(--d-coral); }
 .deny h3 { margin-bottom: var(--space-md); }
 
 /* Each deploy schedule keeps its table form while its own section is as wide as the table needs
@@ -562,28 +656,28 @@ ol.steps { margin: 0; padding: 0; list-style: none; container: steps / inline-si
    matches these minimums' specificity and, later in the file, wins over them (here and below). */
 .fit td[data-col="Why"] .cell-text { min-inline-size: 12em; }
 .fit td[data-col="On removal"] .cell-text { min-inline-size: 12em; }
-/* Measured 2026-10-21 on the rendered tables with the minimums above and the Saira, Public Sans and
-   Source Code Pro faces: the resource table needs 756px and the widest role table 907px. */
+/* Measured on the rendered tables with the minimums above and the Mona Sans and Source Code Pro
+   faces: the resource table needs 756px and the widest role table 907px. */
 @container resources (width < 760px) {
   .fit-resources .fit, .fit-resources .fit :is(thead, tbody, tr, th, td) { display: block; width: auto; }
   .fit-resources .fit :is(thead, td[data-empty]) { display: none; }
   .fit-resources .fit tbody tr { padding: var(--space-xs) 0 var(--space-sm); }
-  .fit-resources .fit tbody tr + tr { border-top: var(--w-outline) solid var(--ink); }
+  .fit-resources .fit tbody tr + tr { border-top: var(--w-outline) solid var(--rule); }
   .fit-resources .fit :is(th, td) { padding: var(--space-sm) 0; border: 0; }
   .fit-resources .fit :is(th, td)::before { content: attr(data-col); }
   .fit-resources .fit caption { display: block; padding: var(--space-sm) 0; }
   .fit-resources .fit :is(th, td) .cell-text { min-inline-size: 0; }
 }
 /* The longest logical id, 32 mono characters, would break mid-name in a narrow stacked cell; under
-   286px of section it steps down to the silkscreen size instead (UI-SPEC 9.3, E10). */
+   286px of section it steps down to the tag size instead (UI-SPEC 9.3, E10). */
 @container resources (width < 286px) {
-  .fit-resources .fit code { font-size: var(--text-silk); }
+  .fit-resources .fit code { font-size: var(--text-tag); }
 }
 @container permissions (width < 911px) {
   .fit-permissions .fit, .fit-permissions .fit :is(thead, tbody, tr, th, td) { display: block; width: auto; }
   .fit-permissions .fit :is(thead, td[data-empty]) { display: none; }
   .fit-permissions .fit tbody tr { padding: var(--space-xs) 0 var(--space-sm); }
-  .fit-permissions .fit tbody tr + tr { border-top: var(--w-outline) solid var(--ink); }
+  .fit-permissions .fit tbody tr + tr { border-top: var(--w-outline) solid var(--rule); }
   .fit-permissions .fit :is(th, td) { padding: var(--space-sm) 0; border: 0; }
   .fit-permissions .fit :is(th, td)::before { content: attr(data-col); }
   .fit-permissions .fit caption { display: block; padding: var(--space-sm) 0; }
@@ -592,9 +686,9 @@ ol.steps { margin: 0; padding: 0; list-style: none; container: steps / inline-si
 
 /* Privacy and AI: the in-page links, the two drawings, the facts, the website list, the does and
    never-does lists. */
-.jump { display: flex; flex-wrap: wrap; gap: var(--space-lg); }
-.jump a { padding: var(--space-12) 0; font: 600 var(--text-body)/1.2 var(--font-text); }
-figure.filter, figure.interlock { margin: 0 0 clamp(28px, 4vw, 48px); }
+.jump { display: flex; flex-wrap: wrap; gap: var(--space-sm) var(--space-lg); }
+.jump a { padding: var(--space-12) 0; font: 650 var(--text-body)/1.2 var(--font-text); }
+figure.filter, figure.interlock { margin: 0 0 clamp(28px, 4vw, 48px); padding: clamp(16px, 2.4vw, 32px); border: var(--w-rule) solid var(--rule); border-radius: var(--r-card); background: var(--tint); }
 .dwg { display: block; inline-size: 100%; block-size: auto; }
 .dwg-narrow { display: none; }
 .dwg-filter.dwg-wide { max-inline-size: 920px; margin-inline: auto; }
@@ -603,13 +697,13 @@ figure.filter, figure.interlock { margin: 0 0 clamp(28px, 4vw, 48px); }
 .dwg-interlock.dwg-narrow { max-inline-size: 300px; margin-inline: auto; }
 /* Drawing parts are painted from the tokens, so both themes redraw them. */
 .dwg text { font-family: var(--font-mono); font-feature-settings: "tnum" 1; }
-.dwg .dwg-source-name { font-family: var(--font-silk); font-weight: 800; font-size: 15px; fill: var(--ink); }
+.dwg .dwg-source-name { font-family: var(--font-text); font-weight: 800; font-size: 15px; fill: var(--ink); }
 .dwg-lane { font-size: 13px; font-weight: 500; fill: var(--ink); }
 .dwg-caption-text { font-size: 12px; font-weight: 500; fill: var(--label); }
 .dwg-state-text { font-size: 12px; font-weight: 600; fill: var(--ink); }
-.dwg-source { fill: none; stroke: var(--ink); stroke-width: 2; }
+.dwg-source { fill: var(--ground); stroke: var(--accent); stroke-width: 2; }
 .dwg-unit { fill: var(--ground); stroke: var(--ink); stroke-width: 2; }
-.dwg-funnel { fill: none; stroke: var(--ink); stroke-width: 1.5; }
+.dwg-funnel { fill: none; stroke: var(--accent); stroke-width: 1.5; }
 .dwg-pipe { fill: none; stroke: var(--label); stroke-width: 2.5; }
 .dwg-dotted { stroke-dasharray: 1 9; }
 .dwg-stem { fill: none; stroke: var(--ink); stroke-width: 2; }
@@ -618,12 +712,11 @@ figure.filter, figure.interlock { margin: 0 0 clamp(28px, 4vw, 48px); }
    emphasis weight, the interlock itself. */
 .dwg-model { stroke-dasharray: 6 4; }
 .dwg-check { stroke-width: 3; }
-.figure-caption { margin-top: var(--space-md); font: 400 var(--text-silk)/1.4 var(--font-text); color: var(--label); }
+.figure-caption { margin-top: var(--space-md); font: 400 var(--text-label)/1.45 var(--font-text); color: var(--label); }
 .after-schedule { display: grid; gap: var(--space-12); margin-top: var(--space-lg); }
 .after-schedule p { margin: 0; color: var(--ink-2); }
-.facts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border-top: 2px solid var(--ink); }
-.facts > div { padding: var(--space-md) var(--space-lg) var(--space-lg) 0; border-bottom: var(--w-rule) solid var(--rule); }
-.facts > div + div { padding-left: var(--space-lg); border-left: var(--w-rule) solid var(--rule); }
+.facts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--space-md); }
+.facts > div { padding: var(--space-lg); border: var(--w-rule) solid var(--rule); border-radius: var(--r-card); background: var(--ground); }
 .facts h3 { margin: 0 0 var(--space-sm); }
 .facts p { margin: 0 0 var(--space-12); color: var(--ink-2); }
 .facts p:last-child { margin-bottom: 0; }
@@ -635,7 +728,7 @@ ul.site { display: grid; gap: var(--space-12); margin: 0; padding-left: var(--sp
 .split ul { margin: 0; padding: 0; list-style: none; border-top: 2px solid var(--ink); }
 .split li { padding: var(--space-md) 0; border-bottom: var(--w-rule) solid var(--rule); }
 .split h3 { margin-bottom: var(--space-12); }
-.split-note { margin: var(--space-md) 0 0; font-weight: 600; }
+.split-note { margin: var(--space-md) 0 0; font-weight: 650; }
 .split .report { margin: 0; padding-top: var(--space-md); border-top: 2px solid var(--ink); }
 .wrong { display: grid; gap: var(--space-md); }
 .wrong p { margin: 0; color: var(--ink-2); }
@@ -650,13 +743,11 @@ ul.site { display: grid; gap: var(--space-12); margin: 0; padding-left: var(--sp
 .fit-fields .fit tbody th wbr { display: none; }
 /* A model record value is prose, so in table form it keeps a readable column. */
 .fit-model td[data-col="Value"] .cell-text { min-inline-size: 16em; }
-/* Measured 2026-10-21 on the rendered tables with the Saira, Public Sans and Source Code Pro faces:
-   the stored-field table needs 508px with its paths on one line, the model record 366px with its
-   16em value column. */
-/* The stored-field table also stacks at 620px and below, like the statement schedules, so on a phone
-   it reads as blocks even where its section is just wide enough (a 320 to 1440 sweep on 2026-10-21:
-   one change of form, at 624px). Either condition names the wrapper fields-stacked, and the stacked
-   rules below query that name, so they are written once for both. */
+/* The stored-field table needs 508px with its paths on one line, the model record 366px with its
+   16em value column. The stored-field table also stacks at 620px and below, like the statement
+   schedules, so on a phone it reads as blocks even where its section is just wide enough. Either
+   condition names the wrapper fields-stacked, and the stacked rules below query that name, so they
+   are written once for both. */
 .fit-fields .fit-form { container-type: inline-size; }
 @container fields (width < 512px) { .fit-fields .fit-form { container-name: fields-stacked; } }
 @media (max-width: 620px) { .fit-fields .fit-form { container-name: fields-stacked; } }
@@ -664,7 +755,7 @@ ul.site { display: grid; gap: var(--space-12); margin: 0; padding-left: var(--sp
   .fit-fields .fit, .fit-fields .fit :is(thead, tbody, tr, th, td) { display: block; width: auto; }
   .fit-fields .fit thead { display: none; }
   .fit-fields .fit tbody tr { padding: var(--space-xs) 0 var(--space-sm); }
-  .fit-fields .fit tbody tr + tr { border-top: var(--w-outline) solid var(--ink); }
+  .fit-fields .fit tbody tr + tr { border-top: var(--w-outline) solid var(--rule); }
   .fit-fields .fit :is(th, td) { padding: var(--space-sm) 0; border: 0; }
   .fit-fields .fit :is(th, td)::before { content: attr(data-col); }
   .fit-fields .fit caption { display: block; padding: var(--space-sm) 0; }
@@ -675,7 +766,7 @@ ul.site { display: grid; gap: var(--space-12); margin: 0; padding-left: var(--sp
   .fit-model .fit, .fit-model .fit :is(thead, tbody, tr, th, td) { display: block; width: auto; }
   .fit-model .fit thead { display: none; }
   .fit-model .fit tbody tr { padding: var(--space-xs) 0 var(--space-sm); }
-  .fit-model .fit tbody tr + tr { border-top: var(--w-outline) solid var(--ink); }
+  .fit-model .fit tbody tr + tr { border-top: var(--w-outline) solid var(--rule); }
   .fit-model .fit :is(th, td) { padding: var(--space-sm) 0; border: 0; }
   .fit-model .fit :is(th, td)::before { content: attr(data-col); }
   .fit-model .fit caption { display: block; padding: var(--space-sm) 0; }
@@ -688,14 +779,13 @@ ul.site { display: grid; gap: var(--space-12); margin: 0; padding-left: var(--sp
 .fit-record { container: record / inline-size; }
 .fit-checks { container: checks / inline-size; }
 .fit-record td[data-col="Record"] .cell-text, .fit-checks td[data-col="How checked"] .cell-text { min-inline-size: 16em; }
-/* The longest criterion name, 1.2.3, takes three lines at 173px of 600-weight text (measured
-   2026-10-18 with the old faces), so the column keeps 11em of text plus the cell's paddings. */
+/* The longest criterion name, 1.2.3, takes three lines at 173px of 650-weight text, so the column
+   keeps 11em of text plus the cell's paddings. */
 .fit-checks .fit tbody th { min-inline-size: calc(11em + 32px); }
 .fit-record .fit-form, .fit-checks .fit-form { container-type: inline-size; }
 /* Either condition names the wrapper statement-stacked, so the stacked rules are written once for
-   both schedules; each schedule's own section decides its own form. Measured 2026-10-21 with the
-   Saira, Public Sans and Source Code Pro faces: the record needs 381px and the hand-check schedule
-   634px. */
+   both schedules; each schedule's own section decides its own form: the record needs 381px and the
+   hand-check schedule 634px. */
 @container record (width < 385px) { .fit-record .fit-form { container-name: statement-stacked; } }
 @container checks (width < 638px) { .fit-checks .fit-form { container-name: statement-stacked; } }
 @media (max-width: 620px) {
@@ -705,7 +795,7 @@ ul.site { display: grid; gap: var(--space-12); margin: 0; padding-left: var(--sp
   :is(.fit-record, .fit-checks) .fit, :is(.fit-record, .fit-checks) .fit :is(thead, tbody, tr, th, td) { display: block; width: auto; }
   :is(.fit-record, .fit-checks) .fit thead { display: none; }
   :is(.fit-record, .fit-checks) .fit tbody tr { padding: var(--space-xs) 0 var(--space-sm); }
-  :is(.fit-record, .fit-checks) .fit tbody tr + tr { border-top: var(--w-outline) solid var(--ink); }
+  :is(.fit-record, .fit-checks) .fit tbody tr + tr { border-top: var(--w-outline) solid var(--rule); }
   :is(.fit-record, .fit-checks) .fit :is(th, td) { padding: var(--space-sm) 0; border: 0; }
   :is(.fit-record, .fit-checks) .fit :is(th, td)::before { content: attr(data-col); }
   :is(.fit-record, .fit-checks) .fit caption { display: block; padding: var(--space-sm) 0; }
@@ -716,9 +806,8 @@ ul.site { display: grid; gap: var(--space-12); margin: 0; padding-left: var(--sp
 }
 
 /* The landing's limits table keeps every column at every width: in table form its note keeps a
-   readable column, and where its section is narrower than the table needs, and at 620px and below,
-   each row becomes a block with its note under it. Measured 2026-10-21 at 1440 with the 12em note
-   column: the table needs 499px. */
+   readable column, and where its section is narrower than the table needs (499px with the 12em note
+   column), and at 620px and below, each row becomes a block with its note under it. */
 .fit-limits { container: limits / inline-size; }
 .fit-limits td[data-col="Note"] .cell-text { min-inline-size: 12em; }
 .fit-limits .fit-form { container-type: inline-size; }
@@ -734,64 +823,92 @@ ul.site { display: grid; gap: var(--space-12); margin: 0; padding-left: var(--sp
   .fit-limits .fit :is(th, td) .cell-text { min-inline-size: 0; }
 }
 
-/* The marks legend on the accessibility statement: each mark drawn small beside its name, the
-   meaning under it, in as many columns as the band holds. */
-.marks dl { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(16rem, 100%), 1fr)); gap: 0 var(--space-lg); }
-.readout.marks dl > div { grid-template-columns: minmax(0, 1fr); gap: var(--space-sm); align-content: start; padding: var(--space-12) 0; }
+/* The marks legend on the accessibility statement, on its own small night board: each mark drawn
+   small beside its name, the meaning under it, in as many columns as the band holds. */
+.readout.marks { padding: var(--space-lg); border: var(--w-rule) solid var(--board-edge); border-radius: var(--r-card); background: var(--board); color: var(--board-ink); }
+.readout.marks .readout-head, .readout.marks dt { color: var(--board-ink); }
+.readout.marks dd { color: var(--board-label); }
+.marks dl { grid-template-columns: repeat(auto-fill, minmax(min(16rem, 100%), 1fr)); gap: 0 var(--space-lg); }
+.readout.marks dl > div { grid-template-columns: minmax(0, 1fr); gap: var(--space-sm); align-content: start; padding: var(--space-12) 0; border-top-color: var(--board-rule); }
 .marks dt { display: flex; align-items: center; gap: var(--space-12); }
 .marks .sample { display: flex; align-items: center; gap: var(--space-xs); flex: none; min-block-size: 28px; }
-.marks .pad { display: block; flex: none; inline-size: 24px; block-size: 28px; }
-.marks .pad::before { top: 5px; inline-size: 12px; block-size: 8px; }
-.marks .pad::after { bottom: 5px; inline-size: 8px; block-size: 3px; }
-.marks .pad.bounce::before { border-width: 2px; }
+.marks .track { display: contents; }
+.marks .pad { display: block; flex: none; inline-size: 40px; block-size: 18px; }
+.marks .pad.bounce::before { inline-size: 10px; block-size: 10px; }
 .marks .sq { margin-right: 0; }
+.marks .swatch { display: block; inline-size: 22px; block-size: 8px; border-radius: var(--r-pill); background: var(--bank); }
+.marks .sail-mark { inline-size: 16px; block-size: 22px; }
 
+/* The 404's response figure, on a small night board. */
+.not-found .readout { padding: var(--space-lg); border: var(--w-rule) solid var(--board-edge); border-radius: var(--r-card); background: var(--board); color: var(--board-ink); }
+.not-found .readout-head { color: var(--board-label); }
+
+@media (max-width: 1100px) {
+  .hero { grid-template-columns: minmax(0, 1fr); }
+  .hero .landing-title, .hero .lede, .hero .actions { grid-column: 1; }
+  .hero-art.left { display: none; }
+  .hero-art.right { grid-column: 1; grid-row: 4; justify-self: center; max-inline-size: 240px; }
+}
 @media (max-width: 960px) {
-  .first-band, .panel { grid-template-columns: minmax(0, 1fr); }
+  .first-band, .panel, .first-band.solo.with-art { grid-template-columns: minmax(0, 1fr); }
+  .first-band.with-art > .band-art { grid-column: 1; grid-row: auto; justify-self: start; max-inline-size: 200px; }
   .band-head, .band-split { grid-template-columns: minmax(0, 1fr); }
   ol.procedure { grid-auto-flow: row; grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  ol.summary { grid-template-columns: repeat(2, minmax(0, 1fr)); row-gap: var(--space-12); }
-  .summary li:nth-child(3) { padding-left: 0; border-left: 0; }
+  ol.summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .facts, .split { grid-template-columns: minmax(0, 1fr); }
-  .facts > div + div { padding-left: 0; border-left: 0; }
   .index { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
   .index .project { grid-column: 1 / -1; }
 }
-/* Where the pattern's own width gives a column less room than its widest head needs, the column
-   heads give way: each track's name and mute sit above its pads, and the bank labels under the
-   pattern keep each step's name and time. The pattern is the container, not the viewport, so the
-   heads never overlap at any width. Measured 2026-10-21 at 1440: the widest head (a mono time, or
-   "Reopen command") is 53.91px at min-content, so the replay board's twelve columns need 1063px of
-   pattern (208 + 88 + 2 x 16 for the name, mute and gaps, plus 12 x 53.91 + 11 x 8) and the landing's
-   nine need 868px; both take the board's switch. */
+/* On the screen, where its own width runs short the readout's facts stack under the figure. */
+@container screen (width < 760px) {
+  .screen .readout { grid-template-columns: minmax(0, 1fr); grid-template-areas: "head" "window" "facts"; }
+  .screen .readout-head { padding-right: 0; }
+  .screen .readout .stamp { grid-area: auto; justify-self: start; }
+  .screen .readout dl { grid-template-columns: minmax(0, 1fr); }
+}
+/* Where the lanes' own width gives a column less room than its widest head needs, the column heads
+   give way: each lane's name and state sit above its slots, and the step labels under the lanes keep
+   each step's name and time. The lanes are the container, not the viewport, so the heads never
+   overlap at any width. */
 @container pattern (width < 1067px) {
-  .tracks { --pad-h: 40px; }
+  .tracks { --pad-h: 20px; --pad-gap: 6px; }
   .track { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "name mute" "pads pads"; gap: var(--space-sm) var(--space-md); }
   .track .lane-name { grid-area: name; }
   .track .pads { grid-area: pads; }
-  .track .mute { grid-area: mute; block-size: 36px; padding-inline: var(--space-12); }
+  .track .mute { grid-area: mute; block-size: 28px; }
   .track-head { display: none; }
   .track-banks { grid-template-areas: "pads pads"; }
   .track-banks > :not(.pads) { display: none; }
-  .pads { gap: var(--space-xs); }
-  .pad::before { inline-size: 12px; block-size: 8px; }
-  .pad.bounce::before { border-width: 2px; }
+  .sail { inline-size: 34px; block-size: 60px; }
 }
 @media (max-width: 620px) {
-  .top-strip nav { order: 3; flex-basis: 100%; }
+  /* The wordmark takes the first row, the pages the second and the theme switch the third, so focus
+     meets them in the order they show (WCAG 2.4.3). */
+  .top-strip { gap: var(--space-sm) var(--space-12); }
+  .wordmark { font-size: 1.25rem; }
+  .theme label > span { min-inline-size: 52px; min-block-size: 36px; padding: 0 var(--space-sm); }
+  .top-strip nav { flex-basis: 100%; }
+  /* A long lede reads better from a straight left edge on a phone. */
+  .hero { text-align: left; }
+  .hero .landing-title { justify-self: start; }
+  .hero .lede { margin-inline: 0; }
+  .hero .actions { justify-content: flex-start; }
+  .hero-art.right { justify-self: start; }
   .dwg-wide { display: none; }
   .dwg-narrow { display: block; }
   ol.procedure { grid-template-columns: minmax(0, 1fr); }
-  .procedure li { display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: var(--space-md); }
-  .step-key, .procedure.removal .step-key { block-size: 64px; }
-  .close-band .keybtn, .not-found-action .keybtn { justify-content: center; inline-size: 100%; }
+  .procedure li { display: grid; grid-template-columns: 44px minmax(0, 1fr); gap: var(--space-md); }
+  .procedure .icon { display: none; }
+  .close-band .keybtn, .not-found-action .keybtn { inline-size: 100%; }
   .index { grid-template-columns: minmax(0, 1fr); }
+  .screen { margin-inline: 8px; }
+  .refuse li { padding-left: 56px; }
+  .refuse li::before, .refuse li::after { left: 18px; }
   /* The sticky controls cover the top of the viewport, so focus scrolled into view lands below them. */
   :root:has(.controls) { scroll-padding-top: 120px; }
   .controls { position: sticky; top: 0; z-index: 2; padding: var(--space-12) var(--gutter); background: var(--ground); border-bottom: var(--w-rule) solid var(--rule); }
-  .controls .keybtn, .controls .button { flex: 1 1 40%; justify-content: center; }
+  .controls .keybtn, .controls .button { flex: 1 1 40%; }
   .controls .clock { width: 100%; margin-left: 0; }
   ol.summary { grid-template-columns: minmax(0, 1fr); }
-  .summary li + li { padding-left: 0; border-left: 0; }
   .message dl, .message-body { padding-inline: var(--space-md); }
 }

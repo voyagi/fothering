@@ -1,11 +1,11 @@
 ---
+import Drawing from '../components/Drawing.astro';
 import { PROVENANCE_LABELS } from '../site/labels.ts';
 import { loadReplayArtifact } from '../site/replay-view.ts';
 import { headMeta, ROUTES, type SheetRoute } from '../site/route-list.ts';
 import { HEAD_SCRIPT } from '../theme/head-script.ts';
 import '../styles/site.css';
-import publicSansLatin from '@fontsource-variable/public-sans/files/public-sans-latin-wght-normal.woff2?url';
-import sairaLatin from '@fontsource-variable/saira/files/saira-latin-wdth-normal.woff2?url';
+import monaSansLatin from '@fontsource-variable/mona-sans/files/mona-sans-latin-wdth-normal.woff2?url';
 import sourceCodeProLatin from '@fontsource-variable/source-code-pro/files/source-code-pro-latin-wght-normal.woff2?url';
 
 interface Props {
@@ -28,8 +28,8 @@ const status = PROVENANCE_LABELS[provenance].titleBlockStatus;
 const currentMark = (path: string): 'page' | undefined => (path === route.path ? 'page' : undefined);
 // The faces swap in, so a latin face found only once site.css has been parsed lands after the
 // first paint and reflows the first band (layout shift about 0.2 on /deploy/ and /replay/).
-// Preloaded, the three are fetched beside the stylesheet.
-const PRELOADED_FACES = [sairaLatin, publicSansLatin, sourceCodeProLatin];
+// Preloaded, the two are fetched beside the stylesheet.
+const PRELOADED_FACES = [monaSansLatin, sourceCodeProLatin];
 ---
 <!doctype html>
 <html lang="en">
@@ -50,10 +50,10 @@ const PRELOADED_FACES = [sairaLatin, publicSansLatin, sourceCodeProLatin];
   <body>
     <a class="skip" href="#main">Skip to main content</a>
     <header class="top-strip">
-      <a class="wordmark" href="/">FOTHERING</a>
+      <a class="wordmark" href="/"><Drawing name="wordmark" />Fothering</a>
       <nav aria-label="Main">
         <ul>
-          {stripRoutes.map((entry) => <li><a href={entry.path} aria-current={currentMark(entry.path)}><span class="lamp" aria-hidden="true"></span>{entry.label}</a></li>)}
+          {stripRoutes.map((entry) => <li><a href={entry.path} aria-current={currentMark(entry.path)}>{entry.label}</a></li>)}
         </ul>
       </nav>
       <fieldset class="theme">
@@ -61,7 +61,7 @@ const PRELOADED_FACES = [sairaLatin, publicSansLatin, sourceCodeProLatin];
         {THEMES.map((theme) => (
           <label>
             <input type="radio" name="theme" value={theme.value} checked={theme.value === 'device'} />
-            <span><span class="lamp" aria-hidden="true"></span><span class="cap" aria-hidden="true"></span>{theme.label}</span>
+            <span>{theme.label}</span>
           </label>
         ))}
       </fieldset>

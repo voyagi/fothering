@@ -363,16 +363,22 @@ const NO_FORM = 'Check that the site has no form and no text input, only the thr
 // them from the W3C criteria list and axe's rule table. Each result comes from the 05-UAT check 4 run
 // in Chromium on 2026-10-23 (keyboard and pointer, 320 and 1440 px, Light, Dark and Device). Not
 // applicable means the site has nothing the criterion governs. 1.4.5 failed on the readouts' drawn
-// numbers and passed only after the fix that prints each number beside its digits.
+// numbers and passed only after the fix that prints each number beside its digits. Every passed row
+// was checked again on the new look in Chromium on 2026-10-23 (320, 500 and 1440 px, Light, Dark and
+// Device), which moved the phone top bar's switch under the pages so focus follows the screen (2.4.3).
+// For 1.4.11, a bounce's white ring (2.35:1 on orange, 1.93:1 on green) is edged in board colour,
+// which reaches 6.1:1 or more on every lane. An empty slot (1.16:1) and the switch's outer edge stay
+// under 3:1 and are not needed: an empty slot only marks where no event sits, every lit slot reaches
+// 3:1 against it, and the switch names its options in text.
 export const HAND_CHECK_CRITERIA: readonly HandCheckCriterion[] = Object.freeze([
   { number: '1.2.3', name: 'Audio Description or Media Alternative (Prerecorded)', result: 'not-applicable', how: 'Check that the site has no prerecorded video or audio.' },
   { number: '1.2.4', name: 'Captions (Live)', result: 'not-applicable', how: 'Check that the site has no live video or audio.' },
   { number: '1.2.5', name: 'Audio Description (Prerecorded)', result: 'not-applicable', how: 'Check that the site has no prerecorded video.' },
   { number: '1.3.2', name: 'Meaningful Sequence', result: 'passed', how: 'Check that every page keeps its meaning when its text is read in source order.' },
   { number: '1.3.3', name: 'Sensory Characteristics', result: 'passed', how: 'Check that no instruction relies on shape, colour, size, position or sound alone.' },
-  { number: '1.4.5', name: 'Images of Text', result: 'passed', how: "Check that every word is text and that the readout's drawn digits are also given as text beside them." },
+  { number: '1.4.5', name: 'Images of Text', result: 'passed', how: "Check that every word, the readout's number included, is text and never a picture of text." },
   { number: '1.4.10', name: 'Reflow', result: 'passed', how: 'Check that at 320 pixels wide no page scrolls sideways or cuts content off.' },
-  { number: '1.4.11', name: 'Non-text Contrast', result: 'passed', how: 'Check that the state marks, keys, lamps, theme switch and focus rings meet the contrast minimum in Light and Dark.' },
+  { number: '1.4.11', name: 'Non-text Contrast', result: 'passed', how: "Check that state marks, filled and outlined slots, the sail, the switch's choice and focus rings reach 3:1 per theme." },
   { number: '1.4.13', name: 'Content on Hover or Focus', result: 'not-applicable', how: 'Check that hovering over or focusing any link or control opens no tooltip or pop-up over the page.' },
   { number: '2.1.2', name: 'No Keyboard Trap', result: 'passed', how: 'Check that focus can leave every control when tabbing forwards and backwards with the keyboard alone.' },
   { number: '2.1.4', name: 'Character Key Shortcuts', result: 'not-applicable', how: 'Check that pressing letter, number and punctuation keys on every page triggers no shortcut.' },
@@ -447,7 +453,7 @@ export const ACCESSIBILITY_RECORD: AccessibilityRecord = Object.freeze({
   widths: Object.freeze([320, 1440]),
   themes: Object.freeze(['light', 'dark', 'device']),
   limitations: Object.freeze([
-    { id: 'drawings', text: "The step pattern and the readout's digits are drawn. The page text gives each lane's state and the number, and the replay's log lists every event." },
+    { id: 'drawings', text: "The lanes, the sail and the pictures beside the headline are drawn. The page text gives each lane's state, and the replay's log lists every event." },
     { id: 'hand-check', text: 'An automated audit cannot decide every criterion. Those listed under Checked one by one were checked in Chromium only, and no screen reader was run.' },
   ]),
   contact: `To report an accessibility problem, ${CONTROLLER.contact}.`,
