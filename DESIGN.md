@@ -458,6 +458,9 @@ The landing's last band: sea blue owns the band, a drawing of envelope lanes wit
 ### Drawings
 Flat cut-paper SVG layers painted from the tokens: envelopes flying along a dashed lane line under a sun, the hull with a sail drawn over its leak on a blue sea, envelope lanes with one stopped under a sail, and four small step drawings. Outlines are 3px and 2px ink with round caps, and follow the theme's ink so a drawing keeps its edges on the navy ground. Every drawing is decorative and the text beside it says what it shows.
 
+### Tab Icon and Link Preview
+The tab icon is the top bar's sail mark on a clear ground: d-blue sail, white stitch thickened to 1.6 for small sizes, ropes in ink that turn to ink-dark when the browser reports dark mode (`favicon.svg`, with a 16, 32 and 48 px `favicon.ico` for browsers without SVG icons). The 180px home-screen icon puts the same mark on white with wide margins. The link preview (`og-image.png`, 1200 by 630) is the card's scene in its own 1.91:1 frame: the name, "for Amazon SES", the claim and the hull above the night board of the live run, every size as on the card, with the board ending 30px above the foot so a 2:1 crop cuts nothing. Its alt text states the board's facts.
+
 ## Do's and Don'ts
 
 ### Do:
