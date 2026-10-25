@@ -1899,7 +1899,7 @@ describe('the website facts and six rights rules (AC-21, AC-E16)', () => {
     expect(privacyTexts(websiteFactsRule, privacyBody())).toEqual([]);
   });
 
-  it.each(['controller', 'contact', 'legal-basis', 'complaint', 'cloudflare-dpa', 'aws-dpa', 'no-cookie', 'no-analytics'])('fails a website part missing the %s fact', (id) => {
+  it.each(['controller', 'contact', 'legal-basis', 'complaint', 'cloudflare-dpa', 'cloudflare-transfer', 'ip-retention', 'aws-dpa', 'no-cookie', 'no-analytics'])('fails a website part missing the %s fact', (id) => {
     const missing = statementById(privacy.website, id);
     expect(privacyTexts(websiteFactsRule, privacyBody({ website: omitting(privacy.website, id) }))).toEqual([`the website part does not say "${missing.text}"`]);
   });

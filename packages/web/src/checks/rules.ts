@@ -1613,8 +1613,8 @@ export function storedFieldRowsRule(site: BuiltSite, context: CheckContext): Fin
   return onPart(site, 'stored-field-rows', privacyPart, (part) => storedFieldFindings(part, context.privacy.storedFields));
 }
 
-// AC-21: the controller, the contact route, the legal basis, the complaint right, both DPA lines and
-// the no-cookie and no-analytics sentences.
+// AC-21: the controller, the contact route, the legal basis, the complaint right, both DPA lines,
+// Cloudflare's transfer safeguard, the visitor IP's retention and the no-cookie and no-analytics sentences.
 export function websiteFactsRule(site: BuiltSite, context: CheckContext): Finding[] {
   return onPart(site, 'website-facts', privacyPart, (part) => statementFindings(part, context.privacy.website, 'the website part'));
 }
