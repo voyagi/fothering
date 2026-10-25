@@ -1,4 +1,5 @@
 ---
+import Drawing from '../components/Drawing.astro';
 import Schedule from '../components/Schedule.astro';
 import Sheet from '../layouts/Sheet.astro';
 import { ACCESSIBILITY_RECORD, handCheckRows } from '../site/content.ts';
@@ -16,7 +17,7 @@ const recordRows = [
   { header: 'Last automated audit', cells: [{ text: `\`${record.lastAutomatedAudit}\`` }] },
   { header: 'Tool', cells: [{ text: `\`axe-core\` ${record.axeVersion}, tags ${listed(code(record.tags))}, with ${listed(code(record.enabledRules))} enabled by name` }] },
   { header: 'Covered', cells: [{ text: `${listed([...code(record.routes), 'the page an unknown address shows'])}, at ${listed(record.widths.map(String))} pixels wide, in the ${listed(record.themes.map(themeName))} themes` }] },
-  { header: 'Also checked', cells: [{ text: 'Keyboard order, a visible focus indicator on every control, no sideways scrolling, and every lamp and key placed in its final state under reduced motion.' }] },
+  { header: 'Also checked', cells: [{ text: 'Keyboard order, a visible focus indicator on every control, no sideways scrolling, and every slot, tag and sail placed in its final state under reduced motion.' }] },
 ];
 
 const criterionRows = handCheckRows();
@@ -31,27 +32,31 @@ const criterionRows = handCheckRows();
       <p class="readout-head" id="marks-title"><span>What the marks mean</span></p>
       <dl>
         <div>
-          <dt><span class="sample" aria-hidden="true"><span class="lamp on"></span></span>Lit lamp</dt>
-          <dd>Something is on: the page you are on, the theme you chose, the replay step you are on, the muted track's key.</dd>
-        </div>
-        <div>
-          <dt><span class="sample" aria-hidden="true"><span class="pad bank-1 bounce"></span></span>Red lamp in a white ring</dt>
-          <dd>A bounce on that lane.</dd>
-        </div>
-        <div>
-          <dt><span class="sample" aria-hidden="true"><span class="pad bank-2 lit"></span></span>White lamp</dt>
+          <dt><span class="sample" aria-hidden="true"><span class="track lane-1"><span class="pad lit"></span></span></span>Filled slot</dt>
           <dd>An event on that lane, other than a bounce.</dd>
         </div>
         <div>
-          <dt><span class="sample" aria-hidden="true"><span class="pad bank-3 muted"></span></span>Grey key</dt>
-          <dd>A step on the muted track while its lane is closed.</dd>
+          <dt><span class="sample" aria-hidden="true"><span class="track lane-2"><span class="pad bounce"></span></span></span>Red dot in a white ring</dt>
+          <dd>A bounce on that lane.</dd>
         </div>
         <div>
-          <dt><span class="sample" aria-hidden="true"><span class="pad bank-1"></span><span class="pad bank-2"></span><span class="pad bank-3"></span><span class="pad bank-4"></span></span>Key colours</dt>
-          <dd>On the step pattern and the replay's step keys, the replay's four steps in time order: red, orange, yellow, white. Elsewhere they mark the order of sections and steps on the page.</dd>
+          <dt><span class="sample" aria-hidden="true"><span class="track lane-2"><span class="pad muted"></span></span></span>Outlined slot</dt>
+          <dd>A slot on the closed lane while it is closed.</dd>
         </div>
         <div>
-          <dt><span class="sample" aria-hidden="true"><span class="pad bank-2 unplayed"></span></span>Dashed key</dt>
+          <dt><span class="sample" aria-hidden="true"><Drawing name="sail-mark" /></span>Sail</dt>
+          <dd>The lane Fothering closed, drawn where the pause took it, and the Closed tag at the end of that lane.</dd>
+        </div>
+        <div>
+          <dt><span class="sample" aria-hidden="true"><span class="track lane-1"><span class="pad lit"></span></span><span class="track lane-2"><span class="pad lit"></span></span><span class="track lane-3"><span class="pad lit"></span></span></span>Lane colours</dt>
+          <dd>Each lane keeps its own colour, in the order the replay lists the lanes: blue, orange, green.</dd>
+        </div>
+        <div>
+          <dt><span class="sample" aria-hidden="true"><span class="swatch bank-1"></span><span class="swatch bank-2"></span><span class="swatch bank-3"></span><span class="swatch bank-4"></span></span>Step colours</dt>
+          <dd>Under the lanes and on the replay's step discs, the replay's four steps in time order: blue, coral, green, yellow. Elsewhere they mark the order of sections and steps on the page.</dd>
+        </div>
+        <div>
+          <dt><span class="sample" aria-hidden="true"><span class="pad unplayed"></span></span>Dashed slot</dt>
           <dd>A step the replay has not reached yet.</dd>
         </div>
         <div>

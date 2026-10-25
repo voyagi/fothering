@@ -82,6 +82,23 @@ export interface HeadMeta {
   readonly links: readonly Readonly<Record<string, string>>[];
 }
 
+// The link preview every page names, the card's scene at the 1.91:1 shape link previews draw, with room
+// under the board so a 2:1 crop cuts nothing. The file is packages/web/public/og-image.png.
+export const SOCIAL_IMAGE = Object.freeze({
+  path: '/og-image.png',
+  width: 1200,
+  height: 630,
+  alt: 'Fothering for Amazon SES: closes that lane and nothing else. A night board of three SES configuration sets from the live run of 22 October 2026 shows fothering-bulk closed at 16:35 UTC after 20 of 100 bounced, while fothering-transactional and fothering-alerts stay open.',
+});
+
+// The tab icon as an .ico for browsers without SVG icons (sizes="32x32" keeps Chrome on the SVG), the
+// SVG whose ropes turn light in dark mode, and the 180 px home-screen icon iOS asks for.
+export const ICON_LINKS: readonly Readonly<Record<string, string>>[] = Object.freeze([
+  Object.freeze({ rel: 'icon', href: '/favicon.ico', sizes: '32x32' }),
+  Object.freeze({ rel: 'icon', href: '/favicon.svg', type: 'image/svg+xml' }),
+  Object.freeze({ rel: 'apple-touch-icon', href: '/apple-touch-icon.png' }),
+]);
+
 // A canonical or og:url on the 404 page would point crawlers from every unknown address at one URL.
 export function headMeta(route: SheetRoute): HeadMeta {
   const url = route.path === null ? null : `${SITE_ORIGIN}${route.path}`;
@@ -93,9 +110,14 @@ export function headMeta(route: SheetRoute): HeadMeta {
       { property: 'og:description', content: route.description },
       { property: 'og:type', content: 'website' },
       ...(url === null ? [] : [{ property: 'og:url', content: url }]),
-      { name: 'twitter:card', content: 'summary' },
+      { property: 'og:image', content: `${SITE_ORIGIN}${SOCIAL_IMAGE.path}` },
+      { property: 'og:image:type', content: 'image/png' },
+      { property: 'og:image:width', content: String(SOCIAL_IMAGE.width) },
+      { property: 'og:image:height', content: String(SOCIAL_IMAGE.height) },
+      { property: 'og:image:alt', content: SOCIAL_IMAGE.alt },
+      { name: 'twitter:card', content: 'summary_large_image' },
     ],
-    links: url === null ? [] : [{ rel: 'canonical', href: url }],
+    links: [...(url === null ? [] : [{ rel: 'canonical', href: url }]), ...ICON_LINKS],
   };
 }
 

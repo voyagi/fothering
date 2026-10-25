@@ -1,14 +1,16 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, describe, expect, it } from 'vitest';
+import { contrastRatio, type Rgb } from '../harness/contrast.js';
 import { AXE_CONFIG } from '../harness/gates.js';
 import { GET as robotsGet } from '../pages/robots.txt.js';
 import { GET as sitemapGet } from '../pages/sitemap.xml.js';
+import { themedValue, TOKENS } from '../theme/head-script.js';
 import { ACCESSIBILITY_RECORD, accessibilityStatements, CONTROLLER, HAND_CHECK_CRITERIA, HAND_CHECK_RESULT_LABELS, handCheckRows, type HandCheckResult } from './content.js';
 import { readRepoText, repoRoot } from './repo-facts.js';
-import { headMeta, NOT_FOUND_ROUTE, renderRobots, renderSitemap, routeFor, ROUTES, SITE_ORIGIN, sitemapUrls, type SiteRoute } from './route-list.js';
+import { headMeta, ICON_LINKS, NOT_FOUND_ROUTE, renderRobots, renderSitemap, routeFor, ROUTES, SITE_ORIGIN, sitemapUrls, SOCIAL_IMAGE, type SiteRoute } from './route-list.js';
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../../../..');
 
@@ -206,7 +208,7 @@ describe('routeFor', () => {
 });
 
 describe('headMeta', () => {
-  it('gives the title, description, og:title, og:description, og:type website and twitter:card summary', () => {
+  it('gives the title, description, og:title, og:description, og:type website and twitter:card summary_large_image', () => {
     const landing = headMeta(routeFor('/'));
     expect(landing.title).toBe(LANDING_TITLE);
     expect(landing.metas).toEqual(expect.arrayContaining([
@@ -214,21 +216,80 @@ describe('headMeta', () => {
       { property: 'og:title', content: LANDING_TITLE },
       { property: 'og:description', content: LANDING_DESCRIPTION },
       { property: 'og:type', content: 'website' },
-      { name: 'twitter:card', content: 'summary' },
+      { name: 'twitter:card', content: 'summary_large_image' },
     ]));
   });
 
-  it('gives canonical and og:url as SITE_ORIGIN plus the path', () => {
+  it('names the link preview by its full address, with its type, size and alt text', () => {
+    expect(headMeta(routeFor('/')).metas).toEqual(expect.arrayContaining([
+      { property: 'og:image', content: `${SITE_ORIGIN}/og-image.png` },
+      { property: 'og:image:type', content: 'image/png' },
+      { property: 'og:image:width', content: '1200' },
+      { property: 'og:image:height', content: '630' },
+      { property: 'og:image:alt', content: SOCIAL_IMAGE.alt },
+    ]));
+    expect(SOCIAL_IMAGE.alt).toContain('fothering-bulk');
+  });
+
+  it('gives canonical and og:url as SITE_ORIGIN plus the path, then the icon links', () => {
     const landing = headMeta(routeFor('/'));
-    expect(landing.links).toEqual([{ rel: 'canonical', href: `${SITE_ORIGIN}/` }]);
+    expect(landing.links).toEqual([{ rel: 'canonical', href: `${SITE_ORIGIN}/` }, ...ICON_LINKS]);
     expect(landing.metas).toContainEqual({ property: 'og:url', content: `${SITE_ORIGIN}/` });
+  });
+
+  it('names the .ico at 32x32, the SVG by its type and the 180 px home-screen icon', () => {
+    expect(ICON_LINKS).toEqual([
+      { rel: 'icon', href: '/favicon.ico', sizes: '32x32' },
+      { rel: 'icon', href: '/favicon.svg', type: 'image/svg+xml' },
+      { rel: 'apple-touch-icon', href: '/apple-touch-icon.png' },
+    ]);
   });
 
   it('gives the 404 page every item except canonical and og:url, since it answers at any unknown address', () => {
     const notFound = headMeta(NOT_FOUND_ROUTE);
     expect(notFound.title).toBe(NOT_FOUND_ROUTE.title);
-    expect(notFound.links).toEqual([]);
-    expect(notFound.metas.map((meta) => meta.name ?? meta.property)).toEqual(['description', 'og:title', 'og:description', 'og:type', 'twitter:card']);
+    expect(notFound.links).toEqual(ICON_LINKS);
+    expect(notFound.metas.map((meta) => meta.name ?? meta.property)).toEqual([
+      'description', 'og:title', 'og:description', 'og:type', 'og:image', 'og:image:type', 'og:image:width', 'og:image:height', 'og:image:alt', 'twitter:card',
+    ]);
+  });
+});
+
+// The files the head names, read from packages/web/public, which the build copies as they are.
+const PUBLIC = join(REPO_ROOT, 'packages', 'web', 'public');
+const pngSize = (bytes: Buffer): [number, number] => [bytes.readUInt32BE(16), bytes.readUInt32BE(20)];
+
+describe('the link preview and icon files', () => {
+  it('ships the link preview as a 1200 by 630 PNG, the size the head declares', () => {
+    const bytes = readFileSync(join(PUBLIC, SOCIAL_IMAGE.path));
+    expect(bytes.subarray(1, 4).toString('latin1')).toBe('PNG');
+    expect(pngSize(bytes)).toEqual([SOCIAL_IMAGE.width, SOCIAL_IMAGE.height]);
+  });
+
+  it('ships the home-screen icon as a 180 by 180 PNG', () => {
+    const bytes = readFileSync(join(PUBLIC, 'apple-touch-icon.png'));
+    expect(bytes.subarray(1, 4).toString('latin1')).toBe('PNG');
+    expect(pngSize(bytes)).toEqual([180, 180]);
+  });
+
+  it('ships favicon.ico holding 16, 32 and 48 px images', () => {
+    const bytes = readFileSync(join(PUBLIC, 'favicon.ico'));
+    expect([bytes.readUInt16LE(0), bytes.readUInt16LE(2)]).toEqual([0, 1]);
+    const count = bytes.readUInt16LE(4);
+    expect(Array.from({ length: count }, (_, index) => bytes[6 + 16 * index])).toEqual([16, 32, 48]);
+  });
+
+  it('ships favicon.svg with light ropes in dark mode', () => {
+    const svg = readFileSync(join(PUBLIC, 'favicon.svg'), 'utf8');
+    expect(svg).toMatch(/^<svg xmlns="http:\/\/www\.w3\.org\/2000\/svg" viewBox="0 0 32 32">/);
+    expect(svg).toContain('@media (prefers-color-scheme:dark){.rope{stroke:#eef2ff}}');
+  });
+
+  // The _headers policy (default-src 'self') reaches the SVG too, and a browser that applies it there
+  // drops the style element, so the light ropes must not depend on it.
+  it('draws the ropes in ink without the style element, which only switches them for dark mode', () => {
+    const svg = readFileSync(join(PUBLIC, 'favicon.svg'), 'utf8');
+    expect(svg).toMatch(/<path class="rope" [^>]*stroke="#0a1024"/);
   });
 });
 
@@ -269,9 +330,9 @@ describe('the accessibility record (D-156, AC-53)', () => {
     expect(ACCESSIBILITY_RECORD.contact).not.toMatch(/@/);
   });
 
-  it('lists the known limitations, the drawn step pattern and digits among them', () => {
+  it('lists the known limitations, the drawn lanes and sail among them', () => {
     expect(ACCESSIBILITY_RECORD.limitations.find((limitation) => limitation.id === 'drawings')?.text).toBe(
-      "The step pattern and the readout's digits are drawn. The page text gives each lane's state and the number, and the replay's log lists every event.",
+      "The lanes, the sail and the pictures beside the headline are drawn. The page text gives each lane's state, and the replay's log lists every event.",
     );
     // axe-core 4.14.0's color-contrast rule does not skip SVG text, so the statement claims no such gap.
     expect(ACCESSIBILITY_RECORD.limitations.map((limitation) => limitation.id)).not.toContain('drawing-contrast');
@@ -359,6 +420,51 @@ describe('the readout head', () => {
     const css = readRepoText('packages/web/src/styles/site.css', repoRoot(REPO_ROOT));
     expect(css).toMatch(/^p, li, dd \{ max-inline-size: var\(--measure\); \}/m);
     expect(/^\.readout-head \{[^}]*\}/m.exec(css)?.[0]).toContain('max-inline-size: none;');
+  });
+});
+
+const hexRgb = (hex: string): Rgb => {
+  const match = /^#([0-9A-F]{2})([0-9A-F]{2})([0-9A-F]{2})$/i.exec(hex);
+  if (match === null) throw new Error(`${hex} is not a #RRGGBB colour`);
+  return [Number.parseInt(match[1] ?? '', 16), Number.parseInt(match[2] ?? '', 16), Number.parseInt(match[3] ?? '', 16)];
+};
+
+// 1.4.11: below 1067px of lanes the column heads give way, so nothing but the mark itself tells a
+// bounce from a delivery. Its white ring is under 3:1 on the orange and green lanes, so the ring is
+// edged in board colour, and that edge is what meets the lane.
+describe('the bounce mark', () => {
+  it('edges its white ring in board colour, which reaches 3:1 against every lane colour in both themes', () => {
+    const css = readRepoText('packages/web/src/styles/site.css', repoRoot(REPO_ROOT));
+    const rule = /^\.pad\.bounce::before \{[^}]*\}/m.exec(css)?.[0] ?? '';
+    expect(rule).toContain('border: 2px solid var(--d-paper);');
+    expect(rule).toContain('box-shadow: 0 0 0 2px var(--board);');
+    const lanes = TOKENS.themed.filter((token) => /^--lane-\d+$/.test(token.name)).map((token) => token.name);
+    expect(lanes).toEqual(['--lane-1', '--lane-2', '--lane-3']);
+    for (const theme of ['light', 'dark'] as const) {
+      const board = hexRgb(themedValue(TOKENS, '--board', theme));
+      for (const lane of lanes) expect(contrastRatio(board, hexRgb(themedValue(TOKENS, lane, theme))), `${lane} in ${theme}`).toBeGreaterThanOrEqual(3);
+    }
+  });
+});
+
+// The token one site.css rule gives one property, read from the rule that opens its own line.
+const ruleToken = (css: string, selector: string, property: string): string => {
+  const rule = css.split('\n').find((line) => line.startsWith(`${selector} {`)) ?? '';
+  const token = new RegExp(`[{;]\\s*${property}: var\\((--[\\w-]+)\\);`).exec(rule)?.[1];
+  if (token === undefined) throw new Error(`site.css has no "${selector}" rule setting ${property} from a token`);
+  return token;
+};
+
+// The close band's pill is white with sea-blue text in both themes, so its hover ground must stay
+// pale in both too: a themed ground turns navy in Dark and drops the text to about 2.4:1.
+describe('the close band pill', () => {
+  it('keeps its text at 4.5:1 or more on its ground and on its hover ground in both themes', () => {
+    const css = readRepoText('packages/web/src/styles/site.css', repoRoot(REPO_ROOT));
+    const text = ruleToken(css, '.close-band .keybtn', 'color');
+    const grounds = [ruleToken(css, '.close-band .keybtn', 'background'), ruleToken(css, '.close-band .keybtn:hover', 'background')];
+    for (const theme of ['light', 'dark'] as const) {
+      for (const ground of grounds) expect(contrastRatio(hexRgb(themedValue(TOKENS, text, theme)), hexRgb(themedValue(TOKENS, ground, theme))), `${text} on ${ground} in ${theme}`).toBeGreaterThanOrEqual(4.5);
+    }
   });
 });
 

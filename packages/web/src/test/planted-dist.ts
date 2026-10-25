@@ -79,7 +79,7 @@ export function page(body: string, head = '<title>planted</title>'): string {
   return `<!doctype html><html lang="en"><head><meta charset="utf-8">${head}</head><body>${body}</body></html>`;
 }
 
-export const SHEET_HEAD_ITEMS = ['title', 'description', 'og:title', 'og:description', 'og:type', 'twitter:card'] as const;
+export const SHEET_HEAD_ITEMS = ['title', 'description', 'og:title', 'og:description', 'og:type', 'og:image', 'og:image:alt', 'twitter:card'] as const;
 export type SheetHeadItem = (typeof SHEET_HEAD_ITEMS)[number];
 
 export interface SheetHead {
@@ -149,7 +149,9 @@ export function sheetHead(route: string, options: SheetHead = {}): string {
     'og:title': `<meta property="og:title" content="${title}">`,
     'og:description': `<meta property="og:description" content="${description}">`,
     'og:type': '<meta property="og:type" content="website">',
-    'twitter:card': '<meta name="twitter:card" content="summary">',
+    'og:image': '<meta property="og:image" content="https://planted.example/og-image.png">',
+    'og:image:alt': '<meta property="og:image:alt" content="The planted link preview">',
+    'twitter:card': '<meta name="twitter:card" content="summary_large_image">',
   };
   const omitted = new Set(options.omit ?? []);
   return (options.theme ?? THEME_HEAD) + SHEET_HEAD_ITEMS.filter((item) => !omitted.has(item)).map((item) => items[item]).join('');

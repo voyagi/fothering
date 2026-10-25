@@ -5,6 +5,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, describe, expect, it, vi } from 'vitest';
 import { main, PROCESS_IO, waitForSignal, type CliIo } from './cli.js';
+import { contrastRatio, gradientStops, lowestContrast, type Rgb } from './contrast.js';
 import { DRIVER_JOB_TOKEN, runDriver, stageAxeSource, writeDriver } from './dev-browser.js';
 import { completeSite, page, plantDist } from '../test/planted-dist.js';
 import { loadBuiltSite } from '../checks/built-site.js';
@@ -23,6 +24,7 @@ import {
   consoleVerdict,
   copyBuild,
   countAccepted,
+  countGradientDecided,
   noScriptVerdict,
   provenanceCopyVerdict,
   REPLAY_INVALID_HASHES,
@@ -481,6 +483,8 @@ const CATALOGUE_SAMPLES: CatalogueSamples = {
   ruleNotRun: ['target-size'],
   violation: ['image-alt', 1, 'img'],
   incomplete: ['color-contrast', 1, 'p'],
+  gradientContrast: ['p', 3.2, 4.5],
+  gradientDecided: [2, 5.31],
   overflow: [321, 320],
   viewport: [300, 320],
   motion: [1],
@@ -656,7 +660,92 @@ describe('axe verdicts (D-129)', () => {
   });
 });
 
-const reading = (dataTheme: string | null, ground: string): ThemeReading => ({ dataTheme, ground });
+// The light sky fade as Chromium computed it on /deploy/ (2026-10-23), and a node on it.
+const SKY_FADE = 'linear-gradient(rgb(217, 230, 255), rgb(255, 255, 255) 92%)';
+const SKY: Rgb = [217, 230, 255];
+const WHITE: Rgb = [255, 255, 255];
+const onFade = (color: string, change: Record<string, unknown> = {}): AxeReport['incomplete'][number]['nodes'][number] =>
+  ({ target: '.intro', summary: '', messageKey: 'bgGradient', expected: '4.5:1', color, background: SKY_FADE, opaque: true, backgroundWhole: true, stackClear: true, ...change });
+const contrastOf = (nodes: AxeReport['incomplete'][number]['nodes']): AxeReport => ({ ...cleanAxe, incomplete: [{ id: 'color-contrast', nodes }] });
+const INK = 'rgb(10, 16, 36)';
+// A grey that reads at 4.5:1 on white and not on the sky end of the fade, and one below 3:1 on the sky.
+const MID = 'rgb(110, 118, 135)';
+const MID_RGB: Rgb = [110, 118, 135];
+const PALE = 'rgb(138, 147, 168)';
+const PALE_RGB: Rgb = [138, 147, 168];
+
+describe('color-contrast on a gradient (the sky fade)', () => {
+  it('computes WCAG ratios: 21 for black on white, 1 for a colour on itself', () => {
+    expect(contrastRatio([0, 0, 0], [255, 255, 255])).toBeCloseTo(21, 10);
+    expect(contrastRatio([217, 230, 255], [217, 230, 255])).toBe(1);
+  });
+
+  it('reads every stop of the gradient Chromium computes, with or without a direction', () => {
+    expect(gradientStops(SKY_FADE)).toEqual([[217, 230, 255], [255, 255, 255]]);
+    expect(gradientStops('linear-gradient(90deg, rgb(0, 0, 0) 10px, rgb(255, 255, 255) 20% 40%)')).toEqual([[0, 0, 0], [255, 255, 255]]);
+  });
+
+  it('refuses a gradient it cannot read whole', () => {
+    for (const image of [
+      'radial-gradient(rgb(0, 0, 0), rgb(255, 255, 255))',
+      'linear-gradient(rgb(0, 0, 0), rgb(255, 255, 255)), linear-gradient(rgb(0, 0, 0), rgb(9, 9, 9))',
+      'linear-gradient(rgb(0, 0, 0), rgba(255, 255, 255, 0.5))',
+      'linear-gradient(rgb(0, 0, 0), color(srgb 1 1 1))',
+      'linear-gradient(in oklab, rgb(0, 0, 0), rgb(255, 255, 255))',
+      'linear-gradient(rgb(0, 0, 0), 50%, rgb(255, 255, 255))',
+      'linear-gradient(rgb(0, 0, 0))',
+      'url("sky.png")',
+      'none',
+    ]) expect(gradientStops(image), image).toBeNull();
+  });
+
+  it('finds the lowest ratio at the gradient end that sits closest to the text colour', () => {
+    expect(lowestContrast([10, 16, 36], [[217, 230, 255], [255, 255, 255]])).toBeCloseTo(contrastRatio([10, 16, 36], [217, 230, 255]), 10);
+  });
+
+  it('passes ink on the sky fade, and fails a grey that passes on white at the sky end, with its lowest ratio', () => {
+    expect(axeReasons(contrastOf([onFade(INK)]), NO_ACCEPTED)).toEqual([]);
+    expect(contrastRatio(MID_RGB, WHITE)).toBeGreaterThanOrEqual(4.5);
+    const lowest = contrastRatio(MID_RGB, SKY);
+    expect(lowest).toBeLessThan(4.5);
+    expect(axeReasons(contrastOf([onFade(MID)]), NO_ACCEPTED)).toEqual([A11Y_MESSAGES.gradientContrast('.intro', lowest, 4.5)]);
+  });
+
+  it('holds large text to the 3:1 axe asks for it', () => {
+    expect(contrastRatio(MID_RGB, SKY)).toBeGreaterThanOrEqual(3);
+    expect(axeReasons(contrastOf([onFade(MID, { expected: '3:1' })]), NO_ACCEPTED)).toEqual([]);
+    expect(contrastRatio(PALE_RGB, SKY)).toBeLessThan(3);
+    expect(axeReasons(contrastOf([onFade(PALE, { expected: '3:1' })]), NO_ACCEPTED)).toEqual([A11Y_MESSAGES.gradientContrast('.intro', contrastRatio(PALE_RGB, SKY), 3)]);
+  });
+
+  it('leaves the node open when any reading is missing or not a gradient', () => {
+    for (const change of [
+      { messageKey: 'bgImage' },
+      { opaque: false },
+      { backgroundWhole: false },
+      { backgroundWhole: undefined },
+      { stackClear: false },
+      { stackClear: undefined },
+      { color: 'rgba(10, 16, 36, 0.8)' },
+      { background: 'rgb(255, 255, 255)' },
+      { expected: undefined },
+      { color: 42 },
+    ]) expect(axeReasons(contrastOf([onFade(INK, change)]), NO_ACCEPTED), JSON.stringify(change)).toEqual([A11Y_MESSAGES.incomplete('color-contrast', 1, '.intro')]);
+  });
+
+  it('never decides another rule on a gradient', () => {
+    const incomplete = [{ id: 'link-in-text-block', nodes: [onFade(INK)] }];
+    expect(axeReasons({ ...cleanAxe, incomplete }, NO_ACCEPTED)).toEqual([A11Y_MESSAGES.incomplete('link-in-text-block', 1, '.intro')]);
+  });
+
+  it('counts the nodes it decided pass, with the lowest ratio, and none it failed or left open', () => {
+    const nodes = [onFade(INK), onFade(INK, { color: 'rgb(54, 63, 87)' }), onFade(PALE), onFade(INK, { messageKey: 'bgImage' }), svgNode('text')];
+    expect(countGradientDecided([{ id: 'color-contrast', nodes }], ACCEPTED_INCOMPLETE)).toEqual({ count: 2, lowest: contrastRatio([54, 63, 87], SKY) });
+    expect(countGradientDecided([], ACCEPTED_INCOMPLETE)).toEqual({ count: 0, lowest: null });
+  });
+});
+
+const reading =(dataTheme: string | null, ground: string): ThemeReading => ({ dataTheme, ground });
 const DARK_PINNED = reading('dark', DARK_GROUND);
 
 describe('the rendered theme verdicts (D-131, AC-42, AC-E28, C5)', () => {
@@ -744,7 +833,7 @@ const healthyFonts = (route: string): FontsReading => ({
 const healthyRequests = (route: string): RequestsReading => ({
   route,
   page: `${BASE}${route}`,
-  requests: [`${BASE}${route}`, `${BASE}/tokens.css`, `${BASE}/_astro/Sheet.css`, `${BASE}/_astro/Sheet.js`, `${BASE}/_astro/public-sans-latin-wght-normal.woff2`],
+  requests: [`${BASE}${route}`, `${BASE}/tokens.css`, `${BASE}/_astro/Sheet.css`, `${BASE}/_astro/Sheet.js`, `${BASE}/_astro/mona-sans-latin-wdth-normal.woff2`],
 });
 
 const failed = (reason: string): { ok: false; reason: string } => ({ ok: false, reason });
@@ -816,10 +905,10 @@ describe('fontsVerdict (D-135, AC-59 rendered half)', () => {
   });
 
   it('fails a family whose faces have not loaded, and one whose check is false', () => {
-    const notLoaded = healthyFonts('/').families.map((entry) => (entry.family === 'Saira' ? { ...entry, loaded: false } : entry));
-    expect(fontsVerdict({ ...healthyFonts('/'), families: notLoaded })).toEqual(failed(E2E_MESSAGES.fontNotLoaded('Saira')));
-    const unchecked = healthyFonts('/').families.map((entry) => (entry.family === 'Public Sans' ? { ...entry, check: false } : entry));
-    expect(fontsVerdict({ ...healthyFonts('/'), families: unchecked })).toEqual(failed(E2E_MESSAGES.fontCheckFalse('Public Sans')));
+    const notLoaded = healthyFonts('/').families.map((entry) => (entry.family === 'Mona Sans' ? { ...entry, loaded: false } : entry));
+    expect(fontsVerdict({ ...healthyFonts('/'), families: notLoaded })).toEqual(failed(E2E_MESSAGES.fontNotLoaded('Mona Sans')));
+    const unchecked = healthyFonts('/').families.map((entry) => (entry.family === 'Source Code Pro' ? { ...entry, check: false } : entry));
+    expect(fontsVerdict({ ...healthyFonts('/'), families: unchecked })).toEqual(failed(E2E_MESSAGES.fontCheckFalse('Source Code Pro')));
   });
 
   it('fails when the undeclared control family reads present', () => {
@@ -1375,7 +1464,7 @@ describe('replayLayoutVerdict (AC-6, UI-SPEC 6 and 10.3)', () => {
   });
 
   it('holds an identifier set in the face around it to its breaks, not to mono 500', () => {
-    const inherited = { text: 'fothering-bulk', weight: '700', family: '"Saira", sans-serif', lines: ['fothering-bulk'], face: 'inherit' };
+    const inherited = { text: 'fothering-bulk', weight: '700', family: '"Mona Sans", sans-serif', lines: ['fothering-bulk'], face: 'inherit' };
     expect(replayLayoutVerdict({ ...healthyLayout(1280), identifiers: [inherited] })).toEqual({ ok: true });
     const broken = [{ ...inherited, lines: ['fothering-', 'bulk'] }];
     expect(layoutReason({ ...healthyLayout(1280), identifiers: broken })).toBe(E2E_MESSAGES.layoutIdentifierBreak(1280, 'fothering-bulk', ['fothering-', 'bulk']));
@@ -1390,8 +1479,8 @@ describe('replayLayoutVerdict (AC-6, UI-SPEC 6 and 10.3)', () => {
   });
 
   it('fails an identifier not set in Source Code Pro', () => {
-    const identifiers = [{ text: 'GetConfigurationSet', weight: '500', family: '"Public Sans", sans-serif', lines: ['GetConfigurationSet'] }];
-    expect(layoutReason({ ...healthyLayout(1280), identifiers })).toBe(E2E_MESSAGES.layoutIdentifierFamily(1280, 'GetConfigurationSet', '"Public Sans", sans-serif'));
+    const identifiers = [{ text: 'GetConfigurationSet', weight: '500', family: '"Mona Sans", sans-serif', lines: ['GetConfigurationSet'] }];
+    expect(layoutReason({ ...healthyLayout(1280), identifiers })).toBe(E2E_MESSAGES.layoutIdentifierFamily(1280, 'GetConfigurationSet', '"Mona Sans", sans-serif'));
   });
 
   it('fails a word-mode API name broken inside one of its words', () => {

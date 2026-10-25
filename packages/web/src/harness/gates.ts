@@ -11,6 +11,7 @@ import {
   writeDriver,
   type DriverRun,
 } from './dev-browser.js';
+import { gradientVerdict, type ContrastReading } from './contrast.js';
 import { startPreviewServer, type PreviewServer } from './preview-server.js';
 import { filesIn, loadBuiltSite, NoBuiltPagesError, routeOf, textOf, walk, type BuiltElement, type BuiltSite } from '../checks/built-site.js';
 import {
@@ -125,9 +126,12 @@ export interface KeyboardReport {
   readonly walk: readonly FocusStop[];
 }
 
+// A color-contrast node the driver could read further carries the contrast facts as well.
+type AxeNode = { readonly target: string; readonly summary: string } & ContrastReading;
+
 interface AxeItem {
   readonly id: string;
-  readonly nodes: readonly { readonly target: string; readonly summary: string }[];
+  readonly nodes: readonly AxeNode[];
 }
 
 export interface AxeReport {
@@ -188,6 +192,9 @@ export const A11Y_MESSAGES = Object.freeze({
   ruleNotRun: (ruleId: string) => `${ruleId} did not run`,
   violation: (id: string, nodes: number, target: string) => `axe violation ${id} on ${nodes} element(s), first ${target}`,
   incomplete: (id: string, nodes: number, target: string) => `axe incomplete ${id} on ${nodes} element(s), first ${target}, and ${id} is not on the accepted list`,
+  gradientContrast: (target: string, lowest: number, needed: number) => `text on a gradient at ${target} reaches ${lowest.toFixed(2)}:1 at its lowest point, ${needed}:1 needed`,
+  gradientDecided: (count: number, lowest: number | null) =>
+    `[a11y] decided color-contrast on a gradient: ${count} element(s)${lowest === null ? '' : `, the lowest ${lowest.toFixed(2)}:1`} (axe-core cannot compute the background behind text on a CSS gradient, so the harness checks the text colour against every point of the gradient the browser computed)`,
   overflow: (scrollWidth: number, viewportWidth: number) => `the page is ${scrollWidth} px wide in a ${viewportWidth} px viewport`,
   viewport: (innerWidth: number, width: number) => `the viewport measured ${innerWidth} px, ${width} px expected`,
   motion: (animations: number) => `${animations} animation(s) on the page under reduced motion, where every lamp and key is placed in its final state with none`,
@@ -306,7 +313,7 @@ export interface StorageReading {
   readonly session: readonly string[];
 }
 
-export const SITE_FAMILIES = Object.freeze(['Saira', 'Public Sans', 'Source Code Pro']);
+export const SITE_FAMILIES = Object.freeze(['Mona Sans', 'Source Code Pro']);
 
 const THEME_ORDER = ['device', 'light', 'dark'];
 const PINNED_CHOICES = ['light', 'dark'];
@@ -713,10 +720,10 @@ function typeReasons(reading: ReplayLayoutReading): string[] {
   return reasons;
 }
 
-// The schedule head, --text-silk: every column header is Saira 700 at 12px, uppercase, tracked
-// 0.12em (read in the browser on 2026-10-21 at 1280). The style is named, not voted, since two odd
-// headers would tie with two right ones.
-export const LOG_HEADER_TYPE = '700 12px 1.44px uppercase';
+// The schedule head, --text-label: every column header is Mona Sans 650 at 13px in sentence case,
+// with no tracking (site.css `thead th`). The style is named, not voted, since two odd headers would
+// tie with two right ones.
+export const LOG_HEADER_TYPE = '650 13px normal none';
 
 function headerReasons(reading: ReplayLayoutReading): string[] {
   return reading.logHeaders.filter(({ type }) => type !== LOG_HEADER_TYPE).map(({ text, type }) => E2E_MESSAGES.layoutHeaderType(reading.width, text, type, LOG_HEADER_TYPE));
@@ -844,11 +851,39 @@ export function axeReasons(axe: AxeReport, accepted: readonly AcceptedIncomplete
     if (!axe.ran.includes(ruleId)) reasons.push(A11Y_MESSAGES.ruleNotRun(ruleId));
   }
   for (const item of axe.violations) reasons.push(A11Y_MESSAGES.violation(item.id, item.nodes.length, item.nodes[0]?.target ?? 'no target'));
-  for (const item of axe.incomplete) {
-    const open = item.nodes.filter((node) => !isAccepted(item.id, node.target, accepted));
-    if (open.length > 0) reasons.push(A11Y_MESSAGES.incomplete(item.id, open.length, open[0]?.target ?? 'no target'));
-  }
+  for (const item of axe.incomplete) reasons.push(...incompleteReasons(item, accepted));
   return reasons;
+}
+
+// An incomplete node passes when the accepted list names it, or when it is color-contrast on a
+// gradient and the harness decided it passes. A decided failure names its ratio; every other node
+// stays open.
+function incompleteReasons(item: AxeItem, accepted: readonly AcceptedIncomplete[]): string[] {
+  const reasons: string[] = [];
+  const open: AxeNode[] = [];
+  for (const node of item.nodes) {
+    if (isAccepted(item.id, node.target, accepted)) continue;
+    const verdict = item.id === 'color-contrast' ? gradientVerdict(node) : { kind: 'undecided' as const };
+    if (verdict.kind === 'fail') reasons.push(A11Y_MESSAGES.gradientContrast(node.target, verdict.lowest, verdict.needed));
+    if (verdict.kind === 'undecided') open.push(node);
+  }
+  if (open.length > 0) reasons.push(A11Y_MESSAGES.incomplete(item.id, open.length, open[0]?.target ?? 'no target'));
+  return reasons;
+}
+
+// The color-contrast nodes the harness decided pass on a gradient, and the lowest ratio among them.
+export function countGradientDecided(incomplete: readonly AxeItem[], accepted: readonly AcceptedIncomplete[]): { count: number; lowest: number | null } {
+  let count = 0;
+  let lowest: number | null = null;
+  for (const item of incomplete.filter((entry) => entry.id === 'color-contrast')) {
+    for (const node of item.nodes.filter((entry) => !isAccepted(item.id, entry.target, accepted))) {
+      const verdict = gradientVerdict(node);
+      if (verdict.kind !== 'pass') continue;
+      count += 1;
+      lowest = lowest === null ? verdict.lowest : Math.min(lowest, verdict.lowest);
+    }
+  }
+  return { count, lowest };
 }
 
 export function auditReasons(line: AuditLine, width: number, accepted: readonly AcceptedIncomplete[], expectedStatus = 200, expectedTheme: ThemeName = 'light'): string[] {
@@ -1034,8 +1069,19 @@ interface AuditContext {
   readonly workDir: string;
   readonly print: (line: string) => void;
   readonly accepted: Map<string, number>;
+  readonly gradient: { count: number; lowest: number | null };
   readonly selected: Set<string>;
   readonly outerTimeoutMs: number | undefined;
+}
+
+// Adds one record's accepted and gradient-decided counts to the run's totals.
+function tallyIncomplete(context: AuditContext, incomplete: readonly AxeItem[]): void {
+  for (const [ruleId, count] of countAccepted(incomplete, ACCEPTED_INCOMPLETE)) {
+    context.accepted.set(ruleId, (context.accepted.get(ruleId) ?? 0) + count);
+  }
+  const decided = countGradientDecided(incomplete, ACCEPTED_INCOMPLETE);
+  context.gradient.count += decided.count;
+  if (decided.lowest !== null) context.gradient.lowest = Math.min(context.gradient.lowest ?? decided.lowest, decided.lowest);
 }
 
 async function auditOne(context: AuditContext, theme: ThemeSetup, width: number): Promise<{ failures: string[]; audits: number }> {
@@ -1076,9 +1122,7 @@ async function auditOne(context: AuditContext, theme: ThemeSetup, width: number)
   let held = 0;
   for (const [route, line] of lines) {
     for (const ruleId of line.axe?.selected ?? []) context.selected.add(ruleId);
-    for (const [ruleId, count] of countAccepted(line.axe?.incomplete ?? [], ACCEPTED_INCOMPLETE)) {
-      context.accepted.set(ruleId, (context.accepted.get(ruleId) ?? 0) + count);
-    }
+    tallyIncomplete(context, line.axe?.incomplete ?? []);
     if (line.theme !== undefined && tookHoldVerdict(line.theme, expectedTheme).ok) held += 1;
     const reasons = auditReasons(line, width, ACCEPTED_INCOMPLETE, EXPECTED_STATUS[route] ?? 200, expectedTheme);
     if (reasons.length === 0) {
@@ -1102,10 +1146,11 @@ async function auditAll(context: AuditContext, themes: readonly ThemeSetup[], wi
       audits += result.audits;
     }
   }
-  const { print, accepted, selected } = context;
+  const { print, accepted, selected, gradient } = context;
   print(A11Y_MESSAGES.selectedRules([...selected].sort()));
   if (ACCEPTED_INCOMPLETE.length === 0) print(A11Y_MESSAGES.acceptedNone());
   for (const entry of ACCEPTED_INCOMPLETE) print(A11Y_MESSAGES.acceptedCount(entry.ruleId, accepted.get(entry.ruleId) ?? 0, entry.reason));
+  print(A11Y_MESSAGES.gradientDecided(gradient.count, gradient.lowest));
   const first = failures[0];
   if (first !== undefined) {
     print(A11Y_MESSAGES.fail(A11Y_MESSAGES.failCount(failures.length, audits, first)));
@@ -1133,7 +1178,7 @@ export async function runA11yLive(options: A11yLiveOptions): Promise<number> {
   try {
     const served = await withPreview(options.repoRoot, 'fothering-a11y-', (server, workDir) => {
       const accepted = new Map(ACCEPTED_INCOMPLETE.map((entry) => [entry.ruleId, 0]));
-      const context: AuditContext = { prepared, server, axeFile: staged.name, workDir, print, accepted, selected: new Set<string>(), outerTimeoutMs: options.outerTimeoutMs };
+      const context: AuditContext = { prepared, server, axeFile: staged.name, workDir, print, accepted, gradient: { count: 0, lowest: null }, selected: new Set<string>(), outerTimeoutMs: options.outerTimeoutMs };
       return auditAll(context, themes, widths);
     });
     if (served.ok) return served.value;
