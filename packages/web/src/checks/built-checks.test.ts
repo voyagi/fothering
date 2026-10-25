@@ -60,7 +60,7 @@ import { denyRows, hasPauseGrant, permissionKey, permissionSchedules } from '../
 import { removedByText } from '../site/repo-facts.js';
 import { resourceRows } from '../site/resources-view.js';
 import { renderRobots, renderSitemap, SITE_ORIGIN } from '../site/route-list.js';
-import { filesIn, loadBuiltSite, NOT_FOUND_ROUTE, NoBuiltPagesError, type BuiltSite } from './built-site.js';
+import { filesIn, loadBuiltSite, normalizeText, NOT_FOUND_ROUTE, NoBuiltPagesError, textOf, type BuiltSite } from './built-site.js';
 import {
   ACCESSIBILITY_ROUTE,
   accessibilityPageRule,
@@ -1338,6 +1338,13 @@ describe('the replay word count rule (AC-11, AC-E9)', () => {
 
   it('passes the planted replay', () => {
     expect(replayTexts(replayWordCountRule, replayBody())).toEqual([]);
+  });
+
+  // The planted replay stands in for the built one, so its reopen command reads as text, the
+  // <ReopenFunctionName stack output> slot included, the way CommandBlock renders it.
+  it('keeps the planted reopen command whole, its slot included', () => {
+    const [built] = replaySite(replayBody()).pages;
+    expect(built === undefined ? '' : textOf(built.root)).toContain(normalizeText(REPLAY_VIEW.reopenCommand));
   });
 
   const capped = (stepWords: number): string =>

@@ -478,7 +478,8 @@ export function buildReplayView(artifact: ReplayArtifact): ReplayView {
       subject: artifact.email.subject,
       disclosure: "Fothering's AI agent wrote the Why paragraph. Code wrote the rest.",
       why: artifact.agent.paragraph,
-      reopen: `Run the reopen command for ${artifact.closedLane}.`,
+      // The command's function name is a slot the operator fills from the stack, as the email says.
+      reopen: 'Run the reopen command with the ReopenFunctionName stack output.',
     },
     reopenCommand: artifact.reopen.command,
     lanesLines: lanesLines(artifact.closedLane, openLanes, held),
