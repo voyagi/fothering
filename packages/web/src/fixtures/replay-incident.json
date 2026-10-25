@@ -180,7 +180,7 @@
     "sentAtUtc": "2026-10-14T14:04:05Z"
   },
   "reopen": {
-    "command": "aws sesv2 put-configuration-set-sending-options --configuration-set-name fothering-bulk --sending-enabled --region eu-central-1",
+    "command": "aws lambda invoke \\\n  --region eu-central-1 \\\n  --function-name <ReopenFunctionName stack output> \\\n  --cli-binary-format raw-in-base64-out \\\n  --cli-read-timeout 60 \\\n  --payload '{\"configurationSet\":\"fothering-bulk\"}' \\\n  result.json",
     "atUtc": "2026-10-14T15:20:00Z",
     "readBack": { "value": "true", "atUtc": "2026-10-14T15:20:02Z" }
   }

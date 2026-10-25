@@ -2,6 +2,7 @@ import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSyn
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseLaneMap } from '@fothering/core/lanes';
+import { reopenCommandFor } from '@fothering/core/reopen';
 import { replayArtifactHash, replayArtifactSchema, type ReplayArtifact } from '@fothering/core/replay-artifact';
 import { afterAll, describe, expect, it } from 'vitest';
 import { PROVENANCE_LABELS } from './labels.js';
@@ -319,7 +320,8 @@ describe('buildReplayView step contents', () => {
       why: 'All 31 hard bounces carry batch=2026-10-14-b, and the earlier batch delivered cleanly.',
       reopen: 'Run the reopen command for fothering-bulk.',
     });
-    expect(view.reopenCommand).toContain('--configuration-set-name fothering-bulk --sending-enabled');
+    // The product's own reopen, the one the operator email prints, never a raw SES call.
+    expect(view.reopenCommand).toBe(reopenCommandFor('fothering-bulk'));
     expect(view.steps[3]?.paragraphs).toEqual(['`GetConfigurationSet` then read `SendingEnabled` as true.']);
     expect(view.tag).toMatchObject({
       evidence: 'All 31 hard bounces in the window carry that tag. The 2 in the replay read `550 5.1.1`.',

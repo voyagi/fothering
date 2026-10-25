@@ -3,7 +3,7 @@
 ![Fothering for Amazon SES: closes that lane and nothing else. A night board of three SES configuration sets from the live run of 22 October 2026 shows fothering-bulk closed at 16:35 UTC after 20 of 100 bounced, while fothering-transactional and fothering-alerts stay open.](docs/card.png)
 
 When one stream of the mail you send through Amazon SES starts bouncing, Fothering works out why,
-closes that one lane, and asks you by email before it opens again.
+closes that one lane, and emails you the evidence and the command that reopens it.
 
 Status: hackathon build. It ran end to end on 22 October 2026 in a real AWS account, with the
 test mail sent to the SES mailbox simulator. It has not been tried on real recipients.
@@ -237,8 +237,8 @@ synth test pins the settings.
 
 - `packages/core` - the decision core and the provider mode switch
 - `packages/providers` - the port table, fixtures and live AWS adapters
-- `packages/functions` - the ingest and forget Lambda entries
-- `packages/agent` - the no-model AgentCore runtime entry
+- `packages/functions` - the ingest, detect, action, reopen and forget Lambda entries
+- `packages/agent` - the AgentCore runtime entry, which calls Claude Sonnet 4.6 on Bedrock
 - `packages/infra` - the CDK app and stacks
 - `packages/web` - the Astro static site: landing, replay, privacy and AI, deploy, accessibility statement
 - `docs/adr` - architecture decisions

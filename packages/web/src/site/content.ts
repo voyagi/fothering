@@ -115,7 +115,7 @@ export interface LimitsRow {
 // rows are the same whatever the artifact holds.
 export const LIMITS_REPLAY_ROW = Object.freeze({ id: 'replay', part: 'Incident replay' });
 export const LIMITS_FIXED_ROWS: readonly LimitsRow[] = Object.freeze([
-  { id: 'measured-numbers', part: 'Measured numbers', state: 'None yet', mark: 'later', note: 'This site shows no measured number, not even from the live run. Numbers wait for more recorded runs than three.' },
+  { id: 'measured-numbers', part: 'Measured numbers', state: 'None yet', mark: 'later', note: 'This site shows no measured number, not even from the live run. Numbers wait for more than three live runs.' },
   { id: 'live-run', part: 'Live run', state: 'Recorded', mark: 'open', note: 'Recorded on 22 October 2026 in a real AWS account, with the test mail sent to the SES mailbox simulator. It closed one lane, read the pause back and sent the operator email, and the lane reopened only when the reopen command ran. An earlier attempt that day closed the lane too, but a missing permission stopped its email.' },
   { id: 'deploy-sheet', part: 'Deploy page', state: 'From the template', mark: 'open', note: 'Its permissions and resources are generated from the template on every build.' },
 ]);

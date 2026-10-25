@@ -196,9 +196,12 @@ export function replayPanels(view: ReplayView = REPLAY_VIEW): string[] {
   ];
 }
 
+// The readout as replay.astro renders it: only the lane and its legend are the counted tag, and the
+// cause, the read-back and the stamp sit beside it outside every counted element, so the planted
+// replay counts the words the built one does.
 export function replayTag(view: ReplayView = REPLAY_VIEW): string {
   const { tag } = view;
-  return `<div data-wordcount="tag"><p>${tag.legend}</p><p>${tag.lane}</p><p>${tag.stamp}</p><dl><dt>Cause</dt><dd>${tag.cause}</dd><dt>Read back</dt><dd>${tag.replayReadBack}</dd><dt>Reopens</dt><dd>${tag.reopens}</dd></dl><p>${tag.number}</p></div>`;
+  return `<div><dl><dt>Cause</dt><dd>${tag.cause}</dd><dt>Lane</dt><dd data-wordcount="tag">${tag.lane}<span>${tag.legend}</span></dd><dt>Read back</dt><dd>${tag.replayReadBack}</dd><dt>Reopens</dt><dd>${tag.reopens}</dd></dl><p>${tag.stamp}</p><p>${tag.number}</p></div>`;
 }
 
 export interface ReplayParts {

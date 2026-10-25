@@ -11,8 +11,8 @@ describe('commandUnits (UI-SPEC line 209, the 05-12 finish review)', () => {
   });
 
   it('pairs every flag that takes a value and leaves a flag followed by a flag alone', () => {
-    const reopen = 'aws sesv2 put-configuration-set-sending-options --configuration-set-name fothering-bulk --sending-enabled --region eu-central-1';
-    expect(shown(commandUnits(reopen))).toEqual(['aws | sesv2 | put-configuration-set-sending-options | --configuration-set-name+fothering-bulk | --sending-enabled | --region+eu-central-1']);
+    const command = 'aws sesv2 put-configuration-set-sending-options --configuration-set-name fothering-bulk --sending-enabled --region eu-central-1';
+    expect(shown(commandUnits(command))).toEqual(['aws | sesv2 | put-configuration-set-sending-options | --configuration-set-name+fothering-bulk | --sending-enabled | --region+eu-central-1']);
   });
 
   it('never pairs across a line break, and leaves a flag that ends a line alone', () => {
