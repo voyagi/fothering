@@ -46,6 +46,7 @@ import {
   accessibilityStatements,
   BANNED_NAMES,
   CONSOLE_DELETE_PHRASES,
+  CONTACT_ADDRESS,
   HAND_CHECK_CRITERIA,
   HAND_CHECK_RESULT_LABELS,
   LANDING_SECTIONS,
@@ -69,6 +70,7 @@ import {
   readoutNumberRule,
   checkFileBudget,
   consoleDeleteRule,
+  contactAddressRule,
   countReplayWords,
   countWords,
   dashRule,
@@ -274,9 +276,9 @@ describe('runBuiltChecks', () => {
     expect([...rules].filter((rule) => ['page-metadata', 'sitemap', 'robots'].includes(rule)).sort()).toEqual(['page-metadata', 'robots', 'sitemap']);
   });
 
-  it('holds exactly the fifty-seven rule ids the plans, the 05-UAT hand check and the K2 reviews name', () => {
+  it('holds exactly the fifty-eight rule ids the plans, the 05-UAT hand check, the K2 reviews and issue #83 name', () => {
     expect([...RULE_IDS].sort()).toEqual([
-      'accessibility-page', 'accessibility-statement', 'banned-name', 'command-pair', 'console-delete', 'dash', 'deploy-commands', 'deploy-deny', 'deploy-notice', 'deploy-page', 'deploy-permissions', 'deploy-resources',
+      'accessibility-page', 'accessibility-statement', 'banned-name', 'command-pair', 'console-delete', 'contact-address', 'dash', 'deploy-commands', 'deploy-deny', 'deploy-notice', 'deploy-page', 'deploy-permissions', 'deploy-resources',
       'exact-30-days', 'font-preload', 'forget-command', 'forms-cookies-analytics', 'head-script-order', 'identifier-break', 'landing-sections', 'lede', 'limits',
       'model-id', 'model-role-forbidden', 'model-role-present', 'model-role-required',
       'no-delete-control', 'no-ellipsis', 'no-inline-style', 'one-caller', 'page-metadata', 'pre-r6-words', 'privacy-page', 'privacy-statements', 'provenance-wording', 'provider-label', 'readout-number', 'region-claim', 'replay-lanes',
@@ -2089,6 +2091,50 @@ describe('the accessibility statement rule (AC-53, UI-SPEC E13)', () => {
     const states = new Set(HAND_CHECK_CRITERIA.map((criterion) => criterion.result));
     expect([...states].sort()).toEqual(['not-applicable', 'passed']);
     expect(accessibilityTexts(accessibilityStatementRule, accessibilityBody())).toEqual([]);
+  });
+});
+
+describe('the contact address rule (AC-P16)', () => {
+  const contactSite = (privacyExtra: string, accessibilityExtra = '', head?: string): BuiltSite => siteOf({
+    'privacy-and-ai/index.html': page(privacyBody({ extra: privacyExtra }), head),
+    'accessibility/index.html': page(`${accessibilityBody()}${accessibilityExtra}`),
+  });
+  const shows = (address: string): string => `the page shows "${address}", and the only address it may show is ${CONTACT_ADDRESS}`;
+  const contactFindings = (site: BuiltSite): [string, string][] => contactAddressRule(site, context).map((finding) => {
+    expect(finding.rule).toBe('contact-address');
+    return [finding.route, finding.text];
+  });
+
+  it('passes both pages showing only the controller address, a mailto link to it included', () => {
+    expect(privacyBody()).toContain(CONTACT_ADDRESS);
+    expect(accessibilityBody()).toContain(CONTACT_ADDRESS);
+    expect(contactFindings(contactSite(`<p><a href="mailto:${CONTACT_ADDRESS}?subject=Privacy">Write to us</a></p>`))).toEqual([]);
+  });
+
+  it("fails another address in either page's own markup, outside every statement list, naming the page and the address", () => {
+    expect(contactFindings(contactSite('<p>Or write to ops@example.com.</p>', '<p>Questions: help@example.org</p>'))).toEqual([
+      [ACCESSIBILITY_ROUTE, shows('help@example.org')],
+      [PRIVACY_ROUTE, shows('ops@example.com')],
+    ]);
+  });
+
+  it.each([
+    ['a domain with no dot', 'ops@localhost'],
+    ['a non-ASCII domain', 'hulp@bücher.de'],
+    ['a bare handle', '@taranity'],
+  ])('counts every @, so %s fails too', (_shape, address) => {
+    expect(contactFindings(contactSite(`<p>Also ${address} here.</p>`))).toEqual([[PRIVACY_ROUTE, shows(address)]]);
+  });
+
+  it('fails an address held only in a label, a shown meta, a mailto link or its copy line', () => {
+    expect(contactFindings(contactSite('<button aria-label="Write to ops@example.com">x</button>'))).toEqual([[PRIVACY_ROUTE, shows('ops@example.com')]]);
+    expect(contactFindings(contactSite('', '', '<title>p</title><meta name="description" content="Write to ops@example.com">'))).toEqual([[PRIVACY_ROUTE, shows('ops@example.com')]]);
+    expect(contactFindings(contactSite('', '<a href="mailto:ops@example.com">Write to us</a>'))).toEqual([[ACCESSIBILITY_ROUTE, shows('ops@example.com')]]);
+    expect(contactFindings(contactSite(`<a href="mailto:${CONTACT_ADDRESS}?cc=ops@example.com">Write to us</a>`))).toEqual([[PRIVACY_ROUTE, shows('ops@example.com')]]);
+  });
+
+  it('reads only the privacy and accessibility pages, so a package name on the deploy page is no finding', () => {
+    expect(contactFindings(siteOf({ 'deploy/index.html': page('<p><code>npm run deploy -w @fothering/infra</code></p>') }))).toEqual([]);
   });
 });
 

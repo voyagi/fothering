@@ -2,6 +2,7 @@ import type { Provenance } from '@fothering/core/records';
 import {
   accessibilityStatements,
   ANALYTICS_PATTERNS,
+  CONTACT_ADDRESS,
   EXACT_30_DAY_PATTERNS,
   FORGET_DOC,
   HAND_CHECK_CRITERIA,
@@ -91,6 +92,7 @@ export const RULE_IDS = Object.freeze([
   'accessibility-statement',
   'readout-number',
   'font-preload',
+  'contact-address',
 ] as const);
 
 export type RuleId = (typeof RULE_IDS)[number];
@@ -1773,6 +1775,35 @@ export function accessibilityStatementRule(site: BuiltSite, _context: CheckConte
   return [...said, ...criterionFindings(page)].map((text) => ({ rule: 'accessibility-statement' as const, route: ACCESSIBILITY_ROUTE, text }));
 }
 
+// AC-P16: the privacy and accessibility pages show one email address, the controller's. Every @ a reader meets
+// there counts, email-shaped or not: the text, each label, the shown metas and every link target, so an address
+// put in a page's own markup or in a list beside the controller sentence fails, not only one in that sentence.
+const CONTACT_ROUTES: ReadonlySet<string> = new Set([PRIVACY_ROUTE, ACCESSIBILITY_ROUTE]);
+const AT_RUN = /\S*@\S*/g;
+
+// Sentence punctuation around a run is not part of it: "email privacy@taranity.com." ends a sentence.
+const atRuns = (text: string): string[] => (text.match(AT_RUN) ?? []).map((run) => run.replace(/^[("'[<]+/, '').replace(/[.,;:!?)"'\]>]+$/, ''));
+
+// A link target splits at its scheme and query marks, so mailto:privacy@taranity.com?subject=x gives the address
+// alone, while a cc address or a user name before a host still counts on its own.
+const hrefRuns = (href: string): string[] => href.split(/[\s:?&=,]+/).filter((piece) => piece.includes('@'));
+
+function atTokens(page: BuiltPage): string[] {
+  const fromLinks: string[] = [];
+  walk(page.root, (element) => {
+    if (element.attrs.href !== undefined) fromLinks.push(...hrefRuns(element.attrs.href));
+  });
+  return [...claimTexts(page).flatMap(atRuns), ...fromLinks];
+}
+
+export function contactAddressRule(site: BuiltSite, _context: CheckContext): Finding[] {
+  return site.pages
+    .filter((page) => CONTACT_ROUTES.has(page.route))
+    .flatMap((page) => atTokens(page)
+      .filter((token) => token !== CONTACT_ADDRESS)
+      .map((token) => ({ rule: 'contact-address' as const, route: page.route, text: `the page shows "${token}", and the only address it may show is ${CONTACT_ADDRESS}` })));
+}
+
 // Workers limits: 20,000 files per version on the Free plan and 25 MiB per file (AC-62). The check
 // below uses >= on purpose, so a build must stay at least one file and one byte under each limit.
 const MAX_FILES = 20_000;
@@ -1920,6 +1951,7 @@ const RULES: Readonly<Record<RuleId, Rule>> = {
   'accessibility-statement': accessibilityStatementRule,
   'readout-number': readoutNumberRule,
   'font-preload': fontPreloadRule,
+  'contact-address': contactAddressRule,
 };
 
 // Every rule runs over the whole site and every hit is kept, so one report names them all.
