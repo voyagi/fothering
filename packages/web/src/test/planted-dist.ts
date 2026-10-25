@@ -192,7 +192,7 @@ export function replayPanels(view: ReplayView = REPLAY_VIEW): string[] {
     panel(one, paragraphs(one?.paragraphs ?? [])),
     panel(two, `${schedule}<p data-model-role>${view.schedule.modelRole}</p>`),
     panel(three, `${paragraphs(three?.paragraphs ?? [])}<p>${view.lanesLines.paused}</p>`),
-    panel(four, `${email}<pre><code>${view.reopenCommand}</code></pre>${paragraphs(four?.paragraphs ?? [])}<p>${view.lanesLines.reopened}</p>`),
+    panel(four, `${email}<pre><code>${escapeHtml(view.reopenCommand)}</code></pre>${paragraphs(four?.paragraphs ?? [])}<p>${view.lanesLines.reopened}</p>`),
   ];
 }
 

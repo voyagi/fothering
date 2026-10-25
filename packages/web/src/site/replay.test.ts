@@ -318,7 +318,7 @@ describe('buildReplayView step contents', () => {
       subject: 'Closed: fothering-bulk, one lane in eu-central-1',
       disclosure: "Fothering's AI agent wrote the Why paragraph. Code wrote the rest.",
       why: 'All 31 hard bounces carry batch=2026-10-14-b, and the earlier batch delivered cleanly.',
-      reopen: 'Run the reopen command for fothering-bulk.',
+      reopen: 'Run the reopen command with the ReopenFunctionName stack output.',
     });
     // The product's own reopen, the one the operator email prints, never a raw SES call.
     expect(view.reopenCommand).toBe(reopenCommandFor('fothering-bulk'));
