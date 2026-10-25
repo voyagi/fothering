@@ -327,7 +327,9 @@ describe('the accessibility record (D-156, AC-53)', () => {
 
   it("gives the controller's contact address and no other", () => {
     expect(ACCESSIBILITY_RECORD.contact).toContain(CONTROLLER.contact);
-    expect(ACCESSIBILITY_RECORD.contact.match(/[\w.+-]+@[\w-]+(?:\.[\w-]+)+/g)).toEqual(['privacy@taranity.com']);
+    // Every @ counts, email-shaped or not, across every statement the page renders.
+    const said = accessibilityStatements().map((statement) => statement.text).join(' ');
+    expect([...said.matchAll(/@/g)]).toHaveLength(1);
   });
 
   it('lists the known limitations, the drawn lanes and sail among them', () => {

@@ -247,10 +247,13 @@ export const PRIVACY_REQUIRED: readonly Statement[] = Object.freeze([
 ]);
 
 // UI-SPEC section 17 item 1 (AC-P16): the business behind the site's domain and its one contact address, named
-// 2026-10-25 in place of the role-only default. The privacy and accessibility pages both use this address.
+// 2026-10-25 in place of the role-only default. The privacy and accessibility pages both use this address, and
+// the built check contact-address refuses any other on them.
+export const CONTACT_ADDRESS = 'privacy@taranity.com';
+
 export const CONTROLLER = Object.freeze({
   name: 'Taranity',
-  contact: 'email privacy@taranity.com',
+  contact: `email ${CONTACT_ADDRESS}`,
 });
 
 // AC-21. The Cloudflare DPA sentence and the Dutch authority as complaint body are carried from the

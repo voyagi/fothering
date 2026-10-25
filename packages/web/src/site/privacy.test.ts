@@ -174,7 +174,9 @@ describe('the privacy lists (AC-19, AC-21, AC-P16)', () => {
     const website = WEBSITE_FACTS.map((fact) => fact.text).join(' ');
     expect(website).toContain(CONTROLLER.name);
     expect(website).toContain(CONTROLLER.contact);
-    expect(website.match(/[\w.+-]+@[\w-]+(?:\.[\w-]+)+/g)).toEqual(['privacy@taranity.com']);
+    // Every @ counts, email-shaped or not. The built check contact-address reads the whole page the same way.
+    const listed = [...PRIVACY_REQUIRED, ...WEBSITE_FACTS].map((statement) => statement.text).join(' ');
+    expect([...listed.matchAll(/@/g)]).toHaveLength(1);
   });
 
   // GDPR Article 13(1)(f) and 13(2)(a): the visitor IP's transfer safeguard and how long it is kept.
