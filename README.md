@@ -5,11 +5,12 @@
 When one stream of the mail you send through Amazon SES starts bouncing, Fothering works out why,
 closes that one lane, and emails you the evidence and the command that reopens it.
 
+See it run with nothing to install: [the replay](https://fothering.taranity.com/replay/), or
+[the video](https://youtu.be/lt8Ug9c8zhk) with [its transcript](examples/demo-transcript.md). How it is built:
+[docs/architecture.md](docs/architecture.md).
+
 Status: hackathon build. It ran end to end on 22 October 2026 in a real AWS account, with the
 test mail sent to the SES mailbox simulator. It has not been tried on real recipients.
-
-See it run with nothing to install: [the replay](https://fothering.taranity.com/replay/). How it is built:
-[docs/architecture.md](docs/architecture.md). What the video says: [the transcript](examples/demo-transcript.md).
 
 ## Requirements
 
