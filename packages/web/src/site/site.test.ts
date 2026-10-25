@@ -325,9 +325,9 @@ describe('the accessibility record (D-156, AC-53)', () => {
     expect(ACCESSIBILITY_RECORD.lastAutomatedAudit).toMatch(/^\d{4}-\d{2}-\d{2}$/);
   });
 
-  it('gives the role-only contact route of the controller and names no person or address', () => {
+  it("gives the controller's contact address and no other", () => {
     expect(ACCESSIBILITY_RECORD.contact).toContain(CONTROLLER.contact);
-    expect(ACCESSIBILITY_RECORD.contact).not.toMatch(/@/);
+    expect(ACCESSIBILITY_RECORD.contact.match(/[\w.+-]+@[\w-]+(?:\.[\w-]+)+/g)).toEqual(['privacy@taranity.com']);
   });
 
   it('lists the known limitations, the drawn lanes and sail among them', () => {

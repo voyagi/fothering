@@ -9,7 +9,7 @@ cover it.
 
 | Field | Entry |
 |---|---|
-| Controller | The developer who built this hackathon entry; contact through an issue on the project's repository (the privacy page's wording) |
+| Controller | Taranity, the business behind the site's domain; contact privacy@taranity.com (the privacy page's wording) |
 | Purpose | Serving the website's pages |
 | Legal basis | Legitimate interest in serving the pages, GDPR Article 6(1)(f) |
 | Data subjects | Visitors to the website |

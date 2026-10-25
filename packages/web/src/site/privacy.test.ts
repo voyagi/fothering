@@ -169,12 +169,12 @@ describe('the model-role lists (AC-24, AC-25, AC-E18)', () => {
 });
 
 describe('the privacy lists (AC-19, AC-21, AC-P16)', () => {
-  it('names the controller and the contact route by role only', () => {
-    expect(CONTROLLER).toEqual({ name: 'the developer who built this hackathon entry', contact: "open an issue on the project's repository" });
+  it('names the controller and its one contact address', () => {
+    expect(CONTROLLER).toEqual({ name: 'Taranity', contact: 'email privacy@taranity.com' });
     const website = WEBSITE_FACTS.map((fact) => fact.text).join(' ');
     expect(website).toContain(CONTROLLER.name);
     expect(website).toContain(CONTROLLER.contact);
-    expect(website).not.toContain('@');
+    expect(website.match(/[\w.+-]+@[\w-]+(?:\.[\w-]+)+/g)).toEqual(['privacy@taranity.com']);
   });
 
   // GDPR Article 13(1)(f) and 13(2)(a): the visitor IP's transfer safeguard and how long it is kept.
