@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
@@ -9,6 +10,10 @@ import { readSavedItems } from '@fothering/providers/saved-items';
 
 const ARTIFACT = fileURLToPath(new URL('../../../../examples/live-run-1-email-failed/items-incident.json', import.meta.url));
 const ITEMS = readSavedItems(readFileSync(ARTIFACT, 'utf8'));
+// The SHA-256 of the file `aws dynamodb query` wrote during live run 1. The evidence record's own hash
+// covers only that record, so this is what shows the CLOSURE, DECISION, STATE and COUNTER items are unedited.
+// .gitattributes checks every text file out with LF, so the bytes are the same on every clone.
+const SAVED_FILE_SHA256 = '242cca27ed075a25f2cc6734c9da2fa1b914ed409a6a42af638defd958c81797';
 
 function itemOf(sk: string): Record<string, unknown> {
   const item = ITEMS.find((candidate) => candidate.sk === sk);
@@ -38,7 +43,11 @@ describe('live run 1, the failed operator email (examples/live-run-1-email-faile
     expect(closure?.email).toEqual(expect.objectContaining({ kind: 'closed', attempts: EMAIL_SEND_ATTEMPTS, failed: true, messageId: null, sentAtMs: null }));
   });
 
-  it('is unedited: the evidence record parses and its stored hash is the hash of its own content', () => {
+  it('is unedited: every item in the file still has the bytes the live run saved', () => {
+    expect(createHash('sha256').update(readFileSync(ARTIFACT)).digest('hex')).toBe(SAVED_FILE_SHA256);
+  });
+
+  it('the evidence record parses and its stored hash is the hash of its own content', () => {
     const record = recordOf();
     expect(recordHash(record)).toBe(record.hash);
   });
