@@ -253,7 +253,9 @@ export const CONTROLLER = Object.freeze({
 });
 
 // AC-21. The Cloudflare DPA sentence and the Dutch authority as complaint body are carried from the
-// GDPR audit unverified (UI-SPEC section 17 items 4 and 5).
+// GDPR audit unverified (UI-SPEC section 17 items 4 and 5). The transfer and IP retention facts were
+// read on 2026-10-25 from Cloudflare's Customer DPA version 6.4: clauses 6.2(a) and 6.4 for the
+// transfer, Annex 1 section B for how long; its privacy policy names no fixed period for visitor logs.
 export const WEBSITE_FACTS: readonly Statement[] = Object.freeze([
   { id: 'controller', text: `The controller of this website is ${CONTROLLER.name}.` },
   { id: 'contact', text: `To reach them, ${CONTROLLER.contact}.` },
@@ -261,6 +263,14 @@ export const WEBSITE_FACTS: readonly Statement[] = Object.freeze([
   { id: 'no-analytics', text: 'run no analytics' },
   { id: 'legal-basis', text: 'The legal basis is the legitimate interest in serving the pages (GDPR Article 6(1)(f)).' },
   { id: 'cloudflare-dpa', text: 'Cloudflare processes it under its data processing addendum, part of its self-serve subscription agreement.' },
+  {
+    id: 'cloudflare-transfer',
+    text: "Cloudflare's network can serve these pages from outside the European Economic Area, and its addendum covers that transfer with the EU Standard Contractual Clauses, or the EU-U.S. Data Privacy Framework for the United States.",
+  },
+  {
+    id: 'ip-retention',
+    text: 'This site turns on no request log, and Cloudflare keeps your IP address only while it needs it to deliver the service, never past the end of its agreement with the controller.',
+  },
   { id: 'aws-dpa', text: "AWS processes a deployment's data under the deploying business's own AWS agreement." },
   { id: 'complaint', text: 'and the right to complain to the Dutch supervisory authority, the Autoriteit Persoonsgegevens.', link: COMPLAINT_AUTHORITY_URL },
 ]);

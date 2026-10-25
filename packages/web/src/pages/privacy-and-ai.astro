@@ -202,7 +202,7 @@ const INTERLOCK_DESC = 'Stored events, which hold no addresses, go to detection 
     </div>
     <ul class="site">
       <li>{website('controller')} {website('contact')}</li>
-      <li>Cloudflare delivers these pages and receives your IP address to do so. {legalBasis.slice(0, articleAt)}<span class="keep-whole">{article}</span>{legalBasis.slice(articleAt + article.length)} {website('cloudflare-dpa')}</li>
+      <li>Cloudflare delivers these pages and receives your IP address to do so. {legalBasis.slice(0, articleAt)}<span class="keep-whole">{article}</span>{legalBasis.slice(articleAt + article.length)} {website('cloudflare-dpa')} {website('cloudflare-transfer')} {website('ip-retention')}</li>
       <li>Your browser keeps {entryCount} in localStorage, and nothing is sent anywhere: {STORAGE_ENTRIES.map((entry, index) => (
         <Fragment>{index > 0 && ' and '}<Identifier value={entry.key} /> ({segments(entry.holds).map((segment) => (segment.kind === 'text' ? segment.text : <Identifier value={segment.text} />))})</Fragment>
       ))}.</li>

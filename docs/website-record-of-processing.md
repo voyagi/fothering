@@ -15,8 +15,8 @@ cover it.
 | Data subjects | Visitors to the website |
 | Personal data | The IP address and request details a browser sends when it loads a page. The site sets no cookie, runs no analytics and has no form and no server code: Cloudflare serves the built files as static assets (`packages/web/wrangler.jsonc` holds only the assets block). The one browser storage key, `fothering-theme`, stays in the visitor's browser and holds `light` or `dark`. |
 | Processor | Cloudflare, which serves the pages. Its Customer DPA (version 6.4, effective 2026-04-03) forms part of the Self-Serve Subscription Agreement and names Cloudflare a processor. |
-| Recipients and transfers | Cloudflare's network; any transfer outside the EU runs under the terms of that DPA |
-| Retention | The site keeps nothing itself and configures no log storage (no Workers logs, no Logpush); Cloudflare keeps request data under its own terms |
+| Recipients and transfers | Cloudflare's network, which may process the data outside the EEA (DPA clause 6.1). A transfer runs under the EU Standard Contractual Clauses, Module Two (clause 6.2(a)), or, to the United States, under the EU-U.S. Data Privacy Framework (clause 6.4) |
+| Retention | The site keeps nothing itself and configures no log storage (no Workers logs, no Logpush). Cloudflare keeps the data until processing is no longer needed for its service, and at the latest until the agreement ends (DPA Annex 1, section B); its privacy policy names no fixed period |
 | Security measures | HTTPS with HSTS, an enforced content security policy, `frame-ancestors 'none'`, no third-party script (`packages/web/public/_headers`) |
 
 ## When a personal data breach happens

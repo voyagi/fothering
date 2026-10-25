@@ -177,6 +177,13 @@ describe('the privacy lists (AC-19, AC-21, AC-P16)', () => {
     expect(website).not.toContain('@');
   });
 
+  // GDPR Article 13(1)(f) and 13(2)(a): the visitor IP's transfer safeguard and how long it is kept.
+  it("holds every AC-21 fact, Cloudflare's transfer safeguard and the IP's retention rule among them", () => {
+    expect(WEBSITE_FACTS.map((fact) => fact.id)).toEqual([
+      'controller', 'contact', 'no-cookie', 'no-analytics', 'legal-basis', 'cloudflare-dpa', 'cloudflare-transfer', 'ip-retention', 'aws-dpa', 'complaint',
+    ]);
+  });
+
   it('lists the six rights once each', () => {
     expect([...SIX_RIGHTS].sort()).toEqual(['access', 'data portability', 'erasure', 'objection', 'rectification', 'restriction of processing']);
   });
