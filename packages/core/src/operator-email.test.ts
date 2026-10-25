@@ -113,6 +113,15 @@ describe('a closed lane renders the closed-path email (R9)', () => {
     expect(renderedClosed()?.text).not.toMatch(/no send is possible/i);
   });
 
+  it('says the hold check read the stored events only to an earlier time when the checking run came late, and only then', () => {
+    const lateCheckMs = HOLD_CHECKED_MS + 300_000;
+    const late = renderOperatorEmail({ closure: { ...closedClosure(), holdCheckedAtMs: lateCheckMs }, record: RECORD, decision: CLOSE_DECISION, laneMap: LANE_MAP });
+    const happened = sectionText(late, SECTION_HEADINGS.happened);
+    expect(happened).toContain(`Hold check at ${isoOf(lateCheckMs)}: no send was seen accepted on ${SET} from ${isoOf(HOLD_END_MS)} through ${isoOf(HOLD_CHECKED_MS)}.`);
+    expect(happened).toContain('The check read the stored events only up to that time, since the run that checked came late.');
+    expect(sectionText(renderedClosed(), SECTION_HEADINGS.happened)).not.toContain('came late');
+  });
+
   it('names the paused set in what happened and lists every other lane once in what stays open (AC-E25)', () => {
     const email = renderedClosed();
     const open = sectionText(email, SECTION_HEADINGS.open);

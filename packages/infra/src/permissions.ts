@@ -23,6 +23,7 @@ export interface PermissionEntry {
   role: string;
   kind: 'permission' | 'trust';
   effect: string;
+  /** The action, or the canonical JSON of an intrinsic that resolves to one. */
   action: string;
   /** Canonical JSON of the resource intrinsic; null on a trust entry. */
   resource: string | null;
@@ -93,7 +94,7 @@ function entriesOfDocument(document: unknown, context: StatementContext): Permis
     }
     const condition = statement.Condition === undefined ? null : canonical(statement.Condition);
     const effect = String(statement.Effect);
-    const actions = asList(statement.Action).map(String);
+    const actions = asList(statement.Action).map((action) => (typeof action === 'string' ? action : canonical(action)));
     if (context.kind === 'trust') {
       const principal = canonical(statement.Principal);
       return actions.map((action) => ({ ...context, effect, action, resource: null, principal, condition }));

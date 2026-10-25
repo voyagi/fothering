@@ -602,12 +602,14 @@ async function sendOperatorEmail(run: Run, closure: Closure): Promise<void> {
 }
 
 // The run holding the last attempt stopped before its send settled (a timeout, a recycled container, a
-// store fault after the send): the email is failed with the one error line the alarm catches.
+// store fault after the send): the email is failed with the one error line the alarm catches. One left
+// with no attempt and no claim fails the same way, under its own name.
 async function failStrandedEmail(run: Run, closure: Closure): Promise<void> {
   if (closure.email === null) return;
   const act = { incidentId: closure.incidentId, version: closure.version };
   if (await updateClosure(run, act, { email: { ...closure.email, failed: true } })) {
-    run.deps.log.error({ event: 'email-failed', incidentId: closure.incidentId, errorName: 'ClaimTimedOut' });
+    const errorName = closure.email.claimedAtMs === null ? 'AttemptsSpent' : 'ClaimTimedOut';
+    run.deps.log.error({ event: 'email-failed', incidentId: closure.incidentId, errorName });
   }
 }
 
